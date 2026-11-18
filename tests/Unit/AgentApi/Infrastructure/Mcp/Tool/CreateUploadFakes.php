@@ -12,29 +12,30 @@ use App\Media\Api\Uploads;
 use App\Media\Api\UploadSlot;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Review\Api\OpenDraftQueries;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundCommands;
-use App\Review\Api\RoundNotes;
-use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
-use App\Review\Api\RoundView;
-use App\Review\Api\SharedRoundNotes;
-use App\Review\Api\TicketRounds;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use Symfony\Component\Security\Core\Authorization\AccessDecision;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
- * The collaborators of CreateUpload, each recording what it was asked. Keys match exactly and roundNotes reads only the
- * owner's own open unshared draft, as the real queries do. startDraft refuses DRAFT_EXISTS for an owner who has one and
- * adds the draft it starts. isGranted decides MediaPermission UPLOAD on a round as RoundMediaTarget does for an
- * unshared draft (its owner alone). begin refuses the purpose, type and size in Uploads' order with its messages; the
- * room checks it cannot know are scripted with $refusal. The commands and queries create_upload never uses throw.
+ * The collaborators of CreateUpload, each recording what it was asked. Keys match exactly and openDraftOf reads only
+ * the owner's own open unshared draft, as the real queries do. factsOf reads SHOP-1 and SHOP-2, Mia's report, unless
+ * $isTicketUnreadable. startDraft refuses DRAFT_EXISTS for an owner who has one and adds the draft it starts.
+ * isGranted decides MediaPermission UPLOAD on a round as RoundMediaTarget does for an unshared draft (its owner alone),
+ * and TicketPermission VIEW as $isTicketHidden says. begin refuses the purpose, type and size in Uploads' order with
+ * its messages; the room checks it cannot know are scripted with $refusal. The commands create_upload never uses throw.
  */
-final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, RoundQueries, RoundCommands, Uploads, AuthorizationCheckerInterface
+final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, TicketTurnQueries, OpenDraftQueries, RoundCommands, Uploads, AuthorizationCheckerInterface
 {
     public const string ACME_FOODS = '019a5f00-0000-7000-8000-00000000e701';
     public const string OMAR = '019a5f00-0000-7000-8000-00000000e721';
@@ -67,6 +68,13 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Roun
 
     public bool $deniesInsideUploads = false;
 
+    public bool $isTicketUnreadable = false;
+
+    public bool $isTicketHidden = false;
+
+    /** @var list<TicketVisibilityFacts> the subject of each TicketPermission VIEW asked */
+    public array $ticketViewsAsked = [];
+
     public function __construct()
     {
         $this->caller = new UserId(self::OMAR);
@@ -89,11 +97,20 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Roun
         throw new \LogicException('create_upload never asks for a key.');
     }
 
-    public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes
+    public function factsOf(TicketId $ticketId): ?TicketTurnSnapshot
+    {
+        if ($this->isTicketUnreadable || !\in_array($ticketId->toString(), [self::SHOP_1, self::SHOP_2], true)) {
+            return null;
+        }
+
+        return new TicketTurnSnapshot($ticketId, '019a5f00-0000-7000-8000-00000000e761', '019a5f00-0000-7000-8000-00000000e762', 'todo', 'todo', null, null, null, [], [], TicketVisibilityFacts::FOR_EVERYONE, 'major', null, new UserId(self::MIA), new UserId(self::OMAR));
+    }
+
+    public function openDraftOf(TicketId $ticketId, UserId $owner): ?RoundAccessFacts
     {
         foreach ($this->openDrafts as $roundId => [$draftTicketId, $ownerId]) {
             if ($draftTicketId === $ticketId->toString() && $ownerId === $owner->toString()) {
-                return new RoundNotes($roundId, []);
+                return new RoundAccessFacts(new OrganizationId(self::ACME_FOODS), $roundId, $ticketId, $owner, true, false);
             }
         }
 
@@ -102,7 +119,7 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Roun
 
     public function startDraft(TicketId $ticketId, UserId $ownerId, \DateTimeImmutable $startedAt): string
     {
-        if (null !== $this->roundNotes($ticketId, $ownerId)) {
+        if (null !== $this->openDraftOf($ticketId, $ownerId)) {
             throw new RoundRefused(RoundRefused::DRAFT_EXISTS);
         }
         $this->draftsStarted[] = [$ticketId->toString(), $ownerId->toString(), $startedAt->format('Y-m-d H:i:s')];
@@ -113,6 +130,11 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Roun
 
     public function isGranted(mixed $attribute, mixed $subject = null, ?AccessDecision $accessDecision = null): bool
     {
+        if (TicketPermission::VIEW === $attribute && $subject instanceof TicketVisibilityFacts) {
+            $this->ticketViewsAsked[] = $subject;
+
+            return !$this->isTicketHidden;
+        }
         if (MediaPermission::UPLOAD !== $attribute || !$subject instanceof UploadTarget || 'round' !== $subject->kind || $this->deniesEveryUploadTarget) {
             return false;
         }
@@ -146,31 +168,6 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Roun
     public function complete(OrganizationId $organizationId, UserId $userId, string $intentId, \DateTimeImmutable $at): string
     {
         throw new \LogicException('create_upload never completes an upload.');
-    }
-
-    public function forTicket(TicketId $ticketId, UserId $viewer): TicketRounds
-    {
-        throw new \LogicException('create_upload never reads every round of a ticket.');
-    }
-
-    public function accessFactsOf(string $roundId): ?RoundAccessFacts
-    {
-        throw new \LogicException('create_upload finds the draft by its owner, not by its id.');
-    }
-
-    public function draftOf(string $roundId, UserId $owner): ?RoundView
-    {
-        throw new \LogicException('create_upload never reads a draft with its pictures.');
-    }
-
-    public function draftScreenshotOf(TicketId $ticketId, string $screenshotId): ?RoundAccessFacts
-    {
-        throw new \LogicException('create_upload never looks up a picture.');
-    }
-
-    public function sharedRoundNotes(TicketId $ticketId): ?SharedRoundNotes
-    {
-        throw new \LogicException('create_upload never reads a shared round.');
     }
 
     public function createReport(TicketId $ticketId, array $screenshots, UserId $reporterId, \DateTimeImmutable $reportedAt): string

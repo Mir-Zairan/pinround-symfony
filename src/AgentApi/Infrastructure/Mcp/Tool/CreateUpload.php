@@ -14,12 +14,16 @@ use App\Media\Api\UploadRefused;
 use App\Media\Api\Uploads;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Review\Api\OpenDraftQueries;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
-use App\Review\Api\RoundQueries;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Api\TicketTurnQueries;
+use App\Ticketing\Api\TicketVisibilityFacts;
 use Mcp\Schema\Content\TextContent;
 use Mcp\Schema\Result\CallToolResult;
 use Mcp\Schema\Tool;
@@ -35,11 +39,12 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * PUTs the file. The picture never passes through PHP (ADR-0011): this tool only stores the intent and signs the URL.
  * Holds no state (ADR-0008).
  *
- * A caller with a draft is guarded by MediaPermission UPLOAD on that draft, as the web's upload field is. A caller
- * without one is guarded by RoundPermission DRAFT_CREATE on the ticket, and call() starts the draft before the upload
- * begins, as an upload needs a round to target; the gate's savepoint takes the new draft back when the begin is
- * refused. Another person's draft and a shared one are never a target: RoundQueries::roundNotes reads only the
- * caller's own open unshared draft.
+ * A caller with a draft is guarded by MediaPermission UPLOAD on that draft, as the web's upload field is, once
+ * TicketPermission VIEW grants the ticket, as set_verdict asks it: the draft's owner is granted it without the ticket
+ * being read, so a ticket the caller may no longer see is not found. A caller without one is guarded by
+ * RoundPermission DRAFT_CREATE on the ticket, and call() starts the draft before the upload begins, as an upload needs
+ * a round to target; the gate's savepoint takes the new draft back when the begin is refused. Another person's draft
+ * and a shared one are never a target: OpenDraftQueries::openDraftOf reads only the caller's own open unshared draft.
  *
  * The sha256 is checked for its form only: Media's PUT URL pins the type and the exact size, not the checksum.
  */
@@ -64,7 +69,8 @@ final readonly class CreateUpload implements AgentTool
         private CurrentApiToken $currentApiToken,
         private CurrentUser $currentUser,
         private TicketKeyQueries $ticketKeyQueries,
-        private RoundQueries $roundQueries,
+        private TicketTurnQueries $ticketTurnQueries,
+        private OpenDraftQueries $openDraftQueries,
         private RoundCommands $roundCommands,
         private Uploads $uploads,
         private AuthorizationCheckerInterface $authorizationChecker,
@@ -110,18 +116,21 @@ final readonly class CreateUpload implements AgentTool
 
     /**
      * Reads the ticket's id by its key, then the caller's open unshared draft there, one query each. With a draft the
-     * voter is MediaPermission UPLOAD on it; without one, RoundPermission DRAFT_CREATE on the ticket.
+     * ticket is read for TicketPermission VIEW, and the voter is MediaPermission UPLOAD on the draft; without one,
+     * RoundPermission DRAFT_CREATE on the ticket, which grants its assignee alone.
      *
-     * @throws ToolRefusal     not found, for a key the organization has no ticket with
-     * @throws \LogicException without a user
+     * @throws ToolRefusal     not found, for a key the organization has no ticket with, or a draft on a ticket
+     *                         TicketPermission VIEW denies
+     * @throws \LogicException without a token or a user, or when Ticketing cannot read the ticket's team
      */
     public function targetOf(array $arguments): ToolTarget
     {
         $ticketId = $this->ticketKeyQueries->idOf(self::stringAt($arguments, 'key')) ?? throw ToolRefusal::notFound();
-        $draft = $this->roundQueries->roundNotes($ticketId, $this->callerId());
+        $draft = $this->openDraftQueries->openDraftOf($ticketId, $this->callerId());
         if (null === $draft) {
             return new ToolTarget(RoundPermission::DRAFT_CREATE, $ticketId, self::TICKET_AUDIT_TYPE, $ticketId->toString());
         }
+        $this->refuseUnlessTicketVisible($ticketId);
 
         return new ToolTarget(MediaPermission::UPLOAD, new UploadTarget(self::ROUND_UPLOAD_KIND, $draft->roundId), self::ROUND_AUDIT_TYPE, $draft->roundId);
     }
@@ -148,10 +157,8 @@ final readonly class CreateUpload implements AgentTool
         if (!\is_int($bytes)) {
             throw new \LogicException('The input schema lets create_upload run only with "bytes" as an integer.');
         }
-        $organizationId = ($this->currentApiToken->access() ?? throw new \LogicException('create_upload ran without a personal access token.'))->organizationId;
-
         try {
-            $slot = $this->uploads->begin($organizationId, $callerId, $uploadTarget, self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
+            $slot = $this->uploads->begin($this->organizationId(), $callerId, $uploadTarget, self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
         } catch (UploadRefused $refused) {
             throw ToolRefusal::refused($refused->getMessage());
         } catch (UploadTargetDenied) {
@@ -193,6 +200,29 @@ final readonly class CreateUpload implements AgentTool
         }
 
         return $uploadTarget;
+    }
+
+    /**
+     * MediaPermission UPLOAD grants an unshared draft to its owner without reading the ticket, so the ticket is asked
+     * here, as set_verdict asks it.
+     *
+     * @throws ToolRefusal not found, for a ticket Ticketing does not read or TicketPermission VIEW denies
+     */
+    private function refuseUnlessTicketVisible(TicketId $ticketId): void
+    {
+        $ticket = $this->ticketTurnQueries->factsOf($ticketId) ?? throw ToolRefusal::notFound();
+        if (!$this->authorizationChecker->isGranted(TicketPermission::VIEW, TicketVisibilityFacts::ofSnapshot($this->organizationId(), $ticket))) {
+            throw ToolRefusal::notFound();
+        }
+    }
+
+    /**
+     * @throws \LogicException when the request has no personal access token, which the api_token firewall never lets
+     *                         through
+     */
+    private function organizationId(): OrganizationId
+    {
+        return ($this->currentApiToken->access() ?? throw new \LogicException('create_upload ran without a personal access token.'))->organizationId;
     }
 
     /**
