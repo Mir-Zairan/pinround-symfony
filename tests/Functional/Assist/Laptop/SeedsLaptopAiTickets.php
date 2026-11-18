@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Assist\Laptop;
 
 use App\Assist\UI\Controller\LaptopController;
 use App\Identity\Domain\User;
+use App\Organization\Api\OrganizationPermission;
 use App\Organization\UI\Voter\OrganizationVoter;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Connection;
@@ -184,7 +185,8 @@ trait SeedsLaptopAiTickets
 
     /**
      * The organization voter as it answers for a membership removed after EnterChosenOrganization let the request in,
-     * which no test request can time: it denies every permission on every organization. A membership removed before the
+     * which no test request can time: it denies VIEW, ADMIN and INVITE on every organization, the attributes the real
+     * voter decides, and stays out of every other vote, as the real one does. A membership removed before the
      * request never reaches the controller, as EnterChosenOrganization sends the person to the picker. The client's
      * kernel is booted again first, keeping its session, as the voter is built by the first request and cannot be
      * replaced after it.
@@ -198,7 +200,11 @@ trait SeedsLaptopAiTickets
         self::getContainer()->set(OrganizationVoter::class, new class extends Voter {
             protected function supports(string $attribute, mixed $subject): bool
             {
-                return $subject instanceof OrganizationId;
+                return $subject instanceof OrganizationId && \in_array(
+                    $attribute,
+                    [OrganizationPermission::VIEW, OrganizationPermission::ADMIN, OrganizationPermission::INVITE],
+                    true,
+                );
             }
 
             protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
