@@ -76,13 +76,7 @@ final class SetVerdictTest extends WebTestCase
         self::getContainer()->set('clock', new MockClock(self::NOW));
         $this->people = $this->createAcmeFoodsPeople('member');
         $this->shopProject = $this->addProject($this->shop, 'SHOP', 'Shop');
-        $this->stepId = Uuid::v7()->toRfc4122();
-        $organizationId = $this->acmeFoods->toString();
-        $stepId = $this->stepId;
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
-            [$organizationId, $stepId],
-        ));
+        $this->stepId = $this->addTodoStep($this->acmeFoods);
 
         $this->ticketId = $this->addTicket('SHOP-1');
         $reportShot = $this->addScreenshot($this->addRound($this->ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
@@ -124,7 +118,7 @@ final class SetVerdictTest extends WebTestCase
         $expected = $before;
         foreach ($expected['rounds'] as $index => $round) {
             if ($this->omarsDraft === $round['id']) {
-                // The verdict's save and the summary's, one version each.
+                // One save, but Review counts each change in it: one version for the verdict, one for the summary.
                 $expected['rounds'][$index]['version'] = 3;
             }
         }
@@ -150,11 +144,10 @@ final class SetVerdictTest extends WebTestCase
     }
 
     /**
-     * setDraftVerdict saves the verdict, then editDraftScreenshot refuses the summary: only the gate's savepoint can
-     * take the saved verdict back, in a request whose transaction commits.
+     * Review refuses the summary in the same command that sets the verdict, so the verdict is not saved either.
      */
     #[Test]
-    public function aSummaryOverSixHundredCharactersIsInvalidAndTheVerdictSavedBeforeItIsRolledBack(): void
+    public function aSummaryOverSixHundredCharactersIsInvalidAndTheVerdictIsNotSavedEither(): void
     {
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
@@ -168,6 +161,57 @@ final class SetVerdictTest extends WebTestCase
         );
         self::assertSame($before, $this->stored());
         self::assertSame([$this->toolRow('Omar', $tokenId, 'screenshot', $this->omarsShot, 'invalid_input')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    #[Test]
+    public function aSummaryOfSixHundredCharactersIsKeptWhole(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $summary = str_repeat('é', 600);
+
+        $this->callSetVerdict($token, ['key' => 'SHOP-1', 'screenshot_id' => $this->omarsShot, 'verdict' => SetVerdict::LOOKS_RIGHT, 'summary' => $summary]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame(
+            [['id' => $this->omarsShot, 'position' => 0, 'verdict' => 'looks_right', 'title' => self::TITLE, 'summary' => $summary]],
+            $this->screenshotRowsOf($this->omarsDraft),
+        );
+        self::assertSame([$this->toolRow('Omar', $tokenId, 'screenshot', $this->omarsShot, 'ok')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * Claude Code may send a call again when it lost the answer: the second one stores the same verdict and summary,
+     * answers as the first did, and raises the draft's version again, as every save in Review does.
+     */
+    #[Test]
+    public function theSameVerdictSentTwiceStoresItOnceAndRaisesTheVersionAgain(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored();
+        $arguments = ['key' => 'SHOP-1', 'screenshot_id' => $this->omarsShot, 'verdict' => SetVerdict::NOT_RIGHT_YET, 'summary' => self::NEW_SUMMARY];
+
+        $this->callSetVerdict($token, $arguments);
+        self::assertResponseStatusCodeSame(200);
+        $this->callSetVerdict($token, $arguments);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame(
+            ['screenshot_id' => $this->omarsShot, 'verdict' => 'not_right_yet', 'verdict_label' => 'Not right yet', 'summary_saved' => true],
+            $this->responseValueAt('result', 'structuredContent'),
+        );
+        $expected = $before;
+        foreach ($expected['rounds'] as $index => $round) {
+            if ($this->omarsDraft === $round['id']) {
+                // Two for each call: the verdict and the summary, also when they are the ones stored already.
+                $expected['rounds'][$index]['version'] = 5;
+            }
+        }
+        $expected['screenshots'][$this->omarsDraft] = [['id' => $this->omarsShot, 'position' => 0, 'verdict' => 'not_right', 'title' => self::TITLE, 'summary' => self::NEW_SUMMARY]];
+        self::assertSame($expected, $this->stored());
+        $okRow = $this->toolRow('Omar', $tokenId, 'screenshot', $this->omarsShot, 'ok');
+        self::assertSame([$okRow, $okRow], $this->toolRowsOf($this->acmeFoods));
     }
 
     #[Test]
@@ -194,7 +238,8 @@ final class SetVerdictTest extends WebTestCase
 
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         self::assertSame($before, $this->stored());
-        self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+        // The lookup finds Mia's draft; RoundPermission EDIT denies it, which the gate answers as not found.
+        self::assertSame([$this->toolRow('Omar', $tokenId, 'screenshot', $this->miasShot, 'not_found')], $this->toolRowsOf($this->acmeFoods));
     }
 
     #[Test]
@@ -224,14 +269,16 @@ final class SetVerdictTest extends WebTestCase
     }
 
     /**
-     * Omar works in Beta Bakery too; under its token, Acme Foods' ticket and Omar's own draft there are another
-     * organization's.
+     * Omar works in Beta Bakery too, which has a SHOP-1 of its own that he reported and is assigned: under Beta's
+     * token, the key finds Beta's ticket, and Acme Foods' screenshot and checklist item are not of it.
      */
     #[Test]
-    public function aTicketOfAnotherOrganizationIsNotFoundAndNothingIsWritten(): void
+    public function aScreenshotOrItemOfAnotherOrganizationIsNotFoundAndNothingIsWritten(): void
     {
         $betaBakery = $this->createOrganization('Beta Bakery');
         $this->addMembership($this->people['Omar'], $betaBakery);
+        $betaShop = $this->addProject(null, 'SHOP', 'Shop', $betaBakery);
+        $this->addTicketOf($betaBakery, $betaShop, 'SHOP-1', $this->addTodoStep($betaBakery), $this->people['Omar']);
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $betaBakery);
         $before = $this->stored();
 
@@ -262,6 +309,27 @@ final class SetVerdictTest extends WebTestCase
         self::assertSame([$this->toolRow('Omar', $tokenId, 'check_item', $this->checkItem, 'ok')], $this->toolRowsOf($this->acmeFoods));
     }
 
+    #[Test]
+    public function aSecondFixedOnAFixedItemIsReadOnlyAndTheItemStaysAsTheFirstLeftIt(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $this->callSetVerdict($token, ['key' => 'SHOP-1', 'check_item_id' => $this->checkItem, 'state' => SetVerdict::FIXED]);
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        $afterFirst = $this->stored();
+
+        $this->callSetVerdict($token, ['key' => 'SHOP-1', 'check_item_id' => $this->checkItem, 'state' => SetVerdict::FIXED]);
+
+        $this->assertRefused(ToolRefusal::READ_ONLY);
+        self::assertSame(['state' => 'fixed', 'changed_by' => $this->people['Omar']->id()->toString()], $afterFirst['check_item']);
+        self::assertSame($afterFirst, $this->stored());
+        // Both rows have the frozen clock's time, so their order in toolRowsOf is the random part of their ids.
+        self::assertEqualsCanonicalizing(
+            [$this->toolRow('Omar', $tokenId, 'check_item', $this->checkItem, 'ok'), $this->toolRow('Omar', $tokenId, 'check_item', $this->checkItem, 'read_only')],
+            $this->toolRowsOf($this->acmeFoods),
+        );
+    }
+
     /**
      * Mia may see and edit SHOP-1 but is not its assignee: the voter denies her, which the gate answers as not found,
      * where the web's checklist card answers 403 with "Only the ticket's assignee can mark a pin fixed.".
@@ -276,6 +344,38 @@ final class SetVerdictTest extends WebTestCase
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         self::assertSame(['state' => 'open', 'changed_by' => null], $this->checkItemRow());
         self::assertSame([$this->toolRow('Mia', $tokenId, 'check_item', $this->checkItem, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    private function addTodoStep(OrganizationId $organizationId): string
+    {
+        $stepId = Uuid::v7()->toRfc4122();
+        $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'To do', 'todo', 'todo', 'core', 1)",
+            [$organizationId->toString(), $stepId],
+        ));
+
+        return $stepId;
+    }
+
+    /**
+     * A ticket of no team that $person reported and is assigned, unlike SeedsTicketRounds::addTicket, which is always
+     * Acme Foods' Shop ticket.
+     *
+     * @return string the ticket's id
+     */
+    private function addTicketOf(OrganizationId $organizationId, string $projectId, string $key, string $stepId, User $person): string
+    {
+        $ticketId = Uuid::v7()->toRfc4122();
+        $parameters = [$organizationId->toString(), $ticketId, $projectId, (int) substr($key, (int) strpos($key, '-') + 1), $key, $stepId, $person->id()->toString(), $person->id()->toString()];
+        $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                 step_id, reporter_id, assignee_id, visibility, version, components, check_reasons, created_at, updated_at)
+             VALUES (?, ?, ?, NULL, ?, ?, 'Checkout button is hidden', '', 'bug', 'major', 2, ?, ?, ?, 'all', 3, '{}', '{}',
+                 TIMESTAMPTZ '2026-11-04 10:00:00+00', TIMESTAMPTZ '2026-11-05 10:00:00+00')",
+            $parameters,
+        ));
+
+        return $ticketId;
     }
 
     /**
