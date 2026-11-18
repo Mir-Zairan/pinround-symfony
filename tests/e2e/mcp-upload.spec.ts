@@ -76,9 +76,11 @@ test.afterEach(() => {
   }
 });
 
-/** The PNG fixture the media security tests use, built by tests/Fixtures/Media/ImageFixtures in the app. */
-function mediaFixture(call: string): Buffer {
-  return Buffer.from(runPhp(`require "vendor/autoload.php"; echo base64_encode(App\\Tests\\Fixtures\\Media\\ImageFixtures::${call});`), 'base64');
+const IMAGE_FIXTURES = 'App\\Tests\\Fixtures\\Media\\ImageFixtures';
+
+/** A value of tests/Fixtures/Media/ImageFixtures, which the media security tests use, read in the app: `ImageFixtures::<member>`. */
+function mediaFixture(member: string): Buffer {
+  return Buffer.from(runPhp(`require "vendor/autoload.php"; echo base64_encode(${IMAGE_FIXTURES}::${member});`), 'base64');
 }
 
 class McpSession {
@@ -233,6 +235,39 @@ test.describe('Screenshots from Claude Code', () => {
     await expect(omar.getByText('No screenshots yet.')).toBeVisible();
     const roundId = await draftRoundIdOn(omar);
     expect(runAsDatabaseOwner(`SELECT count(*) FROM rvw_screenshot WHERE round_id = '${roundId}'`)).toEqual(['0']);
+
+    await revokeOnTokensPage(omar, token);
+    await context.close();
+  });
+
+  // The worker re-encodes every picture (P05.T2), so a polyglot is cleaned rather than refused: what Omar's draft shows
+  // holds none of the bytes after the picture's end.
+  test('a PNG with script bytes after its end is added re-encoded, and the picture Omar sees holds none of them', async ({ browser, request }) => {
+    test.setTimeout(90_000);
+    const key = await makeTicketForOmar(browser, 'Claude Code sends a polyglot');
+    const token = issueOmarsToken();
+    const session = await McpSession.start(request, token.plainToken);
+    const scriptBytes = mediaFixture('SCRIPT_BYTES');
+    expect(scriptBytes.toString()).toContain('<?php');
+    const polyglot = mediaFixture(`withAppended(${IMAGE_FIXTURES}::png(64, 64))`);
+    expect(polyglot.includes(scriptBytes), 'the fixture carries the script bytes').toBe(true);
+
+    const uploadId = await uploadThroughMcp(request, session, key, polyglot);
+    const added = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId });
+
+    expect(added.isError, added.text).toBe(false);
+    expect(added.structured).toMatchObject({ status: 'added' });
+    const { context, page: omar } = await openAs(browser, OMAR_STORAGE_STATE);
+    await omar.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    const picture = omar.locator(`section.draft-shot[data-screenshot-id="${String(added.structured.screenshot_id)}"] img`).first();
+    await picture.scrollIntoViewIfNeeded();
+    await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0), { message: 'the processed picture loads' }).toBe(true);
+    const shown = await context.request.get(await picture.evaluate((image: HTMLImageElement) => image.currentSrc));
+    expect(shown.status()).toBe(200);
+    const shownBytes = await shown.body();
+    expect(shownBytes.length).toBeGreaterThan(0);
+    expect(shownBytes.includes(scriptBytes), 'the script bytes in the picture Omar sees').toBe(false);
+    expect(shownBytes.includes(Buffer.from('<?php')), 'the start of the script in the picture Omar sees').toBe(false);
 
     await revokeOnTokensPage(omar, token);
     await context.close();
