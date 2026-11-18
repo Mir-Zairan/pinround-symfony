@@ -461,7 +461,7 @@ final class DraftRoundControllerTest extends WebTestCase
         );
         self::assertSame('Delete this draft round? Its screenshots, pins and notes go too.', $frame->filter('#round-'.$draft.' form.round-card__form:has(.round-card__delete)')->attr('data-turbo-confirm'), 'Deleting asks first.');
         self::assertNull($frame->filter('#round-'.$draft.' form:has(.round-card__share)')->attr('data-turbo-confirm'), 'Sharing does not ask.');
-        self::assertStringContainsString('(built with mcp/sdk)', $tools);
+        self::assertSame('pinround’s tool connection (built with mcp/sdk) lets Claude Code read these notes and verdicts, and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict. How to connect it: docs/guides/claude-code.md.', $tools, 'The tools exist now: no "Planned" or "Not built yet".');
 
         $this->logIn($this->client, $this->people['Lena']);
         $frame = $this->frame();
