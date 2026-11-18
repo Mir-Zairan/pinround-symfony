@@ -436,13 +436,26 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertCount(1, $boxes);
         self::assertCount(1, $frame->filter('#round-'.$draft.' .claude-code-box'));
         self::assertSame('For Claude Code', $boxes->filter('h4')->text());
-        self::assertSame('Read my pinround notes for SHOP-1 and fix what is marked “Not right yet”.', $boxes->filter('code')->text());
+        $prompt = $boxes->filter('textarea.claude-code-box__prompt[readonly][data-copy-text-target="source"]');
+        self::assertCount(1, $prompt, 'The line is a read-only field, so copy-text can copy its value and select it.');
+        self::assertSame('Read my pinround notes for SHOP-1 and fix what is marked “Not right yet”.', $prompt->text());
+        self::assertSame('Line to give Claude Code', $prompt->attr('aria-label'));
+        $copyBlock = $boxes->filter('[data-controller="copy-text"]');
+        self::assertCount(1, $copyBlock);
+        $controls = $copyBlock->filter('[data-copy-text-target="controls"]');
+        self::assertNotNull($controls->attr('hidden'), 'The Copy button comes hidden; copy-text shows it only where the browser can copy.');
+        self::assertSame('copy-text#copy', $controls->filter('button')->attr('data-action'));
+        self::assertSame('button', $controls->filter('button')->attr('type'), 'Copy never submits a form.');
+        self::assertCount(1, $controls->filter('[role="status"][data-copy-text-target="status"]'));
         $tools = $boxes->filter('.claude-code-box__tools')->text();
         foreach (['get_round_notes', 'add_screenshot', 'set_verdict'] as $tool) {
             self::assertStringContainsString($tool, $tools);
         }
+        self::assertSame('To connect Claude Code, make a token on the API tokens page.', $boxes->filter('.claude-code-box__tokens')->text());
+        $tokensLink = $boxes->filter('.claude-code-box__tokens a');
+        self::assertSame(['API tokens', '/me/tokens', '_top'], [$tokensLink->text(), $tokensLink->attr('href'), $tokensLink->attr('data-turbo-frame')], 'The link leaves the rounds frame for the whole page.');
         self::assertSame(
-            ['Add screenshot', 'Share with the team now', 'Delete draft'],
+            ['Add screenshot', 'Share with the team now', 'Delete draft', 'Copy line'],
             $frame->filter(self::ROUNDS.' button')->each(static fn (Crawler $button): string => $button->text()),
             'Only the private draft has buttons; the start button is gone beside it.',
         );
@@ -454,6 +467,31 @@ final class DraftRoundControllerTest extends WebTestCase
         $frame = $this->frame();
         self::assertSame(['Round 1 · self-check by Omar'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
         self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' form'));
+    }
+
+    #[Test]
+    public function eachPersonSeesTheClaudeCodeBoxOnlyInTheirOwnUnsharedDraft(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $omarsDraft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $lenasDraft = $this->addRound($ticketId, null, 'draft', 'Lena', null);
+        $this->addRound($ticketId, 1, 'draft', 'Mia', self::SHARED_AT);
+
+        foreach (['Omar' => $omarsDraft, 'Lena' => $lenasDraft] as $owner => $ownDraft) {
+            $this->logIn($this->client, $this->people[$owner]);
+            $frame = $this->frame();
+            self::assertSame(['Round 1 · self-check by Mia', 'Draft round · only you can see this'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $owner.' sees their own draft and the shared round.');
+            self::assertCount(1, $frame->filter(self::ROUNDS.' .claude-code-box'), $owner);
+            self::assertCount(1, $frame->filter('#round-'.$ownDraft.' .claude-code-box'), $owner);
+        }
+
+        foreach (['Mia', 'Raj', 'Sara'] as $person) {
+            $this->logIn($this->client, $this->people[$person]);
+            $frame = $this->frame();
+            self::assertSame(['Round 1 · self-check by Mia'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person.' sees the shared round only.');
+            self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' [data-controller="copy-text"]'), $person.': a shared round has no box, not even for its owner.');
+            self::assertStringNotContainsString('Read my pinround notes', (string) $this->client->getResponse()->getContent(), $person);
+        }
     }
 
     private function frame(): Crawler

@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
 import { seedDraftWithPicture } from './draft-picture';
@@ -15,6 +16,12 @@ test.use({ viewport: { width: 1280, height: 900 } });
 
 const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const SHARED_HEADLINE = /^Round \d+ · self-check by Omar$/;
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
+// COPIED_SHOWN_FOR_MS in copy-text_controller.js.
+const COPIED_SHOWN_FOR_MS = 2000;
+// The fake clock runs requestAnimationFrame callbacks at most this long after they are asked for.
+const ANIMATION_FRAME_MS = 16;
+const FROZEN_AT = new Date('2026-03-14T10:00:00Z');
 
 async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
   const key = await makeTicketForOmar(browser, 'Draft round check on the checkout banner');
@@ -68,7 +75,7 @@ test.describe('Draft round', () => {
     await expect(card.getByRole('button', { name: 'Add screenshot' })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Delete draft' })).toBeVisible();
     await expect(card.getByRole('heading', { name: 'For Claude Code', level: 4 })).toBeVisible();
-    await expect(card.locator('.claude-code-box__prompt')).toHaveText(`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`);
+    await expect(card.getByLabel('Line to give Claude Code')).toHaveValue(`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`);
     await expect(card.locator('.claude-code-box__tools')).toContainText('get_round_notes, add_screenshot, set_verdict');
     await expect(page.getByRole('button', { name: 'Start a draft round' })).toHaveCount(0);
 
@@ -83,6 +90,72 @@ test.describe('Draft round', () => {
     await expect(shared.getByRole('button', { name: 'Add screenshot' })).toHaveCount(0);
     await expect(shared.locator('.claude-code-box')).toHaveCount(0);
     await expect(shared.locator('input, textarea')).toHaveCount(0);
+    await context.close();
+  });
+
+  test('Omar copies the line for Claude Code from his draft and finds the way to his API tokens', async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, 'Draft round line for Claude Code');
+    const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.clock.install({ time: FROZEN_AT });
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'Start a draft round' }).click();
+    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
+    await page.waitForLoadState('networkidle');
+    const box = page.locator('article.round-card--private section.claude-code-box');
+    const line = `Read my pinround notes for ${key} and fix what is marked “Not right yet”.`;
+    await expect(box.getByLabel('Line to give Claude Code')).toHaveValue(line);
+    await expect(box.getByRole('link', { name: 'API tokens' })).toHaveAttribute('href', '/me/tokens');
+
+    // Paused, the clock stands still between the copy and the steps below, so they time the message exactly.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 60_000));
+    await box.getByRole('button', { name: 'Copy line' }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(line);
+    await page.clock.runFor(ANIMATION_FRAME_MS);
+    await expect(box.getByRole('status')).toHaveText('Copied');
+    await page.clock.runFor(COPIED_SHOWN_FOR_MS - ANIMATION_FRAME_MS);
+    await expect(box.getByRole('status')).toHaveText('');
+    await page.clock.resume();
+
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const { violations } = await new AxeBuilder({ page }).include('.claude-code-box').withTags(AXE_TAGS).analyze();
+      expect(
+        violations
+          .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+          .map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`),
+        scheme,
+      ).toEqual([]);
+    }
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expect(box.getByLabel('Line to give Claude Code')).toHaveValue(line);
+    expect(await box.evaluate((element) => element.scrollWidth - element.clientWidth), 'the line wraps inside the box at 360px').toBeLessThanOrEqual(0);
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    await box.getByRole('link', { name: 'API tokens' }).click();
+    await expect(page.getByRole('heading', { name: 'API tokens', level: 1 })).toBeVisible();
+    await context.close();
+  });
+
+  test('a browser without the Clipboard API shows the line for Claude Code with no Copy button', async ({ browser }) => {
+    const key = await makeTicketForOmar(browser, 'Draft round line without a clipboard');
+    const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(Clipboard.prototype, 'writeText');
+    });
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'Start a draft round' }).click();
+    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    // Before copy-text connects the controls are hidden anyway; only after it has run does hidden prove its check.
+    await page.waitForLoadState('networkidle');
+    expect(await page.evaluate(() => typeof navigator.clipboard?.writeText)).toBe('undefined');
+    const box = page.locator('article.round-card--private section.claude-code-box');
+
+    await expect(box.getByLabel('Line to give Claude Code')).toBeVisible();
+    await expect(box.locator('[data-copy-text-target="controls"]')).toHaveCount(1);
+    await expect(box.locator('[data-copy-text-target="controls"]')).toBeHidden();
     await context.close();
   });
 

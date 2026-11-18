@@ -614,20 +614,49 @@ textarea.screenshot-report__input {
   font-weight: 700;
 }
 
-.claude-code-box__line {
+.claude-code-box__copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Read only, and as tall as the line wraps where the browser can size a field to its content. */
+.claude-code-box__prompt {
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  resize: none;
+  field-sizing: content;
+}
+
+.claude-code-box__copy-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
   margin: 0;
 }
 
-/* One click selects the whole line, so it copies in one go. */
-.claude-code-box__prompt {
-  overflow-wrap: anywhere;
-  user-select: all;
+/* display: flex above would otherwise show the controls copy-text hides where the browser cannot copy. */
+.claude-code-box__copy-controls[hidden] {
+  display: none;
 }
 
-.claude-code-box__tools {
+.claude-code-box__copy-status,
+.claude-code-box__tools,
+.claude-code-box__tokens {
   margin: 0;
   color: var(--on-surface-var);
   font-size: 14px;
+}
+
+.claude-code-box__tokens-link {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .rounds__start {
