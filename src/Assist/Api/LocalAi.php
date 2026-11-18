@@ -63,7 +63,8 @@ interface LocalAi
 
     /**
      * The ticket's laptop summary proposal, which everyone who may see the ticket sees under its summary: its newest
-     * posted result not made the main summary yet, when it was posted after the current summary was made. One read in
+     * posted result not made the main summary yet, when it was posted from the second after the one the current
+     * summary was made in (a summary keeps whole seconds, so a result in that same second is no proposal). One read in
      * the caller's open transaction, whose tenant is $organizationId; whether the viewer may see the ticket is the
      * caller's check.
      *

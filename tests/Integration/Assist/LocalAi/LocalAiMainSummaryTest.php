@@ -103,6 +103,27 @@ final class LocalAiMainSummaryTest extends KernelTestCase
     }
 
     /**
+     * A summary's created_at keeps whole seconds: one written at 10:08:00.700 reads as 10:08:00, so a result posted at
+     * 10:08:00.400 may have come before it and is no proposal; one posted at 10:08:01 is.
+     */
+    #[Test]
+    public function aResultPostedInTheSecondOfTheCurrentSummaryIsNoProposalAndOneInTheNextSecondIs(): void
+    {
+        $inTheSummarySecond = '0197a3c0-0000-7000-8000-0000000f9a3a';
+        $inTheNextSecond = '0197a3c0-0000-7000-8000-0000000f9a3b';
+        $this->addResult(self::ACME_FOODS, $inTheSummarySecond, self::SHOP_8, '2027-03-15 10:08:00.400', 'Posted in the summary\'s second.');
+
+        self::assertNull($this->proposalOf(self::SHOP_8, '2027-03-15 10:08:00+00'));
+        self::assertNull($this->proposalOf(self::SHOP_8, '2027-03-15 10:08:00.100+00'));
+        self::assertSame($inTheSummarySecond, $this->proposalOf(self::SHOP_8, '2027-03-15 10:07:59+00')?->packageId->toString());
+
+        $this->addResult(self::ACME_FOODS, $inTheNextSecond, self::SHOP_8, '2027-03-15 10:08:01', 'Posted in the next second.');
+
+        self::assertSame($inTheNextSecond, $this->proposalOf(self::SHOP_8, '2027-03-15 10:08:00+00')?->packageId->toString());
+        self::assertSame($inTheNextSecond, $this->proposalOf(self::SHOP_8, '2027-03-15 10:08:00.100+00')?->packageId->toString());
+    }
+
+    /**
      * Rows kept before accept() capped a summary result at a summary's length: a newer one over the cap is passed
      * over for the newest one at the cap, and cannot be made the main summary.
      */
@@ -132,6 +153,20 @@ final class LocalAiMainSummaryTest extends KernelTestCase
         self::assertSame(self::LENA, $this->chosenByOfCurrentSummary());
         self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30', self::NEWEST => '2027-03-15 10:10:00'], $this->madeMainTimes());
         self::assertNull($this->proposalOf(self::SHOP_7, '2027-03-15 10:10:00+00'));
+    }
+
+    #[Test]
+    public function lenaMakesTheProposalOfATicketWithNoSummaryItsFirstSummaryWithNothingToHistory(): void
+    {
+        self::assertSame([], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_8));
+
+        $this->makeMainSummary(self::OTHER_TICKET, self::SHOP_8, null);
+
+        self::assertSame([
+            ['text' => 'On another ticket.', 'source' => 'laptop', 'author_id' => self::OMAR, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'is_current' => true, 'created_at' => '2027-03-15 10:10:00'],
+        ], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_8));
+        self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+        self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30', self::OTHER_TICKET => '2027-03-15 10:10:00'], $this->madeMainTimes());
     }
 
     /**
@@ -249,12 +284,12 @@ final class LocalAiMainSummaryTest extends KernelTestCase
         ));
     }
 
-    private function makeMainSummary(string $packageId, string $ticketId, string $currentSummaryCreatedAt): void
+    private function makeMainSummary(string $packageId, string $ticketId, ?string $currentSummaryCreatedAt): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->localAi()->makeMainSummary(
             new LocalPackageId($packageId),
             new TicketId($ticketId),
-            new \DateTimeImmutable($currentSummaryCreatedAt),
+            null === $currentSummaryCreatedAt ? null : new \DateTimeImmutable($currentSummaryCreatedAt),
             new UserId(self::LENA),
             new OrganizationId(self::ACME_FOODS),
         ));

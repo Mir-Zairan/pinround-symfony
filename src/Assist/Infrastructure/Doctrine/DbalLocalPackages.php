@@ -54,9 +54,11 @@ final readonly class DbalLocalPackages implements LocalPackages
 
     // The predicate of ast_local_package_ticket_id_used_at_idx, so both statements read the partial index. The length
     // skips a result kept before accept() capped a summary's at a summary's length, which Ticketing would refuse; it
-    // filters the index scan and is left out of the index, as such rows are few and never come back.
+    // filters the index scan and is left out of the index, as such rows are few and never come back. A summary's
+    // created_at keeps whole seconds and used_at keeps microseconds, so a result counts as newer from the next second
+    // on: one posted earlier in the summary's second may have come before it.
     private const string PROPOSAL_OF_TICKET = 'organization_id = :organization AND ticket_id = :ticket AND used_at IS NOT NULL AND made_main_at IS NULL'
-        .' AND used_at > coalesce(CAST(:newer_than AS timestamptz), \'-infinity\')'
+        .' AND used_at >= coalesce(CAST(:newer_than AS timestamptz) + interval \'1 second\', \'-infinity\')'
         .' AND char_length(result_text) <= '.TicketSummaryCommands::TEXT_MAX_LENGTH;
 
     private const string SELECT_PROPOSAL = 'SELECT '.self::RESULT_COLUMNS.' FROM ast_local_package WHERE '.self::PROPOSAL_OF_TICKET
@@ -70,6 +72,9 @@ final readonly class DbalLocalPackages implements LocalPackages
         .' RETURNING '.self::RESULT_COLUMNS;
 
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
+
+    // The whole second of tkt_summary.created_at, so a fraction the caller carries cannot move the next second.
+    private const string SECOND_FORMAT = 'Y-m-d H:i:sP';
 
     public function __construct(private Connection $connection, private TenantContext $tenantContext, private ClockInterface $clock)
     {
@@ -199,7 +204,7 @@ final readonly class DbalLocalPackages implements LocalPackages
         return [
             'organization' => $organizationId->toString(),
             'ticket' => $ticketId->toString(),
-            'newer_than' => $newerThan?->format(self::TIMESTAMP_FORMAT),
+            'newer_than' => $newerThan?->format(self::SECOND_FORMAT),
         ];
     }
 
