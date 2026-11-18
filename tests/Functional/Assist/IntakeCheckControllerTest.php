@@ -204,6 +204,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         }]);
 
         self::assertResponseStatusCodeSame(404);
+        self::assertSelectorTextContains('title', IntakeCheckController::PROJECT_NOT_FOUND);
         self::assertStringNotContainsString(IntakeCheck::RUNNING_LINE, (string) $this->client->getResponse()->getContent());
         $this->assertNothingWasQueued();
     }
@@ -232,6 +233,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         $this->postCheck(token: $token);
 
         self::assertResponseStatusCodeSame(404);
+        self::assertSelectorTextContains('title', IntakeCheckController::PROJECT_NOT_FOUND);
         $this->assertNothingWasQueued();
     }
 
@@ -274,27 +276,26 @@ final class IntakeCheckControllerTest extends WebTestCase
     /**
      * The fields posted over the form's own, the status, and the line shown with the button kept.
      *
-     * @return iterable<string, array{array<string, string>, int, string}>
+     * @return iterable<string, array{array<string, mixed>, int, string}>
      */
     public static function draftsTheBackendRefuses(): iterable
     {
         yield 'a title that mentions security, as cloud AI runs' => [['title' => 'Password reset sends the old one'], 403, self::SECURITY_LINE];
-        yield 'a pin note that mentions security' => [['title' => 'Pay does nothing'], 403, self::SECURITY_LINE];
+        yield 'a pin note that mentions security' => [['title' => 'Pay does nothing', 'pins' => [['note' => 'The token shows in the address bar']]], 403, self::SECURITY_LINE];
         yield 'a title over the AI cap' => [['title' => str_repeat('a', 201)], 422, 'The title is too long for AI help: 200 characters at most.'];
         yield 'a description that is not UTF-8' => [['description' => "Pay \xC3\x28 does nothing"], 422, 'This report has text AI help cannot read.'];
     }
 
     /**
-     * @param array<string, string> $fields
+     * @param array<string, mixed> $fields
      */
     #[Test]
     #[DataProvider('draftsTheBackendRefuses')]
     public function aDraftTheBackendRefusesAnswersItsLineAndKeepsTheButton(array $fields, int $expectedStatus, string $expectedLine): void
     {
         $this->logIn($this->client, $this->people['Omar']);
-        $pins = self::SECURITY_LINE === $expectedLine && 'Pay does nothing' === $fields['title'] ? ['pins' => [['note' => 'The token shows in the address bar']]] : [];
 
-        $frame = $this->postCheck([...$fields, ...$pins]);
+        $frame = $this->postCheck($fields);
 
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame([$expectedLine], self::textsOf($frame->filter('.intake-check__notice')));
@@ -388,6 +389,7 @@ final class IntakeCheckControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame($expectedStatus);
         if (null === $expectedKind) {
+            self::assertSelectorTextContains('title', IntakeCheckController::PROJECT_NOT_FOUND);
             self::assertCount(0, $this->client->getCrawler()->filter(self::FRAME));
             self::assertSame([], $this->sentJobs());
 
@@ -454,7 +456,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         self::assertSame(['In short: Pay does nothing on the last step.'], self::textsOf($frame->filter('.intake-check__summary')));
         self::assertSame([IntakeCheck::CHECK_AGAIN_LABEL], self::textsOf($frame->filter('button.intake-check__button:not([disabled])')));
         self::assertSame([['SHOP-1', 'Checkout fails', '/t/SHOP-1']], $this->duplicatesOf($frame));
-        self::assertSame(0, $this->stateValkey()->exists('intake_draft:'.$this->acmeFoods->toString().':'.$checkId), 'The ended check keeps its draft.');
+        self::assertSame(0, $this->stateValkey()->exists('intake_draft:'.$this->acmeFoods->toString().':'.$checkId), 'The ended check drops its draft.');
     }
 
     /**
@@ -476,6 +478,8 @@ final class IntakeCheckControllerTest extends WebTestCase
             ['SHOP-1', 'Checkout fails', '/t/SHOP-1'],
             ['SHOP-2', 'Checkout fails', '/t/SHOP-2'],
         ], $this->duplicatesOf($frame));
+        // Inside the frame, a link without its own target would load the ticket into the frame.
+        self::assertSame(['_top', '_top', '_top'], $frame->filter('.intake-check__duplicate a')->each(static fn (Crawler $link): ?string => $link->attr('data-turbo-frame')));
         $content = (string) $this->client->getResponse()->getContent();
         self::assertStringNotContainsString(self::MOBILE_TITLE, $content);
         self::assertStringNotContainsString('MOB-1', $content);
@@ -498,8 +502,8 @@ final class IntakeCheckControllerTest extends WebTestCase
     }
 
     /**
-     * Two candidates the person may see and two the person may not cost what one does: one visibility read and one
-     * ticket read, with the check, the membership and the transaction around them.
+     * Three candidates Omar may see (SHOP-3, SHOP-1, SHOP-2) and one he may not (MOB-1) cost what one does: one
+     * visibility read and one ticket read, with the check, the membership and the transaction around them.
      */
     #[Test]
     public function theDoneFramesQueryCountDoesNotGrowWithItsDuplicates(): void
@@ -602,6 +606,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         $this->client->request('GET', '/tickets/new/check/'.rawurlencode($checkId), server: ['HTTP_TURBO_FRAME' => IntakeCheck::FRAME_ID]);
 
         self::assertResponseStatusCodeSame(404);
+        self::assertSelectorTextContains('title', IntakeCheckController::CHECK_NOT_FOUND);
     }
 
     #[Test]

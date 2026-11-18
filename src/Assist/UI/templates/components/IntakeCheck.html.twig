@@ -44,7 +44,7 @@
                     {% for duplicate in intakeCheck.duplicates %}
                         <li class="intake-check__duplicate">
                             <span class="intake-check__duplicate-key">{{ duplicate.key }}</span>
-                            <a href="{{ path(constant('App\\Assist\\UI\\Controller\\SummaryController::TICKET_ROUTE'), {key: duplicate.key}) }}">{{ duplicate.title }}</a>
+                            <a href="{{ path(constant('App\\Assist\\UI\\Controller\\SummaryController::TICKET_ROUTE'), {key: duplicate.key}) }}" data-turbo-frame="_top">{{ duplicate.title }}</a>
                         </li>
                     {% endfor %}
                 </ul>
