@@ -7,6 +7,7 @@ namespace App\Identity\Infrastructure\Doctrine;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenOwner;
 use App\Identity\Domain\ApiTokens;
+use App\Identity\Domain\ExpiringApiToken;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -16,8 +17,8 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * ApiTokens on idn_api_token: added and read through the entity manager, whose tenant filter supplies the
- * organization; revoked and marked used in one conditional SQL statement each, naming the tenant's organization_id
- * as well as row-level security does.
+ * organization; revoked, marked used and claimed for the expiry warning in one conditional SQL statement each, naming
+ * the tenant's organization_id as well as row-level security does.
  */
 final readonly class DoctrineApiTokens implements ApiTokens
 {
@@ -25,6 +26,18 @@ final readonly class DoctrineApiTokens implements ApiTokens
 
     private const string MARK_USED = 'UPDATE idn_api_token SET last_used_at = ?'
         .' WHERE organization_id = ? AND id = ? AND (last_used_at IS NULL OR last_used_at < ?)';
+
+    // FOR UPDATE, not SKIP LOCKED: a token in use locks its row each minute (MARK_USED), and a skipped row would miss its
+    // only warning. A claim that waited checks the row again, so a token revoked or claimed meanwhile is left out. Served
+    // by idn_api_token_expires_at_id_live_idx.
+    private const string CLAIM_EXPIRY_WARNINGS = 'WITH claimed AS (UPDATE idn_api_token t SET expiry_warned_at = ?'
+        .' WHERE t.organization_id = ? AND t.expiry_warned_at IS NULL AND t.id IN ('
+        .'SELECT c.id FROM idn_api_token c WHERE c.organization_id = ? AND c.revoked_at IS NULL AND c.expiry_warned_at IS NULL'
+        .' AND c.expires_at >= ? AND c.expires_at < ? ORDER BY c.expires_at, c.id LIMIT ? FOR UPDATE)'
+        .' RETURNING t.id, t.user_id, t.name, t.prefix, t.expires_at)'
+        .' SELECT id::text AS id, user_id::text AS user_id, name, prefix,'
+        ." to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || '+00:00' AS expires_at"
+        .' FROM claimed ORDER BY claimed.expires_at, claimed.id';
 
     private const string RESOLVE = 'SELECT token_id, organization_id, user_id FROM resolve_api_token(?)';
 
@@ -193,6 +206,34 @@ final readonly class DoctrineApiTokens implements ApiTokens
             $id,
             $usedAt->modify('-1 minute')->format(self::TIMESTAMP_FORMAT),
         ]);
+    }
+
+    public function claimExpiryWarnings(\DateTimeImmutable $expiresFrom, \DateTimeImmutable $expiresBefore, \DateTimeImmutable $warnedAt, int $limit): array
+    {
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A claim of expiry warnings takes at least one token.');
+        }
+        if ($expiresBefore <= $expiresFrom) {
+            throw new \InvalidArgumentException('The expiry range of a claim ends after it starts.');
+        }
+        $organizationId = $this->tenantContext->require()->toString();
+
+        $rows = $this->entityManager->getConnection()->fetchAllAssociative(self::CLAIM_EXPIRY_WARNINGS, [
+            $warnedAt->format(self::TIMESTAMP_FORMAT),
+            $organizationId,
+            $organizationId,
+            $expiresFrom->format(self::TIMESTAMP_FORMAT),
+            $expiresBefore->format(self::TIMESTAMP_FORMAT),
+            $limit,
+        ], [5 => ParameterType::INTEGER]);
+
+        return array_map(static function (array $row): ExpiringApiToken {
+            if (!\is_string($row['id']) || !\is_string($row['user_id']) || !\is_string($row['name']) || !\is_string($row['prefix']) || !\is_string($row['expires_at'])) {
+                throw new \UnexpectedValueException('A claimed token row lacks a column.');
+            }
+
+            return new ExpiringApiToken($row['id'], new UserId($row['user_id']), $row['name'], $row['prefix'], new \DateTimeImmutable($row['expires_at']));
+        }, $rows);
     }
 
     public function ownerOfLiveToken(string $tokenHash): ?ApiTokenOwner

@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Identity\Application;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenOwner;
 use App\Identity\Domain\ApiTokens;
+use App\Identity\Domain\ExpiringApiToken;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -15,7 +16,8 @@ use Symfony\Component\Uid\Uuid;
 /**
  * Tokens of every organization as idn_api_token keeps them, read in one transaction under $tenant as DoctrineApiTokens
  * reads them: only the tenant's rows, (organization, id) and the hash unique, live counted by the given time, a revoke
- * written once. Stricter than the real one in one way: countLiveOf() refuses unless lockIssuingFor() took that
+ * and an expiry warning written once, and a token read as stored, its revocation, last use and warning included, as a
+ * fresh entity manager loads it. Stricter than the real one in one way: countLiveOf() refuses unless lockIssuingFor() took that
  * person's lock earlier in the transaction, so a count read ahead of the lock fails the test instead of passing.
  */
 final class InMemoryApiTokens implements ApiTokens
@@ -28,6 +30,9 @@ final class InMemoryApiTokens implements ApiTokens
 
     /** @var array<string, \DateTimeImmutable> by rowKey() */
     private array $lastUsedAt = [];
+
+    /** @var array<string, \DateTimeImmutable> by rowKey() */
+    private array $expiryWarnedAt = [];
 
     /** @var array<string, true> by lockKey(), each issuing lock held in this transaction */
     private array $heldIssuingLocks = [];
@@ -193,6 +198,34 @@ final class InMemoryApiTokens implements ApiTokens
         return true;
     }
 
+    public function claimExpiryWarnings(\DateTimeImmutable $expiresFrom, \DateTimeImmutable $expiresBefore, \DateTimeImmutable $warnedAt, int $limit): array
+    {
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A claim of expiry warnings takes at least one token.');
+        }
+        if ($expiresBefore <= $expiresFrom) {
+            throw new \InvalidArgumentException('The expiry range of a claim ends after it starts.');
+        }
+        $from = self::cutToSecond($expiresFrom);
+        $before = self::cutToSecond($expiresBefore);
+        $claimable = array_values(array_filter(
+            $this->tenantTokens(),
+            fn (ApiToken $token): bool => !isset($this->revokedAt[self::rowKey($token->organizationId(), $token->id())])
+                && !isset($this->expiryWarnedAt[self::rowKey($token->organizationId(), $token->id())])
+                && self::cutToSecond($token->expiresAt()) >= $from
+                && self::cutToSecond($token->expiresAt()) < $before,
+        ));
+        usort($claimable, static fn (ApiToken $a, ApiToken $b): int => [self::cutToSecond($a->expiresAt()), strtolower($a->id())] <=> [self::cutToSecond($b->expiresAt()), strtolower($b->id())]);
+
+        $claimed = [];
+        foreach (\array_slice($claimable, 0, $limit) as $token) {
+            $this->expiryWarnedAt[self::rowKey($token->organizationId(), $token->id())] = $warnedAt;
+            $claimed[] = new ExpiringApiToken($token->id(), $token->userId(), $token->name(), $token->prefix(), self::cutToSecond($token->expiresAt()));
+        }
+
+        return $claimed;
+    }
+
     public function ownerOfLiveToken(string $tokenHash): ?ApiTokenOwner
     {
         foreach ($this->rows as $token) {
@@ -246,11 +279,33 @@ final class InMemoryApiTokens implements ApiTokens
         $tokens = [];
         foreach ($this->rows as $token) {
             if ($token->organizationId()->equals($tenant)) {
-                $tokens[$token->id()] = $token;
+                $tokens[$token->id()] = $this->asStored($token);
             }
         }
 
         return $tokens;
+    }
+
+    /**
+     * The token as Doctrine hydrates its row: the columns only the database writes filled in, each to the second.
+     */
+    private function asStored(ApiToken $token): ApiToken
+    {
+        $rowKey = self::rowKey($token->organizationId(), $token->id());
+        $writtenInTheDatabase = array_filter([
+            'revokedAt' => $this->revokedAt[$rowKey] ?? null,
+            'lastUsedAt' => $this->lastUsedAt[$rowKey] ?? null,
+            'expiryWarnedAt' => $this->expiryWarnedAt[$rowKey] ?? null,
+        ]);
+        if ([] === $writtenInTheDatabase) {
+            return $token;
+        }
+        $loaded = clone $token;
+        foreach ($writtenInTheDatabase as $property => $writtenAt) {
+            new \ReflectionProperty(ApiToken::class, $property)->setValue($loaded, self::cutToSecond($writtenAt));
+        }
+
+        return $loaded;
     }
 
     private function requireTenant(): OrganizationId

@@ -110,6 +110,21 @@ interface ApiTokens
     public function markUsed(string $id, \DateTimeImmutable $usedAt): bool;
 
     /**
+     * Marks up to $limit of the tenant's tokens as warned at $warnedAt, in one conditional statement: those neither
+     * revoked nor warned yet that expire in [$expiresFrom, $expiresBefore), the soonest to expire first (then the lower
+     * id). A token warned already is never returned again, so of two claims at once each token goes to one only. Writes
+     * at once; a token already loaded keeps its old expiryWarnedAt.
+     *
+     * @param int $limit at least 1; the caller caps it
+     *
+     * @return list<ExpiringApiToken> the tokens this call marked, at most $limit, soonest to expire first
+     *
+     * @throws \InvalidArgumentException when $limit is below 1 or $expiresBefore is not after $expiresFrom
+     * @throws \LogicException           when no tenant is set
+     */
+    public function claimExpiryWarnings(\DateTimeImmutable $expiresFrom, \DateTimeImmutable $expiresBefore, \DateTimeImmutable $warnedAt, int $limit): array;
+
+    /**
      * Through resolve_api_token, before any tenant is known: the ids of the token with this hash when it is neither
      * revoked nor expired by the database clock.
      *
