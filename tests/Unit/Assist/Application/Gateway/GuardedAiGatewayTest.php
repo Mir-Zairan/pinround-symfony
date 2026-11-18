@@ -435,7 +435,7 @@ final class GuardedAiGatewayTest extends TestCase
             self::fail('A draft went to cloud AI when AI runs only on the laptop.');
         } catch (AiNotAllowed $refusal) {
             self::assertSame(
-                [PolicyRefusal::IntakeNotOnLaptop, 'Your company runs AI on laptops, and Check with AI does not run there yet.'],
+                [PolicyRefusal::IntakeNotOnLaptop, 'Your company runs AI on laptops, and “Check with AI” does not run there yet.'],
                 [$refusal->refusal, $refusal->getMessage()],
             );
         }

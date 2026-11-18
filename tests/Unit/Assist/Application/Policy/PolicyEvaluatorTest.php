@@ -30,7 +30,7 @@ final class PolicyEvaluatorTest extends TestCase
     private const string LAPTOP_NOT_READY = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
     private const string SECURITY_SENSITIVE_DRAFT = 'This report mentions security, so it stays out of cloud AI.';
     private const string CLOUD_ONLY = 'Your admin runs AI help in the company cloud, not on laptops.';
-    private const string INTAKE_NOT_ON_LAPTOP = 'Your company runs AI on laptops, and Check with AI does not run there yet.';
+    private const string INTAKE_NOT_ON_LAPTOP = 'Your company runs AI on laptops, and “Check with AI” does not run there yet.';
 
     /**
      * Each row: the settings (on, leads only, where, restricted tickets to cloud, title only), the viewer, can see the

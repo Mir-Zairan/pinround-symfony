@@ -33,7 +33,7 @@ enum PolicyRefusal: string
             self::LaptopNotReady => 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.',
             self::SecuritySensitiveDraftToCloud => 'This report mentions security, so it stays out of cloud AI.',
             self::CloudOnly => 'Your admin runs AI help in the company cloud, not on laptops.',
-            self::IntakeNotOnLaptop => 'Your company runs AI on laptops, and Check with AI does not run there yet.',
+            self::IntakeNotOnLaptop => 'Your company runs AI on laptops, and “Check with AI” does not run there yet.',
         };
     }
 
