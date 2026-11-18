@@ -200,7 +200,7 @@ final class ToolCallGateTest extends TestCase
         }
 
         self::assertSame(
-            [['level' => 'warning', 'message' => 'The audit row of a failed MCP tool call could not be written.', 'context' => ['tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class]]],
+            [['level' => 'warning', 'message' => 'The audit row of a failed MCP tool call could not be written.', 'context' => ['mcp_tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class]]],
             $fixture->logger->records,
         );
     }
@@ -307,8 +307,8 @@ final class ToolCallGateTest extends TestCase
         self::assertSame(0, $fixture->connection->getTransactionNestingLevel());
         self::assertSame(
             [
-                ['level' => 'warning', 'message' => 'Rolling back the writes of a failed MCP tool call failed; closing the connection instead.', 'context' => ['tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class, 'sqlstate' => null, 'code' => 0]],
-                ['level' => 'warning', 'message' => 'The audit row of a failed MCP tool call could not be written.', 'context' => ['tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class]],
+                ['level' => 'warning', 'message' => 'Rolling back the writes of a failed MCP tool call failed; closing the connection instead.', 'context' => ['mcp_tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class, 'sqlstate' => null, 'code' => 0]],
+                ['level' => 'warning', 'message' => 'The audit row of a failed MCP tool call could not be written.', 'context' => ['mcp_tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class]],
             ],
             $fixture->logger->records,
         );
