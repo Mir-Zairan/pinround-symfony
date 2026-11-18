@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Assist\LocalAi;
 
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
 use Doctrine\DBAL\Connection;
 use Doctrine\Migrations\AbstractMigration;
 use Doctrine\Migrations\Configuration\Configuration;
@@ -21,9 +22,10 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * Version20261118140000, which labels every posted laptop result, run as pinround_migrator (as
- * doctrine:migrations:migrate does) inside a transaction that is rolled back. Its down() refuses, so the test takes the
- * columns away with the statements down() ran before, then runs up(). Acme Foods and Beta Bakery each have used and
- * unused packages, committed first under their own tenant; each organization's run sees only its own rows.
+ * doctrine:migrations:migrate does: with no tenant set) inside a transaction that is rolled back. Its down() refuses, so
+ * the test takes the columns away with the statements down() ran before, then runs up(). Acme Foods and Beta Bakery
+ * each have used and unused packages, committed first under their own tenant, and each organization's labels are then
+ * read under its own tenant, so a backfill that row-level security hid from the owner leaves them unlabelled.
  */
 final class ResultLabelBackfillTest extends KernelTestCase
 {
@@ -37,6 +39,9 @@ final class ResultLabelBackfillTest extends KernelTestCase
     private const string ACME_UNUSED = '0197a3c0-0000-7000-8000-0000000fb133';
     private const string BETA_GEMMA = '0197a3c0-0000-7000-8000-0000000fb134';
     private const string BETA_UNUSED = '0197a3c0-0000-7000-8000-0000000fb135';
+
+    /** TenantConnection's own statement: transaction-local, so the rollback takes it away with the rest. */
+    private const string SET_TENANT_FOR_TRANSACTION = "SELECT set_config('".TenantSetting::NAME."', ?, true)";
 
     /** What down() ran before it refused: the state up() starts from. */
     private const array STATEMENTS_BEFORE_THE_MIGRATION = [
@@ -72,18 +77,20 @@ final class ResultLabelBackfillTest extends KernelTestCase
     #[Test]
     public function everyPostedResultOfEachOrganizationIsLabelledWithItsModelAndAnUnusedPackageKeepsNone(): void
     {
-        $labels = [];
-        foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
-            $labels[$organizationId] = $this->rolledBackAs($organizationId, function (Connection $migrator): array {
-                $this->undoTheMigration($migrator);
-                $this->runUp($migrator);
+        $labels = $this->rolledBackWithNoTenant(function (Connection $migrator): array {
+            $this->undoTheMigration($migrator);
+            $this->runUp($migrator);
 
-                /** @var array<string, string|null> $labels */
-                $labels = $migrator->fetchAllKeyValue('SELECT id, result_label FROM ast_local_package ORDER BY id');
+            $labels = [];
+            foreach ([self::ACME_FOODS, self::BETA_BAKERY] as $organizationId) {
+                $migrator->fetchOne(self::SET_TENANT_FOR_TRANSACTION, [$organizationId]);
+                /** @var array<string, string|null> $labelsOfTheOrganization */
+                $labelsOfTheOrganization = $migrator->fetchAllKeyValue('SELECT id, result_label FROM ast_local_package ORDER BY id');
+                $labels[$organizationId] = $labelsOfTheOrganization;
+            }
 
-                return $labels;
-            });
-        }
+            return $labels;
+        });
 
         self::assertSame([
             self::ACME_FOODS => [
@@ -101,7 +108,7 @@ final class ResultLabelBackfillTest extends KernelTestCase
     #[Test]
     public function theMigrationLeavesRowLevelSecurityForcedOnTheLaptopPackageTable(): void
     {
-        $isForced = $this->rolledBackAs(self::ACME_FOODS, function (Connection $migrator): mixed {
+        $isForced = $this->rolledBackWithNoTenant(function (Connection $migrator): mixed {
             $this->undoTheMigration($migrator);
             $this->runUp($migrator);
 
@@ -179,17 +186,15 @@ final class ResultLabelBackfillTest extends KernelTestCase
      *
      * @return T
      */
-    private function rolledBackAs(string $organizationId, \Closure $work): mixed
+    private function rolledBackWithNoTenant(\Closure $work): mixed
     {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
+        self::getContainer()->get(TenantContext::class)->clear();
         $migrator = $this->migrator();
-        $tenantContext->set(new OrganizationId($organizationId));
         $migrator->beginTransaction();
         try {
             return $work($migrator);
         } finally {
             $migrator->rollBack();
-            $tenantContext->clear();
         }
     }
 
