@@ -15,8 +15,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * The tkt_ticket and tkt_summary tables as Version20261111120000 creates them, with the search column of
- * Version20261112100000, the question pause of Version20261115100000 and the AI summary label of Version20261117160000:
- * their indexes, row-level security, the checks
+ * Version20261112100000, the question pause of Version20261115100000, the AI summary label of Version20261117160000 and
+ * the intake candidates' index of Version20261118160000: their indexes, row-level security, the checks
  * the database keeps on its own and the foreign keys that tie summaries and turn rows to their ticket.
  */
 final class TicketTableTest extends KernelTestCase
@@ -66,6 +66,7 @@ final class TicketTableTest extends KernelTestCase
                 'CREATE INDEX tkt_ticket_step_id_priority_rank_updated_at_id_idx ON public.tkt_ticket USING btree (organization_id, step_id, priority_rank, updated_at DESC, id DESC)',
                 'CREATE INDEX tkt_ticket_reporter_id_created_at_id_idx ON public.tkt_ticket USING btree (organization_id, reporter_id, created_at DESC, id DESC)',
                 'CREATE INDEX tkt_ticket_assignee_id_idx ON public.tkt_ticket USING btree (organization_id, assignee_id) WHERE (closed_at IS NULL)',
+                'CREATE INDEX tkt_ticket_project_id_updated_at_id_open_idx ON public.tkt_ticket USING btree (organization_id, project_id, updated_at DESC, id DESC) WHERE (closed_at IS NULL)',
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'tkt_ticket'"),
         );

@@ -419,6 +419,7 @@ The single list of indexes on the hot tables. Other documents link here instead 
 | tkt_ticket | `(organization_id, step_id, priority_rank, updated_at DESC, id DESC)` | list across "All projects" of a team |
 | tkt_ticket | `(organization_id, reporter_id, created_at DESC, id DESC)` | My reports |
 | tkt_ticket | `(organization_id, assignee_id) WHERE closed_at IS NULL` | person filter, workload |
+| tkt_ticket | partial `(organization_id, project_id, updated_at DESC, id DESC) WHERE closed_at IS NULL` (`tkt_ticket_project_id_updated_at_id_open_idx`, `Version20261118160000`, built `CONCURRENTLY`) | intake candidates: a project's 80 newest open tickets in order, with or without team-only ones (`IntakeCandidateQueryPlanTest`) |
 | tkt_ticket | GIN `(organization_id, search)` (`tkt_ticket_search_idx`); GIN `(organization_id, title gin_trgm_ops)` (`tkt_ticket_title_trgm_idx`), both through `btree_gin` | search and duplicates (see the RLS note under [Query patterns](#query-patterns)) |
 | tkt_ticket_event | `(organization_id, ticket_id, at DESC)` | "What happened" |
 | ins_ticket_turn | `(organization_id, turn_user_id, base_score DESC)` | Home, part 1 |
@@ -589,7 +590,7 @@ ORDER BY at DESC LIMIT 6;
   2. backfill in batches with a Messenger job;
   3. switch reads;
   4. contract — drop the old column in a later release.
-- **Never in one migration:** rename a column that is in use, add `NOT NULL` to a big table without a default, create an index without `CONCURRENTLY` on a big table. (`CREATE INDEX CONCURRENTLY` cannot run in a transaction, so such migrations disable the transaction wrapper. Verify the Doctrine Migrations option at implementation.)
+- **Never in one migration:** rename a column that is in use, add `NOT NULL` to a big table without a default, create an index without `CONCURRENTLY` on a big table. (`CREATE INDEX CONCURRENTLY` cannot run in a transaction, so such migrations disable the transaction wrapper: the migration's `isTransactional()` returns false, and it holds nothing but the index, as `Version20261118160000` does. It drops a leftover INVALID index of a failed build with `DROP INDEX CONCURRENTLY IF EXISTS` first, so a re-run builds it again.)
 - Every new tenant table must come with: an `organization_id` column, the RLS policy, an index that starts with `organization_id`, and a tenant-isolation test. `CatalogTest` fails on a tenant table or partition without the RLS flags and policy (see [Row-level security](#row-level-security)); no check enforces the index yet.
 
 ## Size estimates
