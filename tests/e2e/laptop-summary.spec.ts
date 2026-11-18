@@ -29,6 +29,9 @@ const NOT_READY_LINE = 'Your company runs AI on each laptop, and it is not runni
 /** laptop_summary_controller.js. */
 const RUNNING_LINE = 'Running on this laptop. Ticket text stays on this laptop.';
 const UNREACHABLE_LINE = 'pinround could not reach Ollama on this laptop. Use “Local AI” at the top to set it up.';
+const NO_SUMMARY_LINE = 'Ollama on this laptop gave no summary. Use “Local AI” at the top to check it.';
+/** LaptopController::TOO_MANY_REQUESTS. */
+const TOO_MANY_LINE = 'You sent too many laptop AI requests. Wait a minute and try again.';
 /** SummaryController::MADE_MAIN_SUMMARY. */
 const MADE_MAIN_TOAST = 'Now the main summary. The old one is kept in history.';
 
@@ -217,6 +220,29 @@ test.describe('an organization whose AI runs only on laptops', () => {
     await expect(summarizeButton(page)).toBeEnabled();
     await expect(summarizeButton(page)).not.toHaveAttribute('aria-busy');
     await expect(summarizeButton(page)).toBeFocused();
+    await expect(proposal(page)).toHaveCount(0);
+  });
+
+  test('a refused package shows its sentence without asking Ollama, and an answer that is only thinking says Ollama gave no summary', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Saved address is not offered');
+    await seedReadyLaptop(page);
+    // A refusal the app gives only past a limit, answered here with the shape LaptopController answers.
+    await page.route('**/ai/laptop/package', (route) => route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ message: TOO_MANY_LINE }) }));
+    const generateBodies = await answerGenerateWith(page, '<think>The ask is about addresses.</think>\n');
+    await openTicket(page, key);
+
+    await summarizeButton(page).click();
+
+    await expect(laptopStatusLine(page)).toHaveText(TOO_MANY_LINE);
+    await expect(summarizeButton(page)).toBeEnabled();
+    expect(generateBodies).toEqual([]);
+
+    await page.unroute('**/ai/laptop/package');
+    await summarizeButton(page).click();
+
+    await expect(laptopStatusLine(page)).toHaveText(NO_SUMMARY_LINE);
+    await expect(summarizeButton(page)).toBeEnabled();
+    expect(generateBodies).toHaveLength(1);
     await expect(proposal(page)).toHaveCount(0);
   });
 
