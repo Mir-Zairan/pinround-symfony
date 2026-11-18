@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Assist\Laptop;
 
-use App\Assist\UI\Controller\LaptopController;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
