@@ -19,6 +19,8 @@ const OLLAMA_ORIGIN = 'http://localhost:11434';
 const OLLAMA_TAGS_URL = `${OLLAMA_ORIGIN}/api/tags`;
 const OLLAMA_GENERATE_URL = `${OLLAMA_ORIGIN}/api/generate`;
 const MODEL = 'qwen3:4b';
+/** laptop_run.js's GENERATE_TIMEOUT_MS. */
+const GENERATE_TIMEOUT_MS = 180_000;
 
 const ASK_TEXT = 'Pressing pay on the last checkout step does nothing, and the cart stays full.';
 // Markup in the answer must show as text: the proposal is user content.
@@ -384,6 +386,44 @@ test.describe('an organization whose AI runs on laptops first, then in the cloud
     expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([`/t/${key}/summary`]);
     expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/package'))).toEqual(['/ai/laptop/package']);
     expect(generateCalls).toBe(1);
+  });
+
+  test('a laptop whose Ollama is too slow keeps its ready check, and the next press goes to the cloud', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Saved cards vanish after an update');
+    await seedReadyLaptop(page);
+    const postedPaths = recordPathsPosted(page);
+    const heldRequests: Route[] = [];
+    await page.route(OLLAMA_GENERATE_URL, (route) => {
+      heldRequests.push(route);
+    });
+    await answerCloudSummaryHere(page, key);
+    await openTicket(page, key);
+
+    try {
+      await summarizeButton(page).click();
+      await expect.poll(() => heldRequests.length).toBe(1);
+      await expect(laptopStatusLine(page)).toHaveText(RUNNING_LINE);
+      await page.clock.fastForward(GENERATE_TIMEOUT_MS + 1_000);
+
+      await expect(laptopStatusLine(page)).toHaveText(CLOUD_NEXT_LINE);
+      await expect(summarizeButton(page)).toBeEnabled();
+      // Ollama was reached, so the chip must not say it was not found.
+      await expect(chipState(page)).toHaveText('Local AI: ready');
+      expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('pinround.localAiLastCheck') ?? 'null'))).toEqual({ state: 'ready', model: MODEL, models: [MODEL] });
+      expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([]);
+
+      await summarizeButton(page).click();
+
+      await expect(page.locator('#ticket-ask .ticket__ask-failed')).toHaveText(CLOUD_FAILED_LINE);
+      expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([`/t/${key}/summary`]);
+      expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/'))).toEqual(['/ai/laptop/package']);
+      expect(heldRequests).toHaveLength(1);
+    } finally {
+      for (const route of heldRequests) {
+        // The page gave up on it already, so Playwright may refuse to answer it.
+        await route.abort().catch(() => undefined);
+      }
+    }
   });
 
   test('a laptop that is not ready leaves the press to the cloud', async ({ browser, page }) => {

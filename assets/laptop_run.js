@@ -51,11 +51,21 @@ export async function summarizeOnLaptop({ packageUrl, resultUrl, generateUrl, cs
  * @param {{instructions: string, prompt: string, schema?: string}} promptPackage
  */
 export async function generateOnLaptop(generateUrl, model, promptPackage, signal) {
-  const timeout = AbortSignal.timeout(GENERATE_TIMEOUT_MS);
   const request = { model, system: promptPackage.instructions, prompt: promptPackage.prompt, stream: false, think: false };
   if (typeof promptPackage.schema === 'string') {
     request.format = JSON.parse(promptPackage.schema);
   }
+  // Built on setTimeout, not AbortSignal.timeout, so a page clock (the e2e tests') can move it.
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), GENERATE_TIMEOUT_MS);
+  try {
+    return await askOllama(generateUrl, request, signal, timeout.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function askOllama(generateUrl, request, signal, timeout) {
   const silence = () => (timeout.aborted
     ? new LaptopRunRefused(TOO_SLOW_LINE, { isOllamaTooSlow: true })
     : new LaptopRunRefused(UNREACHABLE_LINE, { isOllamaUnreachable: true }));
