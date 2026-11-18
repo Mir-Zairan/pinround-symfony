@@ -8,6 +8,7 @@ Where every document is, what it holds, and the order to read it in.
 - [01 Requirements](#01-requirements) — what the system must do and how well
 - [02 Architecture](#02-architecture) — how it is built
 - [Operations](#operations) — the configuration reference
+- [Guides](#guides) — how-tos for people who use pinround
 - [03 Decisions (ADRs)](#03-decisions-adrs) — why it is built that way
 - [04 Prototype](#04-prototype) — the clickable prototype, screen by screen
 - [05 Plan](#05-plan) — phases and tasks, one task per Claude Code session
@@ -57,6 +58,11 @@ Where every document is, what it holds, and the order to read it in.
 | File | Holds |
 |---|---|
 | [config.md](operations/config.md) | Every environment variable: default, who reads it, secret or not, prod rules |
+
+## Guides
+| File | Holds |
+|---|---|
+| [claude-code.md](guides/claude-code.md) | Connect Claude Code to pinround: token, `claude mcp add`, the tools, uploads, safety |
 
 ## 03 Decisions (ADRs)
 [03-adr/README.md](03-adr/README.md) lists all 30 decisions with a one-line summary each.
