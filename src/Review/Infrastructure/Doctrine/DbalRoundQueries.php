@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\Infrastructure\Doctrine;
 
+use App\Review\Api\OpenDraftQueries;
 use App\Review\Api\PinNote;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundNotes;
@@ -30,12 +31,12 @@ use Doctrine\DBAL\Connection;
  * The rounds of a ticket from rvw_round, rvw_screenshot and rvw_pin through DBAL, after Ticketing's batch visibility
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
- * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, roundNotes and
- * sharedRoundNotes send one query each and make no visibility check: the first two leave the decision to RoundVoter,
- * the third reads only the owner's own draft, and the last leaves it to the caller's TicketVoter and RoundVoter. draftOf reads one draft of its owner with
- * its screenshots and pins, and needs none either.
+ * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, openDraftOf, roundNotes
+ * and sharedRoundNotes send one query each and make no visibility check: the first two leave the decision to
+ * RoundVoter, the next two read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
+ * RoundVoter. draftOf reads one draft of its owner with its screenshots and pins, and needs none either.
  */
-final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
+final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries, RoundsVisibleTo
 {
     /** The picture and pin columns of roundNotes and sharedRoundNotes, which screenshotNotesOf reads. */
     private const string NOTE_COLUMNS = 'screenshot.id AS screenshot_id, screenshot.media_id, screenshot.position,'
@@ -165,6 +166,24 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             self::boolean($roundRow['is_unshared_draft'], 'is_unshared_draft'),
             self::boolean($roundRow['is_deleted'], 'is_deleted'),
         );
+    }
+
+    public function openDraftOf(TicketId $ticketId, UserId $owner): ?RoundAccessFacts
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // The predicate of rvw_round_ticket_id_owner_id_open_draft_key, which holds at most one such draft; a deleted
+        // draft is closed (rvw_round_deleted_check).
+        $draftId = $this->connection->fetchOne(
+            'SELECT round.id FROM rvw_round AS round'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.shared_at IS NULL AND round.state = 'open'",
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'owner' => $owner->toString()],
+        );
+        if (false === $draftId) {
+            return null;
+        }
+
+        return new RoundAccessFacts($organizationId, self::text($draftId, 'id'), $ticketId, $owner, true, false);
     }
 
     public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes

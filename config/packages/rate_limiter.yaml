@@ -10,7 +10,7 @@
 # session cannot guess the password.
 # Two-step login codes get two_step_code_per_user through SymfonyTwoStepCodeLimiter: every code typed for a user counts,
 # right or wrong, at login and wherever else a code is asked, so the 6 digits cannot be guessed.
-# Upload begins (POST /media/intents) get media_upload_begin_per_user through UploadIntentController: every begin of a
+# Upload begins (POST /media/intents and MCP create_upload) get media_upload_begin_per_user through SymfonyUploadBeginLimit (Media's UploadBeginLimit): every begin of a
 # member with a valid form token counts, accepted or not, so one member cannot script begins against the storage.
 # Status polls (GET /media/{id}/status) get media_upload_status_per_user through UploadStatusController.
 # Server-side AI calls get ai_calls_per_user through SymfonyAiCallLimit (AiCallLimit), before any provider is asked.
@@ -28,7 +28,7 @@ parameters:
     identity.password_reset_per_ip_minutes: 60
     identity.password_change_per_user_minutes: 15
     identity.two_step_code_per_user_minutes: 15
-    # The window in minutes, also the longest wait a refused begin is told (UploadIntentController).
+    # The window in minutes, also the longest wait a refused begin is told (SymfonyUploadBeginLimit).
     media.upload_begin_per_user_minutes: 1
     # The same for a refused status poll (UploadStatusController).
     media.upload_status_per_user_minutes: 1

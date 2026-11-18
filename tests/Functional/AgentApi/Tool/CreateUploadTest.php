@@ -11,6 +11,7 @@ use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Domain\User;
+use App\Media\Api\UploadRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -239,6 +240,32 @@ final class CreateUploadTest extends WebTestCase
     }
 
     /**
+     * SHOP-1 moves to Mobile, for that team only, and to Lena: Omar is in no role of Mobile and no longer involved, so
+     * he may not see it. MediaPermission UPLOAD still grants him his own unshared draft without reading the ticket, so
+     * create_upload asks TicketPermission VIEW itself and answers as for an unknown key.
+     */
+    #[Test]
+    public function theOwnersDraftOnATicketTheyMayNoLongerSeeIsNotFoundAndNothingIsWritten(): void
+    {
+        $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
+        $parameters = [$this->mobile->toString(), $this->people['Lena']->id()->toString(), $this->acmeFoods->toString(), $this->ticketId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET team_id = ?, visibility = 'team', assignee_id = ? WHERE organization_id = ? AND id = ?",
+            $parameters,
+        ));
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $roundsBefore = $this->roundRowsOf($this->ticketId);
+        self::assertCount(1, $roundsBefore);
+
+        $this->callCreateUpload($token, $this->arguments());
+
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        self::assertSame($roundsBefore, $this->roundRowsOf($this->ticketId));
+        self::assertSame([], $this->storedIntents($this->acmeFoods));
+        self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
      * The fields that differ from a PNG screenshot of 240 KB, and the web's plain message for them.
      *
      * @return iterable<string, array{array<string, mixed>, string}>
@@ -279,7 +306,7 @@ final class CreateUploadTest extends WebTestCase
 
         $this->callCreateUpload($token, $this->arguments());
 
-        $this->assertRefused(CreateUpload::ADDING_TOO_FAST);
+        $this->assertRefused(UploadRefused::ADDING_TOO_FAST);
         self::assertSame([], $this->storedIntents($this->acmeFoods));
         self::assertSame([$this->toolRow('Omar', $tokenId, CreateUpload::ROUND_AUDIT_TYPE, $omarsDraft, 'refused')], $this->toolRowsOf($this->acmeFoods));
     }

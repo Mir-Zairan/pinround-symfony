@@ -12,8 +12,10 @@ use App\Identity\Api\CurrentUser;
 use App\Media\Api\MediaPermission;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTarget;
+use App\Media\Infrastructure\RateLimit\SymfonyUploadBeginLimit;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundRefused;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use Mcp\Capability\Discovery\SchemaValidator;
@@ -40,7 +42,7 @@ final class CreateUploadTest extends TestCase
     private const int BEGINS_PER_MINUTE = 3;
 
     private CreateUploadFakes $fakes;
-    private RateLimiterFactory $beginsPerUser;
+    private SymfonyUploadBeginLimit $uploadBeginLimit;
 
     protected function setUp(): void
     {
@@ -49,7 +51,7 @@ final class CreateUploadTest extends TestCase
             self::OMARS_DRAFT => [CreateUploadFakes::SHOP_1, CreateUploadFakes::OMAR],
             self::MIAS_DRAFT => [CreateUploadFakes::SHOP_2, CreateUploadFakes::MIA],
         ];
-        $this->beginsPerUser = new RateLimiterFactory(['id' => 'media_upload_begin_per_user', 'policy' => 'fixed_window', 'limit' => self::BEGINS_PER_MINUTE, 'interval' => '1 minute'], new InMemoryStorage());
+        $this->uploadBeginLimit = new SymfonyUploadBeginLimit(new RateLimiterFactory(['id' => 'media_upload_begin_per_user', 'policy' => 'fixed_window', 'limit' => self::BEGINS_PER_MINUTE, 'interval' => '1 minute'], new InMemoryStorage()), 1);
     }
 
     /**
@@ -123,10 +125,41 @@ final class CreateUploadTest extends TestCase
         self::assertEquals(new UploadTarget('round', self::OMARS_DRAFT), $target->subject);
         self::assertSame([CreateUpload::ROUND_AUDIT_TYPE, self::OMARS_DRAFT], [$target->auditType, $target->auditId]);
         self::assertSame([], $this->fakes->draftsStarted);
+        self::assertCount(1, $this->fakes->ticketViewsAsked);
+        self::assertEquals(new OrganizationId(CreateUploadFakes::ACME_FOODS), $this->fakes->ticketViewsAsked[0]->organizationId);
+        self::assertEquals(new UserId(CreateUploadFakes::OMAR), $this->fakes->ticketViewsAsked[0]->assigneeId);
     }
 
     /**
-     * Mia's draft on SHOP-2 is never Omar's target, so the voter asked is whether he may start one of his own.
+     * The owner's facts grant MediaPermission UPLOAD on the draft without the ticket being read, so a ticket Omar may
+     * no longer see, or one Ticketing does not read, is not found before any voter is asked or anything begins.
+     *
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function ticketsHiddenFromTheDraftsOwner(): iterable
+    {
+        yield 'a ticket TicketPermission VIEW denies' => [true, false];
+        yield 'a ticket Ticketing does not read' => [false, true];
+    }
+
+    #[Test]
+    #[DataProvider('ticketsHiddenFromTheDraftsOwner')]
+    public function theOwnersDraftOnATicketTheyMayNotSeeIsNotFoundAndNothingBegins(bool $isTicketHidden, bool $isTicketUnreadable): void
+    {
+        $this->fakes->isTicketHidden = $isTicketHidden;
+        $this->fakes->isTicketUnreadable = $isTicketUnreadable;
+
+        $refusal = self::refusalOf(fn () => $this->callFor(self::arguments()));
+
+        self::assertSame(ToolCallOutcome::NotFound, $refusal->outcome);
+        self::assertSame(ToolRefusal::NOT_FOUND, $refusal->getMessage());
+        self::assertSame([], $this->fakes->begins);
+        self::assertSame([], $this->fakes->draftsStarted);
+    }
+
+    /**
+     * Mia's draft on SHOP-2 is never Omar's target, so the voter asked is whether he may start one of his own; that
+     * voter grants the assignee alone, so the ticket is not asked for TicketPermission VIEW here.
      */
     #[Test]
     public function withoutADraftOfTheCallersOwnTheTicketIsGuardedByDraftCreate(): void
@@ -137,6 +170,7 @@ final class CreateUploadTest extends TestCase
         self::assertEquals(new TicketId(CreateUploadFakes::SHOP_2), $target->subject);
         self::assertSame([CreateUpload::TICKET_AUDIT_TYPE, CreateUploadFakes::SHOP_2], [$target->auditType, $target->auditId]);
         self::assertSame([], $this->fakes->draftsStarted, 'targetOf writes nothing');
+        self::assertSame([], $this->fakes->ticketViewsAsked);
     }
 
     /**
@@ -275,7 +309,7 @@ final class CreateUploadTest extends TestCase
         $refusal = self::refusalOf(fn () => $this->callFor(self::arguments()));
 
         self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
-        self::assertSame(CreateUpload::ADDING_TOO_FAST, $refusal->getMessage());
+        self::assertSame(UploadRefused::ADDING_TOO_FAST, $refusal->getMessage());
         self::assertSame($beginsBefore, $this->fakes->begins);
     }
 
@@ -387,7 +421,8 @@ final class CreateUploadTest extends TestCase
             $fakes,
             $fakes,
             $fakes,
-            $this->beginsPerUser,
+            $fakes,
+            $this->uploadBeginLimit,
             new MockClock(self::NOW),
         );
     }
