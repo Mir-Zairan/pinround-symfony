@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
+namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp;
 
-use App\AgentApi\Infrastructure\Mcp\Tool\UntrustedText;
+use App\AgentApi\Infrastructure\Mcp\UntrustedText;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;

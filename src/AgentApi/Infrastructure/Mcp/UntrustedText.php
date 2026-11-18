@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\AgentApi\Infrastructure\Mcp\Tool;
+namespace App\AgentApi\Infrastructure\Mcp;
 
 /**
  * Marks text people typed as data for the model that reads a tool's answer (ADR-0020, rule 2). The text goes between

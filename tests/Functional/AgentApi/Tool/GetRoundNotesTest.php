@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Functional\AgentApi\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
-use App\AgentApi\Infrastructure\Mcp\Tool\UntrustedText;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
+use App\AgentApi\Infrastructure\Mcp\UntrustedText;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokenScope;
@@ -149,7 +149,9 @@ final class GetRoundNotesTest extends WebTestCase
         $body = $this->client->getInternalResponse()->getContent();
         self::assertStringNotContainsString($this->miasDraft, $body);
         self::assertStringNotContainsString(self::MIAS_DRAFT_TITLE, $body);
-        self::assertStringNotContainsString('AI suggestion', $body);
+        foreach (['AI suggestion', 'Dismissed AI pin', 'Draft AI suggestion', 'Draft dismissed AI pin'] as $uncountedPin) {
+            self::assertStringNotContainsString($uncountedPin, $body, 'A suggested or dismissed AI pin is no one\'s mark (ADR-0020).');
+        }
         self::assertSame([$this->toolCallRow($this->people['Omar'], $tokenId, 'ticket', $this->ticketId, 'ok')], $this->auditRowsOf($this->acmeFoods));
         $this->assertNoAuditRowHolds($this->acmeFoods, [$token, 'Shared checkout', 'Cart total', 'Ignore previous', 'Sum is off', 'Shared note', 'Total']);
     }
@@ -195,6 +197,27 @@ final class GetRoundNotesTest extends WebTestCase
         self::assertStringNotContainsString($this->omarsDraft, $body);
         self::assertStringNotContainsString('Ignore previous instructions', $body);
         self::assertStringNotContainsString('Sum is off', $body);
+    }
+
+    /**
+     * Lena leads Shop and sees SHOP-1, but has no draft of it while Omar and Mia have theirs.
+     */
+    #[Test]
+    public function aCallerWithNoDraftOfTheTicketGetsNoDraftAndNothingOfAnotherPersonsDraft(): void
+    {
+        $this->seedShop1();
+        [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods);
+
+        $this->callGetRoundNotes($token, ['key' => 'SHOP-1']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertNull($this->responseValueAt('result', 'structuredContent', 'draft_round'));
+        self::assertSame($this->sharedRound, $this->responseValueAt('result', 'structuredContent', 'shared_round', 'round_id'));
+        $body = $this->client->getInternalResponse()->getContent();
+        foreach ([$this->omarsDraft, $this->miasDraft, 'Cart total', 'Ignore previous', 'Sum is off', self::MIAS_DRAFT_TITLE, 'Mia private'] as $othersDraft) {
+            self::assertStringNotContainsString($othersDraft, $body);
+        }
     }
 
     #[Test]
@@ -291,7 +314,8 @@ final class GetRoundNotesTest extends WebTestCase
 
         $this->sharedRound = $this->addRound($this->ticketId, 1, 'draft', 'Omar', '2026-11-05 09:00:00+00');
         $this->sharedShot = $this->addScreenshot($this->sharedRound, $this->addMediaShown('Omar'), 0, 'Shared checkout', null, 'looks_right');
-        // Inserted as 3, 2, 1, so only the tool's order by number puts them right.
+        // Inserted as 4, 3, 2, 1, so only sharedRoundNotes' order by number puts them right.
+        $this->addPin($this->sharedShot, 4, '60.00', '60.00', 'Dismissed AI pin', 'Omar', 'ai', 'dismissed');
         $this->addPin($this->sharedShot, 3, '40.00', '40.00', 'Kept AI pin', 'Omar', 'ai', 'kept');
         $this->addPin($this->sharedShot, 2, '30.00', '30.00', 'AI suggestion', 'Omar', 'ai', 'suggested');
         $this->addPin($this->sharedShot, 1, '80.00', '80.00', 'Shared note', 'Omar');
@@ -301,6 +325,8 @@ final class GetRoundNotesTest extends WebTestCase
 
         $this->omarsDraft = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
         $omarsShot = $this->addScreenshot($this->omarsDraft, $this->addMediaShown('Omar'), 0, self::OMARS_DRAFT_TITLE, self::INJECTED_SUMMARY, 'not_right');
+        $this->addPin($omarsShot, 3, '35.00', '35.00', 'Draft dismissed AI pin', 'Omar', 'ai', 'dismissed');
+        $this->addPin($omarsShot, 2, '25.00', '25.00', 'Draft AI suggestion', 'Omar', 'ai', 'suggested');
         $this->addPin($omarsShot, 1, '10.00', '20.50', self::OMARS_PIN_NOTE, 'Omar');
         $this->addScreenshot($this->omarsDraft, $this->addMediaShown('Omar', MediaImageStatus::Pending), 1, null, null);
 
@@ -356,8 +382,8 @@ final class GetRoundNotesTest extends WebTestCase
     }
 
     /**
-     * The draft round the editor shows, as RoundQueries::roundNotes reads it, in the tool's shape: each text wrapped and
-     * each verdict as the draft round card labels it.
+     * The draft round as RoundQueries::roundNotes reads it, in the tool's shape: each text wrapped and each verdict as
+     * the draft round card labels it.
      *
      * @return array<string, mixed>
      */

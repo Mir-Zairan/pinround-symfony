@@ -12,7 +12,8 @@ final readonly class RoundNotes
 {
     /**
      * @param string                $roundId     the draft's id
-     * @param list<ScreenshotNotes> $screenshots by position; none for a draft with no picture yet
+     * @param list<ScreenshotNotes> $screenshots by position, each with the pins that count only; none for a draft with
+     *                                           no picture yet
      */
     public function __construct(
         public string $roundId,
