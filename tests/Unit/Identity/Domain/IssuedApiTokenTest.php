@@ -48,7 +48,7 @@ final class IssuedApiTokenTest extends TestCase
         );
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('An issued API token is never serialized.');
+        $this->expectExceptionMessageIsOrContains('An issued API token is never serialized.');
 
         serialize($issued);
     }

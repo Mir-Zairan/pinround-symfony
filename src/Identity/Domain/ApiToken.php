@@ -36,16 +36,13 @@ final class ApiToken implements TenantOwned
     private const string LINE_BREAKING_CONTROL_OR_FORMAT = '/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
 
     private readonly string $organizationId;
-    private readonly string $id;
     private readonly string $userId;
     /**
      * Doctrine's binary type loads a stream, so a loaded token holds a resource here.
      *
      * @var resource|string
      */
-    private mixed $tokenHash;
-    /** @var list<string> */
-    private readonly array $scopes;
+    private readonly mixed $tokenHash;
     private readonly \DateTimeImmutable $expiresAt;
     private ?\DateTimeImmutable $lastUsedAt = null;
     private ?\DateTimeImmutable $revokedAt = null;
@@ -54,13 +51,11 @@ final class ApiToken implements TenantOwned
     /**
      * @param list<string> $scopes
      */
-    private function __construct(string $id, OrganizationId $organizationId, UserId $userId, private readonly string $name, string $tokenHash, private readonly string $prefix, array $scopes, private readonly \DateTimeImmutable $createdAt, int $lifetimeDays)
+    private function __construct(private readonly string $id, OrganizationId $organizationId, UserId $userId, private readonly string $name, string $tokenHash, private readonly string $prefix, private readonly array $scopes, private readonly \DateTimeImmutable $createdAt, int $lifetimeDays)
     {
-        $this->id = $id;
         $this->organizationId = $organizationId->toString();
         $this->userId = $userId->toString();
         $this->tokenHash = $tokenHash;
-        $this->scopes = $scopes;
         // In UTC, so a daylight saving change cannot make a day 25 hours and the cap check in the table refuse it.
         $this->expiresAt = $createdAt->setTimezone(new \DateTimeZone('UTC'))->add(new \DateInterval('P'.$lifetimeDays.'D'));
     }

@@ -401,8 +401,8 @@ final class CreateUploadTest extends TestCase
         $fakes = $this->fakes;
 
         return new CreateUpload(
-            new class($fakes) implements CurrentUser {
-                public function __construct(private readonly CreateUploadFakes $fakes)
+            new readonly class($fakes) implements CurrentUser {
+                public function __construct(private CreateUploadFakes $fakes)
                 {
                 }
 

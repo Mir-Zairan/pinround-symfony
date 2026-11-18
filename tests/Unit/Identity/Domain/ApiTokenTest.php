@@ -119,7 +119,7 @@ final class ApiTokenTest extends TestCase
     public function aLifetimeOutsideOneToThreeHundredSixtyFiveDaysIsRefused(int $lifetimeDays): void
     {
         $this->expectException(InvalidApiToken::class);
-        $this->expectExceptionMessage('A token lasts from 1 to 365 days.');
+        $this->expectExceptionMessageIsOrContains('A token lasts from 1 to 365 days.');
 
         self::issue(lifetimeDays: $lifetimeDays);
     }
@@ -128,7 +128,7 @@ final class ApiTokenTest extends TestCase
     public function noScopeIsRefused(): void
     {
         $this->expectException(InvalidApiToken::class);
-        $this->expectExceptionMessage('Choose at least one thing the token may do.');
+        $this->expectExceptionMessageIsOrContains('Choose at least one thing the token may do.');
 
         self::issue(scopes: []);
     }
@@ -157,7 +157,7 @@ final class ApiTokenTest extends TestCase
     public function aNameThatIsNotOneLineOfUpToOneHundredCharactersIsRefused(string $name, string $refusal): void
     {
         $this->expectException(InvalidApiToken::class);
-        $this->expectExceptionMessage($refusal);
+        $this->expectExceptionMessageIsOrContains($refusal);
 
         self::issue(name: $name);
     }

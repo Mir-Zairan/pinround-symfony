@@ -437,9 +437,9 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
             self::getContainer()->get(ApiTokens::class),
             $userQueries,
             $expiryMail,
-            new class($commandBus) implements MessageBusInterface {
+            new readonly class($commandBus) implements MessageBusInterface {
                 /** @param \Closure(): MessageBusInterface $commandBus */
-                public function __construct(private readonly \Closure $commandBus)
+                public function __construct(private \Closure $commandBus)
                 {
                 }
 

@@ -97,8 +97,8 @@ final class WhoAmITest extends TestCase
     private static function whoAmI(?ApiTokenAccess $access, ?UserId $userId, array $knownUsers): WhoAmI
     {
         return new WhoAmI(
-            new class($access) implements CurrentApiToken {
-                public function __construct(private readonly ?ApiTokenAccess $access)
+            new readonly class($access) implements CurrentApiToken {
+                public function __construct(private ?ApiTokenAccess $access)
                 {
                 }
 
@@ -107,8 +107,8 @@ final class WhoAmITest extends TestCase
                     return $this->access;
                 }
             },
-            new class($userId) implements CurrentUser {
-                public function __construct(private readonly ?UserId $userId)
+            new readonly class($userId) implements CurrentUser {
+                public function __construct(private ?UserId $userId)
                 {
                 }
 
@@ -122,11 +122,11 @@ final class WhoAmITest extends TestCase
                     return null;
                 }
             },
-            new class($knownUsers) implements UserQueries {
+            new readonly class($knownUsers) implements UserQueries {
                 /**
                  * @param list<UserView> $knownUsers
                  */
-                public function __construct(private readonly array $knownUsers)
+                public function __construct(private array $knownUsers)
                 {
                 }
 

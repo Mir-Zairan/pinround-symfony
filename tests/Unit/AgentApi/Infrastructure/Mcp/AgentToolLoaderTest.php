@@ -49,7 +49,7 @@ final class AgentToolLoaderTest extends TestCase
         self::assertInstanceOf(\Closure::class, $handler);
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('An MCP tool ran without ToolCallGate');
+        $this->expectExceptionMessageIsOrContains('An MCP tool ran without ToolCallGate');
 
         $handler();
     }

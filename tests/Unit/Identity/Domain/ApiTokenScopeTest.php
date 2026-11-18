@@ -37,7 +37,7 @@ final class ApiTokenScopeTest extends TestCase
     public function anUnknownValueIsRefusedEvenNextToKnownOnes(): void
     {
         $this->expectException(UnknownApiTokenScope::class);
-        $this->expectExceptionMessage('A token scope must be one of: read, rounds:write, comments:write, tickets:move, reports:write.');
+        $this->expectExceptionMessageIsOrContains('A token scope must be one of: read, rounds:write, comments:write, tickets:move, reports:write.');
 
         ApiTokenScope::fromValues(['read', 'admin']);
     }
