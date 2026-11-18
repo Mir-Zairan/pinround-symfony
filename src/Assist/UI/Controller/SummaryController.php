@@ -11,6 +11,7 @@ use App\Assist\Api\Summaries;
 use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\UI\Component\TheAsk;
+use App\Assist\UI\FormExpired;
 use App\Assist\UI\SummarySourceNote;
 use App\Identity\Api\CurrentTimeZone;
 use App\Identity\Api\UserQueries;
@@ -67,7 +68,7 @@ final class SummaryController extends AbstractController
     public const string MAIN_SUMMARY_CSRF_ID = 'assist_main_summary';
     public const string CSRF_FIELD = '_csrf_token';
 
-    public const string FORM_EXPIRED = 'The page was open too long. Reload it and try again.';
+    public const string FORM_EXPIRED = FormExpired::LINE;
     public const string MADE_MAIN_SUMMARY = 'Now the main summary. The old one is kept in history.';
 
     /** TicketShowController's route and not-found text, which Assist's UI may not import (deptrac). */

@@ -10,6 +10,7 @@ use App\Assist\Api\IntakeCheckId;
 use App\Assist\Api\IntakeCheckRefused;
 use App\Assist\Api\IntakeCheckView;
 use App\Assist\UI\Component\IntakeCheck;
+use App\Assist\UI\FormExpired;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
@@ -56,7 +57,7 @@ final class IntakeCheckController extends AbstractController
     public const string PINS_FIELD = 'pins';
     public const string NEW_TICKET_ROUTE = 'ticketing_ticket_new';
 
-    public const string FORM_EXPIRED = 'The page was open too long. Reload it and try again.';
+    public const string FORM_EXPIRED = FormExpired::LINE;
     public const string TITLE_MISSING = 'Write a title first.';
     public const string PROJECT_NOT_FOUND = 'No project you may report in has that id.';
     public const string CHECK_NOT_FOUND = 'No AI check of yours has that id.';
