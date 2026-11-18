@@ -51,8 +51,16 @@
                     </div>
                     <section class="claude-code-box" aria-labelledby="{{ card.domId }}-claude-code">
                         <h4 id="{{ card.domId }}-claude-code" class="claude-code-box__title">For Claude Code</h4>
-                        <p class="claude-code-box__line"><code class="claude-code-box__prompt">{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_PROMPT')|format(ticketKey) }}</code></p>
+                        {#- A field, not a code line: copy-text copies a field's value, and selects it when the browser refuses. -#}
+                        <div class="claude-code-box__copy" {{ stimulus_controller('copy-text') }}>
+                            <textarea class="claude-code-box__prompt" rows="2" readonly spellcheck="false" aria-label="Line to give Claude Code" {{ stimulus_target('copy-text', 'source') }}>{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_PROMPT')|format(ticketKey) }}</textarea>
+                            <p class="claude-code-box__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
+                                <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy line</twig:Button>
+                                <span class="claude-code-box__copy-status" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
+                            </p>
+                        </div>
                         <p class="claude-code-box__tools">{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_TOOLS_NOTE') }}</p>
+                        <p class="claude-code-box__tokens">To connect Claude Code, make a token on the <a class="claude-code-box__tokens-link" href="{{ path('identity_tokens') }}" data-turbo-frame="_top">API tokens</a> page.</p>
                     </section>
                 {% endif %}
             </twig:Card>
