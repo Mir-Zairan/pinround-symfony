@@ -7,6 +7,9 @@ namespace App\Tests\Functional\AgentApi;
 use App\AgentApi\Infrastructure\Mcp\GatedToolCallHandler;
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
 use App\AgentApi\Infrastructure\Mcp\McpSessionBinding;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
+use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
@@ -59,6 +62,8 @@ final class McpEndpointTest extends WebTestCase
     private const int INVALID_REQUEST = -32600;
     /** The minute of NOW since the epoch: (4077680420 - 20) / 60. */
     private const int MINUTE_OF_NOW = 67961340;
+    /** The minute of TOOL_CALL_TIME since the epoch: (1794301220 - 20) / 60. */
+    private const int MINUTE_OF_TOOL_CALL_TIME = 29905020;
     private const string PROTOCOL_VERSION = '2025-06-18';
     private const string ACCEPT = 'application/json, text/event-stream';
     private const int CALLS_PER_TOKEN_MINUTE = 60;
@@ -101,11 +106,11 @@ final class McpEndpointTest extends WebTestCase
     }
 
     /**
-     * WriteProbeTool is registered in the test env only (when@test in config/services.yaml), so whoami is the only tool
-     * of the product.
+     * WriteProbeTool is registered in the test env only (when@test in config/services.yaml); every other tool listed is
+     * one of the product.
      */
     #[Test]
-    public function testALiveTokenStartsASessionAndListsWhoAmIAsTheOnlyToolBesideTheTestProbe(): void
+    public function testALiveTokenStartsASessionAndListsTheProductsToolsBesideTheTestProbe(): void
     {
         [$acmeFoods, $tokenId, $token] = $this->omarsTokenInAcmeFoods();
 
@@ -127,8 +132,8 @@ final class McpEndpointTest extends WebTestCase
         $tools = $this->responseValueAt('result', 'tools');
         self::assertIsArray($tools);
         $toolsByName = array_column($tools, null, 'name');
-        self::assertEqualsCanonicalizing([WhoAmI::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
-        self::assertCount(2, $tools);
+        self::assertEqualsCanonicalizing([WhoAmI::NAME, ListMyTickets::NAME, GetRoundNotes::NAME, SetVerdict::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
+        self::assertCount(5, $tools);
         $whoAmI = $toolsByName[WhoAmI::NAME];
         self::assertIsArray($whoAmI);
         self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
@@ -447,7 +452,7 @@ final class McpEndpointTest extends WebTestCase
     {
         $this->clock->modify(self::TOOL_CALL_TIME);
         [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
-        [, $otherToken] = $this->issueApiToken($omar, $acmeFoods);
+        [$otherTokenId, $otherToken] = $this->issueApiToken($omar, $acmeFoods);
         $sessionId = $this->startSession($token);
 
         $this->callTool($otherToken, $sessionId, WriteProbeTool::NAME, ['label' => 'other-token', 'fail' => false]);
@@ -455,12 +460,59 @@ final class McpEndpointTest extends WebTestCase
         $this->deleteSession($otherToken, $sessionId);
         $this->assertSessionNotFound();
 
+        self::assertSame(2, $this->callsCounted('mcp_calls_per_token_minute', $otherTokenId, self::MINUTE_OF_TOOL_CALL_TIME), 'the binding runs after ToolCallLimiter, so each refused request spends a call');
+        self::assertSame(2, $this->callsCounted('mcp_calls_per_token_minute', $tokenId, self::MINUTE_OF_TOOL_CALL_TIME));
+        self::assertSame(4, $this->callsCounted('mcp_calls_per_organization_minute', $acmeFoods->toString(), self::MINUTE_OF_TOOL_CALL_TIME));
+
         self::assertSame([], $this->committedProbeLabels($acmeFoods));
         self::assertSame([], $this->auditRowsOf($acmeFoods));
         $this->callTool($token, $sessionId, WriteProbeTool::NAME, ['label' => 'own-token', 'fail' => false]);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['own-token'], $this->committedProbeLabels($acmeFoods));
         self::assertSame([$this->writeProbeRow($omar, $tokenId, $acmeFoods, 'ok')], $this->auditRowsOf($acmeFoods));
+    }
+
+    #[Test]
+    public function aToolCallWithARealSessionAndNoTokenGets401AndRunsNoTool(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool(null, $sessionId, WriteProbeTool::NAME, ['label' => 'no-token', 'fail' => false]);
+
+        $this->assertRefusedByTheFirewallBeforeAnyToolRan($acmeFoods, $tokenId);
+    }
+
+    #[Test]
+    public function aToolCallWithARealSessionAndItsRevokedTokenGets401AndRunsNoTool(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+        $this->revokeApiToken($tokenId, $acmeFoods);
+
+        $this->callTool($token, $sessionId, WriteProbeTool::NAME, ['label' => 'revoked-token', 'fail' => false]);
+
+        $this->assertRefusedByTheFirewallBeforeAnyToolRan($acmeFoods, $tokenId);
+    }
+
+    /**
+     * TokenAuthenticator reads expiry on the database clock, which the frozen clock does not move, so the expired
+     * token is another of Omar's, sent with the session his live token started.
+     */
+    #[Test]
+    public function aToolCallWithARealSessionAndAnExpiredTokenGets401AndRunsNoTool(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        [$expiredTokenId, $expiredToken] = $this->issueApiToken($omar, $acmeFoods, '2020-01-01 10:00:00 UTC', 1);
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($expiredToken, $sessionId, WriteProbeTool::NAME, ['label' => 'expired-token', 'fail' => false]);
+
+        $this->assertRefusedByTheFirewallBeforeAnyToolRan($acmeFoods, $tokenId);
+        self::assertNull($this->counter('mcp_calls_per_token_minute', $expiredTokenId, self::MINUTE_OF_TOOL_CALL_TIME), 'the expired token spent a call');
     }
 
     #[Test]
@@ -572,7 +624,7 @@ final class McpEndpointTest extends WebTestCase
     /**
      * @param mixed $arguments sent as they are, so a test can send what no schema allows
      */
-    private function callTool(string $token, string $sessionId, string $toolName, mixed $arguments): void
+    private function callTool(?string $token, string $sessionId, string $toolName, mixed $arguments): void
     {
         $this->postJsonRpc($token, ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => $toolName, 'arguments' => $arguments]], $sessionId);
     }
@@ -580,6 +632,19 @@ final class McpEndpointTest extends WebTestCase
     private function deleteSession(string $token, string $sessionId): void
     {
         $this->client->request('DELETE', self::MCP, server: [...self::mcpHeaders($token), 'HTTP_MCP_SESSION_ID' => $sessionId, 'HTTP_MCP_PROTOCOL_VERSION' => self::PROTOCOL_VERSION]);
+    }
+
+    /**
+     * The session's own two requests (initialize, initialized) are the only calls its token and organization spent.
+     */
+    private function assertRefusedByTheFirewallBeforeAnyToolRan(OrganizationId $organizationId, string $sessionTokenId): void
+    {
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame(['error' => TokenAuthenticator::REFUSAL_MESSAGE], $this->responseJson());
+        self::assertSame([], $this->committedProbeLabels($organizationId));
+        self::assertSame([], $this->auditRowsOf($organizationId));
+        self::assertSame(2, $this->callsCounted('mcp_calls_per_token_minute', $sessionTokenId, self::MINUTE_OF_TOOL_CALL_TIME));
+        self::assertSame(2, $this->callsCounted('mcp_calls_per_organization_minute', $organizationId->toString(), self::MINUTE_OF_TOOL_CALL_TIME));
     }
 
     private function assertSessionNotFound(): void
@@ -728,21 +793,21 @@ final class McpEndpointTest extends WebTestCase
         ];
     }
 
-    private function callsCounted(string $limiterId, string $keyOwner): int
+    private function callsCounted(string $limiterId, string $keyOwner, int $minuteSinceEpoch = self::MINUTE_OF_NOW): int
     {
-        $window = $this->counter($limiterId, $keyOwner);
+        $window = $this->counter($limiterId, $keyOwner, $minuteSinceEpoch);
         self::assertInstanceOf(Window::class, $window, \sprintf('no %s counter for %s', $limiterId, $keyOwner));
 
         return $window->getHitCount();
     }
 
     /**
-     * The counter ToolCallLimiter keys by the token or organization id and the clock's minute.
+     * The counter ToolCallLimiter keys by the token or organization id and the clock's minute since the epoch.
      */
-    private function counter(string $limiterId, string $keyOwner): ?Window
+    private function counter(string $limiterId, string $keyOwner, int $minuteSinceEpoch = self::MINUTE_OF_NOW): ?Window
     {
         $storage = self::getContainer()->get(ValkeyLimiterStorage::class);
-        $state = $storage->fetch($limiterId.'-'.$keyOwner.':'.self::MINUTE_OF_NOW);
+        $state = $storage->fetch($limiterId.'-'.$keyOwner.':'.$minuteSinceEpoch);
         self::assertTrue(null === $state || $state instanceof Window);
 
         return $state;

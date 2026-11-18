@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Integration\AgentApi;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
+use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
 use App\Kernel;
 use App\Tests\Fixtures\AgentApi\WriteProbeTool;
@@ -29,9 +32,11 @@ final class AgentToolServicesTest extends TestCase
      */
     public static function environments(): iterable
     {
-        yield 'dev' => ['dev', true, [WhoAmI::class]];
-        yield 'prod' => ['prod', false, [WhoAmI::class]];
-        yield 'test' => ['test', true, [WhoAmI::class, WriteProbeTool::class]];
+        $productTools = [WhoAmI::class, ListMyTickets::class, GetRoundNotes::class, SetVerdict::class];
+
+        yield 'dev' => ['dev', true, $productTools];
+        yield 'prod' => ['prod', false, $productTools];
+        yield 'test' => ['test', true, [...$productTools, WriteProbeTool::class]];
     }
 
     /**
