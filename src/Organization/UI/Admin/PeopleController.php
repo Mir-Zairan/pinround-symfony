@@ -23,6 +23,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\InputBag;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
@@ -90,13 +91,14 @@ final class PeopleController extends AbstractController
         $this->denyAccessUnlessGranted(OrganizationPermission::ADMIN, $organizationId);
         \assert($organizationId instanceof OrganizationId);
 
-        return $this->renderPage($organizationId, after: $this->pageCursorOf($request), tokensAfter: $this->tokenPageCursorOf($request));
+        return $this->renderPage($organizationId, after: $this->pageCursorOf($request->query), tokensAfter: $this->tokenPageCursorOf($request->query));
     }
 
     /**
-     * Revokes any person's token of the organization, in the request transaction with its ApiTokenRevoked. The id is
-     * not checked by the route, so a malformed one gets the same 404 as another organization's. A token revoked
-     * already, as after a double click, says nothing: the list no longer shows it.
+     * Revokes any person's token of the organization, in the request transaction with its ApiTokenRevoked, and goes
+     * back to the pages of both lists the form names in the same parameters as show. The id is not checked by the
+     * route, so a malformed one gets the same 404 as another organization's. A token revoked already, as after a double
+     * click, says nothing: the list no longer shows it.
      */
     #[Route('/admin/people/tokens/{id}/revoke', name: self::REVOKE_TOKEN_ROUTE, methods: ['POST'])]
     public function revokeToken(Request $request, string $id): Response
@@ -105,8 +107,10 @@ final class PeopleController extends AbstractController
         $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
         $this->denyAccessUnlessGranted(OrganizationPermission::ADMIN, $organizationId);
         \assert($organizationId instanceof OrganizationId);
+        $after = $this->pageCursorOf($request->request);
+        $tokensAfter = $this->tokenPageCursorOf($request->request);
         if (!$this->isCsrfTokenValid(self::REVOKE_TOKEN_CSRF_ID, $request->request->getString('_csrf_token'))) {
-            return $this->renderPage($organizationId, formError: self::FORM_EXPIRED);
+            return $this->renderPage($organizationId, formError: self::FORM_EXPIRED, after: $after, tokensAfter: $tokensAfter);
         }
         $admin = $this->currentUser->id();
         \assert(null !== $admin);
@@ -120,7 +124,7 @@ final class PeopleController extends AbstractController
             $this->addFlash(self::TOAST, self::TOKEN_REVOKED);
         }
 
-        return $this->redirectToRoute(self::ROUTE);
+        return $this->redirectToRoute(self::ROUTE, [...$this->invitationsPageQueryOf($after), ...$this->tokensPageQueryOf($tokensAfter)]);
     }
 
     /**
@@ -175,16 +179,18 @@ final class PeopleController extends AbstractController
     /**
      * The cursor pendingOf reads, which needs only the id and invitedAt; null when the request names no page.
      *
+     * @param InputBag<string> $parameters the query of show, or the form of revokeToken
+     *
      * @throws BadRequestHttpException when only one of the two parameters is given, or either is no valid value
      */
-    private function pageCursorOf(Request $request): ?PendingInvitation
+    private function pageCursorOf(InputBag $parameters): ?PendingInvitation
     {
-        $hasInvitedAt = $request->query->has(self::AFTER_INVITED_AT);
-        if (!$hasInvitedAt && !$request->query->has(self::AFTER_ID)) {
+        $hasInvitedAt = $parameters->has(self::AFTER_INVITED_AT);
+        if (!$hasInvitedAt && !$parameters->has(self::AFTER_ID)) {
             return null;
         }
-        $invitedAtText = $request->query->getString(self::AFTER_INVITED_AT);
-        $id = $request->query->getString(self::AFTER_ID);
+        $invitedAtText = $parameters->getString(self::AFTER_INVITED_AT);
+        $id = $parameters->getString(self::AFTER_ID);
         $invitedAt = \DateTimeImmutable::createFromFormat('!'.self::CURSOR_TIME_FORMAT, $invitedAtText);
         // The round trip refuses what createFromFormat rolls over, such as a 31 November, instead of reading another time.
         if (!$hasInvitedAt || false === $invitedAt || $invitedAt->format(self::CURSOR_TIME_FORMAT) !== $invitedAtText || !Uuid::isValid($id)) {
@@ -195,19 +201,21 @@ final class PeopleController extends AbstractController
     }
 
     /**
+     * @param InputBag<string> $parameters the query of show, or the form of revokeToken
+     *
      * @return array{\DateTimeImmutable, string}|null the expiresAt and id of the last API token shown; null when the
      *                                                request names no page of tokens
      *
      * @throws BadRequestHttpException when only one of the two parameters is given, or either is no valid value
      */
-    private function tokenPageCursorOf(Request $request): ?array
+    private function tokenPageCursorOf(InputBag $parameters): ?array
     {
-        $hasExpiresAt = $request->query->has(self::TOKENS_AFTER_EXPIRES_AT);
-        if (!$hasExpiresAt && !$request->query->has(self::TOKENS_AFTER_ID)) {
+        $hasExpiresAt = $parameters->has(self::TOKENS_AFTER_EXPIRES_AT);
+        if (!$hasExpiresAt && !$parameters->has(self::TOKENS_AFTER_ID)) {
             return null;
         }
-        $expiresAtText = $request->query->getString(self::TOKENS_AFTER_EXPIRES_AT);
-        $id = $request->query->getString(self::TOKENS_AFTER_ID);
+        $expiresAtText = $parameters->getString(self::TOKENS_AFTER_EXPIRES_AT);
+        $id = $parameters->getString(self::TOKENS_AFTER_ID);
         $expiresAt = \DateTimeImmutable::createFromFormat('!'.self::TOKEN_CURSOR_TIME_FORMAT, $expiresAtText);
         if (!$hasExpiresAt || false === $expiresAt || $expiresAt->format(self::TOKEN_CURSOR_TIME_FORMAT) !== $expiresAtText || !Uuid::isValid($id)) {
             throw new BadRequestHttpException('The page of API tokens to show is not valid.');
@@ -225,14 +233,8 @@ final class PeopleController extends AbstractController
     {
         $hasError = null !== $emailError || null !== $formError;
         // Each list's Show more keeps the page the other list is on.
-        $invitationsPageQuery = null === $after ? [] : [
-            self::AFTER_INVITED_AT => $after->invitedAt()->format(self::CURSOR_TIME_FORMAT),
-            self::AFTER_ID => $after->id(),
-        ];
-        $tokensPageQuery = null === $tokensAfter ? [] : [
-            self::TOKENS_AFTER_EXPIRES_AT => $tokensAfter[0]->format(self::TOKEN_CURSOR_TIME_FORMAT),
-            self::TOKENS_AFTER_ID => $tokensAfter[1],
-        ];
+        $invitationsPageQuery = $this->invitationsPageQueryOf($after);
+        $tokensPageQuery = $this->tokensPageQueryOf($tokensAfter);
         $pendingInvitations = $this->invitationQueries->pendingOf($organizationId, self::PAGE_SIZE + 1, $after);
         $nextPage = null;
         if (\count($pendingInvitations) > self::PAGE_SIZE) {
@@ -266,10 +268,35 @@ final class PeopleController extends AbstractController
             'liveTokens' => $liveTokens,
             'tokenOwnerNames' => array_map(static fn (UserView $owner): string => $owner->displayName, $this->userQueries->byIds(array_values($ownerIds))),
             'tokensNextPage' => $tokensNextPage,
+            'shownPagesQuery' => [...$invitationsPageQuery, ...$tokensPageQuery],
             'revokeTokenCsrfId' => self::REVOKE_TOKEN_CSRF_ID,
             'typedEmail' => $typedEmail,
             'emailError' => $emailError,
             'formError' => $formError,
         ], new Response(status: $hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK));
+    }
+
+    /**
+     * @return array<string, string> the parameters pageCursorOf reads back as $after; none for the first page
+     */
+    private function invitationsPageQueryOf(?PendingInvitation $after): array
+    {
+        return null === $after ? [] : [
+            self::AFTER_INVITED_AT => $after->invitedAt()->format(self::CURSOR_TIME_FORMAT),
+            self::AFTER_ID => $after->id(),
+        ];
+    }
+
+    /**
+     * @param array{\DateTimeImmutable, string}|null $tokensAfter
+     *
+     * @return array<string, string> the parameters tokenPageCursorOf reads back as $tokensAfter; none for the first page
+     */
+    private function tokensPageQueryOf(?array $tokensAfter): array
+    {
+        return null === $tokensAfter ? [] : [
+            self::TOKENS_AFTER_EXPIRES_AT => $tokensAfter[0]->format(self::TOKEN_CURSOR_TIME_FORMAT),
+            self::TOKENS_AFTER_ID => $tokensAfter[1],
+        ];
     }
 }

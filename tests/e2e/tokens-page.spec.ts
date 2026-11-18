@@ -175,9 +175,8 @@ test('a browser without the Clipboard API shows no copy buttons, only the fields
   expect(await page.evaluate(() => typeof navigator.clipboard?.writeText)).toBe('undefined');
 
   await makeToken(page, tokenName);
-  // The controls come hidden, so hidden proves copy-text's check only once it has connected; nothing in the page marks
-  // that moment, so wait for the importmap modules to load as openTokensPage does.
-  await page.waitForLoadState('networkidle');
+  // The controls come hidden, so hidden proves copy-text's check only once it has connected.
+  await expect(page.getByRole('main').locator('[data-controller~="copy-text"][data-copy-text-connected]')).toHaveCount(2);
 
   const copyControls = page.getByRole('main').locator('[data-copy-text-target="controls"]');
   await expect(copyControls).toHaveCount(2);

@@ -67,15 +67,20 @@
             {% else %}
                 <ul class="people__list">
                     {% for token in liveTokens %}
+                        {% set ownerName = tokenOwnerNames[token.ownerId.toString] ?? 'Unknown person' %}
                         <li class="people__row people__token-row" data-token-id="{{ token.id }}">
-                            <span class="people__token-owner">{{ tokenOwnerNames[token.ownerId.toString] ?? 'Unknown person' }}</span>
+                            <span class="people__token-owner">{{ ownerName }}</span>
                             <span class="people__sub">
                                 {{ token.name }} · <code>{{ token.prefix }}…</code>
                                 · Works until {{ token.expiresAt|date('j M Y', app.user.timeZone) }}
                             </span>
+                            {# The pages both lists are on, so the revoke comes back to them. #}
                             <form class="people__revoke" method="post" action="{{ path('organization_admin_people_token_revoke', {id: token.id}) }}">
                                 <input type="hidden" name="_csrf_token" value="{{ csrf_token(revokeTokenCsrfId) }}">
-                                <twig:Button type="submit" variant="outline">Revoke</twig:Button>
+                                {% for name, value in shownPagesQuery %}
+                                    <input type="hidden" name="{{ name }}" value="{{ value }}">
+                                {% endfor %}
+                                <twig:Button type="submit" variant="outline" aria-label="Revoke {{ ownerName }}’s token {{ token.name }}, {{ token.prefix }}…">Revoke</twig:Button>
                             </form>
                         </li>
                     {% endfor %}
