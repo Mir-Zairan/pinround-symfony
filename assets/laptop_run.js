@@ -14,12 +14,16 @@ const UNREACHABLE_LINE ='pinround could not reach Ollama on this laptop. Use “
 const TOO_SLOW_LINE = 'Ollama on this laptop took too long to answer. Try again, or use “Local AI” at the top to pick another model.';
 const NO_SUMMARY_LINE = 'Ollama on this laptop gave no summary. Use “Local AI” at the top to check it.';
 
-/** A run that ended with a sentence for the person. isOllamaSilent: Ollama could not be reached or did not answer in time. */
+/**
+ * A run that ended with a sentence for the person. isOllamaUnreachable: nothing answered on Ollama's port.
+ * isOllamaTooSlow: Ollama was reached but did not answer in time, so it is still there.
+ */
 export class LaptopRunRefused extends Error {
-  constructor(line, { isOllamaSilent = false } = {}) {
+  constructor(line, { isOllamaUnreachable = false, isOllamaTooSlow = false } = {}) {
     super(line);
     this.line = line;
-    this.isOllamaSilent = isOllamaSilent;
+    this.isOllamaUnreachable = isOllamaUnreachable;
+    this.isOllamaTooSlow = isOllamaTooSlow;
   }
 }
 
@@ -52,7 +56,9 @@ export async function generateOnLaptop(generateUrl, model, promptPackage, signal
   if (typeof promptPackage.schema === 'string') {
     request.format = JSON.parse(promptPackage.schema);
   }
-  const silence = () => new LaptopRunRefused(timeout.aborted ? TOO_SLOW_LINE : UNREACHABLE_LINE, { isOllamaSilent: true });
+  const silence = () => (timeout.aborted
+    ? new LaptopRunRefused(TOO_SLOW_LINE, { isOllamaTooSlow: true })
+    : new LaptopRunRefused(UNREACHABLE_LINE, { isOllamaUnreachable: true }));
   let response;
   try {
     response = await fetch(generateUrl, {

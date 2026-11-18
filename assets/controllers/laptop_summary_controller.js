@@ -9,8 +9,8 @@ const LEFT_PAGE = Symbol('left the page');
 // run it on the laptop (laptop_run.js). The laptop counts as ready when the header's Local AI chip last found it ready
 // in this tab (local_ai_storage.js); nothing here calls Ollama before the press. A not-ready line a ready laptop cures
 // (notReadyLine) is hidden and the form shown while it is ready; without one, a not-ready laptop leaves the form to its
-// normal cloud submit, and when Ollama stops answering there the laptop counts as not found, so the next press goes to
-// the cloud. A press on a ready laptop runs the summary there, then reads the ask's frame again to show the proposal.
+// normal cloud submit, and when Ollama does not answer a press there the next press goes to the cloud. A press on a
+// ready laptop runs the summary there, then reads the ask's frame again to show the proposal.
 // The AI never writes on its own: the result is only a proposal until a person presses "Use as main summary".
 export default class extends Controller {
   static targets = ['form', 'button', 'notReadyLine', 'statusLine'];
@@ -18,6 +18,9 @@ export default class extends Controller {
 
   #run = null;
   #isReady = null;
+  // Set when Ollama did not answer a press that the cloud may take: presses on this page go to the cloud, as the status
+  // line says, until readiness changes and clears that line.
+  #isCloudNext = false;
 
   connect() {
     this.followCheck();
@@ -37,6 +40,7 @@ export default class extends Controller {
       return;
     }
     this.#isReady = isReady;
+    this.#isCloudNext = false;
     this.statusLineTarget.hidden = true;
     this.statusLineTarget.textContent = '';
     if (this.hasNotReadyLineTarget) {
@@ -47,7 +51,7 @@ export default class extends Controller {
 
   // On the form's submit, before Turbo's: only a ready laptop takes the press from the cloud.
   async summarize(event) {
-    const model = readyModel();
+    const model = this.#isCloudNext ? null : readyModel();
     if (model === null) {
       if (this.hasNotReadyLineTarget) {
         event.preventDefault();
@@ -91,15 +95,20 @@ export default class extends Controller {
     this.#showLine(this.#lineAfter(refusal));
   }
 
-  // Where the cloud may take the press (no not-ready line), Ollama that stopped answering makes the laptop not found.
+  // Where the cloud may take the press (no not-ready line), an Ollama that did not answer sends the next press there; one
+  // that could not be reached also makes the laptop not found, while a slow one is still there and keeps its check.
   // Also catches up with a check made while the press ran.
   #lineAfter(refusal) {
-    const mayFallBackToCloud = refusal.isOllamaSilent && !this.hasNotReadyLineTarget;
-    if (mayFallBackToCloud) {
+    const mayFallBackToCloud = (refusal.isOllamaUnreachable || refusal.isOllamaTooSlow) && !this.hasNotReadyLineTarget;
+    if (mayFallBackToCloud && refusal.isOllamaUnreachable) {
       rememberLastCheck(NOT_FOUND_CHECK);
     }
     this.followCheck();
-    return mayFallBackToCloud && !this.#isReady ? CLOUD_NEXT_LINE : refusal.line;
+    if (!mayFallBackToCloud) {
+      return refusal.line;
+    }
+    this.#isCloudNext = true;
+    return CLOUD_NEXT_LINE;
   }
 
   #showRunning() {
