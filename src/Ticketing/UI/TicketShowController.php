@@ -46,10 +46,6 @@ final class TicketShowController extends AbstractController
     public const string ROUTE = 'ticket_show';
     public const string NOT_FOUND = 'No ticket you may see has that key.';
 
-    /** The ask is cut after this many characters, at a word end (ticket-page.md, The ask). */
-    public const int ASK_CUT_LENGTH = 700;
-    public const string ASK_CUT_MARK = ' …';
-
     public const string NOBODY = 'Nobody';
 
     public function __construct(
@@ -101,9 +97,7 @@ final class TicketShowController extends AbstractController
             ],
             'type' => ucfirst($ticket->type),
             'priority' => ucfirst($ticket->priority),
-            'shortAsk' => self::shortAskOf($ticket->description),
             'created' => TicketListText::dateOf($ticket->createdAt, $now, $viewerTimeZone),
-            'reporter' => $ticket->reporterName ?? PersonNames::UNKNOWN_PERSON,
             'assignee' => null === $ticket->visibilityFacts->assigneeId ? self::NOBODY : ($ticket->assigneeName ?? ucfirst(PersonNames::UNKNOWN_PERSON)),
             'components' => implode(', ', $ticket->components),
         ]);
@@ -144,25 +138,5 @@ final class TicketShowController extends AbstractController
             'stopUrl' => $this->generateUrl(QueueController::STOP_ROUTE, ['key' => $ticketKey, ...$listContext->query()]),
             'csrfId' => QueueController::CSRF_ID,
         ];
-    }
-
-    /**
-     * The ask's first ASK_CUT_LENGTH characters, cut back to the end of the last whole word, then ASK_CUT_MARK. A
-     * first word longer than the limit is cut inside it.
-     *
-     * @return string|null null when the whole ask fits, so the page shows it all and no "Show the full ask"
-     */
-    public static function shortAskOf(string $description): ?string
-    {
-        if (mb_strlen($description, 'UTF-8') <= self::ASK_CUT_LENGTH) {
-            return null;
-        }
-        $head = mb_substr($description, 0, self::ASK_CUT_LENGTH, 'UTF-8');
-        $isCutInsideAWord = 1 !== preg_match('/^\s/u', mb_substr($description, self::ASK_CUT_LENGTH, 1, 'UTF-8'));
-        if ($isCutInsideAWord && 1 === preg_match('/^(.*\S)\s+\S*\z/su', $head, $wholeWords)) {
-            $head = $wholeWords[1];
-        }
-
-        return (preg_replace('/\s+\z/u', '', $head) ?? $head).self::ASK_CUT_MARK;
     }
 }

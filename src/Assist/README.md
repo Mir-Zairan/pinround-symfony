@@ -1,6 +1,6 @@
 # Assist
 
-AI help that only suggests: summaries, explanations, intake suggestions and prompt packages for laptop AI. A person always clicks to apply. It owns the tables `ast_explanation`, `ast_suggestion`, `ast_embedding`, `ast_usage` and `ast_local_package`. Its Api is `AiPolicy`, `Summaries`, `Explanations`, `IntakeAssist` and `LocalAi`. It may use the Api of Ticketing, Review, Organization and Audit.
+AI help that only suggests: summaries, explanations, intake suggestions and prompt packages for laptop AI. A person always clicks to apply. It owns the tables `ast_explanation`, `ast_suggestion`, `ast_embedding`, `ast_usage` and `ast_local_package`. Its Api is `AiPolicy`, `Summaries`, `Explanations`, `IntakeAssist` and `LocalAi`. It may use the Api of Ticketing, Review, Organization and Audit, and its UI the Api of Identity (time zone and names for "The ask").
 
 ## Built (phase 08, PR 1)
 

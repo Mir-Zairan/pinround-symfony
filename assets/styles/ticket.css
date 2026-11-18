@@ -236,6 +236,52 @@
   display: none;
 }
 
+.ticket__ask-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.ticket__ask-summary-text {
+  max-width: 66ch;
+  font-size: 17px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ticket__ask-raw,
+.ticket__ask-earlier-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.ticket__ask-earlier-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket__ask-ai-off,
+.ticket__ask-notice,
+.ticket__ask-failed,
+.ticket__ask-earlier-more {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.ticket__ask-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin: 0;
+}
+
 /* Open, the full text replaces the cut one. */
 .ticket__ask:has(.ticket__ask-more[open]) .ticket__ask-text--short {
   display: none;

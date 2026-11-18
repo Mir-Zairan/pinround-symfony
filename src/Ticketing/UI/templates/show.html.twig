@@ -67,28 +67,8 @@
 
         <div class="ticket__columns">
             <div class="ticket__main">
-                <section class="ticket__section" aria-labelledby="ticket-ask-heading">
-                    <h2 id="ticket-ask-heading" class="ticket__section-title">The ask</h2>
-                    {% if ticket.description is empty %}
-                        <p class="ticket__ask-none">The report came with no text.</p>
-                        <p class="ticket__asked">Asked by {{ reporter }} · {{ created }}</p>
-                    {% else %}
-                        <twig:Card tag="div" class="ticket__ask">
-                            <p class="ticket__ask-source"><strong>Original text from the report</strong> · not summarized yet</p>
-                            {% if shortAsk is null %}
-                                <div class="ticket__ask-text">{{ ticket.description }}</div>
-                            {% else %}
-                                <div class="ticket__ask-text ticket__ask-text--short">{{ shortAsk }}</div>
-                                {# A native disclosure: it opens without JavaScript, and the browser tells screen readers whether it is expanded. #}
-                                <details class="ticket__ask-more">
-                                    <summary class="btn btn-outline btn-sm"><span class="ticket__ask-show">Show the full ask</span><span class="ticket__ask-hide">Show less</span></summary>
-                                    <div class="ticket__ask-text ticket__ask-text--full">{{ ticket.description }}</div>
-                                </details>
-                            {% endif %}
-                            <p class="ticket__asked">Asked by {{ reporter }} · {{ created }}</p>
-                        </twig:Card>
-                    {% endif %}
-                </section>
+                {#- Assist's component, embedded by name: Ticketing's UI may not use Assist's Api (deptrac). -#}
+                {{ component('TheAsk', {ticket: ticket}) }}
 
                 {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
                 {{ component('ThreadFrame', {key: ticket.key}) }}

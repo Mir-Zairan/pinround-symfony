@@ -361,7 +361,7 @@ deptrac:
     Assist_Application: [Assist_Domain, Assist_Api, SharedKernel, Ticketing_Api, Review_Api, Organization_Api, Audit_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
     Assist_Infrastructure: [Assist_Domain, Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api, Audit_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
     Assist_AiPlatform: [Assist_Domain, Assist_Application, Assist_Api, SharedKernel, Vendor, SymfonyAi]
-    Assist_UI: [Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api, Audit_Api]
+    Assist_UI: [Assist_Application, Assist_Api, SharedKernel, Vendor, Ticketing_Api, Review_Api, Organization_Api, Audit_Api, Identity_Api]
 
     Integration_Api: [SharedKernel]
     Integration_Event: [SharedKernel]

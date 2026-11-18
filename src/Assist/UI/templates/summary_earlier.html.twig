@@ -1,0 +1,13 @@
+<turbo-frame id="{{ constant('App\\Assist\\UI\\Component\\TheAsk::EARLIER_FRAME_ID') }}">
+    <ol class="ticket__ask-earlier-list">
+        {% for earlier in earlierSummaries %}
+            <li class="ticket__ask-earlier-item">
+                <p class="ticket__ask-source">Earlier summary {{ loop.index }}{% if earlier.note is not null %} · {{ earlier.note }}{% endif %}</p>
+                <div class="ticket__ask-summary-text">{{ earlier.text }}</div>
+            </li>
+        {% endfor %}
+    </ol>
+    {% if unlistedCount > 0 %}
+        <p class="ticket__ask-source ticket__ask-earlier-more">{{ unlistedCount }} older {{ unlistedCount == 1 ? 'summary is' : 'summaries are' }} not shown.</p>
+    {% endif %}
+</turbo-frame>
