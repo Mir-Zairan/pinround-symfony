@@ -130,8 +130,8 @@ trait SeedsLaptopAiTickets
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $userId, $ticketId, $packages): int {
             foreach ($packages as [$packageId, $usedAt]) {
                 $migrator->executeStatement(
-                    "INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model)
-                     VALUES (?, ?, ?, ?, 'summary', 'summary.v1', CAST(? AS timestamptz), CAST(? AS timestamptz) + interval '5 minutes', CAST(? AS timestamptz), 'An earlier answer.', 'qwen3:4b')",
+                    "INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model, result_label)
+                     VALUES (?, ?, ?, ?, 'summary', 'summary.v1', CAST(? AS timestamptz), CAST(? AS timestamptz) + interval '5 minutes', CAST(? AS timestamptz), 'An earlier answer.', 'qwen3:4b', 'posted by Omar using local model qwen3:4b (unverified)')",
                     [$organizationId, $packageId, $userId, $ticketId, $usedAt, $usedAt, $usedAt],
                 );
             }

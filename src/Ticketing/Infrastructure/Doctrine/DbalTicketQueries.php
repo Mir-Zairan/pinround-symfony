@@ -156,7 +156,7 @@ final readonly class DbalTicketQueries implements TicketQueries
             .' ticket.version, project.name AS project_name, parent.key AS parent_key,'
             .' summary.id AS summary_id, summary.text AS summary_text, summary.source AS summary_source,'
             .' summary.author_id AS summary_author_id, summary.model AS summary_model,'
-            .' summary.prompt_version AS summary_prompt_version, summary.created_at AS summary_created_at,'
+            .' summary.prompt_version AS summary_prompt_version, summary.chosen_by_id AS summary_chosen_by_id, summary.created_at AS summary_created_at,'
             .' earlier.summary_count AS earlier_summary_count'
             .' FROM tkt_ticket AS ticket'
             .' JOIN tkt_project AS project ON project.organization_id = ticket.organization_id AND project.id = ticket.project_id'
@@ -233,7 +233,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         $users = $this->userQueries->byIds(self::distinctUserIds([
             $reporterId, $assigneeId, self::userIdOrNull($row['pending_assignee_id'], 'pending assignee id'), self::userIdOrNull($row['reviewer_id'], 'reviewer id'),
             self::userIdOrNull($row['tester_id'], 'tester id'), self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
-            $leadId, ...$developerIds, ...$testerIds, $currentSummary?->authorId,
+            $leadId, ...$developerIds, ...$testerIds, $currentSummary?->authorId, $currentSummary?->chosenById,
         ]));
         $displayNames = array_map(static fn (UserView $user): string => $user->displayName, $users);
         $decodedComponents = json_decode(self::text($row['components'], 'components'), true, 2, \JSON_THROW_ON_ERROR);

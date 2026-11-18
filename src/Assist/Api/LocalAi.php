@@ -59,4 +59,33 @@ interface LocalAi
      * @throws \LogicException    when a transaction is open or no tenant is set; nothing is read or written
      */
     public function accept(LocalPackageId $packageId, string $model, string $text, UserId $posterId, OrganizationId $organizationId): LocalResult;
+
+    /**
+     * The ticket's laptop summary proposal, which everyone who may see the ticket sees under its summary: its newest
+     * posted result not made the main summary yet, when it was posted after the current summary was made. One read in
+     * the caller's open transaction, whose tenant is $organizationId; whether the viewer may see the ticket is the
+     * caller's check.
+     *
+     * @param \DateTimeImmutable|null $currentSummaryCreatedAt when the ticket's current summary was made; null when
+     *                                                         it has none
+     *
+     * @return LocalResult|null null when the ticket has no proposal
+     */
+    public function proposalOf(TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, OrganizationId $organizationId): ?LocalResult;
+
+    /**
+     * "Use as main summary": makes the ticket's proposal its current summary through Ticketing, the one before moving
+     * to history, and marks the result made the main summary so it is chosen once; of two requests at once exactly one
+     * makes it. No AI runs, so the AI policy does not decide it (ADR-0020: a person clicks). Runs in the caller's open
+     * transaction, whose tenant is $organizationId; whether $chooserId may choose the main summary is the caller's
+     * check.
+     *
+     * @param \DateTimeImmutable|null $currentSummaryCreatedAt as for proposalOf, read in the same transaction
+     *
+     * @throws MainSummaryRefused not_a_proposal when $packageId is not the ticket's proposal (unknown, another
+     *                            ticket's or organization's, made the main summary already, or not the newest), and
+     *                            nothing changed; summary_rejected when Ticketing refuses the text as a summary, after
+     *                            the result was marked, so the caller must roll its transaction back
+     */
+    public function makeMainSummary(LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, UserId $chooserId, OrganizationId $organizationId): void;
 }

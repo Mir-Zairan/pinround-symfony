@@ -51,12 +51,36 @@ interface LocalPackages
      * Keeps the result on the package and marks it used in one UPDATE that matches only an unused, unexpired package
      * of $posterId, so of two posts at once exactly one is kept.
      *
-     * @param string $text the checked text, 1 to 10,000 characters
+     * @param string $text  the checked text, 1 to 10,000 characters
+     * @param string $label LocalResult::LABEL_FORMAT filled in, kept as it was when posted
      *
      * @return \DateTimeImmutable|null when it was kept; null when the package was used or expired meanwhile, and
      *                                 nothing changed
      *
      * @throws \LogicException when no transaction is open or $organizationId is not its tenant, before any query
      */
-    public function post(OrganizationId $organizationId, LocalPackageId $packageId, UserId $posterId, string $text, LocalModelName $model): ?\DateTimeImmutable;
+    public function post(OrganizationId $organizationId, LocalPackageId $packageId, UserId $posterId, string $text, LocalModelName $model, string $label): ?\DateTimeImmutable;
+
+    /**
+     * The ticket's proposal: its newest posted result (a tie by the larger id) that is not made the main summary yet,
+     * when it was posted after $newerThan. One read on ast_local_package_ticket_id_used_at_idx.
+     *
+     * @param \DateTimeImmutable|null $newerThan when the ticket's current summary was made; null when it has none
+     *
+     * @throws \LogicException           when no transaction is open or $organizationId is not its tenant, before any query
+     * @throws \UnexpectedValueException when the stored row is not one post() writes
+     */
+    public function proposalOf(OrganizationId $organizationId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): ?PostedLocalResult;
+
+    /**
+     * Marks the package's result made the main summary at $madeMainAt in one conditional UPDATE that matches only while
+     * it is the ticket's proposal as proposalOf() reads it, so of two requests at once exactly one gets it.
+     *
+     * @return PostedLocalResult|null the result marked; null when the package is not the ticket's proposal, and
+     *                                nothing changed
+     *
+     * @throws \LogicException           when no transaction is open or $organizationId is not its tenant, before any query
+     * @throws \UnexpectedValueException when the stored row is not one post() writes
+     */
+    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan, \DateTimeImmutable $madeMainAt): ?PostedLocalResult;
 }

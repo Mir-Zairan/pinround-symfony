@@ -44,4 +44,26 @@ final readonly class CheckedTicketSummaryCommands implements TicketSummaryComman
         }
         $this->ticketSummaries->storeCurrent($summary);
     }
+
+    public function storeChosenLaptopSummary(
+        OrganizationId $organizationId,
+        TicketId $ticketId,
+        string $text,
+        UserId $posterId,
+        string $model,
+        string $promptVersion,
+        UserId $chooserId,
+        \DateTimeImmutable $chosenAt,
+    ): void {
+        if (!$this->tenantContext->require()->equals($organizationId)) {
+            throw new \LogicException('A laptop summary is stored under its own organization; another one is set.');
+        }
+
+        try {
+            $summary = Summary::chosenFromLaptop($ticketId, $text, $posterId, $model, $promptVersion, $chooserId, $chosenAt);
+        } catch (SummaryRefused $refused) {
+            throw new GeneratedSummaryRefused($refused->getMessage(), $refused);
+        }
+        $this->ticketSummaries->storeCurrent($summary);
+    }
 }

@@ -49,8 +49,9 @@ final class DbalLocalPackagesTest extends KernelTestCase
     private const string LATER = '2027-03-15 10:03:30.750+00';
     private const string RESULT = 'Pay does nothing on the last step.';
     private const string MODEL = 'qwen3:4b';
-    private const string INSERT = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model)'
-        .' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    private const string LABEL = 'posted by Omar using local model qwen3:4b (unverified)';
+    private const string INSERT = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model, result_label, made_main_at)'
+        .' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     /** The key DbalLocalPackages::issue() locks on: organization, then the person. */
     private const string LOCK_KEY_FORMAT = 'ast_local_package:open:%s:%s';
     private const string LOCK_TIMEOUT = '200ms';
@@ -149,7 +150,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
         self::assertInstanceOf(\DateTimeImmutable::class, $expiresAt);
         self::assertSame('2027-03-15 10:07:00.500', $expiresAt->format('Y-m-d H:i:s.v'));
         self::assertSame(
-            [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', 'summary.v1', '2027-03-15 10:02:00.500', '2027-03-15 10:07:00.500', null, null, null]],
+            [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', 'summary.v1', '2027-03-15 10:02:00.500', '2027-03-15 10:07:00.500', null, null, null, null]],
             $this->rowsAs(self::ACME_FOODS, self::NEW_PACKAGE),
         );
     }
@@ -301,7 +302,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
         self::assertNotNull($usedAt);
         self::assertSame('2027-03-15 10:02:00.500', $usedAt->format('Y-m-d H:i:s.v'));
         self::assertSame(
-            [[self::ACME_PACKAGE, self::OMAR, self::TICKET, 'summary', 'summary.v1', '2027-03-15 10:00:00.250', '2027-03-15 10:05:00.250', '2027-03-15 10:02:00.500', self::RESULT, self::MODEL]],
+            [[self::ACME_PACKAGE, self::OMAR, self::TICKET, 'summary', 'summary.v1', '2027-03-15 10:00:00.250', '2027-03-15 10:05:00.250', '2027-03-15 10:02:00.500', self::RESULT, self::MODEL, self::LABEL]],
             $this->rowsAs(self::ACME_FOODS, self::ACME_PACKAGE),
         );
         self::assertFalse($this->issuedAs(self::ACME_FOODS, self::ACME_PACKAGE, self::OMAR)?->isOpen);
@@ -415,6 +416,11 @@ final class DbalLocalPackagesTest extends KernelTestCase
         yield 'used with no result' => [['used_at' => self::NOW], 'ast_local_package_result_check'];
         yield 'a result while unused' => [['result_text' => self::RESULT, 'model' => self::MODEL], 'ast_local_package_result_check'];
         yield 'used with a result but no model' => [[...$used, 'model' => null], 'ast_local_package_result_check'];
+        yield 'used with no label' => [[...$used, 'result_label' => null], 'ast_local_package_result_label_check'];
+        yield 'a label while unused' => [['result_label' => self::LABEL], 'ast_local_package_result_label_check'];
+        yield 'a blank label' => [[...$used, 'result_label' => ''], 'ast_local_package_result_label_check'];
+        yield 'a label one character over 400' => [[...$used, 'result_label' => str_repeat('é', 401)], 'ast_local_package_result_label_check'];
+        yield 'made the main summary while unused' => [['made_main_at' => self::NOW], 'ast_local_package_made_main_at_check'];
     }
 
     /**
@@ -447,7 +453,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
         ]));
 
         self::assertSame(
-            [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', str_repeat('é', 200), '2027-03-15 10:00:00.250', '2027-03-15 10:05:00.250', '2027-03-15 10:02:00.500', str_repeat('é', 10000), $model]],
+            [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', str_repeat('é', 200), '2027-03-15 10:00:00.250', '2027-03-15 10:05:00.250', '2027-03-15 10:02:00.500', str_repeat('é', 10000), $model, self::LABEL]],
             $this->rowsAs(self::ACME_FOODS, self::NEW_PACKAGE),
         );
     }
@@ -462,7 +468,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
         match ($operation) {
             'issue' => $this->issueNewPackage($organizationId, 10),
             'issuedOf' => $this->packages()->issuedOf(new OrganizationId($organizationId), new LocalPackageId(self::ACME_PACKAGE), new UserId(self::OMAR)),
-            'post' => $this->packages()->post(new OrganizationId($organizationId), new LocalPackageId(self::ACME_PACKAGE), new UserId(self::OMAR), self::RESULT, new LocalModelName(self::MODEL)),
+            'post' => $this->packages()->post(new OrganizationId($organizationId), new LocalPackageId(self::ACME_PACKAGE), new UserId(self::OMAR), self::RESULT, new LocalModelName(self::MODEL), self::LABEL),
             default => throw new \UnexpectedValueException('Unknown operation '.$operation),
         };
     }
@@ -519,7 +525,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
 
     private function post(string $packageId, string $posterId, string $text, string $now = self::NOW): ?\DateTimeImmutable
     {
-        return $this->packages($now)->post(new OrganizationId(self::ACME_FOODS), new LocalPackageId($packageId), new UserId($posterId), $text, new LocalModelName(self::MODEL));
+        return $this->packages($now)->post(new OrganizationId(self::ACME_FOODS), new LocalPackageId($packageId), new UserId($posterId), $text, new LocalModelName(self::MODEL), self::LABEL);
     }
 
     /**
@@ -544,9 +550,10 @@ final class DbalLocalPackagesTest extends KernelTestCase
             'used_at' => null,
             'result_text' => null,
             'model' => null,
+            'made_main_at' => null,
         ], ...$columns];
 
-        return [$organizationId, $packageId, $userId, self::TICKET, $row['purpose'], $row['prompt_version'], self::CREATED_AT, $row['expires_at'], $row['used_at'], $row['result_text'], $row['model']];
+        return [$organizationId, $packageId, $userId, self::TICKET, $row['purpose'], $row['prompt_version'], self::CREATED_AT, $row['expires_at'], $row['used_at'], $row['result_text'], $row['model'], \array_key_exists('result_label', $columns) ? $columns['result_label'] : (null === $row['used_at'] ? null : self::LABEL), $row['made_main_at']];
     }
 
     /**
@@ -567,7 +574,7 @@ final class DbalLocalPackagesTest extends KernelTestCase
                     to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'),
                     to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'),
                     to_char(used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'),
-                    result_text, model
+                    result_text, model, result_label
              FROM ast_local_package WHERE ?::uuid IS NULL OR id = ?::uuid ORDER BY id",
             [$packageId, $packageId],
         ));

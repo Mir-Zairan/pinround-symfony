@@ -77,8 +77,8 @@ final class LocalAiServiceTest extends KernelTestCase
     /** A byte order mark, a CRLF and trailing spaces, which the answer check removes. */
     private const string RESULT = "\u{FEFF}Pay does nothing on the last step.\r\nThe order is never sent MARKER-e6r.  ";
     private const string CHECKED_RESULT = "Pay does nothing on the last step.\nThe order is never sent MARKER-e6r.";
-    private const string INSERT_PACKAGE = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model)'
-        ." VALUES (?, ?, ?, ?, 'summary', 'summary.v1', ?, ?, ?, ?, ?)";
+    private const string INSERT_PACKAGE = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model, result_label)'
+        ." VALUES (?, ?, ?, ?, 'summary', 'summary.v1', ?, ?, ?, ?, ?, ?)";
     private const string INSERT_MEMBERSHIP = "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2027-03-15 10:00:00+00')";
 
     private static ?TicketId $checkoutTicketId = null;
@@ -791,6 +791,8 @@ final class LocalAiServiceTest extends KernelTestCase
         \assert($aiRequesters instanceof AiRequesters);
         $aiTaskAdmission = self::getContainer()->get('test.assist_ai_task_admission');
         \assert($aiTaskAdmission instanceof AiTaskAdmission);
+        $summaryCommands = self::getContainer()->get('test.ticketing_ticket_summary_commands');
+        \assert($summaryCommands instanceof TicketSummaryCommands);
         $container = self::getContainer();
 
         return new LocalAiService(
@@ -803,6 +805,8 @@ final class LocalAiServiceTest extends KernelTestCase
             $container->get(MemberNameQueries::class),
             $container->get(AuditLog::class),
             $container->get(Transactions::class),
+            $summaryCommands,
+            $container->get(\Psr\Clock\ClockInterface::class),
         );
     }
 
@@ -822,6 +826,7 @@ final class LocalAiServiceTest extends KernelTestCase
                 $organizationId, $packageId, $userId, self::checkoutTicketId()->toString(), $createdAt, $expiresAt, $usedAt,
                 $isUsed ? 'An earlier answer.' : null,
                 $isUsed ? self::MODEL : null,
+                $isUsed ? 'posted by Omar using local model '.self::MODEL.' (unverified)' : null,
             ]);
         });
     }

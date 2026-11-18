@@ -31,7 +31,7 @@ final readonly class DbalTicketSummaryQueries implements TicketSummaryQueries
         // count runs before the LIMIT, so it counts every summary of the ticket.
         $visible = TicketVisibilitySql::of($visibility, self::TICKET_ALIAS);
         $rows = $this->connection->fetchAllAssociative(
-            'SELECT s.id, s.text, s.source, s.author_id, s.model, s.prompt_version, s.is_current, s.created_at,'
+            'SELECT s.id, s.text, s.source, s.author_id, s.model, s.prompt_version, s.chosen_by_id, s.is_current, s.created_at,'
             .' COUNT(s.id) OVER () AS summary_count'
             .' FROM tkt_ticket t LEFT JOIN tkt_summary s ON s.organization_id = t.organization_id AND s.ticket_id = t.id'
             .' WHERE t.organization_id = CAST(:organization AS uuid) AND t.id = CAST(:ticket AS uuid) AND '.$visible->sql()

@@ -14,7 +14,7 @@ use App\Ticketing\Api\TicketSummaryView;
 final class TicketSummaryRow
 {
     /**
-     * @param array<string, mixed> $row    the columns id, text, source, author_id, model, prompt_version and
+     * @param array<string, mixed> $row    the columns id, text, source, author_id, model, prompt_version, chosen_by_id and
      *                                     created_at, each under $prefix
      * @param string               $prefix such as "summary_" for summary_id, summary_text and the rest
      */
@@ -23,6 +23,7 @@ final class TicketSummaryRow
         $authorId = $row[$prefix.'author_id'];
         $model = $row[$prefix.'model'];
         $promptVersion = $row[$prefix.'prompt_version'];
+        $chosenById = $row[$prefix.'chosen_by_id'];
 
         return new TicketSummaryView(
             self::text($row[$prefix.'id'], 'id'),
@@ -32,6 +33,7 @@ final class TicketSummaryRow
             null === $model ? null : self::text($model, 'model'),
             null === $promptVersion ? null : self::text($promptVersion, 'prompt_version'),
             new \DateTimeImmutable(self::text($row[$prefix.'created_at'], 'created_at')),
+            null === $chosenById ? null : new UserId(self::text($chosenById, 'chosen_by_id')),
         );
     }
 

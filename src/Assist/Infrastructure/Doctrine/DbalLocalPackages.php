@@ -7,10 +7,12 @@ namespace App\Assist\Infrastructure\Doctrine;
 use App\Assist\Api\LocalAiPurpose;
 use App\Assist\Api\LocalModelName;
 use App\Assist\Api\LocalPackageId;
+use App\Assist\Api\LocalResult;
 use App\Assist\Application\LocalAi\IssuedLocalPackage;
 use App\Assist\Application\LocalAi\LocalPackageLimit;
 use App\Assist\Application\LocalAi\LocalPackageOwner;
 use App\Assist\Application\LocalAi\LocalPackages;
+use App\Assist\Application\LocalAi\PostedLocalResult;
 use App\Assist\Application\PromptVersion;
 use App\Assist\Application\UnknownPromptTemplate;
 use App\SharedKernel\Application\TenantContext;
@@ -44,8 +46,24 @@ final readonly class DbalLocalPackages implements LocalPackages
     private const string SELECT_OF_USER = 'SELECT purpose, ticket_id, prompt_version, (used_at IS NULL AND expires_at > ?) AS is_open'
         .' FROM ast_local_package WHERE organization_id = ? AND id = ? AND user_id = ?';
 
-    private const string POST = 'UPDATE ast_local_package SET used_at = ?, result_text = ?, model = ?'
+    private const string POST = 'UPDATE ast_local_package SET used_at = ?, result_text = ?, model = ?, result_label = ?'
         .' WHERE organization_id = ? AND id = ? AND user_id = ? AND used_at IS NULL AND expires_at > ?';
+
+    private const string RESULT_COLUMNS = 'id, user_id, result_text, model, result_label, prompt_version, used_at';
+
+    // The predicate of ast_local_package_ticket_id_used_at_idx, so both statements read the partial index.
+    private const string PROPOSAL_OF_TICKET = 'organization_id = :organization AND ticket_id = :ticket AND used_at IS NOT NULL AND made_main_at IS NULL'
+        .' AND used_at > coalesce(CAST(:newer_than AS timestamptz), \'-infinity\')';
+
+    private const string SELECT_PROPOSAL = 'SELECT '.self::RESULT_COLUMNS.' FROM ast_local_package WHERE '.self::PROPOSAL_OF_TICKET
+        .' ORDER BY used_at DESC, id DESC LIMIT 1';
+
+    // The row lock of the UPDATE orders two at once, and the second checks the outer made_main_at again on the row the
+    // first committed, so it matches nothing; the subquery alone is not checked again.
+    private const string MARK_MADE_MAIN = 'UPDATE ast_local_package SET made_main_at = :made_main_at'
+        .' WHERE organization_id = :organization AND ticket_id = :ticket AND id = :package AND made_main_at IS NULL'
+        .' AND id = (SELECT id FROM ast_local_package WHERE '.self::PROPOSAL_OF_TICKET.' ORDER BY used_at DESC, id DESC LIMIT 1)'
+        .' RETURNING '.self::RESULT_COLUMNS;
 
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
 
@@ -129,7 +147,7 @@ final readonly class DbalLocalPackages implements LocalPackages
         return new IssuedLocalPackage($purpose, new TicketId($row['ticket_id']), $promptVersion, $row['is_open']);
     }
 
-    public function post(OrganizationId $organizationId, LocalPackageId $packageId, UserId $posterId, string $text, LocalModelName $model): ?\DateTimeImmutable
+    public function post(OrganizationId $organizationId, LocalPackageId $packageId, UserId $posterId, string $text, LocalModelName $model, string $label): ?\DateTimeImmutable
     {
         $this->requireTenant($organizationId);
         $now = $this->clock->now();
@@ -138,6 +156,7 @@ final readonly class DbalLocalPackages implements LocalPackages
             $nowText,
             $text,
             $model->value,
+            $label,
             $organizationId->toString(),
             $packageId->toString(),
             $posterId->toString(),
@@ -145,6 +164,67 @@ final readonly class DbalLocalPackages implements LocalPackages
         ]);
 
         return 1 === $updated ? $now : null;
+    }
+
+    public function proposalOf(OrganizationId $organizationId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): ?PostedLocalResult
+    {
+        $this->requireTenant($organizationId);
+        $row = $this->connection->fetchAssociative(self::SELECT_PROPOSAL, self::proposalParameters($organizationId, $ticketId, $newerThan));
+
+        return false === $row ? null : self::postedResultOf($row);
+    }
+
+    public function markMadeMain(OrganizationId $organizationId, LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $newerThan, \DateTimeImmutable $madeMainAt): ?PostedLocalResult
+    {
+        $this->requireTenant($organizationId);
+        $row = $this->connection->fetchAssociative(self::MARK_MADE_MAIN, [
+            ...self::proposalParameters($organizationId, $ticketId, $newerThan),
+            'package' => $packageId->toString(),
+            'made_main_at' => $madeMainAt->format(self::TIMESTAMP_FORMAT),
+        ]);
+
+        return false === $row ? null : self::postedResultOf($row);
+    }
+
+    /**
+     * @return array<string, string|null>
+     */
+    private static function proposalParameters(OrganizationId $organizationId, TicketId $ticketId, ?\DateTimeImmutable $newerThan): array
+    {
+        return [
+            'organization' => $organizationId->toString(),
+            'ticket' => $ticketId->toString(),
+            'newer_than' => $newerThan?->format(self::TIMESTAMP_FORMAT),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row the columns of RESULT_COLUMNS
+     *
+     * @throws \UnexpectedValueException when a column is not what post() writes
+     */
+    private static function postedResultOf(array $row): PostedLocalResult
+    {
+        foreach (['id', 'user_id', 'result_text', 'model', 'result_label', 'prompt_version', 'used_at'] as $column) {
+            if (!\is_string($row[$column])) {
+                throw new \UnexpectedValueException(\sprintf('A posted laptop result has no %s.', $column));
+            }
+        }
+        if (!LocalModelName::isValid($row['model'])) {
+            throw new \UnexpectedValueException('A posted laptop result has a model name post() does not write.');
+        }
+
+        return new PostedLocalResult(
+            new LocalResult(
+                new LocalPackageId($row['id']),
+                $row['result_text'],
+                new LocalModelName($row['model']),
+                new UserId($row['user_id']),
+                $row['result_label'],
+                new \DateTimeImmutable($row['used_at']),
+            ),
+            $row['prompt_version'],
+        );
     }
 
     /**

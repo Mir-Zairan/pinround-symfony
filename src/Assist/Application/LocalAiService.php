@@ -11,6 +11,7 @@ use App\Assist\Api\LocalPackageId;
 use App\Assist\Api\LocalPackageRefused;
 use App\Assist\Api\LocalResult;
 use App\Assist\Api\LocalResultRefused;
+use App\Assist\Api\MainSummaryRefused;
 use App\Assist\Api\PromptPackage;
 use App\Assist\Application\Gateway\AiTaskAdmission;
 use App\Assist\Application\LocalAi\IssuedLocalPackage;
@@ -27,6 +28,9 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\GeneratedSummaryRefused;
+use App\Ticketing\Api\TicketSummaryCommands;
+use Psr\Clock\ClockInterface;
 
 /**
  * Laptop AI on the server's side: the policy and the prompt come from the parts the server path uses
@@ -53,7 +57,35 @@ final readonly class LocalAiService implements LocalAi
         private MemberNameQueries $memberNameQueries,
         private AuditLog $auditLog,
         private Transactions $transactions,
+        private TicketSummaryCommands $ticketSummaryCommands,
+        private ClockInterface $clock,
     ) {
+    }
+
+    public function proposalOf(TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, OrganizationId $organizationId): ?LocalResult
+    {
+        return $this->localPackages->proposalOf($organizationId, $ticketId, $currentSummaryCreatedAt)?->result;
+    }
+
+    public function makeMainSummary(LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, UserId $chooserId, OrganizationId $organizationId): void
+    {
+        $madeMainAt = $this->clock->now();
+        $posted = $this->localPackages->markMadeMain($organizationId, $packageId, $ticketId, $currentSummaryCreatedAt, $madeMainAt)
+            ?? throw MainSummaryRefused::notAProposal();
+        try {
+            $this->ticketSummaryCommands->storeChosenLaptopSummary(
+                $organizationId,
+                $ticketId,
+                $posted->result->text,
+                $posted->result->posterId,
+                $posted->result->model->value,
+                $posted->promptVersion,
+                $chooserId,
+                $madeMainAt,
+            );
+        } catch (GeneratedSummaryRefused $refused) {
+            throw MainSummaryRefused::summaryRejected($refused->getMessage());
+        }
     }
 
     public function package(LocalAiPurpose $purpose, TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): PromptPackage
@@ -129,7 +161,8 @@ final readonly class LocalAiService implements LocalAi
         $modelName = new LocalModelName($model);
         $checkedText = $this->checkedTextOf($package->promptVersion, $text);
 
-        $postedAt = $this->localPackages->post($organizationId, $packageId, $posterId, $checkedText, $modelName)
+        $label = \sprintf(LocalResult::LABEL_FORMAT, $posterFirstName, $modelName->value);
+        $postedAt = $this->localPackages->post($organizationId, $packageId, $posterId, $checkedText, $modelName, $label)
             ?? throw LocalResultRefused::packageGone();
 
         return new LocalResult(
@@ -137,7 +170,7 @@ final readonly class LocalAiService implements LocalAi
             $checkedText,
             $modelName,
             $posterId,
-            \sprintf(LocalResult::LABEL_FORMAT, $posterFirstName, $modelName->value),
+            $label,
             $postedAt,
         );
     }

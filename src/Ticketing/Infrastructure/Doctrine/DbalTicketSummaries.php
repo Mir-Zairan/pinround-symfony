@@ -43,8 +43,8 @@ final readonly class DbalTicketSummaries implements TicketSummaries
         );
         $createdAt = $summary->createdAt();
         $this->connection->executeStatement(
-            'INSERT INTO tkt_summary (organization_id, id, ticket_id, text, source, author_id, model, prompt_version, is_current, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, true, ?)',
+            'INSERT INTO tkt_summary (organization_id, id, ticket_id, text, source, author_id, model, prompt_version, chosen_by_id, is_current, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true, ?)',
             [
                 $organizationId,
                 new UuidV7(UuidV7::generate($createdAt))->toRfc4122(),
@@ -54,6 +54,7 @@ final readonly class DbalTicketSummaries implements TicketSummaries
                 $summary->authorId()?->toString(),
                 $summary->model(),
                 $summary->promptVersion(),
+                $summary->chosenById()?->toString(),
                 // Whole seconds, as the column keeps: PostgreSQL would round a fraction, maybe into the next second.
                 $createdAt->format('Y-m-d H:i:sP'),
             ],

@@ -12,10 +12,13 @@ use App\SharedKernel\Domain\UserId;
 final readonly class TicketSummaryView
 {
     /**
-     * @param string  $source        what made it: 'sync', 'ai', 'explanation' or 'human'
-     * @param ?UserId $authorId      who wrote or asked for it; null for a summary made on sync
+     * @param string  $source        what made it: 'sync', 'ai', 'explanation', 'laptop' or 'human'
+     * @param ?UserId $authorId      who wrote or asked for it, or posted it from their laptop; null for a summary made
+     *                               on sync
      * @param ?string $model         the model that wrote it; null when no AI did
      * @param ?string $promptVersion the prompt template that made it, such as "summary.v1"; null when no AI did
+     * @param ?UserId $chosenById    who made it the main summary with "Use as main summary"; null when it became the
+     *                               main summary as it was written
      */
     public function __construct(
         public string $id,
@@ -25,6 +28,7 @@ final readonly class TicketSummaryView
         public ?string $model,
         public ?string $promptVersion,
         public \DateTimeImmutable $createdAt,
+        public ?UserId $chosenById = null,
     ) {
     }
 }

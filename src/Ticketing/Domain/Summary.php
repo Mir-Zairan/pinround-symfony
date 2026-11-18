@@ -30,6 +30,7 @@ final readonly class Summary
         private ?string $model,
         private ?string $promptVersion,
         private \DateTimeImmutable $createdAt,
+        private ?UserId $chosenById = null,
     ) {
     }
 
@@ -50,25 +51,44 @@ final readonly class Summary
         string $promptVersion,
         \DateTimeImmutable $createdAt,
     ): self {
-        $trimmedText = trim($text);
-        if ('' === $trimmedText) {
-            throw new SummaryRefused('A summary has text; this one is blank.');
-        }
-        if (1 !== preg_match(self::PLAIN_TEXT, $trimmedText)) {
-            throw new SummaryRefused('A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.');
-        }
-        if (mb_strlen($trimmedText) > self::TEXT_MAX_LENGTH) {
-            throw new SummaryRefused(\sprintf('A summary has at most %d characters.', self::TEXT_MAX_LENGTH));
-        }
-
         return new self(
             $ticketId,
-            $trimmedText,
+            self::textOf($text),
             SummarySource::Ai,
             $requester,
             self::labelOf($model, 'model', self::MODEL_MAX_LENGTH),
             self::labelOf($promptVersion, 'prompt version', self::PROMPT_VERSION_MAX_LENGTH),
             $createdAt,
+        );
+    }
+
+    /**
+     * A laptop's result a person made the main summary with "Use as main summary". The same rules as generatedByAi.
+     *
+     * @param UserId $poster  who posted the result from their laptop, the summary's author
+     * @param string $model   the local model that wrote it
+     * @param UserId $chooser who made it the main summary
+     *
+     * @throws SummaryRefused as generatedByAi
+     */
+    public static function chosenFromLaptop(
+        TicketId $ticketId,
+        string $text,
+        UserId $poster,
+        string $model,
+        string $promptVersion,
+        UserId $chooser,
+        \DateTimeImmutable $createdAt,
+    ): self {
+        return new self(
+            $ticketId,
+            self::textOf($text),
+            SummarySource::Laptop,
+            $poster,
+            self::labelOf($model, 'model', self::MODEL_MAX_LENGTH),
+            self::labelOf($promptVersion, 'prompt version', self::PROMPT_VERSION_MAX_LENGTH),
+            $createdAt,
+            $chooser,
         );
     }
 
@@ -114,6 +134,34 @@ final readonly class Summary
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    /**
+     * Who made it the main summary; null when it became the main summary as it was written.
+     */
+    public function chosenById(): ?UserId
+    {
+        return $this->chosenById;
+    }
+
+    /**
+     * @throws SummaryRefused when nothing is left after trimming, it holds a control character other than a tab or line
+     *                        break, is not UTF-8, or has more than TEXT_MAX_LENGTH characters
+     */
+    private static function textOf(string $text): string
+    {
+        $trimmedText = trim($text);
+        if ('' === $trimmedText) {
+            throw new SummaryRefused('A summary has text; this one is blank.');
+        }
+        if (1 !== preg_match(self::PLAIN_TEXT, $trimmedText)) {
+            throw new SummaryRefused('A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.');
+        }
+        if (mb_strlen($trimmedText) > self::TEXT_MAX_LENGTH) {
+            throw new SummaryRefused(\sprintf('A summary has at most %d characters.', self::TEXT_MAX_LENGTH));
+        }
+
+        return $trimmedText;
     }
 
     /**
