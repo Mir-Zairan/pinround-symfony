@@ -7,6 +7,9 @@ namespace App\Tests\Functional\AgentApi;
 use App\AgentApi\Infrastructure\Mcp\GatedToolCallHandler;
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
 use App\AgentApi\Infrastructure\Mcp\McpSessionBinding;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
+use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
@@ -101,11 +104,11 @@ final class McpEndpointTest extends WebTestCase
     }
 
     /**
-     * WriteProbeTool is registered in the test env only (when@test in config/services.yaml), so whoami is the only tool
-     * of the product.
+     * WriteProbeTool is registered in the test env only (when@test in config/services.yaml); every other tool listed is
+     * one of the product.
      */
     #[Test]
-    public function testALiveTokenStartsASessionAndListsWhoAmIAsTheOnlyToolBesideTheTestProbe(): void
+    public function testALiveTokenStartsASessionAndListsTheProductsToolsBesideTheTestProbe(): void
     {
         [$acmeFoods, $tokenId, $token] = $this->omarsTokenInAcmeFoods();
 
@@ -127,8 +130,8 @@ final class McpEndpointTest extends WebTestCase
         $tools = $this->responseValueAt('result', 'tools');
         self::assertIsArray($tools);
         $toolsByName = array_column($tools, null, 'name');
-        self::assertEqualsCanonicalizing([WhoAmI::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
-        self::assertCount(2, $tools);
+        self::assertEqualsCanonicalizing([WhoAmI::NAME, ListMyTickets::NAME, GetRoundNotes::NAME, SetVerdict::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
+        self::assertCount(5, $tools);
         $whoAmI = $toolsByName[WhoAmI::NAME];
         self::assertIsArray($whoAmI);
         self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
