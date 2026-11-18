@@ -18,6 +18,7 @@ final class SummaryTest extends TestCase
 {
     private const string SHOP_7 = '0197a3c0-0000-7000-8000-0000000f7a01';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000f7a11';
+    private const string OMAR = '0197a3c0-0000-7000-8000-0000000f7a12';
     private const string TEXT = 'The checkout button is hidden on small screens.';
     private const string MODEL = 'claude-sonnet';
     private const string PROMPT_VERSION = 'summary.v1';
@@ -46,6 +47,34 @@ final class SummaryTest extends TestCase
                 $summary->createdAt(),
             ],
         );
+    }
+
+    #[Test]
+    public function aLaptopSummaryKeepsItsTrimmedTextAndLabelsItsPosterAndWhoChoseIt(): void
+    {
+        $createdAt = new \DateTimeImmutable('2027-03-03 10:05:00 UTC');
+
+        $summary = Summary::chosenFromLaptop(new TicketId(self::SHOP_7), "\u{20}\n".self::TEXT." \n", new UserId(self::OMAR), ' qwen3:4b ', "\t".self::PROMPT_VERSION, new UserId(self::MIA), $createdAt);
+
+        self::assertSame(
+            [self::SHOP_7, self::TEXT, SummarySource::Laptop, self::OMAR, 'qwen3:4b', self::PROMPT_VERSION, $createdAt, self::MIA],
+            [
+                $summary->ticketId()->toString(),
+                $summary->text(),
+                $summary->source(),
+                $summary->authorId()?->toString(),
+                $summary->model(),
+                $summary->promptVersion(),
+                $summary->createdAt(),
+                $summary->chosenById()?->toString(),
+            ],
+        );
+    }
+
+    #[Test]
+    public function anAiSummaryWasChosenByNobody(): void
+    {
+        self::assertNull(self::summaryOf(self::TEXT, self::MODEL, self::PROMPT_VERSION)->chosenById());
     }
 
     #[Test]
@@ -85,6 +114,23 @@ final class SummaryTest extends TestCase
         $this->expectException(SummaryRefused::class);
         $this->expectExceptionMessageIsOrContains($expectedReason);
         self::summaryOf($text, $model, $promptVersion);
+    }
+
+    #[Test]
+    #[DataProvider('refusedSummaries')]
+    public function aLaptopSummaryThatCannotBeStoredIsRefused(string $text, string $model, string $promptVersion, string $expectedReason): void
+    {
+        $this->expectException(SummaryRefused::class);
+        $this->expectExceptionMessageIsOrContains($expectedReason);
+        Summary::chosenFromLaptop(
+            new TicketId(self::SHOP_7),
+            $text,
+            new UserId(self::OMAR),
+            $model,
+            $promptVersion,
+            new UserId(self::MIA),
+            new \DateTimeImmutable('2027-03-03 10:05:00 UTC'),
+        );
     }
 
     #[Test]

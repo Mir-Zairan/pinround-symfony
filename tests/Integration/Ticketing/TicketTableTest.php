@@ -32,6 +32,7 @@ final class TicketTableTest extends KernelTestCase
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000032f2';
     private const string CHECK_VIOLATION = '23514';
     private const array AI_LABEL = ['author_id' => self::OMAR, 'model' => 'claude-sonnet', 'prompt_version' => 'summary.v1'];
+    private const array LAPTOP_LABEL = ['author_id' => self::OMAR, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'chosen_by_id' => self::LENA];
 
     protected function setUp(): void
     {
@@ -305,6 +306,45 @@ final class TicketTableTest extends KernelTestCase
             ['source' => 'ai', 'author_id' => self::OMAR, 'model' => 'claude-sonnet', 'prompt_version' => 'summary.v1'],
             ['source' => 'human', 'author_id' => null, 'model' => null, 'prompt_version' => null],
         ], $inserted);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function labelsOfALaptopSummary(): iterable
+    {
+        yield 'without its poster' => ['author_id'];
+        yield 'without its model' => ['model'];
+        yield 'without its prompt version' => ['prompt_version'];
+        yield 'without who chose it' => ['chosen_by_id'];
+    }
+
+    #[Test]
+    #[DataProvider('labelsOfALaptopSummary')]
+    public function theDatabaseRefusesALaptopSummaryWithoutItsLabel(string $missingLabel): void
+    {
+        try {
+            $this->rolledBackAsTheApp(function (Connection $connection) use ($missingLabel): void {
+                $this->insertTicket($connection, []);
+                $this->insertSummary($connection, self::TICKET, 'laptop', [...self::LAPTOP_LABEL, $missingLabel => null]);
+            });
+            self::fail('The database accepted the unlabelled laptop summary.');
+        } catch (DriverException $refusal) {
+            self::assertSame([self::CHECK_VIOLATION, true], [$refusal->getSQLState(), str_contains($refusal->getMessage(), 'tkt_summary_laptop_label_check')]);
+        }
+    }
+
+    #[Test]
+    public function theDatabaseAcceptsALabelledLaptopSummary(): void
+    {
+        $inserted = $this->rolledBackAsTheApp(function (Connection $connection): array {
+            $this->insertTicket($connection, []);
+            $this->insertSummary($connection, self::TICKET, 'laptop', self::LAPTOP_LABEL);
+
+            return $connection->fetchAllAssociative('SELECT source, author_id, model, prompt_version, chosen_by_id FROM tkt_summary WHERE ticket_id = ?', [self::TICKET]);
+        });
+
+        self::assertSame([['source' => 'laptop', 'author_id' => self::OMAR, 'model' => 'qwen3:4b', 'prompt_version' => 'summary.v1', 'chosen_by_id' => self::LENA]], $inserted);
     }
 
     #[Test]

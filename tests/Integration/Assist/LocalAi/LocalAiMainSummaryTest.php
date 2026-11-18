@@ -123,6 +123,28 @@ final class LocalAiMainSummaryTest extends KernelTestCase
         self::assertSame($inTheNextSecond, $this->proposalOf(self::SHOP_8, '2027-03-15 10:08:00.100+00')?->packageId->toString());
     }
 
+    /** Two results posted at the same moment: the larger id is the proposal, both to read and to make the main summary. */
+    #[Test]
+    public function ofTwoResultsPostedAtOnceTheLargerIdIsTheProposalAndTheOtherIsRefused(): void
+    {
+        $smallerId = '0197a3c0-0000-7000-8000-0000000f9a3c';
+        $largerId = '0197a3c0-0000-7000-8000-0000000f9a3d';
+        // The smaller id is inserted first, so a read that ties on the time alone returns it.
+        $this->addResult(self::ACME_FOODS, $smallerId, self::SHOP_8, '2027-03-15 10:08:00.400', 'The smaller id.');
+        $this->addResult(self::ACME_FOODS, $largerId, self::SHOP_8, '2027-03-15 10:08:00.400', 'The larger id.');
+
+        self::assertSame($largerId, $this->proposalOf(self::SHOP_8, null)?->packageId->toString());
+        try {
+            $this->makeMainSummary($smallerId, self::SHOP_8, null);
+            self::fail('The smaller id of two results posted at once was made the main summary.');
+        } catch (MainSummaryRefused $refusal) {
+            self::assertSame(MainSummaryRefused::NOT_A_PROPOSAL, $refusal->refusalCode);
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+        self::assertSame([], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_8));
+        self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30'], $this->madeMainTimes());
+    }
+
     /**
      * Rows kept before accept() capped a summary result at a summary's length: a newer one over the cap is passed
      * over for the newest one at the cap, and cannot be made the main summary.

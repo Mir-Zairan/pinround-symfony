@@ -358,6 +358,8 @@ final class DbalLocalPackagesTest extends KernelTestCase
         yield 'issue' => ['issue'];
         yield 'issuedOf' => ['issuedOf'];
         yield 'post' => ['post'];
+        yield 'proposalOf' => ['proposalOf'];
+        yield 'markMadeMain' => ['markMadeMain'];
     }
 
     #[Test]
@@ -450,10 +452,11 @@ final class DbalLocalPackagesTest extends KernelTestCase
             'used_at' => self::NOW,
             'result_text' => str_repeat('é', 10000),
             'model' => $model,
+            'result_label' => str_repeat('é', 400),
         ]));
 
         self::assertSame(
-            [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', str_repeat('é', 200), '2027-03-15 10:00:00.250', '2027-03-15 10:05:00.250', '2027-03-15 10:02:00.500', str_repeat('é', 10000), $model, self::LABEL]],
+            [[self::NEW_PACKAGE, self::OMAR, self::TICKET, 'summary', str_repeat('é', 200), '2027-03-15 10:00:00.250', '2027-03-15 10:05:00.250', '2027-03-15 10:02:00.500', str_repeat('é', 10000), $model, str_repeat('é', 400)]],
             $this->rowsAs(self::ACME_FOODS, self::NEW_PACKAGE),
         );
     }
@@ -469,6 +472,8 @@ final class DbalLocalPackagesTest extends KernelTestCase
             'issue' => $this->issueNewPackage($organizationId, 10),
             'issuedOf' => $this->packages()->issuedOf(new OrganizationId($organizationId), new LocalPackageId(self::ACME_PACKAGE), new UserId(self::OMAR)),
             'post' => $this->packages()->post(new OrganizationId($organizationId), new LocalPackageId(self::ACME_PACKAGE), new UserId(self::OMAR), self::RESULT, new LocalModelName(self::MODEL), self::LABEL),
+            'proposalOf' => $this->packages()->proposalOf(new OrganizationId($organizationId), new TicketId(self::TICKET), null),
+            'markMadeMain' => $this->packages()->markMadeMain(new OrganizationId($organizationId), new LocalPackageId(self::ACME_PACKAGE), new TicketId(self::TICKET), null),
             default => throw new \UnexpectedValueException('Unknown operation '.$operation),
         };
     }

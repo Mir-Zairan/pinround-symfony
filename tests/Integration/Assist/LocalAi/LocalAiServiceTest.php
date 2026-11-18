@@ -172,7 +172,7 @@ final class LocalAiServiceTest extends KernelTestCase
         self::assertNull($package->schema);
         self::assertSame('2027-03-15 10:05:00', $package->expiresAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'));
         self::assertSame(
-            [[$package->packageId->toString(), self::OMAR, self::checkoutTicketId()->toString(), 'summary', 'summary.v1', '2027-03-15 10:00:00', '2027-03-15 10:05:00', null, null, null]],
+            [[$package->packageId->toString(), self::OMAR, self::checkoutTicketId()->toString(), 'summary', 'summary.v1', '2027-03-15 10:00:00', '2027-03-15 10:05:00', null, null, null, null]],
             $this->packageRowsOf(self::ACME_FOODS),
         );
     }
@@ -279,7 +279,7 @@ final class LocalAiServiceTest extends KernelTestCase
             [$result->packageId->toString(), $result->text, $result->model->value, $result->posterId->toString(), $result->label, $result->postedAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s')],
         );
         self::assertSame(
-            [[$package->packageId->toString(), self::OMAR, self::checkoutTicketId()->toString(), 'summary', 'summary.v1', '2027-03-15 10:00:00', '2027-03-15 10:05:00', '2027-03-15 10:02:00', self::CHECKED_RESULT, self::MODEL]],
+            [[$package->packageId->toString(), self::OMAR, self::checkoutTicketId()->toString(), 'summary', 'summary.v1', '2027-03-15 10:00:00', '2027-03-15 10:05:00', '2027-03-15 10:02:00', self::CHECKED_RESULT, self::MODEL, 'posted by Omar using local model qwen3:4b (unverified)']],
             $this->packageRowsOf(self::ACME_FOODS),
         );
         self::assertSame(self::CURRENT_SUMMARY, $historyBefore->current?->text);
@@ -756,7 +756,7 @@ final class LocalAiServiceTest extends KernelTestCase
 
     /**
      * @return list<list<mixed>> the packages pinround_app sees under $organizationId, by id: id, user, ticket, purpose,
-     *                           prompt version, created, expires, used (UTC), result text, model
+     *                           prompt version, created, expires, used (UTC), result text, model, result label
      */
     private function packageRowsOf(string $organizationId): array
     {
@@ -765,7 +765,7 @@ final class LocalAiServiceTest extends KernelTestCase
                     to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
                     to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
                     to_char(used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
-                    result_text, model
+                    result_text, model, result_label
              FROM ast_local_package ORDER BY id",
         ));
     }
