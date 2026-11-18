@@ -9,7 +9,7 @@ mcp:
             version: '1.0.0'
             # The bundle refuses a namespace that matches no service, and no tool exists yet; P09.T3 narrows this to
             # 'App\AgentApi\Infrastructure\Mcp\Tool\' with its first tool, so no vendor service can add a tool.
-            # McpServerTest pins that tools/list is empty until then.
+            # McpEndpointTest pins that tools/list is empty until then.
             registry: '*'
             http:
                 path: /mcp
