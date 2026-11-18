@@ -22,8 +22,8 @@ use Symfony\Component\Messenger\Stamp\DispatchAfterCurrentBusStamp;
 use Symfony\Component\Mime\Address;
 
 /**
- * Claims one page of the organization's tokens that stop working in the run's expiry range and emails each owner one
- * warning listing theirs, in worker-notify inside the bus transaction under the message's TenantStamp. The claim marks each
+ * Claims one page of the organization's tokens that stop working in the run's expiry range, but not before now, and
+ * emails each owner one warning listing theirs, in worker-notify inside the bus transaction under the message's TenantStamp. The claim marks each
  * token warned in one conditional statement, so a token is warned once even when two runs or a redelivery overlap. The
  * emails, and the message for the next page when this one is full, are sent only once the transaction commits, so a
  * rollback sends nothing and leaves the tokens to the retry. An owner with no address (blocked) is sent nothing.
@@ -69,8 +69,14 @@ final readonly class SendApiTokenExpiryWarningsHandler
             throw new MessageForAnotherTenantRefused();
         }
 
-        [$expiresFrom, $expiresBefore] = $warnings->expiryRange();
-        $claimed = $this->apiTokens->claimExpiryWarnings($expiresFrom, $expiresBefore, $this->clock->now(), $this->tokensPerPage);
+        [$runExpiresFrom, $expiresBefore] = $warnings->expiryRange();
+        $now = $this->clock->now();
+        // A page handled late (a retry, a backlog, the next page) must not warn a token that has stopped working since.
+        $expiresFrom = $now > $runExpiresFrom ? $now : $runExpiresFrom;
+        if ($expiresFrom >= $expiresBefore) {
+            return;
+        }
+        $claimed = $this->apiTokens->claimExpiryWarnings($expiresFrom, $expiresBefore, $now, $this->tokensPerPage);
 
         /** @var array<string, list<ExpiringApiToken>> $tokensByOwner */
         $tokensByOwner = [];

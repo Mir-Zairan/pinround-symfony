@@ -21,6 +21,11 @@ final class ApiToken implements TenantOwned
     public const int MAX_LIFETIME_DAYS = 365;
     public const int NAME_MAX_LENGTH = 100;
     public const int DISPLAY_PREFIX_LENGTH = 8;
+    /**
+     * A token is warned within this many days before it expires, and only when it lives longer than that: a shorter
+     * one would be warned the day it is made. The resolver organizations_with_expiring_api_tokens repeats the number.
+     */
+    public const int EXPIRY_WARNING_WINDOW_DAYS = 8;
     private const int RANDOM_BYTES = 32;
     // Any Unicode space, the no-break and ideographic ones included, which trim() leaves in place.
     private const string SPACE_AT_EDGES = '/\A[\p{Z}\s]+|[\p{Z}\s]+\z/u';
@@ -193,7 +198,7 @@ final class ApiToken implements TenantOwned
     }
 
     /**
-     * When the warning job claimed the token to email its owner that it stops working in about a week; null until then.
+     * When the warning job claimed the token to email its owner that it stops working soon; null until then.
      * A token already loaded keeps its old value.
      */
     public function expiryWarnedAt(): ?\DateTimeImmutable

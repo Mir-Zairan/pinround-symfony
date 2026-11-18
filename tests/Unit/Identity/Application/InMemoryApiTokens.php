@@ -213,7 +213,8 @@ final class InMemoryApiTokens implements ApiTokens
             fn (ApiToken $token): bool => !isset($this->revokedAt[self::rowKey($token->organizationId(), $token->id())])
                 && !isset($this->expiryWarnedAt[self::rowKey($token->organizationId(), $token->id())])
                 && self::cutToSecond($token->expiresAt()) >= $from
-                && self::cutToSecond($token->expiresAt()) < $before,
+                && self::cutToSecond($token->expiresAt()) < $before
+                && self::cutToSecond($token->expiresAt())->getTimestamp() - self::cutToSecond($token->createdAt())->getTimestamp() > ApiToken::EXPIRY_WARNING_WINDOW_DAYS * 86_400,
         ));
         usort($claimable, static fn (ApiToken $a, ApiToken $b): int => [self::cutToSecond($a->expiresAt()), strtolower($a->id())] <=> [self::cutToSecond($b->expiresAt()), strtolower($b->id())]);
 

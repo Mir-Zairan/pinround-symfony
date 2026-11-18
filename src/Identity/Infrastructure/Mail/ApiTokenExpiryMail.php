@@ -15,9 +15,9 @@ use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Routing\RouterInterface;
 
 /**
- * The email that tells an owner their API tokens stop working in about a week, plain text and HTML, rendered at once
- * so a queued message carries only what the email says: per token its name, prefix and expiry in the owner's time
- * zone, and a link to their Tokens page. Never the token itself, which is not kept. The From address comes from
+ * The email that tells an owner their API tokens stop working soon, plain text and HTML, rendered at once so a queued
+ * message carries only what the email says: per token its name, prefix and expiry in the owner's time zone, and a link
+ * to their Tokens page. It names no time span, as a late warning after a missed run can come with only days left. Never the token itself, which is not kept. The From address comes from
  * mailer.yaml; the link is built on DEFAULT_URI, never on a request context, whose Host a visitor controls.
  */
 final readonly class ApiTokenExpiryMail
