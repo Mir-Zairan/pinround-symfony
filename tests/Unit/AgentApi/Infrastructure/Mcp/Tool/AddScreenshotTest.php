@@ -17,11 +17,10 @@ use App\Media\Api\UploadIntentNotFound;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Review\Api\AddedDraftScreenshot;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundPermission;
-use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundRefused;
-use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -36,9 +35,10 @@ use Symfony\Component\Clock\MockClock;
 
 /**
  * add_screenshot over fakes of Media's, Review's and Ticketing's Api: its input schema as the gate's SchemaValidator
- * reads it, the round an upload finds and its voter attribute, what each processing state answers, the Review commands
- * a ready picture runs, and Review's and Media's refusals as its own. Omar owns an unshared draft on SHOP-1 that holds
- * one picture already, and a shared draft there; Mia owns an unshared draft there. SHOP-2 is a ticket of its own.
+ * reads it, the round an upload finds and its voter attribute, what each processing state answers, the one Review
+ * command a ready picture runs and both of its answers, and Review's and Media's refusals as its own. Omar owns an
+ * unshared draft on SHOP-1 that holds one picture already, and a shared draft there; Mia owns an unshared draft there.
+ * SHOP-2 is a ticket of its own.
  */
 final class AddScreenshotTest extends TestCase
 {
@@ -67,7 +67,7 @@ final class AddScreenshotTest extends TestCase
 
     private KnownDraftRounds $rounds;
     private ScriptedUploadCompletions $uploads;
-    private RecordingDraftScreenshots $roundCommands;
+    private RecordingDraftScreenshots $draftScreenshots;
 
     protected function setUp(): void
     {
@@ -75,11 +75,7 @@ final class AddScreenshotTest extends TestCase
         $omar = new UserId(self::OMAR);
         $shop1 = new TicketId(self::SHOP_1);
         $this->rounds = new KnownDraftRounds($acmeFoods);
-        $addedShot = new RoundScreenshotView(self::OMARS_ADDED_SHOT, self::ADDED_UPLOAD, 0, null, null, 'Cart', null, [
-            new RoundPinView('019a5f00-0000-7000-8000-00000000e771', 1, 10.0, 20.0, 'The total', null, 'human', null, $omar),
-            new RoundPinView('019a5f00-0000-7000-8000-00000000e772', 2, 30.0, 40.0, 'The fee', null, 'human', null, $omar),
-        ]);
-        $this->rounds->add($shop1, new RoundView(self::OMARS_DRAFT, null, RoundView::DRAFT, $omar, null, 'open', [$addedShot]));
+        $this->rounds->add($shop1, new RoundView(self::OMARS_DRAFT, null, RoundView::DRAFT, $omar, null, 'open', []));
         $this->rounds->add($shop1, new RoundView(self::OMARS_SHARED_DRAFT, 1, RoundView::DRAFT, $omar, new \DateTimeImmutable('2026-11-05 10:00:00 UTC'), 'open', []));
         $this->rounds->add($shop1, new RoundView(self::MIAS_DRAFT, null, RoundView::DRAFT, new UserId(self::MIA), null, 'open', []));
 
@@ -96,7 +92,8 @@ final class AddScreenshotTest extends TestCase
         $this->uploads->add($acmeFoods, $omar, self::TICKET_UPLOAD, new UploadTarget('ticket', self::SHOP_1), $ready(self::TICKET_UPLOAD));
         $this->uploads->add($acmeFoods, $omar, self::UNKNOWN_ROUND_UPLOAD, $roundOf('019a5f00-0000-7000-8000-00000000e749'), $ready(self::UNKNOWN_ROUND_UPLOAD));
         $this->uploads->add(new OrganizationId(self::BETA_BAKERY), $omar, self::BETA_BAKERY_UPLOAD, $roundOf(self::OMARS_DRAFT), $ready(self::BETA_BAKERY_UPLOAD));
-        $this->roundCommands = new RecordingDraftScreenshots();
+        $this->draftScreenshots = new RecordingDraftScreenshots();
+        $this->draftScreenshots->heldBefore[self::ADDED_UPLOAD] = new AddedDraftScreenshot(self::OMARS_ADDED_SHOT, true, 2);
     }
 
     /**
@@ -266,24 +263,19 @@ final class AddScreenshotTest extends TestCase
             'pins' => [['x_pct' => 12.5, 'y_pct' => 40, 'note' => 'The total'], ['x_pct' => 0, 'y_pct' => 100, 'note' => '']],
         ]);
 
-        $newShot = RecordingDraftScreenshots::NEW_SCREENSHOT;
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::READY_UPLOAD, '2026-11-10 09:00:20']], $this->roundCommands->added);
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, $newShot, 'Cart', 'The total leaves out the fee.']], $this->roundCommands->edited);
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, $newShot, [[12.5, 40.0, 'The total'], [0.0, 100.0, '']]]], $this->roundCommands->pinsSet);
-        $answer = ['screenshot_id' => $newShot, 'round_id' => self::OMARS_DRAFT, 'status' => AddScreenshot::ADDED, 'pin_count' => 2];
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::READY_UPLOAD, 'Cart', 'The total leaves out the fee.', [[12.5, 40.0, 'The total'], [0.0, 100.0, '']], '2026-11-10 09:00:20']], $this->draftScreenshots->added);
+        $answer = ['screenshot_id' => RecordingDraftScreenshots::NEW_SCREENSHOT, 'round_id' => self::OMARS_DRAFT, 'status' => AddScreenshot::ADDED, 'pin_count' => 2];
         self::assertSame($answer, $result['structured']);
         self::assertSame(json_encode($answer, \JSON_THROW_ON_ERROR), $result['text']);
     }
 
     #[Test]
-    public function aReadyPictureAloneIsAddedWithoutAnEditOrPins(): void
+    public function aReadyPictureAloneIsAddedWithNoTextOrPins(): void
     {
         $result = $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'pins' => []]);
 
-        self::assertCount(1, $this->roundCommands->added);
-        self::assertSame([], $this->roundCommands->edited);
-        self::assertSame([], $this->roundCommands->pinsSet);
-        self::assertSame(0, $result['structured']['pin_count'] ?? null);
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::READY_UPLOAD, null, null, [], '2026-11-10 09:00:20']], $this->draftScreenshots->added);
+        self::assertSame(['screenshot_id' => RecordingDraftScreenshots::NEW_SCREENSHOT, 'round_id' => self::OMARS_DRAFT, 'status' => AddScreenshot::ADDED, 'pin_count' => 0], $result['structured']);
     }
 
     #[Test]
@@ -291,11 +283,11 @@ final class AddScreenshotTest extends TestCase
     {
         $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'summary' => 'The fee.']);
 
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, RecordingDraftScreenshots::NEW_SCREENSHOT, null, 'The fee.']], $this->roundCommands->edited);
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::READY_UPLOAD, null, 'The fee.', [], '2026-11-10 09:00:20']], $this->draftScreenshots->added);
     }
 
     #[Test]
-    public function aPictureInTheDraftAlreadyIsAnsweredAsItIsAndNothingIsAddedOrChanged(): void
+    public function aPictureReviewFindsInTheDraftAlreadyIsAnsweredAsAddedBeforeWithItsOwnPinCount(): void
     {
         $result = $this->callFor(['key' => 'SHOP-1', 'upload_id' => strtoupper(self::ADDED_UPLOAD), 'title' => 'Another title', 'pins' => [['x_pct' => 1, 'y_pct' => 1, 'note' => 'Another']]]);
 
@@ -326,39 +318,30 @@ final class AddScreenshotTest extends TestCase
         $this->assertNothingChanged();
     }
 
-    #[Test]
-    public function aDraftThatIsNoLongerTheCallersWhenThePictureIsReadyIsNotFound(): void
-    {
-        $gone = new RoundAccessFacts(new OrganizationId(self::ACME_FOODS), '019a5f00-0000-7000-8000-00000000e74f', new TicketId(self::SHOP_1), new UserId(self::OMAR), true, false);
-
-        $refusal = self::refusalOf(fn () => $this->addScreenshot()->call(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD], new ToolTarget(RoundPermission::EDIT, $gone, 'round', $gone->roundId)));
-
-        self::assertSame(ToolCallOutcome::NotFound, $refusal->outcome);
-        $this->assertNothingChanged();
-    }
-
     /**
-     * @return iterable<string, array{string, RoundRefused, ToolCallOutcome, string}>
+     * @return iterable<string, array{RoundRefused, ToolCallOutcome, string}>
      */
     public static function roundRefusals(): iterable
     {
-        yield 'the draft is gone' => ['addDraftScreenshot', new RoundRefused(RoundRefused::NOT_FOUND), ToolCallOutcome::NotFound, ToolRefusal::NOT_FOUND];
-        yield 'shared since it was read' => ['addDraftScreenshot', RoundRefused::readOnly('This draft round is shared, so it no longer changes.'), ToolCallOutcome::ReadOnly, ToolRefusal::READ_ONLY];
-        yield 'a full draft' => ['addDraftScreenshot', new RoundRefused('A round holds at most 50 screenshots.'), ToolCallOutcome::Refused, 'A round holds at most 50 screenshots.'];
-        yield 'a title Review refuses' => ['editDraftScreenshot', RoundRefused::invalidContent('A picture title holds at most 120 characters.'), ToolCallOutcome::InvalidInput, \sprintf(ToolRefusal::INVALID_INPUT, 'A picture title holds at most 120 characters.')];
-        yield 'changed meanwhile' => ['setDraftPins', new RoundRefused(RoundRefused::DRAFT_CHANGED), ToolCallOutcome::Refused, RoundRefused::DRAFT_CHANGED];
+        yield 'the draft is gone or no longer the caller\'s' => [new RoundRefused(RoundRefused::NOT_FOUND), ToolCallOutcome::NotFound, ToolRefusal::NOT_FOUND];
+        yield 'shared since it was read' => [RoundRefused::readOnly('This draft round is shared, so it no longer changes.'), ToolCallOutcome::ReadOnly, ToolRefusal::READ_ONLY];
+        yield 'a full draft' => [RoundRefused::invalidContent('A round holds at most 50 screenshots.'), ToolCallOutcome::InvalidInput, \sprintf(ToolRefusal::INVALID_INPUT, 'A round holds at most 50 screenshots.')];
+        yield 'a title Review refuses' => [RoundRefused::invalidContent('A picture title holds at most 120 characters.'), ToolCallOutcome::InvalidInput, \sprintf(ToolRefusal::INVALID_INPUT, 'A picture title holds at most 120 characters.')];
+        yield 'changed meanwhile' => [new RoundRefused(RoundRefused::DRAFT_CHANGED), ToolCallOutcome::Refused, RoundRefused::DRAFT_CHANGED];
+        yield 'a picture Review does not take' => [new RoundRefused(RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU), ToolCallOutcome::Refused, RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU];
     }
 
     #[Test]
     #[DataProvider('roundRefusals')]
-    public function reviewsRefusalIsTheToolsOwnByItsKind(string $command, RoundRefused $roundRefusal, ToolCallOutcome $outcome, string $message): void
+    public function reviewsRefusalIsTheToolsOwnByItsKind(RoundRefused $roundRefusal, ToolCallOutcome $outcome, string $message): void
     {
-        $this->roundCommands->refusals[$command] = $roundRefusal;
+        $this->draftScreenshots->refusal = $roundRefusal;
 
         $refusal = self::refusalOf(fn () => $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'title' => 'Cart', 'pins' => [['x_pct' => 1, 'y_pct' => 1, 'note' => 'The total']]]));
 
         self::assertSame($outcome, $refusal->outcome);
         self::assertSame($message, $refusal->getMessage());
+        $this->assertNothingChanged();
     }
 
     #[Test]
@@ -371,9 +354,7 @@ final class AddScreenshotTest extends TestCase
 
     private function assertNothingChanged(): void
     {
-        self::assertSame([], $this->roundCommands->added);
-        self::assertSame([], $this->roundCommands->edited);
-        self::assertSame([], $this->roundCommands->pinsSet);
+        self::assertSame([], $this->draftScreenshots->added);
     }
 
     /**
@@ -460,7 +441,7 @@ final class AddScreenshotTest extends TestCase
             },
             $this->uploads,
             $this->rounds,
-            $this->roundCommands,
+            $this->draftScreenshots,
             new MockClock(self::NOW),
         );
     }

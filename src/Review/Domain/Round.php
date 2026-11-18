@@ -157,6 +157,31 @@ final class Round
     }
 
     /**
+     * The round's screenshot of that picture, the first by position when it holds the picture twice, or null.
+     *
+     * @param string $mediaId in any case
+     */
+    public function screenshotOfMedia(string $mediaId): ?Screenshot
+    {
+        $lowercaseMediaId = strtolower($mediaId);
+        foreach ($this->screenshots as $screenshot) {
+            if ($screenshot->mediaId() === $lowercaseMediaId) {
+                return $screenshot;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @throws \DomainException when the round is not an open unshared draft of $actorId; the round stays as it is
+     */
+    public function refuseUnlessEditableBy(UserId $actorId): void
+    {
+        $this->requireEditableDraft($actorId);
+    }
+
+    /**
      * Removes the picture with its pins; the others keep their positions.
      *
      * @throws \DomainException when the round is not an open unshared draft of $actorId, or has no such picture; the

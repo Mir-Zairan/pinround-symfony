@@ -15,12 +15,14 @@ use App\Media\Api\UploadCompletions;
 use App\Media\Api\UploadIntentNotFound;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTargetDenied;
+use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\ScreenshotWithPins;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
@@ -32,12 +34,12 @@ use Psr\Clock\ClockInterface;
 
 /**
  * add_screenshot (P09.T5 step 3, FR-RND-16): puts a picture the caller uploaded through create_upload into their own
- * unshared draft round of the ticket, with its title, summary and pins, through Review's draft commands and the voter of
- * the draft round editor (RoundPermission). Holds no state (ADR-0008).
+ * unshared draft round of the ticket, with its title, summary and pins, through Review's DraftScreenshotCommands and the
+ * voter of the draft round editor (RoundPermission). Holds no state (ADR-0008).
  *
  * The upload is finished with Media's UploadCompletions in the gate's savepoint. A picture still processing is a
- * non-error answer, not a refusal, so the completion is kept and the next call with the same upload_id finds it. A
- * picture already in the draft is answered as it is, so the same upload_id never adds a second screenshot.
+ * non-error answer, not a refusal, so the completion is kept and the next call with the same upload_id finds it. Review
+ * answers a picture already in the draft as it is, so the same upload_id never adds a second screenshot.
  */
 final readonly class AddScreenshot implements AgentTool
 {
@@ -50,12 +52,6 @@ final readonly class AddScreenshot implements AgentTool
     public const string PICTURE_REJECTED = 'The picture was rejected: it is not a PNG, JPEG or WebP screenshot we can read, or it is too big. Upload another one with create_upload.';
     public const string UPLOAD_EXPIRED = 'This upload expired before it was added. Begin a new one with create_upload.';
 
-    /** RoundMediaTarget::KIND, which this module may not read. */
-    private const string ROUND_UPLOAD_KIND = 'round';
-    /** Review's caps (Screenshot and Pin), which this module may not read; Review checks them again after trimming. */
-    private const int MAX_TITLE_LENGTH = 120;
-    private const int MAX_SUMMARY_LENGTH = 600;
-    private const int MAX_PIN_NOTE_LENGTH = 1000;
     /** A ticket key or an id is far shorter; the cap only keeps a lookup from reading megabytes. */
     private const int MAX_KEY_OR_ID_LENGTH = 64;
 
@@ -65,7 +61,7 @@ final readonly class AddScreenshot implements AgentTool
         private TicketKeyQueries $ticketKeyQueries,
         private UploadCompletions $uploadCompletions,
         private RoundQueries $roundQueries,
-        private RoundCommands $roundCommands,
+        private DraftScreenshotCommands $draftScreenshotCommands,
         private ClockInterface $clock,
     ) {
     }
@@ -80,8 +76,8 @@ final readonly class AddScreenshot implements AgentTool
                 'properties' => [
                     'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
                     'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => 'The upload_id create_upload gave, after the file was PUT to its put_url.'],
-                    'title' => ['type' => 'string', 'maxLength' => self::MAX_TITLE_LENGTH, 'description' => 'What the picture is of, at most 120 characters.'],
-                    'summary' => ['type' => 'string', 'maxLength' => self::MAX_SUMMARY_LENGTH, 'description' => 'What the picture shows, in plain words: at most 600 characters.'],
+                    'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
+                    'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'pins' => [
                         'type' => 'array',
                         'maxItems' => RoundCommands::MAX_PINS_PER_SCREENSHOT,
@@ -91,7 +87,7 @@ final readonly class AddScreenshot implements AgentTool
                             'properties' => [
                                 'x_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the left edge, in percent of the width.'],
                                 'y_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the top edge, in percent of the height.'],
-                                'note' => ['type' => 'string', 'maxLength' => self::MAX_PIN_NOTE_LENGTH, 'description' => 'What is at the pin, at most 1,000 characters.'],
+                                'note' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_PIN_NOTE_LENGTH, 'description' => \sprintf('What is at the pin, at most %s characters.', number_format(RoundCommands::MAX_PIN_NOTE_LENGTH))],
                             ],
                             'required' => ['x_pct', 'y_pct', 'note'],
                             'additionalProperties' => false,
@@ -128,7 +124,7 @@ final readonly class AddScreenshot implements AgentTool
     {
         $ticketId = $this->ticketKeyQueries->idOf(self::stringAt($arguments, 'key')) ?? throw ToolRefusal::notFound();
         $uploadTarget = $this->uploadCompletions->targetOf($this->organizationId(), $this->callerId(), self::stringAt($arguments, 'upload_id'));
-        if (null === $uploadTarget || self::ROUND_UPLOAD_KIND !== $uploadTarget->kind) {
+        if (null === $uploadTarget || DraftScreenshotCommands::UPLOAD_TARGET_KIND !== $uploadTarget->kind) {
             throw ToolRefusal::notFound();
         }
         $round = $this->roundQueries->accessFactsOf($uploadTarget->id);
@@ -140,8 +136,8 @@ final readonly class AddScreenshot implements AgentTool
     }
 
     /**
-     * Finishes the upload, then adds the ready picture with its title, summary and pins, each through its own Review
-     * command; the gate's savepoint takes all of them back when one refuses.
+     * Finishes the upload, then adds the ready picture with its title, summary and pins in one Review command; the
+     * gate's savepoint takes the completion back when Review refuses.
      *
      * @throws ToolRefusal     not found, read-only (a round that is not an unshared draft, or one shared meanwhile),
      *                         invalid input (content Review refuses), or a plain refusal (a rejected picture, an
@@ -184,39 +180,29 @@ final readonly class AddScreenshot implements AgentTool
 
     /**
      * @param array<string, mixed> $arguments
+     *
+     * @throws ToolRefusal as call() says, for Review's refusal
      */
     private function addOnce(array $arguments, string $roundId, string $mediaId): CallToolResult
     {
-        $callerId = $this->callerId();
-        $draft = $this->roundQueries->draftOf($roundId, $callerId) ?? throw ToolRefusal::notFound();
-        foreach ($draft->screenshots as $screenshot) {
-            if (strtolower($screenshot->mediaId) === strtolower($mediaId)) {
-                return self::answerOf(['screenshot_id' => $screenshot->id, 'round_id' => $draft->id, 'status' => self::ADDED_BEFORE, 'pin_count' => \count($screenshot->pins)]);
-            }
-        }
-
-        $title = self::optionalStringAt($arguments, 'title');
-        $summary = self::optionalStringAt($arguments, 'summary');
-        $pins = self::placedPinsOf($arguments);
-        $now = $this->clock->now();
+        $screenshot = new ScreenshotWithPins($mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), self::placedPinsOf($arguments));
         try {
-            $screenshotId = $this->roundCommands->addDraftScreenshot($roundId, $callerId, $mediaId, $now);
-            if (null !== $title || null !== $summary) {
-                $this->roundCommands->editDraftScreenshot($roundId, $callerId, $screenshotId, $title, $summary, $now);
-            }
-            if ([] !== $pins) {
-                $this->roundCommands->setDraftPins($roundId, $callerId, $screenshotId, $pins, $now);
-            }
+            $added = $this->draftScreenshotCommands->addDraftScreenshotOnce($roundId, $this->callerId(), $screenshot, $this->clock->now());
         } catch (RoundRefused $refused) {
             throw self::toolRefusalOf($refused);
         }
 
-        return self::answerOf(['screenshot_id' => $screenshotId, 'round_id' => $roundId, 'status' => self::ADDED, 'pin_count' => \count($pins)]);
+        return self::answerOf([
+            'screenshot_id' => $added->screenshotId,
+            'round_id' => $roundId,
+            'status' => $added->wasAddedBefore ? self::ADDED_BEFORE : self::ADDED,
+            'pin_count' => $added->pinCount,
+        ]);
     }
 
     /**
-     * Review's refusal as the tool's, by the kind Review gave it. One of no kind, such as a full draft or one another
-     * request saved meanwhile, is plain text for the person, so it goes to the client as it is.
+     * Review's refusal as the tool's, by the kind Review gave it. One of no kind, such as DRAFT_CHANGED for a draft
+     * another request saved meanwhile, is plain text for the person, so it goes to the client as it is.
      */
     private static function toolRefusalOf(RoundRefused $refused): ToolRefusal
     {

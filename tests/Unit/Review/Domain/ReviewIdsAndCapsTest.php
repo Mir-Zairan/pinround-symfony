@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Review\Domain;
 
+use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\RoundCommands;
 use App\Review\Domain\AiPinState;
 use App\Review\Domain\AreaId;
@@ -22,6 +23,7 @@ use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotVerdict;
 use App\Review\Domain\VariantLabel;
+use App\Review\UI\Media\RoundMediaTarget;
 use App\Review\UI\PinView;
 use App\Review\UI\ScreenshotView;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -111,6 +113,9 @@ final class ReviewIdsAndCapsTest extends TestCase
         yield 'screenshot summary' => [Screenshot::SUMMARY_MAX_LENGTH, ScreenshotView::SUMMARY_MAX_LENGTH];
         yield 'pin note' => [Pin::NOTE_MAX_LENGTH, PinView::NOTE_MAX_LENGTH];
         yield 'pins on a screenshot, as the round commands take them' => [Screenshot::MAX_PINS, RoundCommands::MAX_PINS_PER_SCREENSHOT];
+        yield 'screenshot title, as the round commands take it' => [Screenshot::TITLE_MAX_LENGTH, RoundCommands::MAX_TITLE_LENGTH];
+        yield 'screenshot summary, as the round commands take it' => [Screenshot::SUMMARY_MAX_LENGTH, RoundCommands::MAX_SUMMARY_LENGTH];
+        yield 'pin note, as the round commands take it' => [Pin::NOTE_MAX_LENGTH, RoundCommands::MAX_PIN_NOTE_LENGTH];
     }
 
     #[Test]
@@ -118,6 +123,21 @@ final class ReviewIdsAndCapsTest extends TestCase
     public function theDomainCapEqualsTheCapOfTheComponent(int $domainCap, int $componentCap): void
     {
         self::assertSame($componentCap, $domainCap);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function uploadTargetKindsOfApiAndComponent(): iterable
+    {
+        yield 'a draft round, as add_screenshot finds it' => [DraftScreenshotCommands::UPLOAD_TARGET_KIND, RoundMediaTarget::KIND];
+    }
+
+    #[Test]
+    #[DataProvider('uploadTargetKindsOfApiAndComponent')]
+    public function theUploadTargetKindOfTheApiEqualsTheKindOfTheRoundMediaTarget(string $apiKind, string $componentKind): void
+    {
+        self::assertSame($componentKind, $apiKind);
     }
 
     #[Test]

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Review\Doctrine;
 
 use App\Media\Api\MediaImageStatus;
+use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\DraftDecision;
@@ -87,6 +89,8 @@ final class DbalRoundsDraftTest extends KernelTestCase
 
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000f6151';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000f6152';
+    /** Ready, uploaded by Lena, and in no round. */
+    private const string THIRD_MEDIA = '0197a3c0-0000-7000-8000-0000000f6153';
 
     // An offset other than UTC, so a time written without its offset would read back hours off.
     private const string STARTED_AT = '2027-03-16 09:00:00+01:00';
@@ -600,6 +604,32 @@ final class DbalRoundsDraftTest extends KernelTestCase
     }
 
     /**
+     * The second call sends the same picture in upper case with other text and pins, as a retry may.
+     */
+    #[Test]
+    public function addingThePictureTwiceStoresOneScreenshotWithTheTextAndPinsOfTheFirstCall(): void
+    {
+        $before = $this->rowsOfRound(self::DRAFT);
+        $otherRowsBefore = $this->rowsOfOtherRoundsThan(self::DRAFT);
+        $commands = $this->draftCommands();
+
+        $first = $this->committed(self::ACME_FOODS, static fn () => $commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(self::THIRD_MEDIA, 'Panier', null, [new PlacedPin(50.0, 25.0, 'Le total')]), self::savedAt()));
+        $second = $this->committed(self::ACME_FOODS, static fn () => $commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(strtoupper(self::THIRD_MEDIA), 'Another title', 'Another summary', []), self::savedAt()));
+
+        self::assertFalse($first->wasAddedBefore);
+        self::assertTrue($second->wasAddedBefore);
+        self::assertSame([$first->screenshotId, 1], [$second->screenshotId, $second->pinCount]);
+        $after = $this->rowsOfRound(self::DRAFT);
+        self::assertSame([self::FIRST_MEDIA, self::SECOND_MEDIA, self::THIRD_MEDIA], array_column($after['screenshots'], 'media_id'));
+        self::assertSame([$first->screenshotId, 'Panier', null], [$after['screenshots'][2]['id'], $after['screenshots'][2]['title'], $after['screenshots'][2]['summary']]);
+        self::assertSame([$first->screenshotId, 'Le total'], [$after['pins'][2]['screenshot_id'], $after['pins'][2]['note']]);
+        self::assertCount(\count($before['pins']) + 1, $after['pins']);
+        // Three changes in the first call's one save, and none by the second.
+        self::assertSame(self::SEEDED_VERSION + 3, $after['round']['version']);
+        self::assertSame($otherRowsBefore, $this->rowsOfOtherRoundsThan(self::DRAFT));
+    }
+
+    /**
      * Two requests share one draft at once. Both read it unshared; the first takes the ticket's number lock and
      * shares it; the second waits at the lock (lock_timeout ends the wait here, as PHP cannot wait in two places) and,
      * once the first commits, finds the draft changed. Exactly one share lands, under one number.
@@ -849,7 +879,10 @@ final class DbalRoundsDraftTest extends KernelTestCase
             $this->rounds(),
             new InMemoryTicketTurnQueries([], new TicketId(self::EMPTY_TICKET)),
             $tenantContext,
-            new ReportPictures(new InMemoryUploadedMedia($tenantContext, [[self::ACME_FOODS, self::FIRST_MEDIA, self::LENA, MediaImageStatus::Ready]])),
+            new ReportPictures(new InMemoryUploadedMedia($tenantContext, [
+                [self::ACME_FOODS, self::FIRST_MEDIA, self::LENA, MediaImageStatus::Ready],
+                [self::ACME_FOODS, self::THIRD_MEDIA, self::LENA, MediaImageStatus::Ready],
+            ])),
             new RecordingChecklistCommands(),
         );
     }
