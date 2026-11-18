@@ -15,6 +15,10 @@ const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 60;
 /** toast_controller.js ANNOUNCE_DELAY_MS. */
 const TOAST_ANNOUNCE_DELAY_MS = 150;
+/** Playwright's fake clock runs requestAnimationFrame callbacks on a 16 ms timer. */
+const ANIMATION_FRAME_MS = 16;
+/** The most pressSummarize moves the clock, so the first poll timer, set during its steps, has at most this much less to run. */
+const RENDER_SLACK_MS = 500;
 
 const ORGANIZATION_SLUG = 'acme-foods';
 const CLOUD_AI = { on: true, who: 'everyone', where: 'cloud' };
@@ -116,13 +120,43 @@ async function pressButtonWithEnter(button: Locator): Promise<void> {
   await button.press('Enter');
 }
 
-/** Presses "Summarize with AI" on the open ticket and waits for the running frame, whose first poll timer is then set. */
+/**
+ * Presses "Summarize with AI" on the open ticket and waits until Turbo has rendered the running frame and focused its
+ * [autofocus]. Turbo takes those steps only after animation frames, which the paused clock fires only when it moves, so
+ * the clock moves one frame at a time until the frame's turbo:frame-load, at most RENDER_SLACK_MS in all; the first
+ * poll timer is set during those steps.
+ */
 async function pressSummarize(page: Page, key: string, press: (button: Locator) => Promise<void> = clickButton): Promise<void> {
+  const frameLoad = await page.locator(ASK_FRAME).evaluateHandle((frame) => {
+    const sign = { hasLoaded: false };
+    frame.addEventListener(
+      'turbo:frame-load',
+      () => {
+        sign.hasLoaded = true;
+      },
+      { once: true },
+    );
+    return sign;
+  });
   const pressed = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === `/t/${key}/summary`);
   await press(page.locator(ASK_FRAME).getByRole('button', { name: 'Summarize with AI' }));
   await pressed;
-  await expect(page.locator(`${ASK_FRAME} .ticket__summarize`)).toHaveText('Summarizing…');
-  await expect(page.locator(`${ASK_FRAME} .ticket__summarize`)).toBeDisabled();
+
+  let steppedMs = 0;
+  await expect
+    .poll(async () => {
+      if (!(await frameLoad.evaluate((sign) => sign.hasLoaded)) && steppedMs + ANIMATION_FRAME_MS <= RENDER_SLACK_MS) {
+        await page.clock.runFor(ANIMATION_FRAME_MS);
+        steppedMs += ANIMATION_FRAME_MS;
+      }
+      return frameLoad.evaluate((sign) => sign.hasLoaded);
+    })
+    .toBe(true);
+
+  const runningButton = page.locator(`${ASK_FRAME} .ticket__summarize`);
+  await expect(runningButton).toHaveAttribute('data-summary-poll-target', 'button');
+  await expect(runningButton).toHaveText('Summarizing…');
+  await expect(runningButton).toBeDisabled();
 }
 
 /**
@@ -158,9 +192,9 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
     await openTicketWithPausedClock(page, key);
     await pressSummarize(page, key);
 
-    await page.clock.runFor(POLL_INTERVAL_MS - 1);
+    await page.clock.runFor(POLL_INTERVAL_MS - RENDER_SLACK_MS);
     expect(polls).toHaveLength(0);
-    await page.clock.runFor(1);
+    await page.clock.runFor(RENDER_SLACK_MS);
     await expect.poll(() => polls.length).toBe(1);
     await expect(page.locator(ASK_FRAME)).toHaveAttribute('data-answered-polls', '1');
     expect(polls[0].headers()['turbo-frame']).toBe('ticket-ask');
