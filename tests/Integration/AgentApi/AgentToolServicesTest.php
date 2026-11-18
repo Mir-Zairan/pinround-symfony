@@ -63,7 +63,7 @@ final class AgentToolServicesTest extends TestCase
         $container = self::freshContainerBuilder($environment, $isDebug);
         // Before the removing passes: by then every definition and tag of the environment's config is in place.
         $container->addCompilerPass($toolServices, PassConfig::TYPE_BEFORE_REMOVING);
-        $container->compile();
+        $container->compile(resolveEnvPlaceholders: false);
 
         self::assertNotNull($toolServices->taggedIds, 'The recording pass never ran.');
         self::assertEqualsCanonicalizing($expectedToolServices, $toolServices->taggedIds);

@@ -53,8 +53,8 @@ final class GateFixture
         $fixture = $this;
 
         $this->gate = new ToolCallGate(
-            new class($access) implements CurrentApiToken {
-                public function __construct(private readonly ?ApiTokenAccess $access)
+            new readonly class($access) implements CurrentApiToken {
+                public function __construct(private ?ApiTokenAccess $access)
                 {
                 }
 
@@ -63,8 +63,8 @@ final class GateFixture
                     return $this->access;
                 }
             },
-            new class($userId) implements CurrentUser {
-                public function __construct(private readonly ?UserId $userId)
+            new readonly class($userId) implements CurrentUser {
+                public function __construct(private ?UserId $userId)
                 {
                 }
 
@@ -78,8 +78,8 @@ final class GateFixture
                     return null;
                 }
             },
-            new class($fixture) implements AuthorizationCheckerInterface {
-                public function __construct(private readonly GateFixture $fixture)
+            new readonly class($fixture) implements AuthorizationCheckerInterface {
+                public function __construct(private GateFixture $fixture)
                 {
                 }
 

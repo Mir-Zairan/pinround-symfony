@@ -419,8 +419,8 @@ final class GetRoundNotesTest extends TestCase
                     return 'SHOP-12' === $key ? new TicketId(GetRoundNotesTest::TICKET) : null;
                 }
             },
-            new class($isTicketReadable) implements TicketTurnQueries {
-                public function __construct(private readonly bool $isTicketReadable)
+            new readonly class($isTicketReadable) implements TicketTurnQueries {
+                public function __construct(private bool $isTicketReadable)
                 {
                 }
 
@@ -449,11 +449,11 @@ final class GetRoundNotesTest extends TestCase
                     );
                 }
             },
-            new class($sharedNotes, $draftNotes, $accessFacts) implements RoundQueries {
+            new readonly class($sharedNotes, $draftNotes, $accessFacts) implements RoundQueries {
                 /**
                  * @param array<string, RoundAccessFacts> $accessFacts
                  */
-                public function __construct(private readonly ?SharedRoundNotes $sharedNotes, private readonly ?RoundNotes $draftNotes, private readonly array $accessFacts)
+                public function __construct(private ?SharedRoundNotes $sharedNotes, private ?RoundNotes $draftNotes, private array $accessFacts)
                 {
                 }
 
@@ -487,8 +487,8 @@ final class GetRoundNotesTest extends TestCase
                     return GetRoundNotesTest::TICKET === $ticketId->toString() ? $this->sharedNotes : null;
                 }
             },
-            new class($checklist) implements ChecklistQueries {
-                public function __construct(private readonly ?ChecklistView $checklist)
+            new readonly class($checklist) implements ChecklistQueries {
+                public function __construct(private ?ChecklistView $checklist)
                 {
                 }
 
@@ -514,11 +514,11 @@ final class GetRoundNotesTest extends TestCase
      */
     private function signedUrls(): SignedUrls
     {
-        return new class($this->signingsAsked) implements SignedUrls {
+        return new readonly class($this->signingsAsked) implements SignedUrls {
             /**
              * @param \ArrayObject<int, array{list<string>, string, string}> $signingsAsked
              */
-            public function __construct(private readonly \ArrayObject $signingsAsked)
+            public function __construct(private \ArrayObject $signingsAsked)
             {
             }
 
@@ -551,12 +551,12 @@ final class GetRoundNotesTest extends TestCase
      */
     private function roundVoter(array $deniedRoundIds): AuthorizationCheckerInterface
     {
-        return new class($deniedRoundIds, $this->roundViewsAsked) implements AuthorizationCheckerInterface {
+        return new readonly class($deniedRoundIds, $this->roundViewsAsked) implements AuthorizationCheckerInterface {
             /**
              * @param list<string>              $deniedRoundIds
              * @param \ArrayObject<int, string> $roundViewsAsked
              */
-            public function __construct(private readonly array $deniedRoundIds, private readonly \ArrayObject $roundViewsAsked)
+            public function __construct(private array $deniedRoundIds, private \ArrayObject $roundViewsAsked)
             {
             }
 

@@ -149,7 +149,7 @@ final class IssueApiTokenTest extends TestCase
         $tokens->lockIssuingFor(new OrganizationId(self::ACME_FOODS), new UserId(self::LENA));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Live tokens were counted before the issuing lock of the person was taken.');
+        $this->expectExceptionMessageIsOrContains('Live tokens were counted before the issuing lock of the person was taken.');
 
         $tokens->countLiveOf(new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
     }
@@ -189,7 +189,7 @@ final class IssueApiTokenTest extends TestCase
         self::assertStringNotContainsString($newToken->reveal(), print_r($newToken, true));
         self::assertStringNotContainsString($newToken->reveal(), var_export($newToken->__debugInfo(), true));
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('A new API token is never serialized.');
+        $this->expectExceptionMessageIsOrContains('A new API token is never serialized.');
 
         serialize($newToken);
     }

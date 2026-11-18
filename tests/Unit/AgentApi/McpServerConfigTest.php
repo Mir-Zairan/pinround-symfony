@@ -121,14 +121,8 @@ final class McpServerConfigTest extends TestCase
         if (self::SESSION_POOL !== self::at($cache, 'framework', 'cache', 'pools', 'cache.mcp_sessions')) {
             return false;
         }
-        foreach ($cache as $name => $environment) {
-            if (str_starts_with((string) $name, 'when@') && \is_array($environment)
-                && null !== self::at($environment, 'framework', 'cache', 'pools', 'cache.mcp_sessions')) {
-                return false;
-            }
-        }
 
-        return true;
+        return array_all($cache, static fn ($environment, $name) => !(str_starts_with((string) $name, 'when@') && \is_array($environment) && null !== self::at($environment, 'framework', 'cache', 'pools', 'cache.mcp_sessions')));
     }
 
     /**

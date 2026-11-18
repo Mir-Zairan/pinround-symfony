@@ -3,7 +3,7 @@
 How to connect Claude Code to pinround, so it can read your round notes, add screenshots and set verdicts in your own draft round.
 
 ## Index
-- [What you need](#what-you-need) — an account, Claude Code, the app's address
+- [What you need](#what-you-need) — an account with two-step login, Claude Code, the app's address
 - [1. Make a token](#1-make-a-token) — the API tokens page
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
@@ -16,6 +16,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 
 ## What you need
 - A pinround account in your organization.
+- Two-step login turned on for your account. Without it, **Make token** sends you to the two-step login setup page first.
 - Claude Code installed on your computer.
 - The address of your pinround app, for example `https://pinround.acme-foods.example`. Use the address you open in the browser. pinround answers `/mcp` only on its own public address; any other host name gets "400 Bad Request".
 
@@ -81,7 +82,7 @@ Pictures never travel inside a tool call. A call body over 1 MB is refused. Clau
    ```bash
    curl -T shot.png -H "Content-Type: image/png" "<put_url>"
    ```
-   The URL is signed for that type and that exact size. A different file is refused by the storage.
+   The URL is signed for that type and that exact size. A file of another type or size is refused by the storage.
 3. **`add_screenshot`** with `{key, upload_id, title?, summary?, pins?}`. The answer has a `status`:
    - `processing`: pinround is still checking the picture. Nothing is added yet. Call `add_screenshot` again with the same `upload_id` in a few seconds.
    - `added`: the screenshot is in your draft round, with its `screenshot_id`.

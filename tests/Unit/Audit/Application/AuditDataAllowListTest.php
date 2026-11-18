@@ -56,7 +56,7 @@ final class AuditDataAllowListTest extends TestCase
     public function dataThatIsNotExactlyTheActionsListIsRefused(string $action, array $data, string $expectedMessage): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage($expectedMessage);
+        $this->expectExceptionMessageIsOrContains($expectedMessage);
 
         AuditDataAllowList::refuseUnlessAllowed($action, $data);
     }

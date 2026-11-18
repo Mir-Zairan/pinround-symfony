@@ -105,7 +105,7 @@ final class ApiTokensOfOrganizationTest extends TestCase
     public function aPageSizeOutsideOneToTheCapIsRefused(int $limit): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A page of tokens holds 1 to 100.');
+        $this->expectExceptionMessageIsOrContains('A page of tokens holds 1 to 100.');
 
         $this->organizationTokens->livePage(new \DateTimeImmutable(self::NOW), $limit);
     }

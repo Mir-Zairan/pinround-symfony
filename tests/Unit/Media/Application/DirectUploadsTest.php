@@ -771,8 +771,8 @@ final class DirectUploadsTest extends TestCase
     public function anIntentUsedByAnotherRequestMeanwhileIsAnsweredWithThatRequestsPicture(): void
     {
         $slot = $this->begin('image/png', 2048);
-        $racingAuthorizer = new class($this->uploadIntents, $this->mediaObjects, $slot->intentId, self::TICKET) implements MediaTargetAuthorizer {
-            public function __construct(private readonly InMemoryUploadIntents $uploadIntents, private readonly InMemoryMediaObjects $mediaObjects, private readonly string $intentId, private readonly string $kind)
+        $racingAuthorizer = new readonly class($this->uploadIntents, $this->mediaObjects, $slot->intentId, self::TICKET) implements MediaTargetAuthorizer {
+            public function __construct(private InMemoryUploadIntents $uploadIntents, private InMemoryMediaObjects $mediaObjects, private string $intentId, private string $kind)
             {
             }
 
