@@ -42,7 +42,7 @@ final class ApiToken implements TenantOwned
      *
      * @var resource|string
      */
-    private readonly mixed $tokenHash;
+    private mixed $tokenHash;
     private readonly \DateTimeImmutable $expiresAt;
     private ?\DateTimeImmutable $lastUsedAt = null;
     private ?\DateTimeImmutable $revokedAt = null;
