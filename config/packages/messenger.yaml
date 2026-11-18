@@ -18,7 +18,8 @@ parameters:
         # Short jobs for worker-notify too, today queueing the ticket page refresh of a PingEvent
         # (QueueTicketPagesRefreshHandler); more consumers come with Insight and Audit.
         App\Notification\Api\Event\NotificationEvent: async_notify
-        # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler).
+        # Short jobs for worker-notify too, today clearing a renamed person's cached teams (ForgetRenamedPersonHandler)
+        # and the audit entry of each token made or revoked (RecordIdentityAuditEntry).
         App\Identity\Api\Event\IdentityEvent: async_notify
         # Short jobs for worker-notify too; no module handles MediaReady or MediaRejected yet.
         App\Media\Api\Event\MediaEvent: async_notify

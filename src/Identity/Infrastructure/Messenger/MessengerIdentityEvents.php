@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Infrastructure\Messenger;
 
-use App\Identity\Api\Event\UserRenamed;
+use App\Identity\Api\Event\IdentityEvent;
 use App\Identity\Application\IdentityEvents;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -27,7 +27,7 @@ final readonly class MessengerIdentityEvents implements IdentityEvents
     /**
      * @throws \LogicException when no transaction is open
      */
-    public function publish(UserRenamed $event): void
+    public function publish(IdentityEvent $event): void
     {
         // Outside a transaction doctrine_transaction would commit the outbox row on its own, before the change.
         if (!$this->connection->isTransactionActive()) {

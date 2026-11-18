@@ -132,6 +132,12 @@ services:
         tags:
             - { name: messenger.message_handler, bus: event.bus, handles: App\Organization\Api\Event\OrganizationEvent }
 
+    # Tagged here for the same reason; the token events reach it from async_notify on event.bus (messenger.yaml).
+    App\Audit\Application\RecordIdentityAuditEntry:
+        tags:
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Identity\Api\Event\ApiTokenIssued }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Identity\Api\Event\ApiTokenRevoked }
+
     # Tagged here for the same reason; the five events reach it from async_notify on event.bus (messenger.yaml).
     App\Notification\Application\Notify\NotifyRecipients:
         tags:

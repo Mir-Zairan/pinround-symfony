@@ -85,12 +85,6 @@ final readonly class RecordOrganizationAuditEntry
      */
     public static function requireAllowListedData(string $action, array $entryData): array
     {
-        $allowedKeys = self::DATA_KEYS[$action] ?? throw new \LogicException(\sprintf('The audit action "%s" has no data allow-list.', $action));
-        $keys = array_keys($entryData);
-        if ([] !== array_diff($keys, $allowedKeys) || [] !== array_diff($allowedKeys, $keys)) {
-            throw new \LogicException(\sprintf('The data of the audit action "%s" must hold exactly the keys %s.', $action, implode(', ', $allowedKeys)));
-        }
-
-        return $entryData;
+        return AuditDataAllowList::requireExactKeys(self::DATA_KEYS, $action, $entryData);
     }
 }
