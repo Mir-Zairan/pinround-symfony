@@ -56,27 +56,28 @@ final class TicketVoterTest extends TestCase
      */
     public static function matrix(): iterable
     {
-        $everyAttribute = [TicketPermission::VIEW, TicketPermission::EDIT, TicketPermission::MOVE, TicketPermission::ASSIGN];
+        $everyAttribute = [TicketPermission::VIEW, TicketPermission::EDIT, TicketPermission::MOVE, TicketPermission::ASSIGN, TicketPermission::CHOOSE_MAIN_SUMMARY];
         $expectations = [
-            'Lena' => [self::LENA, 'team-only Shop', [true, true, true, true]],
-            'Lena on Mobile' => [self::LENA, 'Mobile', [true, false, false, false]],
-            'Omar' => [self::OMAR, 'team-only Shop', [true, true, true, false]],
-            'Mia' => [self::MIA, 'team-only Shop', [true, true, true, false]],
-            'the Shop viewer' => [self::SHOP_VIEWER, 'team-only Shop', [true, false, false, false]],
-            'Raj on a ticket for everyone' => [self::RAJ, 'Shop', [true, false, false, false]],
-            'Raj' => [self::RAJ, 'team-only Shop', [false, false, false, false]],
-            'Raj in Shop' => [self::RAJ_IN_SHOP, 'team-only Shop', [true, true, true, false]],
-            'Sara' => [self::SARA, 'team-only Shop', [true, false, false, false]],
-            'Sara with no team' => [self::SARA, 'team-only with no team', [true, false, false, false]],
-            'Ben the outside reporter' => [self::BEN, 'team-only Shop', [true, false, false, false]],
-            'the triager with no team' => [self::TRIAGER, 'team-only with no team', [true, false, false, false]],
-            'the triager on Shop' => [self::TRIAGER, 'team-only Shop', [false, false, false, false]],
-            'Lena with no team' => [self::LENA, 'team-only with no team', [false, false, false, false]],
-            'the outsider' => [self::OUTSIDER, 'team-only Shop', [false, false, false, false]],
-            'the outsider on a ticket for everyone' => [self::OUTSIDER, 'Shop', [true, false, false, false]],
-            'the Beta Bakery admin on Shop' => [self::BETA_ADMIN, 'Shop', [false, false, false, false]],
-            'the Beta Bakery admin on team-only Shop' => [self::BETA_ADMIN, 'team-only Shop', [false, false, false, false]],
-            'the Beta Bakery admin on Checkout' => [self::BETA_ADMIN, 'Checkout', [true, true, true, true]],
+            'Lena' => [self::LENA, 'team-only Shop', [true, true, true, true, true]],
+            'Lena on Mobile' => [self::LENA, 'Mobile', [true, false, false, false, false]],
+            'Omar' => [self::OMAR, 'team-only Shop', [true, true, true, false, false]],
+            'Mia' => [self::MIA, 'team-only Shop', [true, true, true, false, false]],
+            'the Shop viewer' => [self::SHOP_VIEWER, 'team-only Shop', [true, false, false, false, false]],
+            'Raj on a ticket for everyone' => [self::RAJ, 'Shop', [true, false, false, false, false]],
+            'Raj' => [self::RAJ, 'team-only Shop', [false, false, false, false, false]],
+            'Raj in Shop' => [self::RAJ_IN_SHOP, 'team-only Shop', [true, true, true, false, false]],
+            'Sara' => [self::SARA, 'team-only Shop', [true, false, false, false, false]],
+            'Sara with no team' => [self::SARA, 'team-only with no team', [true, false, false, false, false]],
+            'Ben the outside reporter' => [self::BEN, 'team-only Shop', [true, false, false, false, true]],
+            'Ben with no team' => [self::BEN, 'team-only with no team', [true, false, false, false, true]],
+            'the triager with no team' => [self::TRIAGER, 'team-only with no team', [true, false, false, false, false]],
+            'the triager on Shop' => [self::TRIAGER, 'team-only Shop', [false, false, false, false, false]],
+            'Lena with no team' => [self::LENA, 'team-only with no team', [false, false, false, false, false]],
+            'the outsider' => [self::OUTSIDER, 'team-only Shop', [false, false, false, false, false]],
+            'the outsider on a ticket for everyone' => [self::OUTSIDER, 'Shop', [true, false, false, false, false]],
+            'the Beta Bakery admin on Shop' => [self::BETA_ADMIN, 'Shop', [false, false, false, false, false]],
+            'the Beta Bakery admin on team-only Shop' => [self::BETA_ADMIN, 'team-only Shop', [false, false, false, false, false]],
+            'the Beta Bakery admin on Checkout' => [self::BETA_ADMIN, 'Checkout', [true, true, true, true, true]],
         ];
         foreach ($expectations as $case => [$actor, $ticket, $grantedByAttribute]) {
             foreach ($everyAttribute as $index => $attribute) {
@@ -100,7 +101,7 @@ final class TicketVoterTest extends TestCase
     {
         $voter = $this->voter();
 
-        foreach ([TicketPermission::VIEW, TicketPermission::EDIT, TicketPermission::MOVE, TicketPermission::ASSIGN] as $attribute) {
+        foreach ([TicketPermission::VIEW, TicketPermission::EDIT, TicketPermission::MOVE, TicketPermission::ASSIGN, TicketPermission::CHOOSE_MAIN_SUMMARY] as $attribute) {
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), self::ticket('Shop'), [$attribute]), $attribute);
         }
     }

@@ -85,6 +85,7 @@ $pingAPerson = '| Ping a person | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only a
 $askAQuestion = '| Ask a question (pauses ticket) | ✅ ¹ | ✅ | ✅ | ✅ | — | ⚠️ only as reporter |';
 $resolveAComment = '| Resolve a comment | ⚠️ own | ⚠️ own | ✅ any in team | ⚠️ own | ⚠️ own | ⚠️ own |';
 $adminPings = 'An admin with no team role may see every ticket in the org (including team-only ones), comment, ask questions and ping';
+$useAsMainSummary = '| Use an explanation as main summary | — | — | ✅ | ⚠️ if reporter | — | ⚠️ if reporter |';
 $seeForEveryoneTickets = '| See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
 
@@ -318,6 +319,15 @@ return [
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Lena', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Ben', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
 
     ['source' => $commentAndReply, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
     ['source' => $commentAndReply, 'attribute' => ConversationPermission::COMMENT, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],

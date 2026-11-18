@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Assist\UI\Controller;
 
+use App\Assist\Api\LocalAi;
+use App\Assist\Api\LocalPackageId;
+use App\Assist\Api\MainSummaryRefused;
 use App\Assist\Api\Summaries;
 use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
@@ -15,6 +18,9 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\Transactions;
+use App\SharedKernel\Domain\UserId;
+use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
@@ -27,6 +33,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\UX\Turbo\TurboBundle;
 
 /**
  * "The ask"'s summary frame (P08.T4, ticket-page.md): GET /t/{key}/summary renders TheAsk's frame with the latest
@@ -40,17 +47,28 @@ use Symfony\Component\Routing\Attribute\Route;
  * the AI call limit, 409 with the running frame while a summary is already on its way, 403 for the policy's refusals
  * and, failing closed, any code it does not name. A request that is not Turbo's frame request is sent to the ticket's
  * page with 303, a POST's refusal flashed as a toast.
+ *
+ * POST /t/{key}/summary/laptop/{packageId} is "Use as main summary" on the ticket's laptop summary proposal
+ * (LocalAi::makeMainSummary). An unknown key, a ticket the person may not see and a person who is neither the lead of
+ * the ticket's team nor its reporter (TicketPermission::CHOOSE_MAIN_SUMMARY) answer the ticket's 404; then an expired
+ * form 422; then a malformed package id and any result that is not the ticket's proposal 404, and a text Ticketing
+ * refuses as a summary 422 with its sentence, nothing changed. A made main summary answers 303 to the ticket with the
+ * toast MADE_MAIN_SUMMARY. A refusal answers a Turbo form with a toast stream, any other form with 303 and the toast
+ * flashed. The AI policy does not decide it, as no AI runs (ADR-0020).
  */
 final class SummaryController extends AbstractController
 {
     public const string FRAME_ROUTE = 'assist_summary_frame';
     public const string EARLIER_ROUTE = 'assist_summary_earlier';
     public const string REQUEST_ROUTE = 'assist_summary_request';
+    public const string MAIN_SUMMARY_ROUTE = 'assist_summary_main';
 
     public const string CSRF_ID = 'assist_summary';
+    public const string MAIN_SUMMARY_CSRF_ID = 'assist_main_summary';
     public const string CSRF_FIELD = '_csrf_token';
 
     public const string FORM_EXPIRED = 'The page was open too long. Reload it and try again.';
+    public const string MADE_MAIN_SUMMARY = 'Now the main summary. The old one is kept in history.';
 
     /** TicketShowController's route and not-found text, which Assist's UI may not import (deptrac). */
     public const string TICKET_ROUTE = 'ticket_show';
@@ -71,6 +89,8 @@ final class SummaryController extends AbstractController
         private readonly UserQueries $userQueries,
         private readonly ClockInterface $clock,
         private readonly CurrentTimeZone $currentTimeZone,
+        private readonly Transactions $transactions,
+        private readonly LocalAi $localAi,
     ) {
     }
 
@@ -86,7 +106,7 @@ final class SummaryController extends AbstractController
     }
 
     /**
-     * One query for the summaries and one for their authors' names.
+     * One query for the summaries and one for the names of their authors and of who made them the main summary.
      */
     #[Route('/t/{key}/summary/earlier', name: self::EARLIER_ROUTE, methods: ['GET'])]
     public function earlier(string $key, Request $request): Response
@@ -98,17 +118,20 @@ final class SummaryController extends AbstractController
         $history = $this->ticketSummaryQueries->historyOf($ticket->id, $visibility) ?? throw $this->createNotFoundException(self::NOT_FOUND);
         $authorIds = [];
         foreach ($history->earlier as $summary) {
-            if (null !== $summary->authorId) {
-                $authorIds[$summary->authorId->toString()] = $summary->authorId;
+            foreach ([$summary->authorId, $summary->chosenById] as $personId) {
+                if (null !== $personId) {
+                    $authorIds[$personId->toString()] = $personId;
+                }
             }
         }
         $authors = $this->userQueries->byIds(array_values($authorIds));
+        $nameOf = static fn (?UserId $personId): ?string => null === $personId ? null : ($authors[$personId->toString()] ?? null)?->displayName;
         $now = $this->clock->now();
         $viewerTimeZone = $this->currentTimeZone->zone();
 
         $response = $this->render('@Assist/summary_earlier.html.twig', [
             'earlierSummaries' => array_map(static fn (TicketSummaryView $summary): array => [
-                'note' => SummarySourceNote::of($summary, null === $summary->authorId ? null : ($authors[$summary->authorId->toString()] ?? null)?->displayName, $now, $viewerTimeZone),
+                'note' => SummarySourceNote::of($summary, $nameOf($summary->authorId), $now, $viewerTimeZone, $nameOf($summary->chosenById)),
                 'text' => $summary->text,
             ], $history->earlier),
             'unlistedCount' => $history->earlierCount - \count($history->earlier),
@@ -150,8 +173,70 @@ final class SummaryController extends AbstractController
     }
 
     /**
+     * Runs without the request transaction: LocalAi::makeMainSummary marks the result before Ticketing checks its
+     * text, so a refusal must leave Transactions::run, which rolls the mark back, before it is answered.
+     */
+    #[Route('/t/{key}/summary/laptop/{packageId}', name: self::MAIN_SUMMARY_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function chooseMainSummary(string $key, string $packageId, Request $request): Response
+    {
+        if (null === $this->tenantContext->get()) {
+            // A visitor has no tenant, and the firewall sends the AccessDeniedException to the login page.
+            throw $this->createAccessDeniedException();
+        }
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+
+        try {
+            $isTokenValid = $this->transactions->run(function () use ($key, $packageId, $csrfToken): bool {
+                [$actor, , $ticket] = $this->visibleTicketOf($key);
+                if (!$this->isGranted(TicketPermission::CHOOSE_MAIN_SUMMARY, $ticket->visibilityFacts)) {
+                    throw $this->createNotFoundException(self::NOT_FOUND);
+                }
+                if (!$this->isCsrfTokenValid(self::MAIN_SUMMARY_CSRF_ID, $csrfToken)) {
+                    return false;
+                }
+                try {
+                    $localPackageId = new LocalPackageId($packageId);
+                } catch (\InvalidArgumentException) {
+                    throw MainSummaryRefused::notAProposal();
+                }
+                $this->localAi->makeMainSummary($localPackageId, $ticket->id, $ticket->currentSummary?->createdAt, $actor->userId(), $actor->organizationId());
+
+                return true;
+            });
+        } catch (MainSummaryRefused $refused) {
+            if (MainSummaryRefused::NOT_A_PROPOSAL === $refused->refusalCode) {
+                throw $this->createNotFoundException($refused->getMessage());
+            }
+
+            return $this->answerWithToast($request, $key, $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if (!$isTokenValid) {
+            return $this->answerWithToast($request, $key, self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        $this->addFlash(self::TOAST, self::MADE_MAIN_SUMMARY);
+
+        return $this->redirectToTicket($key);
+    }
+
+    /**
+     * A Turbo form gets a Turbo Stream that shows the toast with $status; any other form the ticket's page with the
+     * toast flashed.
+     */
+    private function answerWithToast(Request $request, string $key, string $toast, int $status): Response
+    {
+        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
+            $this->addFlash(self::TOAST, $toast);
+
+            return $this->redirectToTicket($key);
+        }
+
+        return $this->render('@Web/_toast_stream.html.twig', ['message' => $toast], new Response(null, $status, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]));
+    }
+
+    /**
      * The person must be logged in to the tenant; the firewall sends a visitor's AccessDeniedException to the login
-     * page. Runs in the request transaction, as pageOf and the visibility read under row-level security.
+     * page. Runs in the request transaction, or chooseMainSummary's own, as pageOf and the visibility read under
+     * row-level security.
      *
      * @return array{ActorContext, TicketVisibility, TicketPageView}
      */

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Api;
 
 /**
- * The voter attributes for tickets (ADR-0013). TicketVoter decides VIEW, EDIT, MOVE and ASSIGN on a ticket's
+ * The voter attributes for tickets (ADR-0013). TicketVoter decides VIEW, EDIT, MOVE, ASSIGN and CHOOSE_MAIN_SUMMARY on a ticket's
  * TicketVisibilityFacts; TicketCreationVoter decides CREATE and ASSIGN on the TeamId the new ticket is for.
  */
 final class TicketPermission
@@ -27,4 +27,10 @@ final class TicketPermission
 
     /** Give a ticket to someone; the subject is its TicketVisibilityFacts. Only a Lead of the ticket's team. */
     public const string ASSIGN = 'TICKET_ASSIGN';
+
+    /**
+     * Press "Use as main summary" on the ticket's proposal; the subject is its TicketVisibilityFacts. A Lead of the
+     * ticket's team or its reporter, on a ticket with no team its reporter only.
+     */
+    public const string CHOOSE_MAIN_SUMMARY = 'TICKET_CHOOSE_MAIN_SUMMARY';
 }

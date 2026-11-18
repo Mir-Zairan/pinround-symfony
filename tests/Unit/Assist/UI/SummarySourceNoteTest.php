@@ -15,6 +15,7 @@ final class SummarySourceNoteTest extends TestCase
 {
     private const string NOW = '2026-03-10 09:00:00 UTC';
     private const string OMAR_ID = '0196a1b2-0000-7000-8000-000000000001';
+    private const string LENA_ID = '0196a1b2-0000-7000-8000-000000000002';
 
     /**
      * @return iterable<string, array{TicketSummaryView, string|null, string|null}>
@@ -46,6 +47,27 @@ final class SummarySourceNoteTest extends TestCase
         }
 
         self::assertSame(['ai' => true, 'sync' => true, 'explanation' => true, 'human' => false], $chipBySource);
+    }
+
+    #[Test]
+    public function aLaptopSummaryNamesItsPosterItsModelAndWhoMadeItTheMainSummary(): void
+    {
+        $summary = new TicketSummaryView(
+            '0196a1b2-0000-7000-8000-0000000000ab',
+            'Pay does nothing on the last step.',
+            'laptop',
+            new UserId(self::OMAR_ID),
+            'qwen3:4b',
+            'summary.v1',
+            new \DateTimeImmutable('2026-03-10 08:59:30 UTC'),
+            new UserId(self::LENA_ID),
+        );
+        $now = new \DateTimeImmutable(self::NOW);
+        $berlin = new \DateTimeZone('Europe/Berlin');
+
+        self::assertSame('posted by Omar using local model qwen3:4b (unverified), made the main summary by Lena', SummarySourceNote::of($summary, 'Omar Haddad', $now, $berlin, 'Lena Fischer'));
+        self::assertSame('posted by someone using local model qwen3:4b (unverified), made the main summary by someone', SummarySourceNote::of($summary, null, $now, $berlin));
+        self::assertTrue(SummarySourceNote::isWrittenByAi($summary));
     }
 
     private static function summary(string $source, string $createdAt, ?string $authorId = self::OMAR_ID): TicketSummaryView
