@@ -1,3 +1,4 @@
+import { test } from '@playwright/test';
 import { runAsDatabaseOwner } from './database';
 
 /** The ai key of org_settings.data before a spec changed it: null when the key was missing. */
@@ -44,4 +45,21 @@ export function restoreAiSettings(organizationSlug: string, previous: StoredAiSe
   }
   runAsDatabaseOwner(`UPDATE org_settings SET data = data - 'ai', version = version + 1 WHERE organization_id = ${organizationId}`
     + (previous.hasSettingsRow ? '' : `; DELETE FROM org_settings WHERE organization_id = ${organizationId} AND data = '{}'::jsonb`));
+}
+
+/** Stores ai before each test of the calling describe and puts the organization's own AI settings back after it. */
+export function useAiSettingsInEachTest(organizationSlug: string, ai: object): void {
+  let previousAiSettings: StoredAiSettings | null = null;
+
+  test.beforeEach(() => {
+    previousAiSettings = readAiSettings(organizationSlug);
+    storeAiSettings(organizationSlug, ai);
+  });
+
+  test.afterEach(() => {
+    if (null !== previousAiSettings) {
+      restoreAiSettings(organizationSlug, previousAiSettings);
+      previousAiSettings = null;
+    }
+  });
 }

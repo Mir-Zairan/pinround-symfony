@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type Locator, type Page, type Route } from '@playwright/test';
-import { readAiSettings, restoreAiSettings, storeAiSettings, type StoredAiSettings } from './ai-settings';
+import { useAiSettingsInEachTest } from './ai-settings';
 import { LENA_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { makeTicketForOmar, TOAST_REGION } from './ticket';
@@ -46,23 +46,6 @@ const MADE_MAIN_TOAST = 'Now the main summary. The old one is kept in history.';
 const FROZEN_AT = new Date('2026-03-04T09:00:00Z');
 
 const madeTicketKeys: string[] = [];
-
-/** Stores ai before each test of the calling describe and puts the organization's own AI settings back after it. */
-function useAiSettingsInEachTest(ai: object): void {
-  let previousAiSettings: StoredAiSettings | null = null;
-
-  test.beforeEach(() => {
-    previousAiSettings = readAiSettings(ORGANIZATION_SLUG);
-    storeAiSettings(ORGANIZATION_SLUG, ai);
-  });
-
-  test.afterEach(() => {
-    if (null !== previousAiSettings) {
-      restoreAiSettings(ORGANIZATION_SLUG, previousAiSettings);
-      previousAiSettings = null;
-    }
-  });
-}
 
 /** Visibility::All or Visibility::Team; the ticket is the Shop team's, which Lena leads. */
 async function makeTicketWithAnAsk(browser: Browser, title: string, visibility: 'all' | 'team' = 'all'): Promise<string> {
@@ -190,7 +173,7 @@ test.afterEach(() => {
 });
 
 test.describe('an organization whose AI runs only on laptops', () => {
-  useAiSettingsInEachTest(LAPTOP_ONLY_AI);
+  useAiSettingsInEachTest(ORGANIZATION_SLUG, LAPTOP_ONLY_AI);
 
   test('a ready laptop summarizes the ask, the summary shows as a proposal in place, and Lena makes it the main summary', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Pay button does nothing at checkout');
@@ -340,7 +323,7 @@ test.describe('an organization whose AI runs only on laptops', () => {
 });
 
 test.describe('an organization whose AI runs on laptops first, then in the cloud', () => {
-  useAiSettingsInEachTest(LAPTOP_FIRST_AI);
+  useAiSettingsInEachTest(ORGANIZATION_SLUG, LAPTOP_FIRST_AI);
 
   test('a ready laptop runs the press, and an answer that thinks first shows without its thinking', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Checkout spinner never stops');

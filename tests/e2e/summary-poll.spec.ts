@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type Locator, type Page, type Request, type Route } from '@playwright/test';
-import { readAiSettings, restoreAiSettings, storeAiSettings, type StoredAiSettings } from './ai-settings';
+import { useAiSettingsInEachTest } from './ai-settings';
 import { OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { makeTicketForOmar, TOAST_REGION } from './ticket';
@@ -85,23 +85,6 @@ async function makeTicketWithAnAsk(browser: Browser, title: string): Promise<str
   runAsDatabaseOwner(`UPDATE tkt_ticket SET description = 'Pressing pay on the last step does nothing.'
     WHERE key = '${key}' AND organization_id = (SELECT organization_id FROM org_organization WHERE slug = '${ORGANIZATION_SLUG}')`);
   return key;
-}
-
-/** Stores ai before each test of the calling describe and puts the organization's own AI settings back after it. */
-function useAiSettingsInEachTest(ai: object): void {
-  let previousAiSettings: StoredAiSettings | null = null;
-
-  test.beforeEach(() => {
-    previousAiSettings = readAiSettings(ORGANIZATION_SLUG);
-    storeAiSettings(ORGANIZATION_SLUG, ai);
-  });
-
-  test.afterEach(() => {
-    if (null !== previousAiSettings) {
-      restoreAiSettings(ORGANIZATION_SLUG, previousAiSettings);
-      previousAiSettings = null;
-    }
-  });
 }
 
 /** Opens the ticket and stops the page's clock; from here only runFor moves the polls. */
@@ -216,7 +199,7 @@ async function seriousViolations(page: Page): Promise<string[]> {
 
 test.describe('"Summarize with AI" while the summary is on its way', () => {
   test.use({ storageState: OMAR_STORAGE_STATE });
-  useAiSettingsInEachTest(CLOUD_AI);
+  useAiSettingsInEachTest(ORGANIZATION_SLUG, CLOUD_AI);
 
   test('polls every 3 seconds, shows the summary with its toast when it arrives, then polls no more', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Summary poll shows the summary');
@@ -344,7 +327,7 @@ test.describe('"Summarize with AI" while the summary is on its way', () => {
 
 test.describe('"Summarize with AI" when the admin turned AI help off', () => {
   test.use({ storageState: OMAR_STORAGE_STATE });
-  useAiSettingsInEachTest(AI_OFF);
+  useAiSettingsInEachTest(ORGANIZATION_SLUG, AI_OFF);
 
   test('the person sees why, and no button to press', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Summary with AI turned off');

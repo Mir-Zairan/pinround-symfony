@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Request, type Route } from '@playwright/test';
-import { readAiSettings, restoreAiSettings, storeAiSettings, type StoredAiSettings } from './ai-settings';
+import { useAiSettingsInEachTest } from './ai-settings';
 import { OMAR_STORAGE_STATE } from './auth';
 import { openNewTicketForm, type TicketForm } from './new-ticket-form';
 
@@ -131,23 +131,6 @@ function postedField(request: Request, name: string): string | null {
   return field === null ? null : field[1];
 }
 
-/** Stores ai before each test of the calling describe and puts the organization's own AI settings back after it. */
-function useAiSettingsInEachTest(ai: object): void {
-  let previousAiSettings: StoredAiSettings | null = null;
-
-  test.beforeEach(() => {
-    previousAiSettings = readAiSettings(ORGANIZATION_SLUG);
-    storeAiSettings(ORGANIZATION_SLUG, ai);
-  });
-
-  test.afterEach(() => {
-    if (null !== previousAiSettings) {
-      restoreAiSettings(ORGANIZATION_SLUG, previousAiSettings);
-      previousAiSettings = null;
-    }
-  });
-}
-
 /**
  * Opens the New ticket form and stops the page's clock; from here only runFor moves the polls. beforePause runs on the
  * open form while the clock still runs, for steps that load a page, whose load waits on timers.
@@ -248,7 +231,7 @@ async function seriousViolations(page: Page): Promise<string[]> {
 
 test.describe('"Check with AI" on the New ticket form', () => {
   test.use({ storageState: OMAR_STORAGE_STATE });
-  useAiSettingsInEachTest(CLOUD_AI);
+  useAiSettingsInEachTest(ORGANIZATION_SLUG, CLOUD_AI);
 
   test('shows the button with a title, marks and selects the suggestion, keeps the person\'s own pick and shows the duplicates', async ({ page }) => {
     const { form, token } = await openFormWithPausedClock(page);
@@ -525,7 +508,7 @@ test.describe('"Check with AI" on the New ticket form', () => {
 
 test.describe('"Check with AI" when the admin turned AI help off', () => {
   test.use({ storageState: OMAR_STORAGE_STATE });
-  useAiSettingsInEachTest(AI_OFF);
+  useAiSettingsInEachTest(ORGANIZATION_SLUG, AI_OFF);
 
   test('the person sees why, and no button to press', async ({ page }) => {
     await page.clock.install({ time: FROZEN_AT });
