@@ -21,7 +21,7 @@ use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
- * POST /mcp end to end (ADR-0021, P09.T1): the bundle's endpoint behind the api_token firewall, McpRequestGuard and
+ * POST /mcp end to end (ADR-0021, P09.T2): the bundle's endpoint behind the api_token firewall, McpRequestGuard and
  * ToolCallLimiter, on the state Valkey's counters and sessions. The client keeps its kernel, so the frozen clock is
  * the one every request reads: 20 seconds into a minute, so a wait counted from the minute's start (60) or from the
  * real time differs from the right one (40). Plain HTTP, so the SDK's own same-origin check sees the origin of
