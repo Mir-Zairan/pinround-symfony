@@ -25,8 +25,8 @@ use Doctrine\DBAL\Connection;
  */
 final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
 {
-    /** Whether a pin counts (PinToCheck::counts): a person's, or an AI pin a person kept. */
-    private const string COUNTED_PIN = "(pin.source = 'human' OR pin.ai_state = 'kept')";
+    /** Whether the row of rvw_pin AS pin counts (PinToCheck::counts): a person's, or an AI pin a person kept. */
+    public const string COUNTED_PIN = "(pin.source = 'human' OR pin.ai_state = 'kept')";
 
     public function __construct(
         private Connection $connection,

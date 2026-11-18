@@ -8,8 +8,8 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * The rounds of a ticket for the people who may see them (ADR-0013, ADR-0017), a round's facts for RoundVoter, and an
- * owner's draft notes. It reads under row-level security, so it needs an open transaction whose tenant is the viewer's
+ * The rounds of a ticket for the people who may see them (ADR-0013, ADR-0017), a round's facts for RoundVoter, an
+ * owner's draft notes and the newest shared round's notes. It reads under row-level security, so it needs an open transaction whose tenant is the viewer's
  * organization.
  */
 interface RoundQueries
@@ -66,9 +66,29 @@ interface RoundQueries
      * and pins. Only that person's own draft is read: another person's draft, a shared or deleted one and another
      * organization's round never are. Pass the person asking as $owner: this method does not check who asks.
      *
+     * Only the pins that count come back: a person's, and an AI pin a person kept (FR-RND-07, ADR-0020). The draft
+     * editor still shows a suggested AI pin, marked as the AI's, for its owner to keep or dismiss; it reads the draft
+     * through forTicket and draftOf, not here.
+     *
      * @return RoundNotes|null null when $owner has no open unshared draft on the ticket, or the tenant has no such ticket
      *
      * @throws \LogicException when no transaction is open or no tenant is set, before any query
      */
     public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes;
+
+    /**
+     * The newest shared round of the ticket that holds pictures, the report (Round 0) or a shared draft round, by
+     * number, with its pictures and the pins that count, in one query whatever the number of pictures and pins. A
+     * checklist or review round, a deleted round and an unshared draft are never it; neither is another organization's.
+     * A suggested or dismissed AI pin is left out, as in roundNotes.
+     *
+     * This method checks nobody: the caller asks TicketPermission VIEW on the ticket first, and RoundPermission VIEW on
+     * the round it answers.
+     *
+     * @return SharedRoundNotes|null null when the ticket has no shared report or draft round, or the tenant has no such
+     *                               ticket
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set, before any query
+     */
+    public function sharedRoundNotes(TicketId $ticketId): ?SharedRoundNotes;
 }

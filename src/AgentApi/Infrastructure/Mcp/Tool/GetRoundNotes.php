@@ -7,6 +7,7 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\UntrustedText;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\MediaImage;
@@ -16,16 +17,11 @@ use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ChecklistView;
 use App\Review\Api\PinNote;
 use App\Review\Api\RoundCommands;
-use App\Review\Api\RoundNotes;
 use App\Review\Api\RoundPermission;
-use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundQueries;
-use App\Review\Api\RoundScreenshotView;
-use App\Review\Api\RoundView;
 use App\Review\Api\ScreenshotNotes;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
-use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketTurnQueries;
@@ -39,9 +35,9 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * get_round_notes (P09.T4): what a developer marked on a ticket, for their Claude Code to fix. The newest shared round
- * that has pictures (a shared draft round, or the report, Round 0), the caller's own unshared draft round exactly as
- * RoundQueries::roundNotes reads it, and the checklist. Another person's unshared draft is never read. Titles,
- * summaries and pin notes are wrapped as UntrustedText (ADR-0020).
+ * that has pictures as RoundQueries::sharedRoundNotes reads it, the caller's own unshared draft round as
+ * RoundQueries::roundNotes reads it, and the checklist; Review decides which pins count. Another person's unshared
+ * draft is never read. Titles, summaries and pin notes are wrapped as UntrustedText (ADR-0020).
  *
  * The gate grants TicketPermission VIEW on the ticket first; each round is then shown only when RoundPermission VIEW
  * grants it too, as the Rounds section does.
@@ -55,10 +51,6 @@ final readonly class GetRoundNotes implements AgentTool
     public const string AUDIT_TARGET_TYPE = 'ticket';
     /** The variant the Rounds section shows (RoundCards::VARIANT, which this module may not read). */
     public const string IMAGE_VARIANT = 'view';
-
-    private const string REPORT_KIND = 'report';
-    private const string AI_PIN = 'ai';
-    private const string KEPT_AI_PIN = 'kept';
 
     public function __construct(
         private CurrentApiToken $currentApiToken,
@@ -142,10 +134,9 @@ final readonly class GetRoundNotes implements AgentTool
         $ticketId = new TicketId($target->auditId);
         $callerId = $this->currentUser->id() ?? throw new \LogicException('get_round_notes ran without a user.');
 
-        $rounds = $this->roundQueries->forTicket($ticketId, $callerId)->rounds;
-        $sharedRound = $this->latestSharedRoundOf($rounds);
-        if (null !== $sharedRound && !$this->mayView($sharedRound->id)) {
-            $sharedRound = null;
+        $sharedNotes = $this->roundQueries->sharedRoundNotes($ticketId);
+        if (null !== $sharedNotes && !$this->mayView($sharedNotes->roundId)) {
+            $sharedNotes = null;
         }
         $draftNotes = $this->roundQueries->roundNotes($ticketId, $callerId);
         if (null !== $draftNotes && !$this->mayView($draftNotes->roundId)) {
@@ -156,25 +147,21 @@ final readonly class GetRoundNotes implements AgentTool
             $checklist = null;
         }
 
-        $mediaIdsByScreenshot = self::mediaIdsOf($sharedRound, self::ownUnsharedDraftOf($rounds, $callerId), $draftNotes);
-        $images = $this->imagesOf(array_values(array_unique($mediaIdsByScreenshot)));
-        $imageOf = static function (string $screenshotId) use ($mediaIdsByScreenshot, $images): ?array {
-            $mediaId = $mediaIdsByScreenshot[$screenshotId] ?? null;
-
-            return null === $mediaId ? null : self::imageFieldsOf($images[strtolower($mediaId)] ?? null);
-        };
+        $answeredScreenshots = [...$sharedNotes->screenshots ?? [], ...$draftNotes->screenshots ?? []];
+        $images = $this->imagesOf(array_values(array_unique(array_map(static fn (ScreenshotNotes $screenshot): string => $screenshot->mediaId, $answeredScreenshots))));
+        $screenshotFieldsOf = static fn (ScreenshotNotes $screenshot): array => self::screenshotFieldsOf($screenshot, $images[strtolower($screenshot->mediaId)] ?? null);
 
         $notes = [
             'untrusted_text_notice' => UntrustedText::NOTICE,
-            'shared_round' => null === $sharedRound ? null : [
-                'round_id' => $sharedRound->id,
-                'number' => $sharedRound->number,
-                'kind' => $sharedRound->kind,
-                'screenshots' => array_map(static fn (RoundScreenshotView $screenshot): array => self::sharedScreenshotFieldsOf($screenshot, $imageOf($screenshot->id)), $sharedRound->screenshots),
+            'shared_round' => null === $sharedNotes ? null : [
+                'round_id' => $sharedNotes->roundId,
+                'number' => $sharedNotes->number,
+                'kind' => $sharedNotes->kind,
+                'screenshots' => array_map($screenshotFieldsOf, $sharedNotes->screenshots),
             ],
             'draft_round' => null === $draftNotes ? null : [
                 'round_id' => $draftNotes->roundId,
-                'screenshots' => array_map(static fn (ScreenshotNotes $screenshot): array => self::draftScreenshotFieldsOf($screenshot, $imageOf($screenshot->screenshotId)), $draftNotes->screenshots),
+                'screenshots' => array_map($screenshotFieldsOf, $draftNotes->screenshots),
             ],
             'checklist' => null === $checklist ? null : self::checklistFieldsOf($checklist),
         ];
@@ -205,64 +192,6 @@ final readonly class GetRoundNotes implements AgentTool
     }
 
     /**
-     * Only the report and draft rounds come with their pictures from RoundQueries::forTicket; a checklist is answered
-     * on its own, and a review round compares areas, which this tool does not read.
-     *
-     * @param list<RoundView> $rounds by number, as forTicket orders them
-     */
-    private function latestSharedRoundOf(array $rounds): ?RoundView
-    {
-        $latest = null;
-        foreach ($rounds as $round) {
-            $hasPictures = self::REPORT_KIND === $round->kind || RoundView::DRAFT === $round->kind;
-            if ($hasPictures && null !== $round->number && (null === $latest || $round->number > $latest->number)) {
-                $latest = $round;
-            }
-        }
-
-        return $latest;
-    }
-
-    /**
-     * @param list<RoundView> $rounds
-     */
-    private static function ownUnsharedDraftOf(array $rounds, UserId $callerId): ?RoundView
-    {
-        foreach ($rounds as $round) {
-            if ($round->isUnsharedDraft() && $round->ownerId->equals($callerId)) {
-                return $round;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * RoundNotes carry no media id, so the draft's pictures are found in forTicket's copy of the same draft. A picture
-     * added between the two reads has none and is answered without an image.
-     *
-     * @return array<string, string> media id by screenshot id, of the screenshots answered only
-     */
-    private static function mediaIdsOf(?RoundView $sharedRound, ?RoundView $ownDraft, ?RoundNotes $draftNotes): array
-    {
-        $mediaIds = [];
-        foreach (null === $sharedRound ? [] : $sharedRound->screenshots as $screenshot) {
-            $mediaIds[$screenshot->id] = $screenshot->mediaId;
-        }
-        if (null === $draftNotes || null === $ownDraft || $ownDraft->id !== $draftNotes->roundId) {
-            return $mediaIds;
-        }
-        $answered = array_flip(array_map(static fn (ScreenshotNotes $screenshot): string => $screenshot->screenshotId, $draftNotes->screenshots));
-        foreach ($ownDraft->screenshots as $screenshot) {
-            if (isset($answered[$screenshot->id])) {
-                $mediaIds[$screenshot->id] = $screenshot->mediaId;
-            }
-        }
-
-        return $mediaIds;
-    }
-
-    /**
      * One call: a shared round and a draft hold at most 50 pictures each, well under SignedUrls::MAX_MEDIA_IDS.
      *
      * @param list<string> $mediaIds
@@ -279,82 +208,33 @@ final readonly class GetRoundNotes implements AgentTool
     }
 
     /**
-     * @return array{status: string, url: ?string}|null null when the picture's media object was not found
-     */
-    private static function imageFieldsOf(?MediaImage $image): ?array
-    {
-        return null === $image ? null : ['status' => $image->status->value, 'url' => $image->url];
-    }
-
-    /**
-     * @param array{status: string, url: ?string}|null $image
-     *
-     * @return array<string, mixed>
-     */
-    private static function sharedScreenshotFieldsOf(RoundScreenshotView $screenshot, ?array $image): array
-    {
-        $pins = [];
-        foreach ($screenshot->pins as $pin) {
-            if (self::counts($pin)) {
-                $pins[] = self::pinFieldsOf($pin->number, $pin->xPercent, $pin->yPercent, $pin->note);
-            }
-        }
-
-        return self::screenshotFieldsOf($screenshot->id, $screenshot->position, $image, $screenshot->title, $screenshot->summary, $screenshot->verdict, $pins);
-    }
-
-    /**
-     * @param array{status: string, url: ?string}|null $image
-     *
-     * @return array<string, mixed>
-     */
-    private static function draftScreenshotFieldsOf(ScreenshotNotes $screenshot, ?array $image): array
-    {
-        $pins = array_map(static fn (PinNote $pin): array => self::pinFieldsOf($pin->number, $pin->xPercent, $pin->yPercent, $pin->note), $screenshot->pins);
-
-        return self::screenshotFieldsOf($screenshot->screenshotId, $screenshot->position, $image, $screenshot->title, $screenshot->summary, $screenshot->verdict, $pins);
-    }
-
-    /**
-     * A person's pin, or an AI pin a person kept (FR-RND-07, ADR-0020); an AI suggestion is no one's mark yet.
-     */
-    private static function counts(RoundPinView $pin): bool
-    {
-        return self::AI_PIN !== $pin->source || self::KEPT_AI_PIN === $pin->aiState;
-    }
-
-    /**
-     * @param array{status: string, url: ?string}|null $image
-     * @param list<array<string, mixed>>               $pins
+     * @param MediaImage|null $image null when Media did not find the picture's media object
      *
      * @return array<string, mixed>
      *
-     * @throws \UnexpectedValueException when $verdict is not one the draft round card knows
+     * @throws \UnexpectedValueException when the stored verdict is not one the draft round card knows
      */
-    private static function screenshotFieldsOf(string $screenshotId, int $position, ?array $image, ?string $title, ?string $summary, ?string $verdict, array $pins): array
+    private static function screenshotFieldsOf(ScreenshotNotes $screenshot, ?MediaImage $image): array
     {
         return [
-            'screenshot_id' => $screenshotId,
-            'position' => $position,
-            'image' => $image,
-            'title' => UntrustedText::wrapOrNull($title),
-            'summary' => UntrustedText::wrapOrNull($summary),
-            'verdict' => match ($verdict) {
+            'screenshot_id' => $screenshot->screenshotId,
+            'position' => $screenshot->position,
+            'image' => null === $image ? null : ['status' => $image->status->value, 'url' => $image->url],
+            'title' => UntrustedText::wrapOrNull($screenshot->title),
+            'summary' => UntrustedText::wrapOrNull($screenshot->summary),
+            'verdict' => match ($screenshot->verdict) {
                 RoundCommands::VERDICT_LOOKS_RIGHT => self::LOOKS_RIGHT,
                 RoundCommands::VERDICT_NOT_RIGHT_YET => self::NOT_RIGHT_YET,
                 null => null,
                 default => throw new \UnexpectedValueException('A stored screenshot verdict is not one the draft round card knows.'),
             },
-            'pins' => $pins,
+            'pins' => array_map(static fn (PinNote $pin): array => [
+                'number' => $pin->number,
+                'x_pct' => $pin->xPercent,
+                'y_pct' => $pin->yPercent,
+                'note' => UntrustedText::wrap($pin->note),
+            ], $screenshot->pins),
         ];
-    }
-
-    /**
-     * @return array{number: int, x_pct: float, y_pct: float, note: string}
-     */
-    private static function pinFieldsOf(int $number, float $xPercent, float $yPercent, string $note): array
-    {
-        return ['number' => $number, 'x_pct' => $xPercent, 'y_pct' => $yPercent, 'note' => UntrustedText::wrap($note)];
     }
 
     /**
