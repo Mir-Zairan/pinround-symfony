@@ -42,10 +42,11 @@ use Symfony\Component\Scheduler\Messenger\ServiceCallMessage;
 
 /**
  * The API token expiry warning run on 3 Mar 2027 at 09:00 UTC, through the resolver, the real command.bus and
- * async_notify, so it warns tokens expiring from 10 Mar 09:00 up to but not including 11 Mar 09:00 UTC. In Acme Foods
- * Omar (Berlin time) has two tokens in that range, one at its very start, and three outside it (in 6 days, at the
- * range's end, in 9 days); Lena has a revoked one in it and Mia, who is blocked, a live one. In Beta Bakery Lena has
- * one in it; Cedar Cafe only one in 9 days. Other tests share the database, so only these organizations' rows and
+ * async_notify, so it warns tokens expiring from then up to but not including 11 Mar 09:00 UTC: on time 7 to 8 days
+ * ahead, and late the ones a missed run left out. In Acme Foods Omar (Berlin time) has three tokens in that range (in 3
+ * days, never warned; in 7 days; a second before its end) and three outside it (an hour ago, at the range's end, in 9
+ * days); Lena has a revoked one in it and Mia, who is blocked, a live one. In Beta Bakery Lena has one in it; Cedar
+ * Cafe only one in 9 days. Other tests share the database, so only these organizations' rows and
  * messages are read and handled.
  */
 final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
@@ -64,15 +65,16 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
     private const string LENA_ADDRESS = 'lena.9a12@acme-foods.example';
     private const string MIA_ADDRESS = 'mia.9a13@acme-foods.example';
 
-    private const string OMAR_AT_RANGE_START = '0197a3c0-0000-7000-8000-0000000e9a21';
+    private const string OMAR_IN_7_DAYS = '0197a3c0-0000-7000-8000-0000000e9a21';
     private const string OMAR_JUST_BEFORE_RANGE_END = '0197a3c0-0000-7000-8000-0000000e9a22';
-    private const string OMAR_IN_6_DAYS = '0197a3c0-0000-7000-8000-0000000e9a23';
+    private const string OMAR_IN_3_DAYS = '0197a3c0-0000-7000-8000-0000000e9a23';
     private const string OMAR_AT_RANGE_END = '0197a3c0-0000-7000-8000-0000000e9a24';
     private const string OMAR_IN_9_DAYS = '0197a3c0-0000-7000-8000-0000000e9a25';
     private const string LENA_REVOKED = '0197a3c0-0000-7000-8000-0000000e9a26';
     private const string MIA_BLOCKED = '0197a3c0-0000-7000-8000-0000000e9a27';
     private const string LENA_AT_BETA = '0197a3c0-0000-7000-8000-0000000e9a28';
     private const string CEDAR_IN_9_DAYS = '0197a3c0-0000-7000-8000-0000000e9a29';
+    private const string OMAR_EXPIRED_AN_HOUR_AGO = '0197a3c0-0000-7000-8000-0000000e9a2a';
 
     private const string NOW = '2027-03-03 09:00:00 UTC';
     private const string RAN_AT = '2027-03-03T09:00:00+00:00';
@@ -95,8 +97,9 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
         // Added out of order, so the order in an email cannot come from the insert order.
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $this->addToken(self::OMAR_JUST_BEFORE_RANGE_END, self::ACME_FOODS, self::OMAR, 'Browser plugin', '2027-03-11 08:59:59 UTC');
-            $this->addToken(self::OMAR_IN_6_DAYS, self::ACME_FOODS, self::OMAR, 'Old laptop', '2027-03-09 09:00:00 UTC');
-            $this->addToken(self::OMAR_AT_RANGE_START, self::ACME_FOODS, self::OMAR, 'Claude Code', '2027-03-10 09:00:00 UTC');
+            $this->addToken(self::OMAR_IN_3_DAYS, self::ACME_FOODS, self::OMAR, 'Old laptop', '2027-03-06 09:00:00 UTC');
+            $this->addToken(self::OMAR_EXPIRED_AN_HOUR_AGO, self::ACME_FOODS, self::OMAR, 'Spare key', '2027-03-03 08:00:00 UTC');
+            $this->addToken(self::OMAR_IN_7_DAYS, self::ACME_FOODS, self::OMAR, 'Claude Code', '2027-03-10 09:00:00 UTC');
             $this->addToken(self::OMAR_AT_RANGE_END, self::ACME_FOODS, self::OMAR, 'Build server', '2027-03-11 09:00:00 UTC');
             $this->addToken(self::OMAR_IN_9_DAYS, self::ACME_FOODS, self::OMAR, 'Home desktop', '2027-03-12 09:00:00 UTC');
             $this->addToken(self::LENA_REVOKED, self::ACME_FOODS, self::LENA, 'Claude Code', '2027-03-10 12:00:00 UTC');
@@ -156,12 +159,13 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
 
         $emails = $this->emailsSent();
         self::assertEqualsCanonicalizing([self::OMAR_ADDRESS, self::LENA_ADDRESS], array_keys($emails));
-        self::assertSame('2 of your pinround API tokens stop working soon', $emails[self::OMAR_ADDRESS]->getSubject());
+        self::assertSame('3 of your pinround API tokens stop working soon', $emails[self::OMAR_ADDRESS]->getSubject());
         $omarsText = $emails[self::OMAR_ADDRESS]->getTextBody();
         self::assertIsString($omarsText);
         self::assertStringContainsString(
-            "2 of your pinround API tokens stop working soon:\n\n"
-            .'- Claude Code ('.$this->prefixes[self::OMAR_AT_RANGE_START].") works until 10 Mar 2027, 10:00 CET\n\n"
+            "3 of your pinround API tokens stop working soon:\n\n"
+            .'- Old laptop ('.$this->prefixes[self::OMAR_IN_3_DAYS].") works until 6 Mar 2027, 10:00 CET\n\n"
+            .'- Claude Code ('.$this->prefixes[self::OMAR_IN_7_DAYS].") works until 10 Mar 2027, 10:00 CET\n\n"
             .'- Browser plugin ('.$this->prefixes[self::OMAR_JUST_BEFORE_RANGE_END].") works until 11 Mar 2027, 09:59 CET\n\n"
             ."To keep Claude Code or the browser plugin working, make a new token and put it in their settings:\n",
             $omarsText,
@@ -173,14 +177,16 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
         self::assertStringContainsString('- Claude Code ('.$this->prefixes[self::LENA_AT_BETA].") works until 10 Mar 2027, 18:00 UTC\n", $lenasText);
         self::assertSame(
             [
-                self::OMAR_AT_RANGE_START => '2027-03-03 09:00:00',
+                self::OMAR_IN_7_DAYS => '2027-03-03 09:00:00',
                 self::OMAR_JUST_BEFORE_RANGE_END => '2027-03-03 09:00:00',
-                self::OMAR_IN_6_DAYS => null,
+                // Never warned, as if a run was missed: warned late, once.
+                self::OMAR_IN_3_DAYS => '2027-03-03 09:00:00',
                 self::OMAR_AT_RANGE_END => null,
                 self::OMAR_IN_9_DAYS => null,
                 self::LENA_REVOKED => null,
                 // Claimed with the others, though the blocked owner is sent nothing.
                 self::MIA_BLOCKED => '2027-03-03 09:00:00',
+                self::OMAR_EXPIRED_AN_HOUR_AGO => null,
             ],
             $this->warnedAtOf(self::ACME_FOODS),
         );
@@ -201,7 +207,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
         $this->handleOnlyTheMessagesOfTheseOrganizations();
 
         self::assertSame([], $this->emailsSent());
-        self::assertSame('2027-03-03 09:00:00', $this->warnedAtOf(self::ACME_FOODS)[self::OMAR_AT_RANGE_START]);
+        self::assertSame('2027-03-03 09:00:00', $this->warnedAtOf(self::ACME_FOODS)[self::OMAR_IN_7_DAYS]);
     }
 
     #[Test]
@@ -236,7 +242,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
     }
 
     /**
-     * Acme Foods has three tokens to warn and a page holds two, so the first message claims two and sends itself
+     * Acme Foods has four tokens to warn and a page holds three, so the first message claims three and sends itself
      * again with the same run time; the second claims the last one and, its page not full, sends nothing more. Each
      * email and the next page's message wait for the bus to commit, so a rollback sends none of them. The bus here
      * only records: the real one drops the stamp before a transport sees it.
@@ -245,7 +251,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
     public function aFullPageSendsTheMessageAgainForTheSameRunAndAPageThatIsNotFullStops(): void
     {
         $commandBus = new RecordingMessageBus();
-        $handler = $this->handlerWithPagesOf(2, $commandBus);
+        $handler = $this->handlerWithPagesOf(3, $commandBus);
 
         $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $handler(new SendApiTokenExpiryWarnings(self::ACME_FOODS, self::RAN_AT)));
 
@@ -254,8 +260,8 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
             self::describe($commandBus->dispatched()),
         );
         self::assertSame(
-            [self::OMAR_AT_RANGE_START => '2027-03-03 09:00:00', self::OMAR_JUST_BEFORE_RANGE_END => null, self::MIA_BLOCKED => '2027-03-03 09:00:00'],
-            array_intersect_key($this->warnedAtOf(self::ACME_FOODS), array_flip([self::OMAR_AT_RANGE_START, self::OMAR_JUST_BEFORE_RANGE_END, self::MIA_BLOCKED])),
+            [self::OMAR_IN_7_DAYS => '2027-03-03 09:00:00', self::OMAR_JUST_BEFORE_RANGE_END => null, self::OMAR_IN_3_DAYS => '2027-03-03 09:00:00', self::MIA_BLOCKED => '2027-03-03 09:00:00'],
+            array_intersect_key($this->warnedAtOf(self::ACME_FOODS), array_flip([self::OMAR_IN_7_DAYS, self::OMAR_JUST_BEFORE_RANGE_END, self::OMAR_IN_3_DAYS, self::MIA_BLOCKED])),
         );
 
         $this->transactions()->committedAs(self::ACME_FOODS, static fn () => $handler(new SendApiTokenExpiryWarnings(self::ACME_FOODS, self::RAN_AT)));
