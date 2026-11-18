@@ -169,7 +169,7 @@ final class SummaryControllerTest extends WebTestCase
         $frame = $this->client->getCrawler()->filter('turbo-frame#ticket-ask');
         self::assertCount(1, $frame->filter(self::RUNNING));
         self::assertSame('Summarizing…', $frame->filter('button.ticket__summarize[disabled]')->text());
-        self::assertCount(0, $frame->filter('form'));
+        self::assertCount(0, $frame->filter('button.ticket__summarize:not([disabled])'));
         $queued = $this->stateOf($this->shopTicketId);
         self::assertNotNull($queued);
         self::assertSame([SummaryRequestView::QUEUED, $this->idOf('Omar')], [$queued->status, $queued->requesterId->toString()]);
@@ -303,8 +303,14 @@ final class SummaryControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('ticket-ask', $frame->attr('id'));
-        self::assertCount(1, $frame->filter(self::RUNNING));
-        self::assertSame('Summarizing…', $frame->filter('button.ticket__summarize[disabled]')->text());
+        $state = $frame->filter(self::RUNNING);
+        self::assertCount(1, $state);
+        self::assertSame(
+            ['/t/SHOP-1/summary', 'Summary saved for everyone.', 'Summarize with AI'],
+            [$state->attr('data-summary-poll-url-value'), $state->attr('data-summary-poll-saved-toast-value'), $state->attr('data-summary-poll-ready-label-value')],
+        );
+        $button = $frame->filter('form[action="/t/SHOP-1/summary"] button.ticket__summarize[disabled]');
+        self::assertSame(['Summarizing…', 'true', 'button'], [$button->text(), $button->attr('aria-busy'), $button->attr('data-summary-poll-target')]);
         self::assertContains('Turbo-Frame', $this->client->getResponse()->getVary());
     }
 

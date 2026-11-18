@@ -137,6 +137,7 @@ Every controller is small, stays under about 150 lines, and has a test (Playwrig
 | `ticket-list` | The tickets list page: loads the URL `TicketFilters` sends into the list frame, the rail's frame and the address bar |
 | `focus-chips` | Shows and hides Home sections without a reload and saves the choice |
 | `local-ai` | Laptop AI ([ADR-0019](../03-adr/0019-browser-local-ai.md)): on the user's click it checks `GET http://localhost:11434/api/tags`; it fetches a prompt package from the server; it calls `POST /api/generate` (non-streaming, `format: "json"` when JSON is expected); it posts the result back. It never runs on page load (browsers may show a local-network permission prompt). |
+| `summary-poll` | `assets/controllers/summary-poll_controller.js`, on `.ticket__ask-state` inside TheAsk's `ticket-ask` frame: while its `state` value is `running` it fetches the `url` value (`GET /t/{key}/summary`, with the `Turbo-Frame` header) every 3 s, at most 60 times per connect, and replaces the frame's children when the answer's state is no longer running; a `done` answer first puts the `savedToast` value ("Summary saved for everyone.") in the toast region. A failed or refused poll counts as running. It stops on disconnect and while the page is hidden. After the last poll it turns the `button` target back on with the `readyLabel` value. During a press it sets `aria-busy` on the submitter (Turbo writes "Summarizing…"). Specs: `tests/e2e/summary-poll.spec.ts` |
 | `menu` | The "⋯" menus, the avatar menu and the bell popover: open/close, Escape, click outside, roving focus (the avatar menu is a disclosure and keeps its items in the Tab order) |
 | `theme-switch` | The avatar menu's System / Light / Dark switch: sets or removes `data-theme` on `<html>` at once and posts the choice to `/me/theme` |
 | `dialog` | Opens a `<dialog>`, keeps focus inside, gives focus back on close |
@@ -250,7 +251,7 @@ The prototype's single page becomes these routes. The `Module` column says who o
 | Check box actions | `POST /t/{key}/check/{action}` (`ticket_check`) | Ticketing | Turbo Stream |
 | Comment / question / reply / resolve | `POST /t/{key}/thread…` | Conversation | Turbo Stream |
 | Ping dialog | `POST /t/{key}/ping/{userId}` | Notification | Dialog |
-| Explain it to me / summarize | `POST /t/{key}/ai/explain`, `POST /t/{key}/ai/summary` | Assist | `ExplainBox` |
+| Explain it to me / summarize | `POST /t/{key}/ai/explain`; the summary: `GET /t/{key}/summary` (`assist_summary_frame`), `GET /t/{key}/summary/earlier` (`assist_summary_earlier`), `POST /t/{key}/summary` (`assist_summary_request`) | Assist | `ExplainBox`; `TheAsk` with the `summary-poll` controller |
 | Report a problem | `GET/POST /report` (`report_new`) | Ticketing | `ReportForm` |
 | My reports | `GET /my-reports` (`my_reports`) | Insight | Tracker cards grouped Needs you / Stuck / Moving / Done |
 | Round view (prototype "Review round" board) | `GET /t/{key}/rounds/{number}` | Review | Screenshot + PinLayer, before/after, verdicts |

@@ -9,10 +9,14 @@
     {#- Polite, so a summary that replaces the raw text while the reader is elsewhere on the page is read out once. -#}
     <turbo-frame id="{{ constant('App\\Assist\\UI\\Component\\TheAsk::FRAME_ID') }}" aria-live="polite">
         {#- Turbo swaps the frame's children, not the frame, so the summary-poll controller's values live here. -#}
+        {%- set summarizeLabel = 'Summarize with AI' %}
         <div class="ticket__ask-state"
              data-controller="summary-poll"
+             data-action="visibilitychange@document->summary-poll#followVisibility turbo:submit-start->summary-poll#markBusy turbo:submit-end->summary-poll#clearBusy"
              data-summary-poll-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {key: ticket.key}) }}"
-             data-summary-poll-state-value="{{ state }}">
+             data-summary-poll-state-value="{{ state }}"
+             data-summary-poll-saved-toast-value="Summary saved for everyone."
+             data-summary-poll-ready-label-value="{{ summarizeLabel }}">
             {% if summary is not null %}
                 <twig:Card tag="div" class="ticket__ask ticket__ask--summary">
                     <p class="ticket__ask-source">
@@ -64,9 +68,11 @@
                     {% if aiRefusal is not null %}
                         <p class="ticket__ask-ai-off">{{ aiRefusal }}</p>
                     {% elseif state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_RUNNING') %}
-                        <div class="ticket__ask-actions">
-                            <twig:Button variant="tonal" :disabled="true" aria-busy="true" class="ticket__summarize">Summarizing…</twig:Button>
-                        </div>
+                        {#- A form with the button off, so the summary-poll controller can offer it again after its last poll. -#}
+                        <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions">
+                            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
+                            <twig:Button type="submit" variant="tonal" :disabled="true" aria-busy="true" class="ticket__summarize" data-summary-poll-target="button" data-turbo-submits-with="Summarizing…">Summarizing…</twig:Button>
+                        </form>
                     {% else %}
                         {% if state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_FAILED') %}
                             <p class="ticket__ask-failed">{{ ask.summaryRequest.sentence }}</p>
@@ -76,7 +82,7 @@
                         {% endif %}
                         <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions">
                             <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
-                            <twig:Button type="submit" variant="tonal" class="ticket__summarize" data-turbo-submits-with="Summarizing…">Summarize with AI</twig:Button>
+                            <twig:Button type="submit" variant="tonal" class="ticket__summarize" data-turbo-submits-with="Summarizing…">{{ summarizeLabel }}</twig:Button>
                         </form>
                     {% endif %}
                 </twig:Card>
