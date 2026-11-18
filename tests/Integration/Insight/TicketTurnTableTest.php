@@ -62,7 +62,7 @@ final class TicketTurnTableTest extends KernelTestCase
     }
 
     #[Test]
-    public function theKeyAndTheFiveCatalogueIndexesAllStartWithTheOrganization(): void
+    public function theKeyAndTheSixIndexesAllStartWithTheOrganization(): void
     {
         self::assertEqualsCanonicalizing(
             [
@@ -72,6 +72,7 @@ final class TicketTurnTableTest extends KernelTestCase
                 'CREATE INDEX ins_ticket_turn_team_id_turn_user_id_waiting_since_idx ON public.ins_ticket_turn USING btree (organization_id, team_id, turn_user_id, waiting_since)',
                 'CREATE INDEX ins_ticket_turn_project_id_turn_user_id_waiting_since_idx ON public.ins_ticket_turn USING btree (organization_id, project_id, turn_user_id, waiting_since)',
                 'CREATE INDEX ins_ticket_turn_team_id_grp_idx ON public.ins_ticket_turn USING btree (organization_id, team_id, grp)',
+                'CREATE INDEX ins_ticket_turn_assignee_id_idx ON public.ins_ticket_turn USING btree (organization_id, assignee_id)',
             ],
             $this->connection()->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'ins_ticket_turn'"),
         );

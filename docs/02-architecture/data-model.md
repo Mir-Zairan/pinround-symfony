@@ -430,6 +430,7 @@ The single list of indexes on the hot tables. Other documents link here instead 
 | ins_ticket_turn | `(organization_id, team_id, turn_user_id, waiting_since)` | Whose turn (team, all projects), workload |
 | ins_ticket_turn | `(organization_id, project_id, turn_user_id, waiting_since)` | Whose turn filtered by project |
 | ins_ticket_turn | `(organization_id, team_id, grp)` | manager bars |
+| ins_ticket_turn | `(organization_id, assignee_id)` (`ins_ticket_turn_assignee_id_idx`, `Version20261119180000`, built `CONCURRENTLY`) | `list_my_tickets`: the tickets assigned to the caller, beside the turn index for the ones whose turn is theirs |
 | cnv_message | `(organization_id, ticket_id, created_at, id)`; partial `UNIQUE (organization_id, ticket_id) WHERE kind='question' AND resolved_at IS NULL AND removed_at IS NULL`; partial `(organization_id, to_user_id) WHERE kind='question' AND resolved_at IS NULL` | thread, one open question per ticket, open questions |
 | cnv_reply | `(organization_id, message_id, created_at, id)` | replies of a message |
 | ntf_ping | `(organization_id, from_id, to_id, ticket_id, created_at)`; partial `(organization_id, to_id, ticket_id) WHERE cleared_at IS NULL` | rate limit, pings tray |
