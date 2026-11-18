@@ -91,8 +91,23 @@ export default class extends Controller {
       await this.#showProposal(frame, hadFocus);
       return;
     }
-    this.#giveButtonBack(readyLabel, hadFocus);
-    this.#showLine(this.#lineAfter(refusal));
+    this.#showRefusal(refusal, readyLabel, frame, hadFocus);
+  }
+
+  // A check made during the press may have found the laptop not ready and hidden the form: the not-ready line then
+  // says what to do, alone.
+  #showRefusal(refusal, readyLabel, frame, hadFocus) {
+    const line = this.#lineAfter(refusal);
+    // Disabling the button dropped a focus that was in the ask to the page; one the person moved elsewhere stays there.
+    const isFocusOurs = hadFocus && (document.activeElement === document.body || (frame?.contains(document.activeElement) ?? false));
+    const isFormShown = !this.formTarget.hidden;
+    this.#giveButtonBack(readyLabel, isFocusOurs && isFormShown);
+    if (isFormShown) {
+      this.#showLine(line);
+    } else if (isFocusOurs) {
+      this.notReadyLineTarget.tabIndex = -1;
+      this.notReadyLineTarget.focus();
+    }
   }
 
   // Where the cloud may take the press (no not-ready line), an Ollama that did not answer sends the next press there; one

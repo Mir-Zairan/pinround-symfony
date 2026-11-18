@@ -90,6 +90,30 @@ async function answerGenerateWith(page: Page, response: string, beforeAnswer: Pr
   return generateBodies;
 }
 
+/** The POST /api/generate requests the page sent, left unanswered for the test to settle. */
+async function holdGenerateRequests(page: Page): Promise<Route[]> {
+  const heldRequests: Route[] = [];
+  await page.route(OLLAMA_GENERATE_URL, (route) => {
+    heldRequests.push(route);
+  });
+  return heldRequests;
+}
+
+async function abortHeldRequests(heldRequests: Route[]): Promise<void> {
+  for (const route of heldRequests) {
+    // The page may have given up on it already, so Playwright may refuse to settle it.
+    await route.abort('connectionrefused').catch(() => undefined);
+  }
+}
+
+/** Stores and announces a check's result as the chip does (local_ai_storage.js's rememberLastCheck), without moving the focus. */
+async function rememberCheckAsTheChipDoes(page: Page, outcome: object): Promise<void> {
+  await page.evaluate((checked) => {
+    sessionStorage.setItem('pinround.localAiLastCheck', JSON.stringify(checked));
+    window.dispatchEvent(new CustomEvent('local-ai:checked', { detail: checked }));
+  }, outcome);
+}
+
 function recordPathsPosted(page: Page): string[] {
   const paths: string[] = [];
   page.on('request', (request) => {
@@ -322,6 +346,60 @@ test.describe('an organization whose AI runs only on laptops', () => {
     await expect(summarizeButton(page)).toBeVisible();
     expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/package'))).toEqual([]);
   });
+
+  test('a check during a keyboard press that finds the laptop gone leaves only the not-ready line, with the focus on it', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Newsletter box hides the pay button');
+    await seedReadyLaptop(page);
+    const heldRequests = await holdGenerateRequests(page);
+    await openTicket(page, key);
+
+    try {
+      await summarizeButton(page).press('Enter');
+      await expect.poll(() => heldRequests.length).toBe(1);
+      await expect(laptopStatusLine(page)).toHaveText(RUNNING_LINE);
+      await rememberCheckAsTheChipDoes(page, { state: 'not-found', model: null, models: [] });
+      await abortHeldRequests(heldRequests);
+
+      await expect(notReadyLine(page)).toHaveText(NOT_READY_LINE);
+      await expect(notReadyLine(page)).toBeFocused();
+      await expect(summarizeForm(page)).toBeHidden();
+      await expect(laptopStatusLine(page)).toBeHidden();
+      await expect(laptopStatusLine(page)).toHaveText('');
+      await expect(summarizeForm(page).locator('.ticket__summarize')).not.toHaveAttribute('aria-busy');
+    } finally {
+      await abortHeldRequests(heldRequests);
+    }
+  });
+
+  test('a check in the sheet during a press that finds the laptop gone leaves the focus where the person put it', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Order history skips the newest order');
+    await seedReadyLaptop(page);
+    const heldRequests = await holdGenerateRequests(page);
+    await page.route(OLLAMA_TAGS_URL, (route) => route.abort('connectionrefused'));
+    await openTicket(page, key);
+
+    try {
+      await summarizeButton(page).press('Enter');
+      await expect.poll(() => heldRequests.length).toBe(1);
+      await localAiChip(page).click();
+      const sheet = page.getByRole('dialog', { name: 'AI on your laptop' });
+      await sheet.getByRole('button', { name: 'Check again' }).click();
+      await expect(sheet.getByRole('status')).toHaveText('pinround could not reach Ollama on this laptop.', { useInnerText: true });
+      await page.keyboard.press('Escape');
+      await expect(sheet).toBeHidden();
+      await abortHeldRequests(heldRequests);
+
+      await expect(notReadyLine(page)).toHaveText(NOT_READY_LINE);
+      await expect(summarizeForm(page)).toBeHidden();
+      await expect(laptopStatusLine(page)).toBeHidden();
+      await expect(laptopStatusLine(page)).toHaveText('');
+      // The sheet gave the focus back to the chip, and the end of the press leaves it there.
+      await expect(localAiChip(page)).toBeFocused();
+      await expect(page.locator('#ticket-ask :focus')).toHaveCount(0);
+    } finally {
+      await abortHeldRequests(heldRequests);
+    }
+  });
 });
 
 test.describe('an organization whose AI runs on laptops first, then in the cloud', () => {
@@ -392,10 +470,7 @@ test.describe('an organization whose AI runs on laptops first, then in the cloud
     const key = await makeTicketWithAnAsk(browser, 'Saved cards vanish after an update');
     await seedReadyLaptop(page);
     const postedPaths = recordPathsPosted(page);
-    const heldRequests: Route[] = [];
-    await page.route(OLLAMA_GENERATE_URL, (route) => {
-      heldRequests.push(route);
-    });
+    const heldRequests = await holdGenerateRequests(page);
     await answerCloudSummaryHere(page, key);
     await openTicket(page, key);
 
@@ -419,10 +494,7 @@ test.describe('an organization whose AI runs on laptops first, then in the cloud
       expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/'))).toEqual(['/ai/laptop/package']);
       expect(heldRequests).toHaveLength(1);
     } finally {
-      for (const route of heldRequests) {
-        // The page gave up on it already, so Playwright may refuse to answer it.
-        await route.abort().catch(() => undefined);
-      }
+      await abortHeldRequests(heldRequests);
     }
   });
 
