@@ -1,0 +1,52 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Identity\Domain;
+
+use App\Identity\Domain\ApiTokenScope;
+use App\Identity\Domain\UnknownApiTokenScope;
+use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\TestCase;
+
+final class ApiTokenScopeTest extends TestCase
+{
+    #[Test]
+    public function theScopesAreExactlyTheFiveOfAdr0021AndAdr0039(): void
+    {
+        self::assertSame(
+            ['read', 'rounds:write', 'comments:write', 'tickets:move', 'reports:write'],
+            array_column(ApiTokenScope::cases(), 'value'),
+        );
+    }
+
+    #[Test]
+    public function claudeCodeStartsWithReadAndRoundsWriteOnly(): void
+    {
+        self::assertSame([ApiTokenScope::Read, ApiTokenScope::RoundsWrite], ApiTokenScope::claudeCodeDefaults());
+    }
+
+    #[Test]
+    public function knownValuesBecomeScopesInTheOrderGiven(): void
+    {
+        self::assertSame([ApiTokenScope::TicketsMove, ApiTokenScope::Read], ApiTokenScope::fromValues(['tickets:move', 'read']));
+        self::assertSame([], ApiTokenScope::fromValues([]));
+    }
+
+    #[Test]
+    public function anUnknownValueIsRefusedEvenNextToKnownOnes(): void
+    {
+        $this->expectException(UnknownApiTokenScope::class);
+        $this->expectExceptionMessage('A token scope must be one of: read, rounds:write, comments:write, tickets:move, reports:write.');
+
+        ApiTokenScope::fromValues(['read', 'admin']);
+    }
+
+    #[Test]
+    public function aScopeInAnotherLetterCaseIsUnknown(): void
+    {
+        $this->expectException(UnknownApiTokenScope::class);
+
+        ApiTokenScope::fromValues(['READ']);
+    }
+}
