@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Review\Application;
 
 use App\Media\Api\MediaImageStatus;
+use App\Review\Api\AddedDraftScreenshot;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\DraftDecision;
@@ -62,6 +64,8 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     private const string REJECTED_MEDIA = '0197a3c0-0000-7000-8000-000000000d04';
     private const string OMARS_MEDIA = '0197a3c0-0000-7000-8000-000000000d05';
     private const string UNKNOWN_MEDIA = '0197a3c0-0000-7000-8000-000000000d09';
+    /** Ready, uploaded by Lena and by Mia, and in no round. */
+    private const string FRESH_MEDIA = '0197a3c0-0000-7000-8000-000000000d06';
 
     private const string DRAFT = '0197a3c0-0000-7000-8000-000000000e01';
     private const string OMARS_DRAFT = '0197a3c0-0000-7000-8000-000000000e02';
@@ -104,6 +108,8 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             [self::ACME_FOODS, self::PENDING_MEDIA, self::LENA, MediaImageStatus::Pending],
             [self::ACME_FOODS, self::REJECTED_MEDIA, self::LENA, MediaImageStatus::Rejected],
             [self::ACME_FOODS, self::OMARS_MEDIA, self::OMAR, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::FRESH_MEDIA, self::LENA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::FRESH_MEDIA, self::MIA, MediaImageStatus::Ready],
         ]);
         $this->commands = $this->commandsOver($this->interfering);
         $this->seedRounds();
@@ -234,6 +240,168 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         $refused = $this->assertRefusedAndNothingSaved('A round holds at most 50 screenshots.', fn () => $this->commands->addDraftScreenshot(self::FULL_DRAFT, new UserId(self::LENA), self::MEDIA, self::at()));
 
         self::assertSame([false, false, true], self::kindsOf($refused));
+    }
+
+    #[Test]
+    public function addingAPictureOnceStoresItWithItsTextAndPinsInOneReadAndOneSave(): void
+    {
+        $before = $this->snapshot();
+        $versionBefore = $this->storedRound(self::DRAFT)->version();
+        $loadedBefore = $this->rounds->loadedRounds;
+        $savedBefore = $this->rounds->savedRounds;
+
+        $added = $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(
+            strtoupper(self::FRESH_MEDIA),
+            ' Cart total ',
+            'The fee is left out.',
+            [new PlacedPin(12.5, 40.0, ' The total '), new PlacedPin(0.0, 100.0, '')],
+        ), self::at());
+
+        self::assertFalse($added->wasAddedBefore);
+        self::assertSame(2, $added->pinCount);
+        $draft = $this->storedRound(self::DRAFT);
+        self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, $added->screenshotId], self::screenshotIdsOf($draft));
+        $stored = $draft->screenshots()[2];
+        self::assertSame([self::FRESH_MEDIA, 2, 'Cart total', 'The fee is left out.', null], [$stored->mediaId(), $stored->position(), $stored->title(), $stored->summary(), $stored->verdict()]);
+        self::assertSame(
+            [[1, 12.5, 40.0, 'The total', self::LENA], [2, 0.0, 100.0, '', self::LENA]],
+            array_map(static fn (Pin $pin): array => [$pin->number(), $pin->xPercent(), $pin->yPercent(), $pin->note(), $pin->authorId()->toString()], $stored->pins()),
+        );
+        self::assertSame([$loadedBefore + 1, $savedBefore + 1], [$this->rounds->loadedRounds, $this->rounds->savedRounds]);
+        self::assertSame($versionBefore + 3, $draft->version());
+        self::assertSame([[strtoupper(self::FRESH_MEDIA)]], $this->uploadedMedia->askedMediaIds);
+        self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
+    }
+
+    /**
+     * The text and pins sent this time are not used, so even ones over their caps are not looked at.
+     */
+    #[Test]
+    public function addingAPictureTheDraftHoldsAlreadyAnswersThatScreenshotAndSavesNothing(): void
+    {
+        $before = $this->snapshot();
+        $savedBefore = $this->rounds->savedRounds;
+
+        $added = $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(
+            strtoupper(self::OTHER_MEDIA),
+            str_repeat('é', 121),
+            null,
+            [new PlacedPin(101.0, 1.0, 'Outside'), new PlacedPin(1.0, 1.0, 'Inside')],
+        ), self::at());
+
+        self::assertEquals(new AddedDraftScreenshot(self::SECOND_SCREENSHOT, true, 0), $added);
+        self::assertSame($before, $this->snapshot());
+        self::assertSame($savedBefore, $this->rounds->savedRounds);
+        self::assertSame([], $this->uploadedMedia->askedMediaIds);
+    }
+
+    #[Test]
+    public function addingThePictureOfAScreenshotWithPinsAgainCountsItsStoredPins(): void
+    {
+        $added = $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(self::MEDIA), self::at());
+
+        self::assertEquals(new AddedDraftScreenshot(self::FIRST_SCREENSHOT, true, 1), $added);
+    }
+
+    /**
+     * @return iterable<string, array{string, ScreenshotWithPins, string}>
+     */
+    public static function picturesOnceOverACap(): iterable
+    {
+        $pin = new PlacedPin(1.0, 1.0, 'Note');
+        yield 'a title over 120 characters' => [self::DRAFT, new ScreenshotWithPins(self::FRESH_MEDIA, str_repeat('é', 121)), 'A picture title holds at most 120 characters.'];
+        yield 'a summary over 600 characters' => [self::DRAFT, new ScreenshotWithPins(self::FRESH_MEDIA, null, str_repeat('é', 601)), 'A picture summary holds at most 600 characters.'];
+        yield 'a note over 1,000 characters' => [self::DRAFT, new ScreenshotWithPins(self::FRESH_MEDIA, pins: [$pin, new PlacedPin(1.0, 1.0, str_repeat('é', 1001))]), 'A pin note holds at most 1000 characters.'];
+        yield 'a pin outside the picture' => [self::DRAFT, new ScreenshotWithPins(self::FRESH_MEDIA, pins: [new PlacedPin(100.5, 1.0, 'Note')]), 'A pin must sit inside the picture: x and y go from 0 to 100.'];
+        yield 'a full draft' => [self::FULL_DRAFT, new ScreenshotWithPins(self::FRESH_MEDIA), 'A round holds at most 50 screenshots.'];
+        // On a round that does not exist, which shows the pin cap is checked before the round is read.
+        yield 'more pins than a picture holds' => [self::UNKNOWN_ROUND, new ScreenshotWithPins(self::FRESH_MEDIA, pins: array_fill(0, Screenshot::MAX_PINS + 1, $pin)), 'A picture holds at most 100 pins.'];
+    }
+
+    #[Test]
+    #[DataProvider('picturesOnceOverACap')]
+    public function addingAPictureOnceOverACapIsInvalidContentAndStoresNothing(string $roundId, ScreenshotWithPins $screenshot, string $reason): void
+    {
+        $refused = $this->assertRefusedAndNothingSaved($reason, fn () => $this->commands->addDraftScreenshotOnce($roundId, new UserId(self::LENA), $screenshot, self::at()));
+
+        self::assertSame([false, false, true], self::kindsOf($refused));
+    }
+
+    #[Test]
+    #[DataProvider('picturesTheOwnerCannotAdd')]
+    public function addingAPictureOnceTheOwnerCannotUseIsRefusedAndStoresNothing(string $mediaId, string $reason): void
+    {
+        $refused = $this->assertRefusedAndNothingSaved($reason, fn () => $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins($mediaId), self::at()));
+
+        self::assertSame([false, false, false], self::kindsOf($refused));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function picturesOfASharedDraft(): iterable
+    {
+        yield 'a picture it holds' => [self::MEDIA];
+        yield 'a picture it does not hold' => [self::FRESH_MEDIA];
+    }
+
+    #[Test]
+    #[DataProvider('picturesOfASharedDraft')]
+    public function addingAPictureOnceToASharedDraftIsReadOnlyAndStoresNothing(string $mediaId): void
+    {
+        self::assertNotNull($this->storedRound(self::MIAS_SHARED_DRAFT)->sharedAt());
+
+        $refused = $this->assertRefusedAndNothingSaved('This draft round is shared, so it no longer changes.', fn () => $this->commands->addDraftScreenshotOnce(self::MIAS_SHARED_DRAFT, new UserId(self::MIA), new ScreenshotWithPins($mediaId, 'Title'), self::at()));
+
+        self::assertSame([false, true, false], self::kindsOf($refused));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function roundsOnceIsNotFoundOn(): iterable
+    {
+        yield 'a malformed round id' => ['not-a-round-id'];
+        yield 'an unknown round' => [self::UNKNOWN_ROUND];
+        yield 'another person\'s draft' => [self::OMARS_DRAFT];
+        yield 'another organization\'s draft' => [self::BETA_BAKERY_DRAFT];
+        yield 'a report round' => [self::REPORT];
+        yield 'the owner\'s deleted draft' => [self::LENAS_DELETED_DRAFT];
+    }
+
+    /**
+     * Omar's draft holds OMARS_MEDIA, so the answer for it must not tell Lena so.
+     */
+    #[Test]
+    #[DataProvider('roundsOnceIsNotFoundOn')]
+    public function addingAPictureOnceToARoundThatIsNotTheOwnersOpenDraftIsNotFoundAndStoresNothing(string $roundId): void
+    {
+        $refused = $this->assertRefusedAndNothingSaved(RoundRefused::NOT_FOUND, fn () => $this->commands->addDraftScreenshotOnce($roundId, new UserId(self::LENA), new ScreenshotWithPins(self::OMARS_MEDIA), self::at()));
+
+        self::assertSame([true, false, false], self::kindsOf($refused));
+        self::assertSame([], $this->uploadedMedia->askedMediaIds);
+    }
+
+    #[Test]
+    public function addingAPictureOnceToADraftAnotherRequestSavedMeanwhileIsRefusedAsChanged(): void
+    {
+        $this->interfering->afterNextGet = static function (Rounds $rounds): void {
+            $draft = $rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('The seeded draft is missing.');
+            $draft->addScreenshot(new UserId(self::LENA), new ScreenshotId(self::CONCURRENT_SCREENSHOT), self::FRESH_MEDIA);
+            $rounds->save($draft, self::at());
+        };
+
+        try {
+            $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(self::FRESH_MEDIA, 'Title'), self::at());
+            self::fail('The picture was added over a draft that changed after it was read.');
+        } catch (RoundRefused $refused) {
+            self::assertSame(RoundRefused::DRAFT_CHANGED, $refused->getMessage());
+            self::assertInstanceOf(RoundChanged::class, $refused->getPrevious());
+        }
+
+        $draft = $this->storedRound(self::DRAFT);
+        self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, self::CONCURRENT_SCREENSHOT], self::screenshotIdsOf($draft));
+        self::assertNull($draft->screenshots()[2]->title(), 'Only the other request\'s picture, with no title, may have landed.');
     }
 
     #[Test]

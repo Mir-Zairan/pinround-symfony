@@ -323,7 +323,7 @@ final class SetVerdictTest extends TestCase
     {
         yield 'changed meanwhile' => [new RoundRefused(RoundRefused::DRAFT_CHANGED, 0, new \RuntimeException('The round changed since it was read.'))];
         // The cause alone says nothing: only the kind Review set does.
-        yield 'a domain refusal Review gave no kind' => [new RoundRefused('A round holds at most 50 screenshots.', 0, new \DomainException('A round holds at most 50 screenshots.'))];
+        yield 'a domain refusal Review gave no kind' => [new RoundRefused('Only the person who owns a draft round can change it.', 0, new \DomainException('Only the person who owns a draft round can change it.'))];
         yield 'an invalid argument Review gave no kind' => [new RoundRefused('Not a kind.', 0, new \InvalidArgumentException('Not a kind.'))];
     }
 

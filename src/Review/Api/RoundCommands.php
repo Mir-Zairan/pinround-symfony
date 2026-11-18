@@ -21,6 +21,10 @@ interface RoundCommands
 {
     /** The most pins one screenshot takes. */
     public const int MAX_PINS_PER_SCREENSHOT = 100;
+    /** The most characters, after trimming, of a screenshot's title, a screenshot's summary and a pin's note. */
+    public const int MAX_TITLE_LENGTH = 120;
+    public const int MAX_SUMMARY_LENGTH = 600;
+    public const int MAX_PIN_NOTE_LENGTH = 1000;
 
     /** The verdicts setDraftVerdict takes: "Looks right" and "Not right yet". */
     public const string VERDICT_LOOKS_RIGHT = 'looks_right';
