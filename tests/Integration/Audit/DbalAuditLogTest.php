@@ -13,6 +13,7 @@ use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Fixtures\Audit\AuditLogConsumer;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -61,8 +62,8 @@ final class DbalAuditLogTest extends KernelTestCase
         $this->connection()->transactional(fn () => $this->auditLog()->record(AuditEntry::byUser(
             new OrganizationId(self::ORG_A),
             self::USER,
-            'role.changed',
-            'membership',
+            'team_role.changed',
+            'user',
             self::TARGET,
             ['from' => 'member', 'to' => 'admin', 'team_id' => 7],
             "\x00\xff-ip",
@@ -81,8 +82,8 @@ final class DbalAuditLogTest extends KernelTestCase
         self::assertSame('user', $row['actor_kind']);
         self::assertSame(self::USER, $row['actor_user_id']);
         self::assertNull($row['actor_token_id']);
-        self::assertSame('role.changed', $row['action']);
-        self::assertSame('membership', $row['target_type']);
+        self::assertSame('team_role.changed', $row['action']);
+        self::assertSame('user', $row['target_type']);
         self::assertSame(self::TARGET, $row['target_id']);
         self::assertIsString($row['data']);
         self::assertIsString($row['id']);
@@ -118,6 +119,7 @@ final class DbalAuditLogTest extends KernelTestCase
             'member.joined',
             'user',
             self::USER,
+            ['org_roles' => ['admin']],
             occurredAt: new \DateTimeImmutable('2027-02-28 23:59:58.250 UTC'),
         )));
 
@@ -139,14 +141,14 @@ final class DbalAuditLogTest extends KernelTestCase
     {
         $this->tenantContext()->set(new OrganizationId(self::ORG_A));
         $this->connection()->transactional(function (): void {
-            $this->auditLog()->record(AuditEntry::byToken(new OrganizationId(self::ORG_A), self::USER, self::TOKEN, 'mcp.tool_called', 'ticket', self::TARGET, ['tool' => 'get_ticket']));
-            $this->auditLog()->record(AuditEntry::bySystem(new OrganizationId(self::ORG_A), 'retention.changed', 'organization', null));
+            $this->auditLog()->record(AuditEntry::byToken(new OrganizationId(self::ORG_A), self::USER, self::TOKEN, 'mcp.tool_called', 'ticket', self::TARGET, ['tool' => 'get_ticket', 'outcome' => 'ok']));
+            $this->auditLog()->record($this->systemEntryFor(self::ORG_A));
         });
 
         self::assertSame(
             [
-                ['actor_kind' => 'system', 'actor_user_id' => null, 'actor_token_id' => null, 'target_id' => null, 'data' => '{}', 'ip_hash' => null],
-                ['actor_kind' => 'token', 'actor_user_id' => self::USER, 'actor_token_id' => self::TOKEN, 'target_id' => self::TARGET, 'data' => '{"tool": "get_ticket"}', 'ip_hash' => null],
+                ['actor_kind' => 'system', 'actor_user_id' => null, 'actor_token_id' => null, 'target_id' => self::TARGET, 'data' => '{}', 'ip_hash' => null],
+                ['actor_kind' => 'token', 'actor_user_id' => self::USER, 'actor_token_id' => self::TOKEN, 'target_id' => self::TARGET, 'data' => '{"tool": "get_ticket", "outcome": "ok"}', 'ip_hash' => null],
             ],
             $this->connection()->transactional(static fn (Connection $connection) => $connection->fetchAllAssociative(
                 'SELECT actor_kind, actor_user_id, actor_token_id, target_id, data::text AS data, ip_hash FROM aud_event ORDER BY actor_kind',
@@ -206,28 +208,79 @@ final class DbalAuditLogTest extends KernelTestCase
         self::assertSame(0, $this->countVisibleEvents());
     }
 
-    /** A list-shaped array must not turn the column into a JSON array. */
+    /** An empty array is list-shaped too, and must not turn the column into a JSON array. */
     #[Test]
-    public function dataShapedLikeAListIsStoredAsAnObject(): void
+    public function noDataIsStoredAsAnEmptyObject(): void
     {
         $this->tenantContext()->set(new OrganizationId(self::ORG_A));
-        $listShapedData = [0 => 'x'];
-        $this->connection()->transactional(fn () => $this->auditLog()->record(
-            // @phpstan-ignore argument.type (a caller can still pass a list at run time, which is what this proves)
-            AuditEntry::bySystem(new OrganizationId(self::ORG_A), 'retention.changed', 'organization', null, $listShapedData),
-        ));
+        $this->connection()->transactional(fn () => $this->auditLog()->record($this->systemEntryFor(self::ORG_A)));
 
         self::assertSame(
-            ['{"0": "x"}', 'object'],
+            ['{}', 'object'],
             $this->connection()->transactional(static fn (Connection $connection) => $connection->fetchNumeric(
                 'SELECT data::text, jsonb_typeof(data) FROM aud_event',
             )),
         );
     }
 
+    /**
+     * Each entry is refused whichever module writes it, and the transaction it ran in can still commit a row that is
+     * allowed, so nothing of the refused one was written.
+     *
+     * @return iterable<string, array{\Closure(): AuditEntry, string}>
+     */
+    public static function entriesTheAllowListRefuses(): iterable
+    {
+        $orgA = new OrganizationId(self::ORG_A);
+
+        yield 'a tool call with an extra key' => [
+            static fn (): AuditEntry => AuditEntry::byToken($orgA, self::USER, self::TOKEN, 'mcp.tool_called', 'ticket', self::TARGET, ['tool' => 'get_ticket', 'outcome' => 'ok', 'arguments' => 'SHOP-1']),
+            'The data of the audit action "mcp.tool_called" must hold exactly the keys tool, outcome.',
+        ];
+        yield 'a token issued without its expiry' => [
+            static fn (): AuditEntry => AuditEntry::byUser($orgA, self::USER, 'api_token.issued', 'api_token', self::TARGET, ['scopes' => ['read']]),
+            'The data of the audit action "api_token.issued" must hold exactly the keys scopes, expires_at.',
+        ];
+        // A caller can still pass a list at run time.
+        yield 'list-shaped data' => [
+            // @phpstan-ignore argument.type
+            static fn (): AuditEntry => AuditEntry::bySystem($orgA, 'member.joined', 'user', self::USER, [0 => ['admin']]),
+            'The data of the audit action "member.joined" must hold exactly the keys org_roles.',
+        ];
+        yield 'an action with no allow-list' => [
+            static fn (): AuditEntry => AuditEntry::bySystem($orgA, 'retention.changed', 'organization', null),
+            'The audit action "retention.changed" has no data allow-list.',
+        ];
+    }
+
+    /**
+     * @param \Closure(): AuditEntry $refusedEntry
+     */
+    #[Test]
+    #[DataProvider('entriesTheAllowListRefuses')]
+    public function anEntryTheAllowListRefusesIsNotWritten(\Closure $refusedEntry, string $expectedMessage): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::ORG_A));
+
+        $this->connection()->transactional(function () use ($refusedEntry, $expectedMessage): void {
+            try {
+                $this->auditLog()->record($refusedEntry());
+                self::fail('The entry was recorded.');
+            } catch (\LogicException $refusal) {
+                self::assertSame($expectedMessage, $refusal->getMessage());
+            }
+            $this->auditLog()->record($this->systemEntryFor(self::ORG_A));
+        });
+
+        self::assertSame(
+            ['member.invited'],
+            $this->connection()->transactional(static fn (Connection $connection) => $connection->fetchFirstColumn('SELECT action FROM aud_event')),
+        );
+    }
+
     private function systemEntryFor(string $organizationId): AuditEntry
     {
-        return AuditEntry::bySystem(new OrganizationId($organizationId), 'retention.changed', 'organization', null);
+        return AuditEntry::bySystem(new OrganizationId($organizationId), 'member.invited', 'invitation', self::TARGET);
     }
 
     private function countVisibleEvents(): int

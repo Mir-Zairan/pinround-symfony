@@ -7,12 +7,13 @@ namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditEntryForAnotherTenantRefused;
 use App\Audit\Api\AuditLog;
+use App\Audit\Application\AuditDataAllowList;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Connection;
 
 /**
- * An AuditLog that keeps its entries in memory. Like DbalAuditLog it refuses an entry of another organization than
- * the tenant's, and it can fail as a write in a broken transaction does. Given a connection, it also refuses an entry
+ * An AuditLog that keeps its entries in memory. Like DbalAuditLog it refuses data Audit's allow-list does not list and
+ * an entry of another organization than the tenant's, and it can fail as a write in a broken transaction does. Given a connection, it also refuses an entry
  * outside a transaction and notes each entry in a table of that connection, so a rollback takes the entry back as it
  * would take back the aud_event row.
  */
@@ -50,6 +51,7 @@ final class RecordingAuditLog implements AuditLog
         if (null !== $this->failure) {
             throw $this->failure;
         }
+        AuditDataAllowList::refuseUnlessAllowed($entry->action, $entry->data);
         if (!$entry->organizationId->equals($this->tenant)) {
             throw new AuditEntryForAnotherTenantRefused();
         }

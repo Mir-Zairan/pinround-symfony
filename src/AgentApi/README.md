@@ -5,7 +5,7 @@ The REST API under `/api/v1` and the MCP tools at `/mcp` for the browser plugin,
 ## Depends on
 
 - Identity Api: `CurrentApiToken::access()`, the request's `ApiTokenAccess` (token id, organization, scope names), which the stateless `api_token` firewall (`TokenAuthenticator`, security.yaml) sets for every request under `/mcp` and `/api/v1`; `CurrentUser::id()`, the token's user; `UserQueries::byIds()`, for whoami's display name.
-- Audit Api: `AuditLog::record()` and `AuditDataAllowList`, for the row of each tool call.
+- Audit Api: `AuditLog::record()`, for the row of each tool call. Audit's own allow-list (`Audit\Application\AuditDataAllowList`) lists `mcp.tool_called` with exactly `tool` and `outcome`, and `DbalAuditLog` refuses any other key.
 
 ## What it has now
 
