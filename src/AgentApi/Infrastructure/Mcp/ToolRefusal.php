@@ -42,4 +42,15 @@ final class ToolRefusal extends \RuntimeException
     {
         return new self(\sprintf(self::INVALID_INPUT, $problems), ToolCallOutcome::InvalidInput);
     }
+
+    /**
+     * A plain refusal of the domain that none of the others names, such as a picture processing rejected.
+     *
+     * @param string $reason the plain text the client is shown as it is; it must not tell whether a target the caller
+     *                       may not see exists
+     */
+    public static function refused(string $reason): self
+    {
+        return new self($reason, ToolCallOutcome::Refused);
+    }
 }

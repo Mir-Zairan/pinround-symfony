@@ -248,6 +248,21 @@ final class ToolCallGateTest extends TestCase
         $this->assertOneRow($fixture, 'read_only', 'ticket', self::SHOP_42);
     }
 
+    #[Test]
+    public function aToolsPlainRefusalAfterItsWriteKeepsNoneOfItAndIsAuditedAsRefused(): void
+    {
+        $fixture = new GateFixture(scopes: ['read', 'rounds:write'], grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $tool = $this->toolOnShop42('rounds:write', self::writing($fixture, 'by the tool', ToolRefusal::refused('The picture was rejected.')));
+
+        $refusal = $this->refusalOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42']));
+
+        self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
+        self::assertSame('The picture was rejected.', $refusal->getMessage());
+        self::assertSame([], $fixture->writtenLabels());
+        self::assertSame(1, $fixture->connection->getTransactionNestingLevel());
+        $this->assertOneRow($fixture, 'refused', 'ticket', self::SHOP_42);
+    }
+
     /**
      * The ok row fails as the error row after it does, so the call ends with neither; what matters is that the tool's
      * write does not stay without its row.
