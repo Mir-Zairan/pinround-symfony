@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Integration\AgentApi;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
 use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
@@ -32,7 +34,7 @@ final class AgentToolServicesTest extends TestCase
      */
     public static function environments(): iterable
     {
-        $productTools = [WhoAmI::class, ListMyTickets::class, GetRoundNotes::class, SetVerdict::class];
+        $productTools = [WhoAmI::class, ListMyTickets::class, GetRoundNotes::class, SetVerdict::class, CreateUpload::class, AddScreenshot::class];
 
         yield 'dev' => ['dev', true, $productTools];
         yield 'prod' => ['prod', false, $productTools];
