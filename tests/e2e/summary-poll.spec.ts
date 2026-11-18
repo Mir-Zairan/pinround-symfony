@@ -180,7 +180,7 @@ async function recordPollTimes(page: Page): Promise<() => Promise<number[]>> {
     const startedAtMs: number[] = [];
     const pageFetch = window.fetch.bind(window);
     window.fetch = (input, init) => {
-      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      const url = new URL(input instanceof window.Request ? input.url : String(input), window.location.href);
       if ((init?.method ?? 'GET').toUpperCase() === 'GET' && url.pathname.endsWith('/summary')) {
         startedAtMs.push(Date.now());
       }
