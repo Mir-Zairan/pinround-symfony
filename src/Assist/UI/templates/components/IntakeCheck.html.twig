@@ -8,14 +8,21 @@
     {%- set isFrameAnswer = app.request is not null and app.request.headers.get('Turbo-Frame') == constant(component ~ '::FRAME_ID') %}
     <div class="intake-check__state" tabindex="-1"{% if isFrameAnswer %} autofocus{% endif %}
          data-controller="intake-check"
+         data-action="visibilitychange@document->intake-check#followVisibility"
          data-intake-check-state-value="{{ state }}"
          data-intake-check-request-url-value="{{ path(constant(controller ~ '::REQUEST_ROUTE')) }}"
+         data-intake-check-ready-label-value="{{ state == constant(component ~ '::STATE_DONE') ? constant(component ~ '::CHECK_AGAIN_LABEL') : constant(component ~ '::CHECK_LABEL') }}"
+         data-intake-check-running-label-value="{{ constant(component ~ '::RUNNING_LABEL') }}"
+         data-intake-check-mark-label-value="{{ constant(component ~ '::MARK_LABEL') }}"
+         data-intake-check-unanswered-line-value="{{ constant(component ~ '::UNANSWERED_LINE') }}"
          {%- if intakeCheck.checkId is not null %} data-intake-check-id-value="{{ intakeCheck.checkId.toString }}" data-intake-check-url-value="{{ path(constant(controller ~ '::FRAME_ROUTE'), {checkId: intakeCheck.checkId.toString}) }}"{% endif %}
          {%- if intakeCheck.suggestedType is not null %} data-intake-check-type-value="{{ intakeCheck.suggestedType }}"{% endif %}
          {%- if intakeCheck.suggestedPriority is not null %} data-intake-check-priority-value="{{ intakeCheck.suggestedPriority }}"{% endif %}>
         {% if state == constant(component ~ '::STATE_RUNNING') %}
             <p class="intake-check__line">{{ constant(component ~ '::RUNNING_LINE') }}</p>
-            <twig:Button type="button" variant="tonal" size="sm" :disabled="true" aria-busy="true" class="intake-check__button">{{ constant(component ~ '::RUNNING_LABEL') }}</twig:Button>
+            {#- Off while it runs; the token goes with it so the controller can offer it again after its last poll. -#}
+            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
+            <twig:Button type="button" variant="tonal" size="sm" :disabled="true" aria-busy="true" class="intake-check__button" data-intake-check-target="button" data-action="intake-check#check">{{ constant(component ~ '::RUNNING_LABEL') }}</twig:Button>
         {% else %}
             {% set aiRefusal = intakeCheck.aiRefusal %}
             {% if aiRefusal is not null %}
@@ -34,7 +41,7 @@
                 {% endif %}
                 {#- Inside the New ticket form, so its fields go with the check; a button, not a submit, so Enter in a field still makes the ticket. -#}
                 <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
-                <twig:Button type="button" variant="tonal" size="sm" class="intake-check__button" data-action="intake-check#check">{{ state == constant(component ~ '::STATE_DONE') ? constant(component ~ '::CHECK_AGAIN_LABEL') : constant(component ~ '::CHECK_LABEL') }}</twig:Button>
+                <twig:Button type="button" variant="tonal" size="sm" class="intake-check__button" data-intake-check-target="button" data-action="intake-check#check">{{ state == constant(component ~ '::STATE_DONE') ? constant(component ~ '::CHECK_AGAIN_LABEL') : constant(component ~ '::CHECK_LABEL') }}</twig:Button>
             {% endif %}
         {% endif %}
         {% if state == constant(component ~ '::STATE_DONE') and intakeCheck.duplicates is not empty %}

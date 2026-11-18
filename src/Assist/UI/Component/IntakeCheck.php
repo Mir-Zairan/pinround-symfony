@@ -34,6 +34,10 @@ final class IntakeCheck
     public const string CHECK_LABEL = 'Check with AI';
     public const string CHECK_AGAIN_LABEL = 'Check again with AI';
     public const string RUNNING_LABEL = 'Thinking…';
+    /** What a screen reader hears for the ✦ the browser puts after a suggested Type or Priority. */
+    public const string MARK_LABEL = 'AI suggestion';
+    /** Shown by the browser when the button's request answered without the frame, such as offline or an error page. */
+    public const string UNANSWERED_LINE = 'The check did not go through. Try again.';
 
     /** The New ticket form's radio values, by the type and priority the intake schema answers with. */
     private const array TYPE_VALUES = ['Bug' => 'bug', 'Story' => 'story', 'Task' => 'task'];

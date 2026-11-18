@@ -158,10 +158,19 @@ final class IntakeCheckControllerTest extends WebTestCase
         self::assertSame([IntakeCheck::RUNNING_LINE], self::textsOf($frame->filter('.intake-check__line')));
         self::assertSame([IntakeCheck::RUNNING_LABEL], self::textsOf($frame->filter('button.intake-check__button[disabled]')));
         self::assertCount(0, $frame->filter('button.intake-check__button:not([disabled])'));
+        self::assertSame(IntakeCheck::CHECK_LABEL, $frame->filter(self::STATE)->attr('data-intake-check-ready-label-value'));
+        $tokens = $frame->filter('input[type="hidden"][name="'.IntakeCheckController::CSRF_FIELD.'"]');
+        self::assertCount(1, $tokens, 'After its last poll the controller offers the button again, which posts this token.');
+        $runningToken = (string) $tokens->attr('value');
         self::assertSame(['div.intake-check__state[tabindex="-1"]'], $this->autofocusedOf($this->client->getCrawler()));
         self::assertCount(0, $this->client->getCrawler()->filter('form, input[name="title"], textarea'), 'The answer re-renders only the frame, so the typed text stays.');
         self::assertContains('Turbo-Frame', $this->client->getResponse()->getVary());
         self::assertSame(1, $this->stateValkey()->exists('intake_request:'.$this->acmeFoods->toString().':'.$checkId));
+
+        // The token passes its check, so the empty title is what is refused.
+        $refusal = $this->postCheck(['title' => ''], token: $runningToken);
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame([IntakeCheckController::TITLE_MISSING], self::textsOf($refusal->filter('.intake-check__notice')));
     }
 
     #[Test]
@@ -455,6 +464,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         self::assertSame(['done', 'bug', 'major'], [$state->attr('data-intake-check-state-value'), $state->attr('data-intake-check-type-value'), $state->attr('data-intake-check-priority-value')]);
         self::assertSame(['In short: Pay does nothing on the last step.'], self::textsOf($frame->filter('.intake-check__summary')));
         self::assertSame([IntakeCheck::CHECK_AGAIN_LABEL], self::textsOf($frame->filter('button.intake-check__button:not([disabled])')));
+        self::assertSame(IntakeCheck::CHECK_AGAIN_LABEL, $state->attr('data-intake-check-ready-label-value'), 'A press that gets no frame gives the button this label back.');
         self::assertSame([['SHOP-1', 'Checkout fails', '/t/SHOP-1']], $this->duplicatesOf($frame));
         self::assertSame(0, $this->stateValkey()->exists('intake_draft:'.$this->acmeFoods->toString().':'.$checkId), 'The ended check drops its draft.');
     }

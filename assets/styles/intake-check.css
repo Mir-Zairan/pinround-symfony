@@ -26,6 +26,10 @@
   outline: none;
 }
 
+.intake-check__button[hidden] {
+  display: none;
+}
+
 .intake-check__line {
   flex: 1 1 16rem;
   margin: 0;
@@ -86,4 +90,9 @@
   min-width: 0;
   color: inherit;
   overflow-wrap: anywhere;
+}
+
+/* The ✦ the intake-check controller puts after a suggested Type or Priority label. */
+.intake-check__mark {
+  color: var(--ai);
 }
