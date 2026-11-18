@@ -243,11 +243,11 @@ sequenceDiagram
   B->>P: POST /ai/laptop/package {feature, ticketId}
   P->>P: Policy + voter check, build prompt from template
   P-->>B: {packageId, instructions, prompt, schema, expiresAt}
-  B->>O: POST /api/generate {model, prompt, format, stream:false}
+  B->>O: POST /api/generate {model, system: instructions, prompt, format, stream:false}
   O-->>B: result text
   B->>P: POST /ai/laptop/result {packageId, model, text}
   P->>P: Validate (schema, size, model name), label "posted by Y using local model X (unverified)"
-  P-->>B: Turbo Stream: show summary
+  P-->>B: 201 {packageId, label, text, model, postedAt}
 ```
 
 Rules:

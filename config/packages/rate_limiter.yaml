@@ -100,7 +100,8 @@ framework:
             lock_factory: lock.factory
         # Both laptop AI routes together, keyed by the organization, the user id and the clock's minute
         # (SymfonyLaptopRequestLimit): every refused result writes an audit entry, so a script of made-up package ids
-        # is stopped within a minute, while a person asking and posting by hand never meets it.
+        # is held to 30 requests a minute and the audit log grows by at most 30 refused-result entries a minute per
+        # person, while a person asking and posting by hand never meets it.
         ai_laptop_per_user:
             policy: fixed_window
             limit: 30
