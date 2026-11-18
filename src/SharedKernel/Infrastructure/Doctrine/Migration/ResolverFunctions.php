@@ -9,7 +9,7 @@ namespace App\SharedKernel\Infrastructure\Doctrine\Migration;
  * Lookups before the tenant is known): the lookups that run before the tenant is known, the
  * ticket search, which must reach the GIN indexes the planner skips under a policy (ADR-0022), and
  * the organizations or people a scheduled job with no tenant must visit, such as the release of held
- * notifications and the email digest. Each
+ * notifications, the email digest and the expiry warning of API tokens. Each
  * is owned by pinround_resolver, returns ids only, and only pinround_app may execute it.
  */
 final class ResolverFunctions
@@ -28,5 +28,6 @@ final class ResolverFunctions
         'search_ticket_ids',
         'organizations_with_due_notifications',
         'digest_recipients',
+        'organizations_with_expiring_api_tokens',
     ];
 }

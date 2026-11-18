@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Identity\Infrastructure\Doctrine;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokens;
 use App\Identity\Domain\ApiTokenScope;
+use App\Identity\Domain\ExpiringApiToken;
 use App\Identity\Infrastructure\Doctrine\DoctrineApiTokens;
 use App\Identity\Infrastructure\Security\HmacApiTokenHashing;
 use App\SharedKernel\Application\TenantContext;
@@ -254,12 +255,13 @@ final class DoctrineApiTokensTest extends KernelTestCase
         $found = $this->asAcmeFoods(fn (): array => [
             $this->tokens()->byId(self::LENA_AT_ACME)?->userId()->toString(),
             $this->tokens()->byId(strtoupper(self::OMAR_LIVE))?->id(),
+            $this->tokens()->byId(self::OMAR_EXPIRED)?->id(),
             $this->tokens()->byId(self::OMAR_AT_BETA),
             $this->tokens()->byId('0197a3c0-0000-7000-8000-000000000cff'),
             $this->tokens()->byId("not-a-token-id'"),
         ]);
 
-        self::assertSame([self::LENA, self::OMAR_LIVE, null, null, null], $found);
+        self::assertSame([self::LENA, self::OMAR_LIVE, self::OMAR_EXPIRED, null, null, null], $found);
         self::assertSame(self::OMAR, $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): ?string => $this->tokens()->byId(self::OMAR_AT_BETA)?->userId()->toString()));
     }
 
@@ -442,6 +444,87 @@ final class DoctrineApiTokensTest extends KernelTestCase
             ['revoked_at' => null, 'last_used_at' => null],
             $this->asAcmeFoods(fn (): array|false => $this->connection()->fetchAssociative('SELECT revoked_at, last_used_at FROM idn_api_token WHERE id = ?', [self::OMAR_LIVE])),
         );
+    }
+
+    /**
+     * OMAR_OLDER expires on 12 Jun 2099 at 10:00, the start of the range; OMAR_LIVE and OMAR_SAME_SECOND in one second
+     * on 13 Jun; Lena's on 14 Jun at 10:00, the end of the first range; the revoked one on 13 Jun at 11:00; Beta's on
+     * 15 Jun. A page of two ends between the tied tokens, so the lower id goes first.
+     */
+    #[Test]
+    public function expiryWarningsAreClaimedOncePerLiveTokenInTheRangeSoonestFirstAndOnlyInTheTenant(): void
+    {
+        $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
+        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
+            $this->add(self::OMAR_REVOKED, self::ACME_FOODS, self::OMAR, $issuedAt->modify('+1 hour'));
+            self::assertTrue($this->tokens()->revoke(self::OMAR_REVOKED, $issuedAt->modify('+2 hours')));
+        });
+        $from = new \DateTimeImmutable('2099-06-12 10:00:00 UTC');
+        $before = new \DateTimeImmutable('2099-06-14 10:00:00 UTC');
+        $warnedAt = new \DateTimeImmutable('2099-06-05 06:30:00 UTC');
+
+        $claims = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => [
+            'first page' => $this->tokens()->claimExpiryWarnings($from, $before, $warnedAt, 2),
+            'second page' => $this->tokens()->claimExpiryWarnings($from, $before, $warnedAt->modify('+1 minute'), 10),
+            'again' => $this->tokens()->claimExpiryWarnings($from, $before, $warnedAt->modify('+2 minutes'), 10),
+            'the next day' => $this->tokens()->claimExpiryWarnings($before, $before->modify('+2 days'), $warnedAt, 10),
+        ]);
+        $betaClaim = $this->transactions()->committedAs(self::BETA_BAKERY, fn (): array => $this->tokens()->claimExpiryWarnings($before, $before->modify('+2 days'), $warnedAt, 10));
+
+        self::assertSame(
+            [
+                'first page' => [self::OMAR_OLDER, self::OMAR_LIVE],
+                'second page' => [self::OMAR_SAME_SECOND],
+                'again' => [],
+                'the next day' => [self::LENA_AT_ACME],
+            ],
+            array_map(static fn (array $claimed): array => array_map(static fn (ExpiringApiToken $token): string => $token->id, $claimed), $claims),
+        );
+        self::assertSame([self::OMAR_AT_BETA], array_map(static fn (ExpiringApiToken $token): string => $token->id, $betaClaim));
+        $older = $claims['first page'][0];
+        self::assertSame(self::OMAR, $older->ownerId->toString());
+        self::assertSame('Claude Code', $older->name);
+        self::assertSame(substr($this->plainTokens[self::OMAR_OLDER], 0, 11), $older->prefix);
+        self::assertEquals(new \DateTimeImmutable('2099-06-12 10:00:00 UTC'), $older->expiresAt);
+        self::assertSame(
+            [
+                self::OMAR_LIVE => '2099-06-05 06:30:00',
+                self::OMAR_SAME_SECOND => '2099-06-05 06:31:00',
+                self::OMAR_OLDER => '2099-06-05 06:30:00',
+                self::OMAR_EXPIRED => null,
+                self::LENA_AT_ACME => '2099-06-05 06:30:00',
+                self::OMAR_REVOKED => null,
+            ],
+            $this->asAcmeFoods(fn (): array => $this->connection()->fetchAllKeyValue(
+                "SELECT id, to_char(expiry_warned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM idn_api_token ORDER BY id",
+            )),
+        );
+    }
+
+    #[Test]
+    public function aClaimOfNoTokenOrOfAnEmptyRangeIsRefusedAndWithoutATenantToo(): void
+    {
+        $from = new \DateTimeImmutable('2099-06-12 10:00:00 UTC');
+        $refusals = [];
+        $calls = [
+            'no token' => fn (): array => $this->tokens()->claimExpiryWarnings($from, $from->modify('+1 day'), $from, 0),
+            'an empty range' => fn (): array => $this->tokens()->claimExpiryWarnings($from, $from, $from, 10),
+        ];
+        foreach ($calls as $case => $call) {
+            try {
+                $this->asAcmeFoods($call);
+            } catch (\InvalidArgumentException) {
+                $refusals[] = $case;
+            }
+        }
+        try {
+            $this->tokens()->claimExpiryWarnings($from, $from->modify('+1 day'), $from, 10);
+        } catch (TenantNotSet) {
+            $refusals[] = 'without a tenant';
+        }
+
+        self::assertSame(['no token', 'an empty range', 'without a tenant'], $refusals);
+        self::assertSame(0, $this->asAcmeFoods(fn (): mixed => $this->connection()->fetchOne('SELECT count(*) FROM idn_api_token WHERE expiry_warned_at IS NOT NULL')));
     }
 
     #[Test]

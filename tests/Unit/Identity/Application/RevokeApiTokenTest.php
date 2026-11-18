@@ -171,10 +171,17 @@ final class RevokeApiTokenTest extends TestCase
     #[Test]
     public function anAdminRevokesAnExpiredTokenAndThePublishedEventNamesTheAdminAsActorAndTheOwnerAsUser(): void
     {
+        self::assertNull($this->tokens->byId(self::OMARS_EXPIRED_TOKEN)?->revokedAt());
+
         self::assertTrue($this->revokeAsSara(self::OMARS_EXPIRED_TOKEN));
 
-        self::assertFalse($this->revokeAsSara(self::OMARS_EXPIRED_TOKEN), 'the expired token was not revoked the first time');
-        self::assertSame([self::OMARS_TOKEN], $this->liveIdsOf(self::OMAR));
+        self::assertEquals(new \DateTimeImmutable(self::NOW), $this->tokens->byId(self::OMARS_EXPIRED_TOKEN)?->revokedAt());
+        self::assertNull($this->tokens->byId(self::OMARS_TOKEN)?->revokedAt(), 'the admin revoked another token of the owner too');
+        self::assertFalse(
+            new RevokeApiToken($this->tokens, $this->events)->asAdmin(new UserId(self::SARA), self::OMARS_EXPIRED_TOKEN, new \DateTimeImmutable('2027-03-16 10:00:00 UTC')),
+            'a second revoke of the same token changes nothing',
+        );
+        self::assertEquals(new \DateTimeImmutable(self::NOW), $this->tokens->byId(self::OMARS_EXPIRED_TOKEN)?->revokedAt(), 'the second revoke moved the revocation time');
         self::assertEquals(
             [new ApiTokenRevoked(self::ACME_FOODS, self::OMARS_EXPIRED_TOKEN, self::OMAR, self::SARA, new \DateTimeImmutable(self::NOW))],
             $this->events->publishedEvents,

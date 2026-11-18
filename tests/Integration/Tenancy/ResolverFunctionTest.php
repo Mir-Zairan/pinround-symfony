@@ -51,6 +51,8 @@ final class ResolverFunctionTest extends KernelTestCase
         'organizations_with_due_notifications' => "organizations_with_due_notifications('1970-01-01 00:00:00+00'::timestamptz)",
         // No notification was made an hour before 1970.
         'digest_recipients' => "digest_recipients('1970-01-01 00:00:00+00'::timestamptz)",
+        // No token expires in 1969: each lasts at most a year from its issue.
+        'organizations_with_expiring_api_tokens' => "organizations_with_expiring_api_tokens('1969-01-01 00:00:00+00'::timestamptz, '1970-01-01 00:00:00+00'::timestamptz)",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -63,6 +65,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'search_ticket_ids' => ['ticket_id'],
         'organizations_with_due_notifications' => ['organization_id'],
         'digest_recipients' => ['organization_id', 'user_id'],
+        'organizations_with_expiring_api_tokens' => ['organization_id'],
     ];
 
     /**
