@@ -29,14 +29,19 @@ use Doctrine\ORM\EntityManagerInterface;
 use Monolog\Formatter\JsonFormatter;
 use PHPUnit\Framework\Attributes\Test;
 use Psr\Log\LoggerInterface;
+use Symfony\Bridge\Twig\Mime\BodyRenderer;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Mailer\Messenger\SendEmailMessage;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\DispatchAfterCurrentBusStamp;
+use Symfony\Component\Messenger\Stamp\ErrorDetailsStamp;
+use Symfony\Component\Messenger\Stamp\RedeliveryStamp;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
+use Symfony\Component\Mime\BodyRendererInterface;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Message;
 use Symfony\Component\Scheduler\Generator\MessageContext;
 use Symfony\Component\Scheduler\Messenger\ServiceCallMessage;
 
@@ -75,6 +80,7 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
     private const string LENA_AT_BETA = '0197a3c0-0000-7000-8000-0000000e9a28';
     private const string CEDAR_IN_9_DAYS = '0197a3c0-0000-7000-8000-0000000e9a29';
     private const string OMAR_EXPIRED_AN_HOUR_AGO = '0197a3c0-0000-7000-8000-0000000e9a2a';
+    private const string LENA_IN_1_DAY = '0197a3c0-0000-7000-8000-0000000e9a2b';
 
     private const string NOW = '2027-03-03 09:00:00 UTC';
     private const string RAN_AT = '2027-03-03T09:00:00+00:00';
@@ -272,6 +278,100 @@ final class QueueApiTokenExpiryWarningsTest extends KernelTestCase
             self::describe($commandBus->dispatched()),
         );
         self::assertSame('2027-03-03 09:00:00', $this->warnedAtOf(self::ACME_FOODS)[self::OMAR_JUST_BEFORE_RANGE_END]);
+    }
+
+    /**
+     * Lena's token, the soonest, makes her email the first one queued; Omar's then fails to render. The page of two is
+     * full, so only the failure keeps the next page from being queued too.
+     */
+    #[Test]
+    public function aMailThatFailsToRenderAfterTheClaimUndoesTheClaimAndQueuesNoEmailAndNoNextPage(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->addToken(self::LENA_IN_1_DAY, self::ACME_FOODS, self::LENA, 'Work laptop', '2027-03-04 09:00:00 UTC'));
+        $realRenderer = new BodyRenderer(self::getContainer()->get('twig'));
+        $failingMail = new ApiTokenExpiryMail(
+            new class($realRenderer) implements BodyRendererInterface {
+                private int $renders = 0;
+
+                public function __construct(private readonly BodyRendererInterface $realRenderer)
+                {
+                }
+
+                public function render(Message $message): void
+                {
+                    if (2 === ++$this->renders) {
+                        throw new \RuntimeException('The second email could not be rendered.');
+                    }
+                    $this->realRenderer->render($message);
+                }
+            },
+            self::getContainer()->get('router'),
+            'http://localhost',
+        );
+        $this->replaceTheHandlerWithPagesOfTwo(self::getContainer()->get(UserQueries::class), $failingMail);
+
+        $this->assertAFailedMessageWarnsAndQueuesNothing('The second email could not be rendered.');
+    }
+
+    #[Test]
+    public function ownersThatCannotBeLoadedAfterTheClaimUndoTheClaimAndQueueNoEmailAndNoNextPage(): void
+    {
+        $failingUserQueries = self::createStub(UserQueries::class);
+        $failingUserQueries->method('emailsOf')->willThrowException(new \RuntimeException('The owners could not be loaded.'));
+        $this->replaceTheHandlerWithPagesOfTwo($failingUserQueries, self::getContainer()->get(ApiTokenExpiryMail::class));
+
+        $this->assertAFailedMessageWarnsAndQueuesNothing('The owners could not be loaded.');
+    }
+
+    /**
+     * Before command.bus exists, as the bus takes its handlers when it is built; the replacement reaches the bus only
+     * once it handles a message.
+     */
+    private function replaceTheHandlerWithPagesOfTwo(UserQueries $userQueries, ApiTokenExpiryMail $expiryMail): void
+    {
+        $commandBus = static fn (): MessageBusInterface => self::getContainer()->get('command.bus');
+        self::getContainer()->set(SendApiTokenExpiryWarningsHandler::class, new SendApiTokenExpiryWarningsHandler(
+            self::getContainer()->get(TenantContext::class),
+            self::getContainer()->get(ApiTokens::class),
+            $userQueries,
+            $expiryMail,
+            new class($commandBus) implements MessageBusInterface {
+                /** @param \Closure(): MessageBusInterface $commandBus */
+                public function __construct(private readonly \Closure $commandBus)
+                {
+                }
+
+                public function dispatch(object $message, array $stamps = []): Envelope
+                {
+                    return ($this->commandBus)()->dispatch($message, $stamps);
+                }
+            },
+            new MockClock(new \DateTimeImmutable(self::NOW)),
+            2,
+        ));
+    }
+
+    /**
+     * Handles Acme Foods' message once on the real command.bus through async_notify. Its retry waits in the transport,
+     * as the frozen clock never reaches the time it is due.
+     */
+    private function assertAFailedMessageWarnsAndQueuesNothing(string $expectedFailure): void
+    {
+        self::getContainer()->get('command.bus')->dispatch(new SendApiTokenExpiryWarnings(self::ACME_FOODS, self::RAN_AT), [new TenantStamp(new OrganizationId(self::ACME_FOODS))]);
+        $this->handleOnlyTheMessagesOfTheseOrganizations();
+
+        self::assertSame([], array_filter($this->warnedAtOf(self::ACME_FOODS), static fn (?string $warnedAt): bool => null !== $warnedAt));
+        self::assertNotSame([], $this->asyncNotify()->getSent());
+        $sent = array_map(static function (Envelope $envelope): string {
+            $message = $envelope->getMessage();
+            $redelivered = null === $envelope->last(RedeliveryStamp::class) ? '' : ' redelivered after: '.$envelope->last(ErrorDetailsStamp::class)?->getExceptionMessage();
+
+            return ($message instanceof SendApiTokenExpiryWarnings ? $message->organizationId.' '.$message->ranAt : $message::class).$redelivered;
+        }, $this->asyncNotify()->getSent());
+        self::assertSame(
+            [self::ACME_FOODS.' '.self::RAN_AT, self::ACME_FOODS.' '.self::RAN_AT.' redelivered after: '.$expectedFailure],
+            $sent,
+        );
     }
 
     /**
