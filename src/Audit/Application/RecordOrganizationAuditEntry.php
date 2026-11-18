@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Audit\Application;
 
+use App\Audit\Api\AuditDataAllowList;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
 use App\Organization\Api\Event\MemberInvited;

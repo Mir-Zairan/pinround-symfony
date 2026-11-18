@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Audit\Application;
+namespace App\Audit\Api;
 
 /**
- * The check every audit consumer runs on the data of each entry it records (ADR-0026: a schema allow-list per action).
+ * The check every audit writer runs on the data of each entry it records (ADR-0026: a schema allow-list per action):
+ * Audit's own event consumers and the other modules that call AuditLog, such as AgentApi's ToolCallAuditor.
  */
 final class AuditDataAllowList
 {

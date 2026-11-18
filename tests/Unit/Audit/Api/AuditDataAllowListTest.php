@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Audit\Application;
+namespace App\Tests\Unit\Audit\Api;
 
-use App\Audit\Application\AuditDataAllowList;
+use App\Audit\Api\AuditDataAllowList;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
