@@ -47,6 +47,30 @@ interface ApiTokens
     public function byIdForOwner(string $id, UserId $ownerId): ?ApiToken;
 
     /**
+     * Any person's token, for an Admin of the tenant.
+     *
+     * @return ApiToken|null null when $id is not a UUID or no token of the tenant has it
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function byId(string $id): ?ApiToken;
+
+    /**
+     * The tenant's tokens of every person that are neither revoked nor expired at $at, the soonest to expire first (by
+     * expires_at, then the lower id), after the token whose expiresAt and id are $afterExpiresAt and $afterId when
+     * both are given. A keyset page: no offset, so a page deep in the list costs what the first does.
+     *
+     * @param int $limit at least 1; the caller caps it
+     *
+     * @return list<ApiToken> at most $limit
+     *
+     * @throws \InvalidArgumentException when $limit is below 1, or only one of $afterExpiresAt and $afterId is given,
+     *                                   or $afterId is not a UUID
+     * @throws \LogicException           when no tenant is set
+     */
+    public function livePage(\DateTimeImmutable $at, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array;
+
+    /**
      * The user's MAX_LISTED_TOKENS newest tokens in the tenant, revoked and expired ones included, newest first (by
      * created_at, then the later id). Older ones are left out, a live one too when 50 newer tokens were made since.
      *

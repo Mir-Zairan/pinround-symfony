@@ -93,6 +93,44 @@ final readonly class DoctrineApiTokens implements ApiTokens
         return $this->entityManager->getRepository(ApiToken::class)->findOneBy(['id' => strtolower($id), 'userId' => $ownerId->toString()]);
     }
 
+    public function byId(string $id): ?ApiToken
+    {
+        $organizationId = $this->tenantContext->require();
+        if (!Uuid::isValid($id)) {
+            return null;
+        }
+
+        return $this->entityManager->getRepository(ApiToken::class)->findOneBy(['organizationId' => $organizationId->toString(), 'id' => strtolower($id)]);
+    }
+
+    public function livePage(\DateTimeImmutable $at, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array
+    {
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A page of tokens holds at least one.');
+        }
+        if ((null === $afterExpiresAt) !== (null === $afterId) || (null !== $afterId && !Uuid::isValid($afterId))) {
+            throw new \InvalidArgumentException('A page of tokens starts after both the expiry and the id of a token.');
+        }
+        $organizationId = $this->tenantContext->require();
+        $query = $this->entityManager->createQuery(
+            'SELECT t FROM '.ApiToken::class.' t WHERE t.organizationId = :organizationId'
+            .' AND t.revokedAt IS NULL AND t.expiresAt > :at'
+            .(null === $afterExpiresAt ? '' : ' AND (t.expiresAt > :afterExpiresAt OR (t.expiresAt = :afterExpiresAt AND t.id > :afterId))')
+            .' ORDER BY t.expiresAt ASC, t.id ASC',
+        )
+            ->setParameter('organizationId', $organizationId->toString())
+            ->setParameter('at', $at->format(self::TIMESTAMP_FORMAT))
+            ->setMaxResults($limit);
+        if (null !== $afterExpiresAt && null !== $afterId) {
+            $query->setParameter('afterExpiresAt', $afterExpiresAt->format(self::TIMESTAMP_FORMAT))
+                ->setParameter('afterId', strtolower($afterId));
+        }
+        /** @var list<ApiToken> $tokens */
+        $tokens = $query->getResult();
+
+        return $tokens;
+    }
+
     public function forUser(UserId $userId): array
     {
         /** @var list<ApiToken> $tokens */

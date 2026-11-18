@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Application;
 
+use App\Identity\Api\ApiTokenNotInOrganization;
 use App\Identity\Api\Event\ApiTokenRevoked;
 use App\Identity\Application\ApiTokenNotFound;
 use App\Identity\Application\RevokeApiToken;
@@ -27,6 +28,8 @@ final class RevokeApiTokenTest extends TestCase
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000000fb1';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000000fd1';
     private const string LENA = '0197a3c0-0000-7000-8000-000000000fd2';
+    /** An Admin of Acme Foods, who owns no token. */
+    private const string SARA = '0197a3c0-0000-7000-8000-000000000fd3';
     private const string OMARS_TOKEN = '0197a3c0-0000-7000-8000-000000000fe1';
     private const string LENAS_TOKEN = '0197a3c0-0000-7000-8000-000000000fe2';
     private const string OMARS_TOKEN_AT_BETA = '0197a3c0-0000-7000-8000-000000000fe3';
@@ -140,6 +143,85 @@ final class RevokeApiTokenTest extends TestCase
     }
 
     #[Test]
+    public function anAdminRevokesAnotherPersonsTokenAndThePublishedEventNamesTheAdminAsActorAndTheOwnerAsUser(): void
+    {
+        self::assertTrue($this->revokeAsSara(self::OMARS_TOKEN));
+
+        self::assertSame([], $this->liveIdsOf(self::OMAR));
+        self::assertSame([self::LENAS_TOKEN], $this->liveIdsOf(self::LENA));
+        self::assertEquals(
+            [new ApiTokenRevoked(self::ACME_FOODS, self::OMARS_TOKEN, self::OMAR, self::SARA, new \DateTimeImmutable(self::NOW))],
+            $this->events->publishedEvents,
+        );
+    }
+
+    #[Test]
+    public function anAdminsSecondRevokeOfTheSameTokenReturnsFalseAndPublishesNothingMore(): void
+    {
+        self::assertTrue($this->revokeAsSara(self::OMARS_TOKEN));
+
+        self::assertFalse($this->revokeAsSara(self::OMARS_TOKEN));
+        self::assertFalse($this->revokeAsSara(strtoupper(self::OMARS_TOKEN)));
+        self::assertCount(1, $this->events->publishedEvents);
+    }
+
+    /**
+     * Revoked by its owner first, so the Admin's revoke changes nothing and must not record a second revocation.
+     */
+    #[Test]
+    public function anAdminsRevokeOfATokenItsOwnerRevokedAlreadyPublishesNothing(): void
+    {
+        self::assertTrue($this->revokeAsOmar(self::OMARS_TOKEN));
+
+        self::assertFalse($this->revokeAsSara(self::OMARS_TOKEN));
+        self::assertEquals(
+            [new ApiTokenRevoked(self::ACME_FOODS, self::OMARS_TOKEN, self::OMAR, self::OMAR, new \DateTimeImmutable(self::NOW))],
+            $this->events->publishedEvents,
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function idsOfNoTokenInAcmeFoods(): iterable
+    {
+        yield 'another organization\'s' => [self::OMARS_TOKEN_AT_BETA];
+        yield 'unknown' => ['0197a3c0-0000-7000-8000-000000000fff'];
+        yield 'malformed' => ["not-a-token-id'"];
+        yield 'empty' => [''];
+    }
+
+    #[Test]
+    #[DataProvider('idsOfNoTokenInAcmeFoods')]
+    public function anAdminsRevokeOfAnIdThatIsNoTokenOfTheTenantIsRefusedAndNothingIsRevokedOrPublished(string $tokenId): void
+    {
+        try {
+            $this->revokeAsSara($tokenId);
+            self::fail('A token that is not Acme Foods\' was revoked.');
+        } catch (ApiTokenNotInOrganization $refusal) {
+            self::assertSame('No token of this organization has this id.', $refusal->getMessage());
+        }
+
+        self::assertSame([self::OMARS_TOKEN], $this->liveIdsOf(self::OMAR));
+        self::assertSame([self::LENAS_TOKEN], $this->liveIdsOf(self::LENA));
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    #[Test]
+    public function withoutATenantTheAdminsRevokeRefusesAndPublishesNothing(): void
+    {
+        $tokens = new InMemoryApiTokens(null, new \DateTimeImmutable(self::NOW));
+
+        try {
+            new RevokeApiToken($tokens, $this->events)->asAdmin(new UserId(self::SARA), self::OMARS_TOKEN, new \DateTimeImmutable(self::NOW));
+            self::fail('A token was revoked without a tenant.');
+        } catch (TenantNotSet) {
+        }
+
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    #[Test]
     public function withoutATenantTheRevokeRefusesAndPublishesNothing(): void
     {
         $tokens = new InMemoryApiTokens(null, new \DateTimeImmutable(self::NOW));
@@ -156,6 +238,11 @@ final class RevokeApiTokenTest extends TestCase
     private function revokeAsOmar(string $tokenId): bool
     {
         return new RevokeApiToken($this->tokens, $this->events)(new UserId(self::OMAR), $tokenId, new \DateTimeImmutable(self::NOW));
+    }
+
+    private function revokeAsSara(string $tokenId): bool
+    {
+        return new RevokeApiToken($this->tokens, $this->events)->asAdmin(new UserId(self::SARA), $tokenId, new \DateTimeImmutable(self::NOW));
     }
 
     /**

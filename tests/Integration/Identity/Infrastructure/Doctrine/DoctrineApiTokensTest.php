@@ -17,6 +17,7 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -248,6 +249,96 @@ final class DoctrineApiTokensTest extends KernelTestCase
     }
 
     #[Test]
+    public function anyPersonsTokenIsFoundByIdOnlyInItsOrganization(): void
+    {
+        $found = $this->asAcmeFoods(fn (): array => [
+            $this->tokens()->byId(self::LENA_AT_ACME)?->userId()->toString(),
+            $this->tokens()->byId(strtoupper(self::OMAR_LIVE))?->id(),
+            $this->tokens()->byId(self::OMAR_AT_BETA),
+            $this->tokens()->byId('0197a3c0-0000-7000-8000-000000000cff'),
+            $this->tokens()->byId("not-a-token-id'"),
+        ]);
+
+        self::assertSame([self::LENA, self::OMAR_LIVE, null, null, null], $found);
+        self::assertSame(self::OMAR, $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): ?string => $this->tokens()->byId(self::OMAR_AT_BETA)?->userId()->toString()));
+    }
+
+    /**
+     * OMAR_LIVE and OMAR_SAME_SECOND expire in the same second, and a page of two ends between them, so only the id in
+     * the cursor tells the next page where to start. The revoked token is otherwise live; Lena's is listed with Omar's.
+     */
+    #[Test]
+    public function theOrganizationsLiveTokensArePagedSoonestToExpireFirstAndTheLowerIdFirstOnATie(): void
+    {
+        $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
+        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
+            $this->add(self::OMAR_REVOKED, self::ACME_FOODS, self::OMAR, $issuedAt->modify('+1 hour'));
+            self::assertTrue($this->tokens()->revoke(self::OMAR_REVOKED, $issuedAt->modify('+2 hours')));
+        });
+        $tieExpiresAt = new \DateTimeImmutable('2099-06-13 10:00:00 UTC');
+        $lenasExpiresAt = new \DateTimeImmutable('2099-06-14 10:00:00 UTC');
+
+        $pages = $this->asAcmeFoods(fn (): array => [
+            $this->pageIdsOf($issuedAt, 2),
+            $this->pageIdsOf($issuedAt, 2, $tieExpiresAt, self::OMAR_LIVE),
+            $this->pageIdsOf($issuedAt, 2, $lenasExpiresAt, self::LENA_AT_ACME),
+            $this->pageIdsOf($issuedAt, 10),
+            $this->pageIdsOf(new \DateTimeImmutable('2099-06-12 10:00:00 UTC'), 10),
+        ]);
+        $betaPage = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->pageIdsOf($issuedAt, 10));
+
+        self::assertSame(
+            [
+                [self::OMAR_OLDER, self::OMAR_LIVE],
+                [self::OMAR_SAME_SECOND, self::LENA_AT_ACME],
+                [],
+                [self::OMAR_OLDER, self::OMAR_LIVE, self::OMAR_SAME_SECOND, self::LENA_AT_ACME],
+                [self::OMAR_LIVE, self::OMAR_SAME_SECOND, self::LENA_AT_ACME],
+            ],
+            $pages,
+        );
+        self::assertSame([self::OMAR_AT_BETA], $betaPage);
+    }
+
+    /**
+     * @return iterable<string, array{int, ?string, ?string}>
+     */
+    public static function pagesThatAreNotValid(): iterable
+    {
+        yield 'no token' => [0, null, null];
+        yield 'the expiry only' => [2, '2099-06-13 10:00:00 UTC', null];
+        yield 'the id only' => [2, null, self::OMAR_LIVE];
+        yield 'an id that is no uuid' => [2, '2099-06-13 10:00:00 UTC', "not-a-token-id'"];
+    }
+
+    #[Test]
+    #[DataProvider('pagesThatAreNotValid')]
+    public function aPageOfNoTokenOrWithHalfACursorIsRefused(int $limit, ?string $afterExpiresAt, ?string $afterId): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->asAcmeFoods(fn (): array => $this->tokens()->livePage(new \DateTimeImmutable(self::ISSUED_AT), $limit, null === $afterExpiresAt ? null : new \DateTimeImmutable($afterExpiresAt), $afterId));
+    }
+
+    #[Test]
+    public function withoutATenantTheOrganizationsPageAndTheLookUpByIdRefuse(): void
+    {
+        $refusals = [];
+        foreach ([
+            'livePage' => fn (): array => $this->tokens()->livePage(new \DateTimeImmutable(self::ISSUED_AT), 10),
+            'byId' => fn (): ?ApiToken => $this->tokens()->byId(self::OMAR_LIVE),
+        ] as $method => $call) {
+            try {
+                $call();
+            } catch (TenantNotSet) {
+                $refusals[] = $method;
+            }
+        }
+
+        self::assertSame(['livePage', 'byId'], $refusals);
+    }
+
+    #[Test]
     public function withoutATenantTheLiveListRefuses(): void
     {
         $this->expectException(TenantNotSet::class);
@@ -420,6 +511,14 @@ final class DoctrineApiTokensTest extends KernelTestCase
     private function liveIdsOf(string $userId, \DateTimeImmutable $at): array
     {
         return array_map(static fn (ApiToken $token): string => $token->id(), $this->tokens()->liveForUser(new UserId($userId), $at));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function pageIdsOf(\DateTimeImmutable $at, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array
+    {
+        return array_map(static fn (ApiToken $token): string => $token->id(), $this->tokens()->livePage($at, $limit, $afterExpiresAt, $afterId));
     }
 
     private static function extraTokenId(int $hoursBack): string
