@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Audit\Application;
 use App\Audit\Api\ActorKind;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
+use App\Audit\Application\AuditDataAllowList;
 use App\Audit\Application\RecordIdentityAuditEntry;
 use App\Identity\Api\Event\ApiTokenIssued;
 use App\Identity\Api\Event\ApiTokenRevoked;
@@ -58,40 +59,8 @@ final class RecordIdentityAuditEntryTest extends TestCase
             [self::ACME_FOODS, ActorKind::User, $expectedActor, null, $expectedAction, 'api_token', self::OMARS_TOKEN, $expectedData],
             [$entry->organizationId->toString(), $entry->actorKind, $entry->actorUserId, $entry->actorTokenId, $entry->action, $entry->targetType, $entry->targetId, $entry->data],
         );
-        self::assertSame(RecordIdentityAuditEntry::DATA_KEYS[$expectedAction], array_keys($entry->data));
+        self::assertSame(AuditDataAllowList::DATA_KEYS_BY_ACTION[$expectedAction], array_keys($entry->data));
         self::assertEquals(new \DateTimeImmutable(self::OCCURRED_AT), $entry->occurredAt);
-    }
-
-    #[Test]
-    public function dataWithExactlyTheAllowListedKeysPasses(): void
-    {
-        $data = ['expires_at' => '2027-04-14T10:00:00+00:00', 'scopes' => ['read']];
-
-        self::assertSame($data, RecordIdentityAuditEntry::requireAllowListedData('api_token.issued', $data));
-    }
-
-    /**
-     * @return iterable<string, array{string, array<string, mixed>}>
-     */
-    public static function refusedData(): iterable
-    {
-        yield 'the token name' => ['api_token.issued', ['scopes' => ['read'], 'expires_at' => '2027-04-14T10:00:00+00:00', 'name' => 'Claude Code']];
-        yield 'the token prefix' => ['api_token.revoked', ['prefix' => 'pr_a1b2c3d4']];
-        yield 'a listed key missing' => ['api_token.issued', ['scopes' => ['read']]];
-        yield 'an action with no list' => ['api_token.used', []];
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    #[Test]
-    #[DataProvider('refusedData')]
-    public function dataThatIsNotExactlyTheActionsAllowListIsRefused(string $action, array $data): void
-    {
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessageMatches('/^The (audit action|data of the audit action) "'.preg_quote($action, '/').'"/');
-
-        RecordIdentityAuditEntry::requireAllowListedData($action, $data);
     }
 
     #[Test]
@@ -139,6 +108,7 @@ final class RecordIdentityAuditEntryTest extends TestCase
 
             public function record(AuditEntry $entry): void
             {
+                AuditDataAllowList::refuseUnlessAllowed($entry->action, $entry->data);
                 $this->entries[] = $entry;
             }
         };

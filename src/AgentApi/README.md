@@ -5,7 +5,7 @@ The REST API under `/api/v1` and the MCP tools at `/mcp` for the browser plugin,
 ## Depends on
 
 - Identity Api: `CurrentApiToken::access()`, the request's `ApiTokenAccess` (token id, organization, scope names), which the stateless `api_token` firewall (`TokenAuthenticator`, security.yaml) sets for every request under `/mcp` and `/api/v1`; `CurrentUser::id()`, the token's user; `UserQueries::byIds()`, for whoami's display name.
-- Audit Api: `AuditLog::record()` and `AuditDataAllowList`, for the row of each tool call.
+- Audit Api: `AuditLog::record()`, for the row of each tool call. Audit's own allow-list (`Audit\Application\AuditDataAllowList`) lists `mcp.tool_called` with exactly `tool` and `outcome`, and `DbalAuditLog` refuses any other key.
 
 ## What it has now
 
@@ -23,8 +23,10 @@ The REST API under `/api/v1` and the MCP tools at `/mcp` for the browser plugin,
   - `AgentToolLoader` (an SDK loader) lists each tool in `tools/list`; the registry's own handler for a tool only throws.
   - `GatedToolCallHandler` (an SDK request handler, asked before the SDK's `CallToolHandler`) answers every `tools/call`. An unknown tool name gets a JSON-RPC invalid-params error and no audit row.
   - `ToolCallGate` runs each call: the token's scope, the input schema (a new SDK `SchemaValidator` per call, which logs nothing), `targetOf()`, the voter (a denial is "not found", ADR-0013), `call()`. A missing scope, a not-found or a read-only refusal is a tool error result with the `ToolRefusal` message; invalid input is a JSON-RPC invalid-params error; any other failure is the generic `TOOL_FAILED` result, logged with the tool name and the exception class only.
+  - The target, the voter, `call()` and the "ok" audit row run in a DBAL savepoint of the request transaction (the gate refuses to run a tool when none is open). Any refusal or failure in it, the ok row's own write included, rolls back to the savepoint before the refusal or "error" row is written, so a call that did not end "ok" keeps only its audit row, and a tool write is never committed without its row. A tool that leaves a transaction of its own open is rolled back too and fails; one that ends the request transaction, or a rollback that fails, gets the connection closed, so the request commits nothing (a 500 at its commit). The savepoint covers DBAL writes only: a tool that uses the ORM must flush inside `call()`, as entities left unflushed are not undone.
   - `ToolCallAuditor` writes one `aud_event` per call that reached the gate, refused or not: actor kind `token` with the token id and its user, action `mcp.tool_called`, the target (or type `mcp_tool` and no id), and data exactly `tool` and `outcome` (`ok`, `not_found`, `read_only`, `missing_scope`, `invalid_input`, `error`). Never the input, the output or the token.
-  - `Tool\WhoAmI` (`whoami`, scope `read`, no target): the token's user id and display name, its organization id and its scopes.
+  - `OwnIdentityTool`, the marker of a tool that reads only the caller's own identity: only such a tool may answer `null` from `targetOf()` and skip the voter; the gate fails (an "error" row, `TOOL_FAILED`) any other tool that has no target (deny by default).
+  - `Tool\WhoAmI` (`whoami`, scope `read`, an `OwnIdentityTool`, no target): the token's user id and display name, its organization id and its scopes.
 - Proof: `McpEndpointTest` (functional: the handshake, each refusal with its reason and the token and counters unchanged, both limits, `tools/list` and `whoami` through the real endpoint), `McpRequestGuardTest`, `ToolCallLimiterTest`, `ToolCallGateTest`, `GatedToolCallHandlerTest`, `ToolCallAuditorTest` and `AgentToolLoaderTest` (unit).
 
 Not built yet: the organization name in `whoami` (Organization has no Api for it), the session binding to its token and whoami's token expiry (P09.T2, task 5b), the other tools (P09.T3 on), and any guard or limit on `/api/v1` (P09.T7).

@@ -7,6 +7,7 @@ namespace App\Audit\Infrastructure;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditEntryForAnotherTenantRefused;
 use App\Audit\Api\AuditLog;
+use App\Audit\Application\AuditDataAllowList;
 use App\SharedKernel\Application\TenantContext;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
@@ -15,7 +16,8 @@ use Symfony\Component\Uid\UuidV7;
 
 /**
  * AuditLog on the aud_event table. pinround_app may only insert and read it; the row-level security policy also
- * refuses a row of another organization than the transaction's tenant.
+ * refuses a row of another organization than the transaction's tenant. Every entry's data is checked against
+ * AuditDataAllowList first, whichever module writes it.
  */
 final readonly class DbalAuditLog implements AuditLog
 {
@@ -31,6 +33,7 @@ final readonly class DbalAuditLog implements AuditLog
 
     public function record(AuditEntry $entry): void
     {
+        AuditDataAllowList::refuseUnlessAllowed($entry->action, $entry->data);
         if (!$entry->organizationId->equals($this->tenantContext->require())) {
             throw new AuditEntryForAnotherTenantRefused();
         }

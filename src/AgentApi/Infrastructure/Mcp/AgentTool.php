@@ -35,16 +35,17 @@ interface AgentTool
      *
      * @param array<string, mixed> $arguments valid against the input schema
      *
-     * @return ToolTarget|null null only for a tool that reads nothing but the caller's own identity, which no voter
-     *                         guards
+     * @return ToolTarget|null null only from an OwnIdentityTool, which no voter guards; ToolCallGate fails the call of
+     *                         any other tool that answers null
      *
      * @throws ToolRefusal not found when there is no such target
      */
     public function targetOf(array $arguments): ?ToolTarget;
 
     /**
-     * Runs after the voter granted the target. Refuses before it writes anything, so a refusal leaves no partial
-     * action behind; an error result is never returned for a refusal.
+     * Runs after the voter granted the target, in a savepoint of the request transaction: when it refuses or throws,
+     * ToolCallGate rolls back what it wrote. It ends every transaction it begins and never ends the one it runs in. An
+     * error result is never returned for a refusal.
      *
      * @param array<string, mixed> $arguments valid against the input schema
      * @param ToolTarget|null      $target    what targetOf() returned

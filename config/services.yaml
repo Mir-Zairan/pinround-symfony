@@ -586,6 +586,12 @@ when@test:
             autowire: true
             autoconfigure: true
 
+        # Test-only MCP tool of McpEndpointTest: it writes and then fails when told to. autoconfigure tags it
+        # agent_api.tool, so the test env lists and runs it beside the real tools.
+        App\Tests\Fixtures\AgentApi\WriteProbeTool:
+            autowire: true
+            autoconfigure: true
+
         # Public, so DbalAuditLogTest reads the AuditLog a module is given from the test container.
         App\Tests\Fixtures\Audit\AuditLogConsumer:
             autowire: true

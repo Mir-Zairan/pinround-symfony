@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Audit\Application;
 use App\Audit\Api\ActorKind;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
+use App\Audit\Application\AuditDataAllowList;
 use App\Audit\Application\RecordOrganizationAuditEntry;
 use App\Organization\Api\Event\MemberInvited;
 use App\Organization\Api\Event\MemberJoined;
@@ -63,38 +64,8 @@ final class RecordOrganizationAuditEntryTest extends TestCase
             [self::ACME_FOODS, ActorKind::User, self::SARA, $expectedAction, $expectedTargetType, $expectedTargetId, $expectedData],
             [$entry->organizationId->toString(), $entry->actorKind, $entry->actorUserId, $entry->action, $entry->targetType, $entry->targetId, $entry->data],
         );
-        self::assertSame(RecordOrganizationAuditEntry::DATA_KEYS[$expectedAction], array_keys($entry->data));
+        self::assertSame(AuditDataAllowList::DATA_KEYS_BY_ACTION[$expectedAction], array_keys($entry->data));
         self::assertSame($event->occurredAt, $entry->occurredAt);
-    }
-
-    #[Test]
-    public function dataWithExactlyTheAllowListedKeysPasses(): void
-    {
-        $data = ['to' => 'viewer', 'team_id' => self::SHOP_TEAM, 'from' => null];
-
-        self::assertSame($data, RecordOrganizationAuditEntry::requireAllowListedData('team_role.changed', $data));
-    }
-
-    /**
-     * @return iterable<string, array{string, array<string, mixed>}>
-     */
-    public static function refusedData(): iterable
-    {
-        yield 'a key outside the list' => ['team.created', ['lead_user_id' => self::LENA, 'name' => 'Shop']];
-        yield 'a listed key missing' => ['org_roles.changed', ['to' => ['admin']]];
-        yield 'an action with no list' => ['team.renamed', []];
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    #[Test]
-    #[DataProvider('refusedData')]
-    public function dataThatIsNotExactlyTheActionsAllowListIsRefused(string $action, array $data): void
-    {
-        $this->expectException(\LogicException::class);
-
-        RecordOrganizationAuditEntry::requireAllowListedData($action, $data);
     }
 
     #[Test]
@@ -167,6 +138,7 @@ final class RecordOrganizationAuditEntryTest extends TestCase
 
             public function record(AuditEntry $entry): void
             {
+                AuditDataAllowList::refuseUnlessAllowed($entry->action, $entry->data);
                 $this->entries[] = $entry;
             }
         };

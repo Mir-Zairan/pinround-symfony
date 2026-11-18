@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\AgentApi\Infrastructure\Mcp;
 
-use App\Audit\Api\AuditDataAllowList;
 use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
 use App\Identity\Api\ApiTokenAccess;
@@ -19,7 +18,6 @@ final readonly class ToolCallAuditor
     public const string ACTION = 'mcp.tool_called';
     /** The target type of a row whose call reached no target of its own. */
     public const string TOOL_TARGET_TYPE = 'mcp_tool';
-    private const array DATA_KEYS = [self::ACTION => ['tool', 'outcome']];
 
     public function __construct(private AuditLog $auditLog)
     {
@@ -30,12 +28,11 @@ final readonly class ToolCallAuditor
      *
      * @param string $toolName the name of one of the AgentTools, never what the client sent for an unknown one
      *
-     * @throws \Throwable what AuditLog::record throws, such as when no transaction is open
+     * @throws \Throwable what AuditLog::record throws, such as when no transaction is open or Audit's allow-list for
+     *                    the action no longer holds exactly these keys
      */
     public function record(ApiTokenAccess $access, UserId $userId, string $toolName, ?ToolTarget $target, ToolCallOutcome $outcome): void
     {
-        $allowedData = AuditDataAllowList::requireExactKeys(self::DATA_KEYS, self::ACTION, ['tool' => $toolName, 'outcome' => $outcome->value]);
-
         $this->auditLog->record(AuditEntry::byToken(
             $access->organizationId,
             $userId->toString(),
@@ -43,7 +40,7 @@ final readonly class ToolCallAuditor
             self::ACTION,
             $target->auditType ?? self::TOOL_TARGET_TYPE,
             $target?->auditId,
-            $allowedData,
+            ['tool' => $toolName, 'outcome' => $outcome->value],
         ));
     }
 }

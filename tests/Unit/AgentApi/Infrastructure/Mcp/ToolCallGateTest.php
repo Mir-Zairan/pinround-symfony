@@ -65,7 +65,7 @@ final class ToolCallGateTest extends TestCase
     public function anEmptyArgumentObjectPassesASchemaThatRequiresNothing(): void
     {
         $fixture = new GateFixture();
-        $tool = new ScriptedTool('read', static fn (): ?ToolTarget => null, inputSchema: ['type' => 'object', 'properties' => [], 'additionalProperties' => false]);
+        $tool = new ScriptedOwnIdentityTool(['type' => 'object', 'properties' => [], 'additionalProperties' => false]);
 
         $fixture->gate->call($tool, []);
 
@@ -137,15 +137,34 @@ final class ToolCallGateTest extends TestCase
     }
 
     #[Test]
-    public function aToolWithoutATargetAsksNoVoter(): void
+    public function anOwnIdentityToolWithoutATargetAsksNoVoter(): void
+    {
+        $fixture = new GateFixture();
+        $tool = new ScriptedOwnIdentityTool();
+
+        $fixture->gate->call($tool, ['ticket' => 'SHOP-42']);
+
+        self::assertSame(1, $tool->calls);
+        self::assertSame([], $fixture->voterQuestions);
+        $this->assertOneRow($fixture, 'ok', ToolCallAuditor::TOOL_TARGET_TYPE, null);
+    }
+
+    /**
+     * Deny by default: only an OwnIdentityTool may skip the voter.
+     */
+    #[Test]
+    public function anyOtherToolWithoutATargetIsRefusedBeforeItRunsWithAnErrorRow(): void
     {
         $fixture = new GateFixture();
         $tool = new ScriptedTool('read', static fn (): ?ToolTarget => null);
 
-        $fixture->gate->call($tool, ['ticket' => 'SHOP-42']);
+        $failure = $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42']));
 
+        self::assertInstanceOf(\LogicException::class, $failure);
+        self::assertStringContainsString('only an OwnIdentityTool may run without one', $failure->getMessage());
+        self::assertSame([1, 0], [$tool->targetLookups, $tool->calls]);
         self::assertSame([], $fixture->voterQuestions);
-        $this->assertOneRow($fixture, 'ok', ToolCallAuditor::TOOL_TARGET_TYPE, null);
+        $this->assertOneRow($fixture, 'error', ToolCallAuditor::TOOL_TARGET_TYPE, null);
     }
 
     #[Test]
@@ -187,6 +206,144 @@ final class ToolCallGateTest extends TestCase
     }
 
     #[Test]
+    public function aGrantedCallKeepsItsWritesInTheRequestTransactionBesideItsOkRow(): void
+    {
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $fixture->writeLabel('before the call');
+        $tool = $this->toolOnShop42('read', self::writing($fixture, 'by the tool'));
+
+        $fixture->gate->call($tool, ['ticket' => 'SHOP-42']);
+
+        self::assertSame(['before the call', 'by the tool'], $fixture->writtenLabels());
+        self::assertSame(1, $fixture->connection->getTransactionNestingLevel(), 'the savepoint was not released');
+        $this->assertOneRow($fixture, 'ok', 'ticket', self::SHOP_42);
+    }
+
+    #[Test]
+    public function aToolThatFailsAfterItsWriteKeepsNoneOfItAndOnlyAnErrorRow(): void
+    {
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $fixture->writeLabel('before the call');
+        $failure = new \RuntimeException('the second write failed');
+        $tool = $this->toolOnShop42('read', self::writing($fixture, 'by the tool', $failure));
+
+        self::assertSame($failure, $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42'])));
+
+        self::assertSame(['before the call'], $fixture->writtenLabels());
+        self::assertSame(1, $fixture->connection->getTransactionNestingLevel());
+        $this->assertOneRow($fixture, 'error', 'ticket', self::SHOP_42);
+    }
+
+    #[Test]
+    public function aToolThatRefusesAfterItsWriteKeepsNoneOfItAndOnlyItsRefusalRow(): void
+    {
+        $fixture = new GateFixture(scopes: ['read', 'rounds:write'], grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $tool = $this->toolOnShop42('rounds:write', self::writing($fixture, 'by the tool', ToolRefusal::readOnly()));
+
+        $refusal = $this->refusalOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42']));
+
+        self::assertSame(ToolCallOutcome::ReadOnly, $refusal->outcome);
+        self::assertSame([], $fixture->writtenLabels());
+        self::assertSame(1, $fixture->connection->getTransactionNestingLevel());
+        $this->assertOneRow($fixture, 'read_only', 'ticket', self::SHOP_42);
+    }
+
+    /**
+     * The ok row fails as the error row after it does, so the call ends with neither; what matters is that the tool's
+     * write does not stay without its row.
+     */
+    #[Test]
+    public function anOkRowThatCannotBeWrittenTakesTheToolsWriteBackWithIt(): void
+    {
+        $auditFailure = new \LogicException('the audit write failed');
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]], auditFailure: $auditFailure);
+        $tool = $this->toolOnShop42('read', self::writing($fixture, 'by the tool'));
+
+        self::assertSame($auditFailure, $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42'])));
+
+        self::assertSame(1, $tool->calls);
+        self::assertSame([], $fixture->writtenLabels());
+        self::assertSame(1, $fixture->connection->getTransactionNestingLevel());
+        self::assertSame([], $fixture->auditLog->entries);
+    }
+
+    #[Test]
+    public function aToolThatLeavesATransactionOpenKeepsNoneOfItsWritesAndGetsAnErrorRow(): void
+    {
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $tool = $this->toolOnShop42('read', static function () use ($fixture): CallToolResult {
+            $fixture->connection->beginTransaction();
+            $fixture->writeLabel('left open');
+
+            return new CallToolResult([new TextContent('done')]);
+        });
+
+        self::assertInstanceOf(\LogicException::class, $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42'])));
+
+        self::assertSame([], $fixture->writtenLabels());
+        self::assertSame(1, $fixture->connection->getTransactionNestingLevel());
+        $this->assertOneRow($fixture, 'error', 'ticket', self::SHOP_42);
+    }
+
+    /**
+     * What it committed cannot be taken back, so the connection is closed: the request then fails at its own commit,
+     * which finds its transaction gone.
+     */
+    #[Test]
+    public function aToolThatEndsTheRequestTransactionGetsTheConnectionClosed(): void
+    {
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $tool = $this->toolOnShop42('read', static function () use ($fixture): CallToolResult {
+            $fixture->writeLabel('committed by the tool');
+            $fixture->connection->commit();
+            $fixture->connection->commit();
+
+            return new CallToolResult([new TextContent('done')]);
+        });
+
+        self::assertInstanceOf(\LogicException::class, $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42'])));
+
+        self::assertFalse($fixture->connection->isConnected());
+        self::assertSame(0, $fixture->connection->getTransactionNestingLevel());
+        self::assertSame(
+            [
+                ['level' => 'warning', 'message' => 'Rolling back the writes of a failed MCP tool call failed; closing the connection instead.', 'context' => ['tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class, 'sqlstate' => null, 'code' => 0]],
+                ['level' => 'warning', 'message' => 'The audit row of a failed MCP tool call could not be written.', 'context' => ['tool' => ScriptedTool::NAME, 'exception_class' => \LogicException::class]],
+            ],
+            $fixture->logger->records,
+        );
+    }
+
+    #[Test]
+    public function aRequestWithoutAnOpenTransactionFailsWithoutARowOrAToolRun(): void
+    {
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $fixture->connection->rollBack();
+        $tool = $this->toolOnShop42('read');
+
+        $failure = $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42']));
+
+        self::assertInstanceOf(\LogicException::class, $failure);
+        self::assertStringContainsString('none is open', $failure->getMessage());
+        self::assertSame([0, 0], [$tool->targetLookups, $tool->calls]);
+        self::assertSame([], $fixture->auditLog->entries);
+    }
+
+    #[Test]
+    public function aRequestWithoutAUserFailsWithoutARowOrAToolRun(): void
+    {
+        $fixture = new GateFixture(hasUser: false);
+        $tool = $this->toolOnShop42('read');
+
+        $failure = $this->failureOf(static fn () => $fixture->gate->call($tool, ['ticket' => 'SHOP-42']));
+
+        self::assertInstanceOf(\LogicException::class, $failure);
+        self::assertStringContainsString('without a user', $failure->getMessage());
+        self::assertSame([0, 0], [$tool->targetLookups, $tool->calls]);
+        self::assertSame([], $fixture->auditLog->entries);
+    }
+
+    #[Test]
     public function aRequestWithoutATokenFailsWithoutARowOrAToolRun(): void
     {
         $fixture = new GateFixture(hasToken: false);
@@ -209,6 +366,36 @@ final class ToolCallGateTest extends TestCase
     private function toolOnShop42(string $scope, ?\Closure $run = null): ScriptedTool
     {
         return new ScriptedTool($scope, static fn (): ToolTarget => new ToolTarget(self::TICKET_VIEW, self::SHOP_42, 'ticket', self::SHOP_42), $run);
+    }
+
+    /**
+     * A tool step that writes $label and then throws $failure, or answers "done" without one.
+     *
+     * @return \Closure(): CallToolResult
+     */
+    private static function writing(GateFixture $fixture, string $label, ?\Throwable $failure = null): \Closure
+    {
+        return static function () use ($fixture, $label, $failure): CallToolResult {
+            $fixture->writeLabel($label);
+            if (null !== $failure) {
+                throw $failure;
+            }
+
+            return new CallToolResult([new TextContent('done')]);
+        };
+    }
+
+    /**
+     * @param \Closure(): mixed $call
+     */
+    private function failureOf(\Closure $call): \Throwable
+    {
+        try {
+            $call();
+        } catch (\Throwable $failure) {
+            return $failure;
+        }
+        self::fail('the call did not fail');
     }
 
     /**
