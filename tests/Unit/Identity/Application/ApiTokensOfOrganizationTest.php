@@ -82,8 +82,8 @@ final class ApiTokensOfOrganizationTest extends TestCase
     {
         $now = new \DateTimeImmutable(self::NOW);
         $firstPage = $this->organizationTokens->livePage($now, 2);
-        $secondPage = $this->organizationTokens->livePage($now, 2, $firstPage[1]);
-        $lastPage = $this->organizationTokens->livePage($now, 2, $secondPage[1]);
+        $secondPage = $this->organizationTokens->livePage($now, 2, $firstPage[1]->expiresAt, $firstPage[1]->id);
+        $lastPage = $this->organizationTokens->livePage($now, 2, $secondPage[1]->expiresAt, $secondPage[1]->id);
 
         self::assertSame([self::OMAR_SOON, self::OMAR_TIED_LOW], self::idsOf($firstPage));
         self::assertSame([self::LENA_TIED_HIGH, self::LENA_LATE], self::idsOf($secondPage));

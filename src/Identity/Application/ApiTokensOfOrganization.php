@@ -16,7 +16,7 @@ final readonly class ApiTokensOfOrganization implements OrganizationApiTokens
     {
     }
 
-    public function livePage(\DateTimeImmutable $now, int $limit, ?OrganizationApiToken $after = null): array
+    public function livePage(\DateTimeImmutable $now, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array
     {
         if ($limit < 1 || $limit > self::MAX_PAGE_SIZE) {
             throw new \InvalidArgumentException(\sprintf('A page of tokens holds 1 to %d.', self::MAX_PAGE_SIZE));
@@ -24,7 +24,7 @@ final readonly class ApiTokensOfOrganization implements OrganizationApiTokens
 
         return array_map(
             static fn (ApiToken $token): OrganizationApiToken => new OrganizationApiToken($token->id(), $token->userId(), $token->name(), $token->prefix(), $token->expiresAt()),
-            $this->tokens->livePage($now, $limit, $after?->expiresAt, $after?->id),
+            $this->tokens->livePage($now, $limit, $afterExpiresAt, $afterId),
         );
     }
 

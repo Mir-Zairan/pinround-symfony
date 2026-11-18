@@ -17,17 +17,18 @@ interface OrganizationApiTokens
 
     /**
      * One query. The tenant's tokens that are neither revoked nor expired at $now, of every person, the soonest to
-     * expire first (by expires_at, then the lower id), after $after when given.
+     * expire first (by expires_at, then the lower id), after the token whose expiresAt and id are $afterExpiresAt and
+     * $afterId when both are given: the last one of the page before.
      *
-     * @param int                       $limit 1 to MAX_PAGE_SIZE
-     * @param OrganizationApiToken|null $after the last token of the page before; only its expiresAt and id are read
+     * @param int $limit 1 to MAX_PAGE_SIZE
      *
      * @return list<OrganizationApiToken> at most $limit
      *
-     * @throws \InvalidArgumentException when $limit is not between 1 and MAX_PAGE_SIZE, before any query
+     * @throws \InvalidArgumentException when $limit is not between 1 and MAX_PAGE_SIZE, only one of $afterExpiresAt
+     *                                   and $afterId is given, or $afterId is not a UUID; before any query
      * @throws \LogicException           when no tenant is set
      */
-    public function livePage(\DateTimeImmutable $now, int $limit, ?OrganizationApiToken $after = null): array;
+    public function livePage(\DateTimeImmutable $now, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array;
 
     /**
      * Revokes any token of the tenant, whoever owns it, at once, and publishes ApiTokenRevoked with $adminId as the

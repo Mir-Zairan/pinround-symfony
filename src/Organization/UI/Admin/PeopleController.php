@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace App\Organization\UI\Admin;
 
+use App\Identity\Api\ApiTokenNotInOrganization;
 use App\Identity\Api\CurrentUser;
+use App\Identity\Api\OrganizationApiTokens;
+use App\Identity\Api\UserQueries;
+use App\Identity\Api\UserView;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\InvitationQueries;
 use App\Organization\Api\OrganizationPermission;
@@ -26,8 +30,8 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * The admin page of people (FR-ID-02): invite an email address, and see the invitations not joined yet. ADMIN_AREA
- * guards both routes; AbstractController::denyAccessUnlessGranted gives SendAdminToTwoStepProof the attribute and the
+ * The admin page of people (FR-ID-02): invite an email address, see the invitations not joined yet, and see and revoke
+ * the organization's live API tokens (P09.T1). ADMIN_AREA guards every route; AbstractController::denyAccessUnlessGranted gives SendAdminToTwoStepProof the attribute and the
  * organization it needs to send an Admin to the two-step proof.
  */
 final class PeopleController extends AbstractController
@@ -46,15 +50,26 @@ final class PeopleController extends AbstractController
     public const string AFTER_INVITED_AT = 'after_invited_at';
     public const string AFTER_ID = 'after_id';
 
+    public const string REVOKE_TOKEN_ROUTE = 'organization_admin_people_token_revoke';
+    public const string TOKEN_REVOKED = 'The token is revoked. It no longer works.';
+    /** The query parameters of the next page of API tokens: the expiresAt and id of the last token shown, both or neither. */
+    public const string TOKENS_AFTER_EXPIRES_AT = 'tokens_after_expires_at';
+    public const string TOKENS_AFTER_ID = 'tokens_after_id';
+
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
     private const string CSRF_ID = 'organization_admin_people_invite';
+    private const string REVOKE_TOKEN_CSRF_ID = 'organization_admin_people_token_revoke';
     /** With microseconds and the offset, so the cursor names the exact created_at the database holds. */
     private const string CURSOR_TIME_FORMAT = 'Y-m-d\TH:i:s.uP';
+    /** expires_at keeps whole seconds, so its cursor needs none. */
+    private const string TOKEN_CURSOR_TIME_FORMAT = 'Y-m-d\TH:i:sP';
 
     public function __construct(
         private readonly InvitationQueries $invitationQueries,
         private readonly InviteMember $inviteMember,
+        private readonly OrganizationApiTokens $organizationApiTokens,
+        private readonly UserQueries $userQueries,
         private readonly Transactions $transactions,
         private readonly TenantContext $tenantContext,
         private readonly CurrentUser $currentUser,
@@ -63,7 +78,8 @@ final class PeopleController extends AbstractController
     }
 
     /**
-     * The page after the invitation that AFTER_INVITED_AT and AFTER_ID name, or the first page without them.
+     * The page after the invitation that AFTER_INVITED_AT and AFTER_ID name, and after the API token that
+     * TOKENS_AFTER_EXPIRES_AT and TOKENS_AFTER_ID name, or the first page of either without them.
      */
     #[Route('/admin/people', name: self::ROUTE, methods: ['GET'])]
     public function show(Request $request): Response
@@ -71,9 +87,40 @@ final class PeopleController extends AbstractController
         $organizationId = $this->tenantContext->get();
         $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
         $this->denyAccessUnlessGranted(OrganizationPermission::INVITE, $organizationId);
+        $this->denyAccessUnlessGranted(OrganizationPermission::ADMIN, $organizationId);
         \assert($organizationId instanceof OrganizationId);
 
-        return $this->renderPage($organizationId, after: $this->pageCursorOf($request));
+        return $this->renderPage($organizationId, after: $this->pageCursorOf($request), tokensAfter: $this->tokenPageCursorOf($request));
+    }
+
+    /**
+     * Revokes any person's token of the organization, in the request transaction with its ApiTokenRevoked. The id is
+     * not checked by the route, so a malformed one gets the same 404 as another organization's. A token revoked
+     * already, as after a double click, says nothing: the list no longer shows it.
+     */
+    #[Route('/admin/people/tokens/{id}/revoke', name: self::REVOKE_TOKEN_ROUTE, methods: ['POST'])]
+    public function revokeToken(Request $request, string $id): Response
+    {
+        $organizationId = $this->tenantContext->get();
+        $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
+        $this->denyAccessUnlessGranted(OrganizationPermission::ADMIN, $organizationId);
+        \assert($organizationId instanceof OrganizationId);
+        if (!$this->isCsrfTokenValid(self::REVOKE_TOKEN_CSRF_ID, $request->request->getString('_csrf_token'))) {
+            return $this->renderPage($organizationId, formError: self::FORM_EXPIRED);
+        }
+        $admin = $this->currentUser->id();
+        \assert(null !== $admin);
+
+        try {
+            $isRevokedNow = $this->organizationApiTokens->revokeAsAdmin($admin, $id, $this->clock->now());
+        } catch (ApiTokenNotInOrganization $notFound) {
+            throw $this->createNotFoundException($notFound->getMessage(), $notFound);
+        }
+        if ($isRevokedNow) {
+            $this->addFlash(self::TOAST, self::TOKEN_REVOKED);
+        }
+
+        return $this->redirectToRoute(self::ROUTE);
     }
 
     /**
@@ -148,25 +195,78 @@ final class PeopleController extends AbstractController
     }
 
     /**
-     * Reads the pending invitations, so it needs a transaction open under $organizationId.
+     * @return array{\DateTimeImmutable, string}|null the expiresAt and id of the last API token shown; null when the
+     *                                                request names no page of tokens
+     *
+     * @throws BadRequestHttpException when only one of the two parameters is given, or either is no valid value
      */
-    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null): Response
+    private function tokenPageCursorOf(Request $request): ?array
+    {
+        $hasExpiresAt = $request->query->has(self::TOKENS_AFTER_EXPIRES_AT);
+        if (!$hasExpiresAt && !$request->query->has(self::TOKENS_AFTER_ID)) {
+            return null;
+        }
+        $expiresAtText = $request->query->getString(self::TOKENS_AFTER_EXPIRES_AT);
+        $id = $request->query->getString(self::TOKENS_AFTER_ID);
+        $expiresAt = \DateTimeImmutable::createFromFormat('!'.self::TOKEN_CURSOR_TIME_FORMAT, $expiresAtText);
+        if (!$hasExpiresAt || false === $expiresAt || $expiresAt->format(self::TOKEN_CURSOR_TIME_FORMAT) !== $expiresAtText || !Uuid::isValid($id)) {
+            throw new BadRequestHttpException('The page of API tokens to show is not valid.');
+        }
+
+        return [$expiresAt, $id];
+    }
+
+    /**
+     * Reads the pending invitations and the live API tokens, so it needs a transaction open under $organizationId.
+     *
+     * @param array{\DateTimeImmutable, string}|null $tokensAfter the expiresAt and id of the last API token shown
+     */
+    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null, ?array $tokensAfter = null): Response
     {
         $hasError = null !== $emailError || null !== $formError;
+        // Each list's Show more keeps the page the other list is on.
+        $invitationsPageQuery = null === $after ? [] : [
+            self::AFTER_INVITED_AT => $after->invitedAt()->format(self::CURSOR_TIME_FORMAT),
+            self::AFTER_ID => $after->id(),
+        ];
+        $tokensPageQuery = null === $tokensAfter ? [] : [
+            self::TOKENS_AFTER_EXPIRES_AT => $tokensAfter[0]->format(self::TOKEN_CURSOR_TIME_FORMAT),
+            self::TOKENS_AFTER_ID => $tokensAfter[1],
+        ];
         $pendingInvitations = $this->invitationQueries->pendingOf($organizationId, self::PAGE_SIZE + 1, $after);
         $nextPage = null;
         if (\count($pendingInvitations) > self::PAGE_SIZE) {
             $pendingInvitations = \array_slice($pendingInvitations, 0, self::PAGE_SIZE);
             $lastShown = $pendingInvitations[self::PAGE_SIZE - 1];
             $nextPage = [
+                ...$tokensPageQuery,
                 self::AFTER_INVITED_AT => $lastShown->invitedAt()->format(self::CURSOR_TIME_FORMAT),
                 self::AFTER_ID => $lastShown->id(),
             ];
+        }
+        $liveTokens = $this->organizationApiTokens->livePage($this->clock->now(), self::PAGE_SIZE + 1, $tokensAfter[0] ?? null, $tokensAfter[1] ?? null);
+        $tokensNextPage = null;
+        if (\count($liveTokens) > self::PAGE_SIZE) {
+            $liveTokens = \array_slice($liveTokens, 0, self::PAGE_SIZE);
+            $lastShownToken = $liveTokens[self::PAGE_SIZE - 1];
+            $tokensNextPage = [
+                ...$invitationsPageQuery,
+                self::TOKENS_AFTER_EXPIRES_AT => $lastShownToken->expiresAt->format(self::TOKEN_CURSOR_TIME_FORMAT),
+                self::TOKENS_AFTER_ID => $lastShownToken->id,
+            ];
+        }
+        $ownerIds = [];
+        foreach ($liveTokens as $token) {
+            $ownerIds[$token->ownerId->toString()] = $token->ownerId;
         }
 
         return $this->render('@Organization/admin/people.html.twig', [
             'pendingInvitations' => $pendingInvitations,
             'nextPage' => $nextPage,
+            'liveTokens' => $liveTokens,
+            'tokenOwnerNames' => array_map(static fn (UserView $owner): string => $owner->displayName, $this->userQueries->byIds(array_values($ownerIds))),
+            'tokensNextPage' => $tokensNextPage,
+            'revokeTokenCsrfId' => self::REVOKE_TOKEN_CSRF_ID,
             'typedEmail' => $typedEmail,
             'emailError' => $emailError,
             'formError' => $formError,
