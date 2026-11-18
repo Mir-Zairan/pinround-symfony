@@ -34,6 +34,7 @@ const NOT_READY_LINE = 'Your company runs AI on each laptop, and it is not runni
 const RUNNING_LINE = 'Running on this laptop. Ticket text stays on this laptop.';
 const UNREACHABLE_LINE = 'pinround could not reach Ollama on this laptop. Use “Local AI” at the top to set it up.';
 const NO_SUMMARY_LINE = 'Ollama on this laptop gave no summary. Use “Local AI” at the top to check it.';
+const TOO_SLOW_LINE = 'Ollama on this laptop took too long to answer. Try again, or use “Local AI” at the top to pick another model.';
 const CLOUD_NEXT_LINE = 'Ollama on this laptop did not answer. Press again to use cloud AI.';
 /** SummaryController's failed frame, as the cloud press is answered here. */
 const CLOUD_FAILED_LINE = 'The AI answer failed. Try again.';
@@ -281,6 +282,33 @@ test.describe('an organization whose AI runs only on laptops', () => {
     await expect(summarizeForm(page)).toBeHidden();
     await expect(laptopStatusLine(page)).toBeHidden();
     await expect(laptopStatusLine(page)).toHaveText('');
+  });
+
+  test('Ollama that is too slow gets the sentence that suggests another model, the button back, and keeps its ready check', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Store finder shows closed shops as open');
+    await seedReadyLaptop(page);
+    const postedPaths = recordPathsPosted(page);
+    const heldRequests = await holdGenerateRequests(page);
+    await openTicket(page, key);
+
+    try {
+      await summarizeButton(page).click();
+      await expect.poll(() => heldRequests.length).toBe(1);
+      await expect(laptopStatusLine(page)).toHaveText(RUNNING_LINE);
+      await page.clock.fastForward(GENERATE_TIMEOUT_MS + 1_000);
+
+      await expect(laptopStatusLine(page)).toHaveText(TOO_SLOW_LINE);
+      await expect(summarizeButton(page)).toBeEnabled();
+      await expect(summarizeButton(page)).not.toHaveAttribute('aria-busy');
+      // Ollama was reached, so the chip must not say it was not found, and only laptops run AI here: no cloud line.
+      await expect(chipState(page)).toHaveText('Local AI: ready');
+      await expect(notReadyLine(page)).toBeHidden();
+      await expect(proposal(page)).toHaveCount(0);
+      expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('pinround.localAiLastCheck') ?? 'null'))).toEqual({ state: 'ready', model: MODEL, models: [MODEL] });
+      expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/'))).toEqual(['/ai/laptop/package']);
+    } finally {
+      await abortHeldRequests(heldRequests);
+    }
   });
 
   test('a refused package shows its sentence without asking Ollama, and an answer that is only thinking says Ollama gave no summary', async ({ browser, page }) => {
