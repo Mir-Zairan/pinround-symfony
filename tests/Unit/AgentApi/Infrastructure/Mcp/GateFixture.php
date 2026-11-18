@@ -11,21 +11,26 @@ use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DriverManager;
 use Symfony\Component\Security\Core\Authorization\AccessDecision;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * A ToolCallGate on doubles: Omar's token in Acme Foods with the scopes given, a voter that grants only the attribute
- * and subject pairs it is told to and remembers each question, and an in-memory audit log.
+ * and subject pairs it is told to and remembers each question, an in-memory audit log, and an in-memory SQLite
+ * connection with an open transaction in place of the request's, whose table WRITES a tool can write to.
  */
 final class GateFixture
 {
     public const string ACME_FOODS = '019a5f00-0000-7000-8000-00000000d601';
     public const string OMAR = '019a5f00-0000-7000-8000-00000000d621';
     public const string OMARS_TOKEN = '019a5f00-0000-7000-8000-00000000d611';
+    public const string WRITES = 'tool_write';
 
     public readonly RecordingAuditLog $auditLog;
     public readonly CollectingLogger $logger;
+    public readonly Connection $connection;
     public readonly ToolCallGate $gate;
     /** @var list<array{mixed, mixed}> each attribute and subject the voter was asked about */
     public array $voterQuestions = [];
@@ -34,12 +39,17 @@ final class GateFixture
      * @param list<string>               $scopes
      * @param list<array{string, mixed}> $grants   the attribute and subject pairs the voter grants
      * @param bool                       $hasToken false for a request the firewall let through without a token
+     * @param bool                       $hasUser  false for a request the firewall let through without a user
      */
-    public function __construct(array $scopes = ['read'], private readonly array $grants = [], ?\Throwable $auditFailure = null, bool $hasToken = true)
+    public function __construct(array $scopes = ['read'], private readonly array $grants = [], ?\Throwable $auditFailure = null, bool $hasToken = true, bool $hasUser = true)
     {
-        $this->auditLog = new RecordingAuditLog(new OrganizationId(self::ACME_FOODS), $auditFailure);
+        $this->connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true]);
+        $this->connection->executeStatement('CREATE TABLE '.self::WRITES.' (label TEXT NOT NULL)');
+        $this->auditLog = new RecordingAuditLog(new OrganizationId(self::ACME_FOODS), $auditFailure, $this->connection);
+        $this->connection->beginTransaction();
         $this->logger = new CollectingLogger();
         $access = $hasToken ? new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), $scopes) : null;
+        $userId = $hasUser ? new UserId(self::OMAR) : null;
         $fixture = $this;
 
         $this->gate = new ToolCallGate(
@@ -53,10 +63,14 @@ final class GateFixture
                     return $this->access;
                 }
             },
-            new class implements CurrentUser {
-                public function id(): UserId
+            new class($userId) implements CurrentUser {
+                public function __construct(private readonly ?UserId $userId)
                 {
-                    return new UserId(GateFixture::OMAR);
+                }
+
+                public function id(): ?UserId
+                {
+                    return $this->userId;
                 }
 
                 public function idOf(mixed $tokenUser): ?UserId
@@ -75,8 +89,22 @@ final class GateFixture
                 }
             },
             new ToolCallAuditor($this->auditLog),
+            $this->connection,
             $this->logger,
         );
+    }
+
+    /**
+     * @return list<mixed> the labels in WRITES as the open transaction sees them
+     */
+    public function writtenLabels(): array
+    {
+        return $this->connection->fetchFirstColumn('SELECT label FROM '.self::WRITES.' ORDER BY label');
+    }
+
+    public function writeLabel(string $label): void
+    {
+        $this->connection->insert(self::WRITES, ['label' => $label]);
     }
 
     public function answerVoterQuestion(mixed $attribute, mixed $subject): bool

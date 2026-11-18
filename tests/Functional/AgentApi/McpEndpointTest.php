@@ -18,8 +18,10 @@ use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Fixtures\AgentApi\WriteProbeTool;
 use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Integration\Tenancy\TenantProbeTable;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -64,6 +66,19 @@ final class McpEndpointTest extends WebTestCase
     private KernelBrowser $client;
     private MockClock $clock;
 
+    public static function setUpBeforeClass(): void
+    {
+        self::probeTable()->recreate();
+        self::ensureKernelShutdown();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::probeTable()->drop();
+        self::ensureKernelShutdown();
+        parent::tearDownAfterClass();
+    }
+
     protected function setUp(): void
     {
         $this->client = self::createClient([], ['REMOTE_ADDR' => \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254))]);
@@ -74,6 +89,7 @@ final class McpEndpointTest extends WebTestCase
 
     protected function tearDown(): void
     {
+        self::probeTable()->removeAllRows();
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM aud_event WHERE organization_id = ?', [$organizationId]));
         }
@@ -81,8 +97,12 @@ final class McpEndpointTest extends WebTestCase
         $this->removeUsersAndOrganizations();
     }
 
+    /**
+     * WriteProbeTool is registered in the test env only (when@test in config/services.yaml), so whoami is the only tool
+     * of the product.
+     */
     #[Test]
-    public function aLiveTokenStartsASessionAndListsWhoAmIAsTheOnlyTool(): void
+    public function testALiveTokenStartsASessionAndListsWhoAmIAsTheOnlyToolBesideTheTestProbe(): void
     {
         [$acmeFoods, $tokenId, $token] = $this->omarsTokenInAcmeFoods();
 
@@ -103,8 +123,10 @@ final class McpEndpointTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $tools = $this->responseValueAt('result', 'tools');
         self::assertIsArray($tools);
-        self::assertCount(1, $tools);
-        $whoAmI = $tools[0] ?? null;
+        $toolsByName = array_column($tools, null, 'name');
+        self::assertEqualsCanonicalizing([WhoAmI::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
+        self::assertCount(2, $tools);
+        $whoAmI = $toolsByName[WhoAmI::NAME];
         self::assertIsArray($whoAmI);
         self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
         self::assertSame(['type' => 'object', 'properties' => [], 'additionalProperties' => false], $whoAmI['inputSchema'] ?? null);
@@ -377,6 +399,42 @@ final class McpEndpointTest extends WebTestCase
         self::assertSame([], $this->auditRowsOf($acmeFoods));
     }
 
+    #[Test]
+    public function aToolThatWritesAndAnswersKeepsItsWriteAndOneOkRow(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WriteProbeTool::NAME, ['label' => 'kept', 'fail' => false]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame([['type' => 'text', 'text' => 'written']], $this->responseValueAt('result', 'content'));
+        self::assertSame(['kept'], $this->committedProbeLabels($acmeFoods));
+        self::assertSame([$this->writeProbeRow($omar, $tokenId, $acmeFoods, 'ok')], $this->auditRowsOf($acmeFoods));
+    }
+
+    /**
+     * The tool's write and its failure run in one request whose transaction commits, so only the gate's savepoint can
+     * take the write back.
+     */
+    #[Test]
+    public function aToolThatFailsAfterItsWriteAnswersToolFailedKeepsNoneOfItAndOneErrorRow(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WriteProbeTool::NAME, ['label' => 'thrown-away', 'fail' => true]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertTrue($this->responseValueAt('result', 'isError'));
+        self::assertSame([['type' => 'text', 'text' => GatedToolCallHandler::TOOL_FAILED]], $this->responseValueAt('result', 'content'));
+        self::assertSame([], $this->committedProbeLabels($acmeFoods));
+        self::assertSame([$this->writeProbeRow($omar, $tokenId, $acmeFoods, 'error')], $this->auditRowsOf($acmeFoods));
+    }
+
     /**
      * @return array{OrganizationId, string, string, User} Acme Foods, Omar's token id, its plain text and Omar
      */
@@ -438,6 +496,34 @@ final class McpEndpointTest extends WebTestCase
     private function toolCallRow(User $user, string $tokenId, string $outcome): array
     {
         return ['token', $user->id()->toString(), $tokenId, ToolCallAuditor::ACTION, ToolCallAuditor::TOOL_TARGET_TYPE, null, '2026-11-10 09:00:20', ['outcome' => $outcome, 'tool' => WhoAmI::NAME]];
+    }
+
+    /**
+     * @return array{string, string, string, string, string, string, string, array<string, string>}
+     */
+    private function writeProbeRow(User $user, string $tokenId, OrganizationId $organizationId, string $outcome): array
+    {
+        return ['token', $user->id()->toString(), $tokenId, ToolCallAuditor::ACTION, 'organization', $organizationId->toString(), '2026-11-10 09:00:20', ['outcome' => $outcome, 'tool' => WriteProbeTool::NAME]];
+    }
+
+    /**
+     * @return list<mixed> the labels of the organization's committed zz_tenant_probe rows
+     */
+    private function committedProbeLabels(OrganizationId $organizationId): array
+    {
+        $labels = [];
+        $this->committedAs($organizationId, static function (Connection $migrator) use (&$labels): int {
+            $labels = $migrator->fetchFirstColumn('SELECT label FROM zz_tenant_probe ORDER BY label');
+
+            return 0;
+        });
+
+        return $labels;
+    }
+
+    private static function probeTable(): TenantProbeTable
+    {
+        return new TenantProbeTable(self::getContainer()->get('doctrine.dbal.migrator_connection'));
     }
 
     /**

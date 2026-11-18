@@ -8,6 +8,8 @@ use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\SharedKernel\Domain\UserId;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Mcp\Capability\Discovery\SchemaValidator;
 use Mcp\Schema\Result\CallToolResult;
 use Psr\Log\LoggerInterface;
@@ -16,7 +18,12 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 /**
  * The one way an MCP tool runs (ADR-0021): the token's scope, the input schema, the tool's target, the voter the web UI
  * runs for the same action (a denial reads as not found, ADR-0013), the tool, and one audit row for every call that
- * got here, refused or not. Holds no state, so it is safe in worker mode (ADR-0008).
+ * got here, refused or not.
+ *
+ * The target, the tool and its "ok" row run in a savepoint of the request transaction. A refusal or failure there,
+ * the row's own write included, rolls back to it before the refusal or "error" row is written, so a call that did not
+ * end "ok" keeps none of the tool's writes, and no tool write is kept without its row. Holds no state, so it is safe in
+ * worker mode (ADR-0008).
  */
 final readonly class ToolCallGate
 {
@@ -27,6 +34,7 @@ final readonly class ToolCallGate
         private CurrentUser $currentUser,
         private AuthorizationCheckerInterface $authorizationChecker,
         private ToolCallAuditor $toolCallAuditor,
+        private Connection $connection,
         private LoggerInterface $logger,
     ) {
     }
@@ -34,10 +42,13 @@ final readonly class ToolCallGate
     /**
      * @param array<string, mixed> $arguments what the client sent, unchecked
      *
-     * @throws ToolRefusal     after its audit row is written
-     * @throws \LogicException when the request has no token or no user, which the api_token firewall never lets
-     *                         through; no row is written
-     * @throws \Throwable      any other failure, after an "error" row was tried
+     * @throws ToolRefusal     after the tool's writes were rolled back and its audit row was written
+     * @throws \LogicException when the request has no token, no user or no open transaction, which the api_token
+     *                         firewall and the request transaction never let through; nothing runs and no row is
+     *                         written
+     * @throws \Throwable      any other failure, after the tool's writes were rolled back and an "error" row was tried;
+     *                         when the rollback itself fails, the connection is closed, so nothing of the request is
+     *                         committed
      */
     public function call(AgentTool $tool, array $arguments): CallToolResult
     {
@@ -45,30 +56,43 @@ final readonly class ToolCallGate
             ?? throw new \LogicException('An MCP tool call passed the api_token firewall without a personal access token.');
         $userId = $this->currentUser->id()
             ?? throw new \LogicException('An MCP tool call passed the api_token firewall without a user.');
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('An MCP tool call runs in the request transaction; none is open.');
+        }
         $definition = $tool->definition();
-        $target = null;
 
         try {
             if (!$access->hasScope($tool->requiredScope())) {
                 throw ToolRefusal::missingScope($tool->requiredScope());
             }
             $this->refuseInvalidInput($arguments, $definition->inputSchema);
+        } catch (ToolRefusal $refusal) {
+            $this->toolCallAuditor->record($access, $userId, $definition->name, null, $refusal->outcome);
+
+            throw $refusal;
+        }
+
+        $target = null;
+        $this->connection->beginTransaction();
+        $savepointLevel = $this->connection->getTransactionNestingLevel();
+        try {
             $target = $tool->targetOf($arguments);
             if (null !== $target && !$this->authorizationChecker->isGranted($target->voterAttribute, $target->subject)) {
                 throw ToolRefusal::notFound();
             }
             $toolAnswer = $tool->call($arguments, $target);
-        } catch (ToolRefusal $refusal) {
-            $this->toolCallAuditor->record($access, $userId, $definition->name, $target, $refusal->outcome);
-
-            throw $refusal;
+            $this->toolCallAuditor->record($access, $userId, $definition->name, $target, ToolCallOutcome::Ok);
+            $this->releaseSavepoint($savepointLevel);
         } catch (\Throwable $failure) {
-            $this->recordFailure($access, $userId, $definition->name, $target);
+            $this->rollBackToSavepoint($savepointLevel, $definition->name);
+            if ($failure instanceof ToolRefusal) {
+                $this->toolCallAuditor->record($access, $userId, $definition->name, $target, $failure->outcome);
+            } else {
+                $this->recordFailure($access, $userId, $definition->name, $target);
+            }
 
             throw $failure;
         }
-
-        $this->toolCallAuditor->record($access, $userId, $definition->name, $target, ToolCallOutcome::Ok);
 
         return $toolAnswer;
     }
@@ -99,8 +123,45 @@ final readonly class ToolCallGate
     }
 
     /**
-     * The failure itself goes on to the caller; a row that cannot be written, as when the failure broke the
-     * transaction, is logged by its class alone.
+     * @throws \LogicException when the tool left a transaction of its own open or ended the savepoint itself
+     */
+    private function releaseSavepoint(int $savepointLevel): void
+    {
+        if ($this->connection->getTransactionNestingLevel() !== $savepointLevel) {
+            throw new \LogicException('An MCP tool did not end the transactions it began, or ended the one it ran in.');
+        }
+
+        $this->connection->commit();
+    }
+
+    /**
+     * Also rolls back what the tool left open inside the savepoint. When the savepoint is gone (the tool ended it, or
+     * its release failed) or the rollback fails, closing the connection ends the request transaction on the server,
+     * so nothing the tool wrote is committed and the request fails when it commits.
+     */
+    private function rollBackToSavepoint(int $savepointLevel, string $toolName): void
+    {
+        try {
+            if ($this->connection->getTransactionNestingLevel() < $savepointLevel) {
+                throw new \LogicException('The savepoint of an MCP tool call is gone.');
+            }
+            while ($this->connection->getTransactionNestingLevel() >= $savepointLevel) {
+                $this->connection->rollBack();
+            }
+        } catch (\Throwable $rollBackFailure) {
+            // Class and code only: a database message can quote row values.
+            $this->logger->warning('Rolling back the writes of a failed MCP tool call failed; closing the connection instead.', [
+                'tool' => $toolName,
+                'exception_class' => $rollBackFailure::class,
+                'sqlstate' => $rollBackFailure instanceof DriverException ? $rollBackFailure->getSQLState() : null,
+                'code' => $rollBackFailure->getCode(),
+            ]);
+            $this->connection->close();
+        }
+    }
+
+    /**
+     * The failure itself goes on to the caller; a row that cannot be written is logged by its class alone.
      */
     private function recordFailure(ApiTokenAccess $access, UserId $userId, string $toolName, ?ToolTarget $target): void
     {
