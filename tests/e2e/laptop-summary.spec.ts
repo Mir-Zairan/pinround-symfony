@@ -26,7 +26,7 @@ const LAPTOP_SUMMARY = 'The <b>Pay</b> button does nothing on the last step & th
 
 /** PolicyRefusal::LaptopNotReady. */
 const NOT_READY_LINE = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
-/** laptop_summary_controller.js. */
+/** laptop_run.js. */
 const RUNNING_LINE = 'Running on this laptop. Ticket text stays on this laptop.';
 const UNREACHABLE_LINE = 'pinround could not reach Ollama on this laptop. Use “Local AI” at the top to set it up.';
 const NO_SUMMARY_LINE = 'Ollama on this laptop gave no summary. Use “Local AI” at the top to check it.';
