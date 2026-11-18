@@ -8,8 +8,8 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * The rounds of a ticket for the people who may see them (ADR-0013, ADR-0017), a round's facts for RoundVoter, an
- * owner's draft notes and the newest shared round's notes. It reads under row-level security, so it needs an open transaction whose tenant is the viewer's
+ * The rounds of a ticket for the people who may see them (ADR-0013, ADR-0017), a round's facts for RoundVoter, found
+ * by its id or by a picture of a draft, an owner's draft notes and the newest shared round's notes. It reads under row-level security, so it needs an open transaction whose tenant is the viewer's
  * organization.
  */
 interface RoundQueries
@@ -60,6 +60,21 @@ interface RoundQueries
      * @throws \LogicException when no transaction is open or no tenant is set, before any query
      */
     public function draftOf(string $roundId, UserId $owner): ?RoundView;
+
+    /**
+     * The draft round of the ticket that holds the picture $screenshotId, as RoundPermission VIEW and EDIT decide on it,
+     * in one query whatever the number of rounds, pictures and pins: a draft past the newest MAX_NUMBERED_ROUNDS is
+     * found too. Another person's draft, shared or not, and a deleted one come back as they are, for RoundVoter to
+     * deny; who may see the round is the voter's to decide, so the caller answers null and a denied VIEW alike, with 404.
+     *
+     * @param string $screenshotId the id as the request carried it, in any case
+     *
+     * @return RoundAccessFacts|null null for a malformed id, without a query, and for a picture of no draft of that
+     *                               ticket: a report's, another ticket's, another organization's or an unknown one
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set, before any query
+     */
+    public function draftScreenshotOf(TicketId $ticketId, string $screenshotId): ?RoundAccessFacts;
 
     /**
      * What $owner wrote in their open unshared draft round of the ticket, in one query whatever the number of pictures

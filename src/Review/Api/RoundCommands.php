@@ -112,6 +112,23 @@ interface RoundCommands
     public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void;
 
     /**
+     * Sets the owner's verdict on the picture and, unless $summary is null, its summary (at most 600 characters,
+     * trimmed; a blank one is none), in one save over the version the draft was read at: the title stays the one
+     * stored, so a title saved by another request in between is never put back, as that save is refused as
+     * DRAFT_CHANGED instead. The draft's version goes up by one for the verdict and one more for a summary, also when
+     * either is the one stored already.
+     *
+     * @param string      $verdict VERDICT_LOOKS_RIGHT or VERDICT_NOT_RIGHT_YET
+     * @param string|null $summary null keeps the summary there is
+     *
+     * @throws RoundRefused    NOT_FOUND or SCREENSHOT_NOT_FOUND (isNotFound); UNKNOWN_VERDICT or a summary over its
+     *                         cap (isInvalidContent); a shared or closed draft (isReadOnly); DRAFT_CHANGED; nothing is
+     *                         saved, the verdict neither
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void;
+
+    /**
      * Shows the draft to everyone who may see the ticket as the ticket's next round number. Holds the ticket's round
      * numbers until the caller's transaction ends, so two shares on one ticket get two numbers.
      *

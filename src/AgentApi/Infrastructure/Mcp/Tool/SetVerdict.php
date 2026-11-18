@@ -18,7 +18,6 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
-use App\Review\Api\RoundView;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
@@ -34,10 +33,10 @@ use Psr\Clock\ClockInterface;
  * with the voters of the draft round editor (RoundPermission) and the checklist card (ChecklistPermission MARK_FIXED).
  * Holds no state (ADR-0008).
  *
- * A screenshot is looked for among the drafts RoundQueries::forTicket shows the caller, so another person's unshared
- * draft is not found. A shared draft is read-only for everyone who may see it, its owner included (FR-RND-12); one
- * past the newest RoundQueries::MAX_NUMBERED_ROUNDS rounds is not loaded and so not found. A checklist item the voter
- * denies, such as one of a ticket the caller is not the assignee of, is not found too, as every denial of the gate.
+ * A screenshot is looked up with RoundQueries::draftScreenshotOf among the ticket's drafts, however many rounds the
+ * ticket has. Another person's unshared draft is denied by RoundPermission EDIT and so not found, as every denial of
+ * the gate; a shared draft is read-only for everyone RoundPermission VIEW lets see it, its owner included (FR-RND-12).
+ * A checklist item the voter denies, such as one of a ticket the caller is not the assignee of, is not found too.
  */
 final readonly class SetVerdict implements AgentTool
 {
@@ -119,13 +118,12 @@ final readonly class SetVerdict implements AgentTool
     }
 
     /**
-     * Reads the ticket's id by its key, then its drafts the caller may see (four queries at most) or the checklist
-     * item (one query). The voter of an unshared draft is RoundPermission EDIT; of a shared one VIEW, as it is
-     * read-only and call() refuses it so; of a checklist item ChecklistPermission MARK_FIXED.
+     * Reads the ticket's id by its key, then the draft that holds the screenshot or the checklist item, one query
+     * each. The voter of an unshared draft is RoundPermission EDIT; of a shared one VIEW, as it is read-only and call()
+     * refuses it so; of a checklist item ChecklistPermission MARK_FIXED.
      *
-     * @throws ToolRefusal     not found for an unknown key, a ticket the caller may not see, or a screenshot or item
-     *                         that is not of that ticket's drafts the caller sees or of its checklist
-     * @throws \LogicException when the request has no user, which the api_token firewall never lets through
+     * @throws ToolRefusal not found for an unknown key, or a screenshot or item that is not of that ticket's drafts
+     *                     or of its checklist
      */
     public function targetOf(array $arguments): ToolTarget
     {
@@ -138,7 +136,7 @@ final readonly class SetVerdict implements AgentTool
     }
 
     /**
-     * Verdict and summary are saved in the gate's savepoint, so a refused summary leaves the verdict unsaved too.
+     * Verdict and summary are saved by one Review command, so a refused summary leaves the verdict unsaved too.
      *
      * @throws ToolRefusal     not found, read-only (a shared or closed draft, a checklist item marked fixed or OK
      *                         already), or invalid input (a summary over 600 characters)
@@ -160,22 +158,10 @@ final readonly class SetVerdict implements AgentTool
 
     private function screenshotTargetOf(TicketId $ticketId, string $screenshotId): ToolTarget
     {
-        $wantedId = strtolower($screenshotId);
-        foreach ($this->roundQueries->forTicket($ticketId, $this->callerId())->rounds as $round) {
-            if (RoundView::DRAFT !== $round->kind) {
-                continue;
-            }
-            foreach ($round->screenshots as $screenshot) {
-                if ($screenshot->id !== $wantedId) {
-                    continue;
-                }
-                $facts = $this->roundQueries->accessFactsOf($round->id) ?? throw ToolRefusal::notFound();
+        $draft = $this->roundQueries->draftScreenshotOf($ticketId, $screenshotId) ?? throw ToolRefusal::notFound();
 
-                return new ToolTarget($facts->isUnsharedDraft ? RoundPermission::EDIT : RoundPermission::VIEW, $facts, self::SCREENSHOT_AUDIT_TYPE, $screenshot->id);
-            }
-        }
-
-        throw ToolRefusal::notFound();
+        // The lookup found it, so the id is a UUID, which Review keeps in lowercase.
+        return new ToolTarget($draft->isUnsharedDraft ? RoundPermission::EDIT : RoundPermission::VIEW, $draft, self::SCREENSHOT_AUDIT_TYPE, strtolower($screenshotId));
     }
 
     private function checkItemTargetOf(TicketId $ticketId, string $checkItemId): ToolTarget
@@ -189,9 +175,6 @@ final readonly class SetVerdict implements AgentTool
     }
 
     /**
-     * The verdict first: its save locks the draft's row, so the title read after it is the one the summary's save
-     * keeps, and no title saved meanwhile in the web is put back.
-     *
      * @param array<string, mixed> $arguments
      */
     private function setScreenshotVerdict(array $arguments, RoundAccessFacts $round, string $screenshotId): CallToolResult
@@ -201,38 +184,17 @@ final readonly class SetVerdict implements AgentTool
         }
         $verdict = self::stringAt($arguments, 'verdict');
         $roundVerdict = self::ROUND_VERDICTS[$verdict] ?? throw new \LogicException('The input schema lets only the known verdicts through.');
-        $callerId = $this->callerId();
-        $now = $this->clock->now();
-        $hasSummary = \array_key_exists('summary', $arguments);
+        $summary = \array_key_exists('summary', $arguments) ? self::stringAt($arguments, 'summary') : null;
 
         try {
-            $this->roundCommands->setDraftVerdict($round->roundId, $callerId, $screenshotId, $roundVerdict, $now);
-            if ($hasSummary) {
-                $title = $this->titleOf($round->roundId, $callerId, $screenshotId);
-                $this->roundCommands->editDraftScreenshot($round->roundId, $callerId, $screenshotId, $title, self::stringAt($arguments, 'summary'), $now);
-            }
+            $this->roundCommands->setDraftVerdictWithSummary($round->roundId, $this->callerId(), $screenshotId, $roundVerdict, $summary, $this->clock->now());
         } catch (RoundRefused $refused) {
             throw self::toolRefusalOf($refused);
         }
 
-        $answer = ['screenshot_id' => $screenshotId, 'verdict' => $verdict, 'verdict_label' => self::VERDICT_LABELS[$verdict], 'summary_saved' => $hasSummary];
+        $answer = ['screenshot_id' => $screenshotId, 'verdict' => $verdict, 'verdict_label' => self::VERDICT_LABELS[$verdict], 'summary_saved' => null !== $summary];
 
         return self::answerOf($answer);
-    }
-
-    /**
-     * @throws ToolRefusal not found when the draft or the screenshot is gone
-     */
-    private function titleOf(string $roundId, UserId $callerId, string $screenshotId): ?string
-    {
-        $draft = $this->roundQueries->draftOf($roundId, $callerId) ?? throw ToolRefusal::notFound();
-        foreach ($draft->screenshots as $screenshot) {
-            if ($screenshot->id === $screenshotId) {
-                return $screenshot->title;
-            }
-        }
-
-        throw ToolRefusal::notFound();
     }
 
     private function markFixed(CheckItemAccessFacts $item): CallToolResult
@@ -247,18 +209,15 @@ final readonly class SetVerdict implements AgentTool
     }
 
     /**
-     * Review's refusal as the tool's: the domain wraps a text over its cap in an InvalidArgumentException and a draft
-     * that no longer changes (shared or closed) in a DomainException. Any other, such as DRAFT_CHANGED, goes on as a
+     * Review's refusal as the tool's, by the kind Review gave it. Any other, such as DRAFT_CHANGED, goes on as a
      * failure.
      */
     private static function toolRefusalOf(RoundRefused $refused): \Throwable
     {
-        $reason = $refused->getMessage();
-
         return match (true) {
-            RoundRefused::NOT_FOUND === $reason, RoundRefused::SCREENSHOT_NOT_FOUND === $reason => ToolRefusal::notFound(),
-            $refused->getPrevious() instanceof \InvalidArgumentException => ToolRefusal::invalidInput($reason),
-            $refused->getPrevious() instanceof \DomainException => ToolRefusal::readOnly(),
+            $refused->isNotFound() => ToolRefusal::notFound(),
+            $refused->isReadOnly() => ToolRefusal::readOnly(),
+            $refused->isInvalidContent() => ToolRefusal::invalidInput($refused->getMessage()),
             default => $refused,
         };
     }
