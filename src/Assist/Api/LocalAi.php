@@ -41,8 +41,9 @@ interface LocalAi
     /**
      * Finds the package through resolve_laptop_package, reads the poster's roles again and asks the policy for the
      * package's ticket as package() did, checks the model name and the text as any AI answer is checked
-     * (AiAnswerCheck, the feature's size limits, plain text) and capped like a comment, and keeps the text on the
-     * package in the one UPDATE that uses it, so of two results for one package exactly one is kept.
+     * (AiAnswerCheck, the feature's size limits, plain text) and capped like a comment and, for a summary, like a
+     * summary (TicketSummaryCommands::TEXT_MAX_LENGTH), and keeps the text on the package in the one UPDATE that uses
+     * it, so of two results for one package exactly one is kept.
      *
      * Runs in a transaction of its own (Transactions), so the caller must have none open and must have set the tenant
      * to $organizationId. A refusal is recorded in the audit log of $organizationId (ADR-0042, ADR-0026) with its code

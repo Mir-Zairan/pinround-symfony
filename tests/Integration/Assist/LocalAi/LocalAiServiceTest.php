@@ -411,6 +411,8 @@ final class LocalAiServiceTest extends KernelTestCase
         yield 'blank' => [" \r\n\u{FEFF} ", self::MODEL, 'The AI answer is blank.'];
         // One word of 10,001 bytes: under the answer check's byte cap and its word count, so only the comment cap refuses it.
         yield 'one character over a comment\'s cap' => [str_repeat('x', 10001), self::MODEL, 'The AI answer is longer than 10,000 characters.'];
+        // One word, as above: only a summary's cap refuses it.
+        yield 'one character over a summary\'s cap' => [str_repeat('é', 2001), self::MODEL, 'The AI answer is longer than 2,000 characters.'];
         yield 'over the answer check\'s bytes' => [str_repeat('x', 20001), self::MODEL, 'The AI answer is longer than 20000 bytes.'];
         yield 'over the summary\'s words' => [str_repeat('word ', 61), self::MODEL, 'The AI answer to summary.v1 has more than 60 words.'];
         yield 'an uppercase model' => [self::RESULT, 'Qwen3:4b', LocalModelName::RULE];
@@ -432,16 +434,30 @@ final class LocalAiServiceTest extends KernelTestCase
         self::assertInstanceOf(LocalResult::class, $this->acceptAs(self::OMAR, $package->packageId, self::RESULT), 'A rejected result used the package up.');
     }
 
-    /** At the cap exactly the text is kept, so the rejection one character over is the cap's. */
+    /**
+     * At a summary's cap exactly the text is kept, so the rejection one character over is that cap's. The comment's cap
+     * is above it, so no summary result reaches it.
+     */
     #[Test]
-    public function aResultOfExactlyACommentsCapIsKept(): void
+    public function aSummaryResultOfExactlyASummarysCapIsKept(): void
     {
         $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
 
-        $result = $this->acceptAs(self::OMAR, $package->packageId, str_repeat('é', 10000));
+        $result = $this->acceptAs(self::OMAR, $package->packageId, str_repeat('é', 2000));
 
         self::assertInstanceOf(LocalResult::class, $result);
-        self::assertSame(10000, mb_strlen($result->text));
+        self::assertSame(2000, mb_strlen($result->text));
+    }
+
+    #[Test]
+    public function aSummaryResultOverASummarysCapIsAuditedAsRejected(): void
+    {
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+
+        $refusal = $this->acceptAs(self::OMAR, $package->packageId, str_repeat('é', 2001));
+
+        self::assertInstanceOf(LocalResultRefused::class, $refusal);
+        $this->assertOneRefusalAudited($package->packageId, LocalResultRefused::RESULT_REJECTED);
     }
 
     /**

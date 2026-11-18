@@ -198,20 +198,44 @@ final class LaptopSummaryProposalTest extends WebTestCase
         $this->assertNothingChanged();
     }
 
+    /**
+     * A result stored with a control character stands for one Ticketing refuses as a summary, as accept() lets none
+     * through.
+     */
     #[Test]
-    public function aResultTooLongForASummaryAnswers422WithTheRuleAndStaysTheProposal(): void
+    public function aResultTicketingRefusesAnswers422WithTheRuleAndStaysTheProposal(): void
     {
-        $longText = str_repeat('a', 2001);
-        $this->addResult($this->acmeFoods, self::UNKNOWN, $this->shopTicketId, '2026-11-11 11:45:00+00', $longText);
+        $this->addResult($this->acmeFoods, self::UNKNOWN, $this->shopTicketId, '2026-11-11 11:45:00+00', "Pay does nothing\u{0007} on the last step.");
         $this->logIn($this->client, $this->people['Lena']);
 
         $this->postChoice('SHOP-1', self::UNKNOWN, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID), asTurboStream: true);
 
         self::assertResponseStatusCodeSame(422);
-        self::assertStringContainsString('A summary has at most 2000 characters.', (string) $this->client->getResponse()->getContent());
+        self::assertStringContainsString('A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.', (string) $this->client->getResponse()->getContent());
         $this->assertNothingChanged();
         $page = $this->client->request('GET', '/t/SHOP-1');
-        self::assertSame($longText, $page->filter('.ticket__ask-proposal-text')->text());
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('/t/SHOP-1/summary/laptop/'.self::UNKNOWN, $page->filter('.ticket__ask-proposal form')->attr('action'));
+    }
+
+    /**
+     * A result kept before accept() capped a summary result at a summary's length is never offered, so the one before
+     * it is, and choosing it answers as for no proposal.
+     */
+    #[Test]
+    public function aStoredResultLongerThanASummaryIsNotOfferedAndChoosingItAnswers404(): void
+    {
+        $this->addResult($this->acmeFoods, self::UNKNOWN, $this->shopTicketId, '2026-11-11 11:45:00+00', str_repeat('a', 2001));
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('/t/SHOP-1/summary/laptop/'.self::PROPOSAL, $page->filter('.ticket__ask-proposal form')->attr('action'));
+
+        $this->postChoice('SHOP-1', self::UNKNOWN, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID));
+
+        self::assertResponseStatusCodeSame(404);
+        $this->assertNothingChanged();
     }
 
     /**

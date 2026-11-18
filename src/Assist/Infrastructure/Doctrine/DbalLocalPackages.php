@@ -19,6 +19,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\TicketSummaryCommands;
 use Doctrine\DBAL\Connection;
 use Psr\Clock\ClockInterface;
 
@@ -51,9 +52,12 @@ final readonly class DbalLocalPackages implements LocalPackages
 
     private const string RESULT_COLUMNS = 'id, user_id, result_text, model, result_label, prompt_version, used_at';
 
-    // The predicate of ast_local_package_ticket_id_used_at_idx, so both statements read the partial index.
+    // The predicate of ast_local_package_ticket_id_used_at_idx, so both statements read the partial index. The length
+    // skips a result kept before accept() capped a summary's at a summary's length, which Ticketing would refuse; it
+    // filters the index scan and is left out of the index, as such rows are few and never come back.
     private const string PROPOSAL_OF_TICKET = 'organization_id = :organization AND ticket_id = :ticket AND used_at IS NOT NULL AND made_main_at IS NULL'
-        .' AND used_at > coalesce(CAST(:newer_than AS timestamptz), \'-infinity\')';
+        .' AND used_at > coalesce(CAST(:newer_than AS timestamptz), \'-infinity\')'
+        .' AND char_length(result_text) <= '.TicketSummaryCommands::TEXT_MAX_LENGTH;
 
     private const string SELECT_PROPOSAL = 'SELECT '.self::RESULT_COLUMNS.' FROM ast_local_package WHERE '.self::PROPOSAL_OF_TICKET
         .' ORDER BY used_at DESC, id DESC LIMIT 1';

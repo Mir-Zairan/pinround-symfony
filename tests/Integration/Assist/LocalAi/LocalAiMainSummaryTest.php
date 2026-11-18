@@ -102,6 +102,24 @@ final class LocalAiMainSummaryTest extends KernelTestCase
         self::assertNull($this->proposalOf(self::SHOP_8, '2027-03-15 10:04:01+00'));
     }
 
+    /**
+     * Rows kept before accept() capped a summary result at a summary's length: a newer one over the cap is passed
+     * over for the newest one at the cap, and cannot be made the main summary.
+     */
+    #[Test]
+    public function aStoredResultLongerThanASummaryIsNoProposalAndOneAtTheCapIs(): void
+    {
+        $atTheCap = '0197a3c0-0000-7000-8000-0000000f9a37';
+        $overTheCap = '0197a3c0-0000-7000-8000-0000000f9a38';
+        $this->addResult(self::ACME_FOODS, $atTheCap, self::SHOP_7, '2027-03-15 10:06:00', str_repeat('é', 2000));
+        $this->addResult(self::ACME_FOODS, $overTheCap, self::SHOP_7, '2027-03-15 10:07:00', str_repeat('é', 2001));
+
+        self::assertSame($atTheCap, $this->proposalOf(self::SHOP_7, self::SUMMARY_WRITTEN_AT)?->packageId->toString());
+        $this->assertRefusedAsNotAProposal($overTheCap, self::SHOP_7);
+        self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
+        self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30'], $this->madeMainTimes());
+    }
+
     #[Test]
     public function lenaMakesTheProposalTheMainSummaryAndTheOneBeforeGoesToHistory(): void
     {

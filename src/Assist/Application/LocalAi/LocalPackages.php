@@ -62,8 +62,9 @@ interface LocalPackages
     public function post(OrganizationId $organizationId, LocalPackageId $packageId, UserId $posterId, string $text, LocalModelName $model, string $label): ?\DateTimeImmutable;
 
     /**
-     * The ticket's proposal: its newest posted result (a tie by the larger id) that is not made the main summary yet,
-     * when it was posted after $newerThan. One read on ast_local_package_ticket_id_used_at_idx.
+     * The ticket's proposal: its newest posted result (a tie by the larger id) that is not made the main summary yet
+     * and no longer than a summary may be (TicketSummaryCommands::TEXT_MAX_LENGTH), when it was posted after
+     * $newerThan. One read on ast_local_package_ticket_id_used_at_idx.
      *
      * @param \DateTimeImmutable|null $newerThan when the ticket's current summary was made; null when it has none
      *

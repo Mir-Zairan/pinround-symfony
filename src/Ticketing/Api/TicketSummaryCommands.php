@@ -14,6 +14,9 @@ use App\SharedKernel\Domain\UserId;
  */
 interface TicketSummaryCommands
 {
+    /** The most characters a summary's text may have once trimmed; a longer one is refused (Summary::TEXT_MAX_LENGTH). */
+    public const int TEXT_MAX_LENGTH = 2000;
+
     /**
      * Stores an AI summary a person asked for with "Summarize with AI" as the ticket's current summary, and moves the
      * one before to history. It locks the ticket's row until the caller's transaction ends, so of two stores for one

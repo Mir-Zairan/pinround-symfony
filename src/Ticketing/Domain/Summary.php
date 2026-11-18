@@ -13,6 +13,7 @@ use App\SharedKernel\Domain\UserId;
  */
 final readonly class Summary
 {
+    /** Other modules read it as TicketSummaryCommands::TEXT_MAX_LENGTH, as the Domain is Ticketing's own (deptrac). */
     public const int TEXT_MAX_LENGTH = 2000;
     /** The same cap as ast_usage.model. */
     public const int MODEL_MAX_LENGTH = 200;

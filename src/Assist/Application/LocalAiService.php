@@ -165,7 +165,7 @@ final readonly class LocalAiService implements LocalAi
             throw LocalResultRefused::resultRejected(LocalModelName::RULE);
         }
         $modelName = new LocalModelName($model);
-        $checkedText = $this->checkedTextOf($package->promptVersion, $text);
+        $checkedText = $this->checkedTextOf($package->purpose, $package->promptVersion, $text);
 
         $label = \sprintf(LocalResult::LABEL_FORMAT, $posterFirstName, $modelName->value);
         $postedAt = $this->localPackages->post($organizationId, $packageId, $posterId, $checkedText, $modelName, $label)
@@ -197,20 +197,34 @@ final readonly class LocalAiService implements LocalAi
     }
 
     /**
-     * @throws LocalResultRefused when the answer check rejects the text or it is longer than a comment may be
+     * @throws LocalResultRefused when the answer check rejects the text, or it is longer than a comment may be or than
+     *                            what its purpose makes of it may be
      */
-    private function checkedTextOf(PromptVersion $version, string $text): string
+    private function checkedTextOf(LocalAiPurpose $purpose, PromptVersion $version, string $text): string
     {
         try {
             $checkedText = $this->aiAnswerCheck->checkText($version, $text);
         } catch (AiAnswerRejected $rejection) {
             throw LocalResultRefused::resultRejected($rejection->getMessage());
         }
-        if (mb_strlen($checkedText, 'UTF-8') > self::MAX_RESULT_CHARACTERS) {
-            throw LocalResultRefused::resultRejected(\sprintf('The AI answer is longer than %s characters.', number_format(self::MAX_RESULT_CHARACTERS)));
+        foreach ([self::MAX_RESULT_CHARACTERS, self::maxCharactersOf($purpose)] as $maxCharacters) {
+            if (mb_strlen($checkedText, 'UTF-8') > $maxCharacters) {
+                throw LocalResultRefused::resultRejected(\sprintf('The AI answer is longer than %s characters.', number_format($maxCharacters)));
+            }
         }
 
         return $checkedText;
+    }
+
+    /**
+     * A summary result longer than a summary may be would be offered under the ticket and then refused by "Use as main
+     * summary".
+     */
+    private static function maxCharactersOf(LocalAiPurpose $purpose): int
+    {
+        return match ($purpose) {
+            LocalAiPurpose::Summary => TicketSummaryCommands::TEXT_MAX_LENGTH,
+        };
     }
 
     /**

@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Ticketing\Domain;
 
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\TicketSummaryCommands;
 use App\Ticketing\Domain\Summary;
 use App\Ticketing\Domain\SummaryRefused;
 use App\Ticketing\Domain\SummarySource;
@@ -21,11 +22,15 @@ final class SummaryTest extends TestCase
     private const string MODEL = 'claude-sonnet';
     private const string PROMPT_VERSION = 'summary.v1';
 
+    /**
+     * The text caps are the Api's, which Assist refuses a laptop result over: a different Domain cap would let it offer
+     * one it cannot store, or refuse one it can.
+     */
     #[Test]
     public function anAiSummaryKeepsItsTrimmedTextAndLabels(): void
     {
         $createdAt = new \DateTimeImmutable('2027-03-03 10:05:00 UTC');
-        $text = str_repeat('é', Summary::TEXT_MAX_LENGTH - 4)."\r\n\té";
+        $text = str_repeat('é', TicketSummaryCommands::TEXT_MAX_LENGTH - 4)."\r\n\té";
 
         $summary = Summary::generatedByAi(new TicketId(self::SHOP_7), "\u{20}\n".$text." \n", new UserId(self::MIA), ' '.self::MODEL.' ', "\t".self::PROMPT_VERSION, $createdAt);
 
@@ -61,7 +66,7 @@ final class SummaryTest extends TestCase
     {
         yield 'empty text' => ['', self::MODEL, self::PROMPT_VERSION, 'A summary has text; this one is blank.'];
         yield 'text of spaces and a CRLF' => [" \r\n\t ", self::MODEL, self::PROMPT_VERSION, 'A summary has text; this one is blank.'];
-        yield 'text over the cap' => [str_repeat('é', Summary::TEXT_MAX_LENGTH + 1), self::MODEL, self::PROMPT_VERSION, 'A summary has at most 2000 characters.'];
+        yield 'text over the cap' => [str_repeat('é', TicketSummaryCommands::TEXT_MAX_LENGTH + 1), self::MODEL, self::PROMPT_VERSION, 'A summary has at most 2000 characters.'];
         yield 'text with an ESC' => ["Hidden \e[31mbutton", self::MODEL, self::PROMPT_VERSION, 'A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.'];
         yield 'text with a NUL' => ["Hidden\0button", self::MODEL, self::PROMPT_VERSION, 'A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.'];
         yield 'text not UTF-8' => ["Hidden \xC3button", self::MODEL, self::PROMPT_VERSION, 'A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.'];
