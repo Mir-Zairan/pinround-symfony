@@ -179,8 +179,10 @@ final readonly class GetRoundNotes implements AgentTool
             'checklist' => null === $checklist ? null : self::checklistFieldsOf($checklist),
         ];
 
+        // No JSON_PRESERVE_ZERO_FRACTION: the SDK writes structuredContent without it, so a whole-number pin position
+        // is 10 in both blocks, never 10.0 in one and 10 in the other.
         return new CallToolResult(
-            [new TextContent(json_encode($notes, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION))],
+            [new TextContent(json_encode($notes, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE))],
             structuredContent: $notes,
         );
     }
