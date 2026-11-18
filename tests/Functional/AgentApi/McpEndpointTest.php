@@ -4,14 +4,23 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\AgentApi;
 
+use App\AgentApi\Infrastructure\Mcp\GatedToolCallHandler;
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
+use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
+use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
+use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\Identity\Api\ApiTokenAccess;
+use App\Identity\Domain\ApiToken;
+use App\Identity\Domain\ApiTokenHashing;
+use App\Identity\Domain\ApiTokenScope;
+use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -38,6 +47,13 @@ final class McpEndpointTest extends WebTestCase
     private const string MCP = '/mcp';
     private const string TOKEN_PROBE = '/mcp/_test/token-probe';
     private const string NOW = '2099-03-20 09:00:20 UTC';
+    /** A tool call writes an audit row, and aud_event has partitions for months around the build, none in 2099. */
+    private const string TOOL_CALL_TIME = '2026-11-10 09:00:20 UTC';
+    private const string OMAR = 'Omar Haddad';
+    /** JSON-RPC's "Invalid params". */
+    private const int INVALID_PARAMS = -32602;
+    /** JSON-RPC's "Invalid Request". */
+    private const int INVALID_REQUEST = -32600;
     /** The minute of NOW since the epoch: (4077680420 - 20) / 60. */
     private const int MINUTE_OF_NOW = 67961340;
     private const string PROTOCOL_VERSION = '2025-06-18';
@@ -58,12 +74,15 @@ final class McpEndpointTest extends WebTestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM aud_event WHERE organization_id = ?', [$organizationId]));
+        }
         $this->removeApiTokens();
         $this->removeUsersAndOrganizations();
     }
 
     #[Test]
-    public function aLiveTokenStartsASessionAndListsNoToolsYet(): void
+    public function aLiveTokenStartsASessionAndListsWhoAmIAsTheOnlyTool(): void
     {
         [$acmeFoods, $tokenId, $token] = $this->omarsTokenInAcmeFoods();
 
@@ -82,7 +101,13 @@ final class McpEndpointTest extends WebTestCase
         $this->postJsonRpc($token, ['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/list'], $sessionId);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(['jsonrpc' => '2.0', 'id' => 2, 'result' => ['tools' => []]], $this->responseJson());
+        $tools = $this->responseValueAt('result', 'tools');
+        self::assertIsArray($tools);
+        self::assertCount(1, $tools);
+        $whoAmI = $tools[0] ?? null;
+        self::assertIsArray($whoAmI);
+        self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
+        self::assertSame(['type' => 'object', 'properties' => [], 'additionalProperties' => false], $whoAmI['inputSchema'] ?? null);
         self::assertSame(['last_used_at' => '2099-03-20 09:00:20', 'revoked_at' => null], $this->usageOf($tokenId, $acmeFoods));
         self::assertSame(3, $this->callsCounted('mcp_calls_per_token_minute', $tokenId));
         self::assertSame(3, $this->callsCounted('mcp_calls_per_organization_minute', $acmeFoods->toString()));
@@ -237,17 +262,236 @@ final class McpEndpointTest extends WebTestCase
         self::assertFalse($this->client->getResponse()->headers->has('Mcp-Session-Id'));
     }
 
+    #[Test]
+    public function whoAmIWithAReadTokenAnswersTheTokensIdentityAndWritesOneOkRowWithoutSecrets(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WhoAmI::NAME, new \stdClass());
+
+        self::assertResponseStatusCodeSame(200);
+        $identity = ['user_id' => $omar->id()->toString(), 'display_name' => self::OMAR, 'organization_id' => $acmeFoods->toString(), 'scopes' => ['read', 'rounds:write']];
+        self::assertSame($identity, $this->responseValueAt('result', 'structuredContent'));
+        self::assertSame([['type' => 'text', 'text' => json_encode($identity, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)]], $this->responseValueAt('result', 'content'));
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame([$this->toolCallRow($omar, $tokenId, 'ok')], $this->auditRowsOf($acmeFoods));
+        $this->assertNoAuditRowHolds($acmeFoods, [$token, self::displayPrefixOf($token), self::OMAR]);
+    }
+
+    #[Test]
+    public function aTokenWithoutTheReadScopeGetsAnErrorResultAndOneMissingScopeRow(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        $omar = $this->createUserWithoutOrganization(self::OMAR);
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $this->addMembership($omar, $acmeFoods);
+        [$tokenId, $token] = $this->issueApiTokenWithScopes($omar, $acmeFoods, [ApiTokenScope::RoundsWrite]);
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WhoAmI::NAME, new \stdClass());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertTrue($this->responseValueAt('result', 'isError'));
+        self::assertSame([['type' => 'text', 'text' => \sprintf(ToolRefusal::MISSING_SCOPE, 'read')]], $this->responseValueAt('result', 'content'));
+        self::assertNull($this->responseValueAt('result', 'structuredContent'), 'a refused call answered the identity');
+        self::assertSame([$this->toolCallRow($omar, $tokenId, 'missing_scope')], $this->auditRowsOf($acmeFoods));
+        $this->assertNoAuditRowHolds($acmeFoods, [$token, self::displayPrefixOf($token), self::OMAR]);
+    }
+
+    #[Test]
+    public function anUnknownToolGetsAnInvalidParamsErrorAndNoRow(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, , $token] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, 'delete_every_round', new \stdClass());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['code' => self::INVALID_PARAMS, 'message' => GatedToolCallHandler::UNKNOWN_TOOL], $this->responseValueAt('error'));
+        self::assertNull($this->responseValueAt('result'));
+        self::assertSame([], $this->auditRowsOf($acmeFoods));
+    }
+
+    #[Test]
+    public function argumentsTheInputSchemaRefusesGetAnInvalidParamsErrorAndOneInvalidInputRow(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, $tokenId, $token, $omar] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WhoAmI::NAME, ['round' => 'SHOP-1']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(self::INVALID_PARAMS, $this->responseValueAt('error', 'code'));
+        $message = $this->responseValueAt('error', 'message');
+        self::assertIsString($message);
+        self::assertStringStartsWith(\sprintf(ToolRefusal::INVALID_INPUT, ''), $message);
+        self::assertNull($this->responseValueAt('result'));
+        self::assertSame([$this->toolCallRow($omar, $tokenId, 'invalid_input')], $this->auditRowsOf($acmeFoods));
+        $this->assertNoAuditRowHolds($acmeFoods, [$token, self::displayPrefixOf($token), self::OMAR, 'SHOP-1']);
+    }
+
     /**
-     * @return array{OrganizationId, string, string} Acme Foods, Omar's token id and its plain text
+     * The SDK refuses them while it reads the request, so the gate never sees the call: its own "Invalid Request".
+     */
+    #[Test]
+    public function argumentsThatAreNoObjectGetTheSdksInvalidRequestErrorAndNoRow(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        [$acmeFoods, , $token] = $this->omarsTokenInAcmeFoods();
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WhoAmI::NAME, 'SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['code' => self::INVALID_REQUEST, 'message' => 'Parameter "arguments" must be an array.'], $this->responseValueAt('error'));
+        self::assertNull($this->responseValueAt('result'));
+        self::assertSame([], $this->auditRowsOf($acmeFoods));
+    }
+
+    /**
+     * Omar works in both; the token is Beta Bakery's, the organization he joined last, so an answer from his first
+     * membership differs from the right one.
+     */
+    #[Test]
+    public function whoAmIAnswersTheTokensOrganizationOnlyAndAuditsItThere(): void
+    {
+        $this->clock->modify(self::TOOL_CALL_TIME);
+        $omar = $this->createUserWithoutOrganization(self::OMAR);
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($omar, $acmeFoods);
+        $this->addMembership($omar, $betaBakery);
+        [$tokenId, $token] = $this->issueApiToken($omar, $betaBakery);
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, WhoAmI::NAME, new \stdClass());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($betaBakery->toString(), $this->responseValueAt('result', 'structuredContent', 'organization_id'));
+        self::assertStringNotContainsString($acmeFoods->toString(), $this->client->getInternalResponse()->getContent());
+        self::assertSame([$this->toolCallRow($omar, $tokenId, 'ok')], $this->auditRowsOf($betaBakery));
+        self::assertSame([], $this->auditRowsOf($acmeFoods));
+    }
+
+    /**
+     * @return array{OrganizationId, string, string, User} Acme Foods, Omar's token id, its plain text and Omar
      */
     private function omarsTokenInAcmeFoods(): array
     {
-        $omar = $this->createUserWithoutOrganization('Omar Haddad');
+        $omar = $this->createUserWithoutOrganization(self::OMAR);
         $acmeFoods = $this->createOrganization('Acme Foods');
         $this->addMembership($omar, $acmeFoods);
         [$tokenId, $token] = $this->issueApiToken($omar, $acmeFoods);
 
-        return [$acmeFoods, $tokenId, $token];
+        return [$acmeFoods, $tokenId, $token, $omar];
+    }
+
+    /**
+     * As IssuesApiTokens::issueApiToken, with scopes of its own instead of Claude Code's defaults.
+     *
+     * @param list<ApiTokenScope> $scopes
+     *
+     * @return array{string, string} the token's id and its plain text
+     */
+    private function issueApiTokenWithScopes(User $user, OrganizationId $organizationId, array $scopes): array
+    {
+        $hashing = self::getContainer()->get('test.identity_api_token_hashing');
+        \assert($hashing instanceof ApiTokenHashing);
+        $issued = ApiToken::issue($this->apiTokens()->nextIdentity(), $organizationId, $user->id(), 'Claude Code', $scopes, $hashing, new \DateTimeImmutable(self::LIVE_TOKEN_ISSUED_AT), ApiToken::DEFAULT_LIFETIME_DAYS);
+        $this->inTokenTransactionAs($organizationId, fn () => $this->apiTokens()->add($issued->token()));
+
+        return [$issued->token()->id(), $issued->reveal()];
+    }
+
+    /**
+     * Initializes a session and confirms it, as Claude Code does before its first tools/list or tools/call.
+     *
+     * @return string the Mcp-Session-Id
+     */
+    private function startSession(string $token): string
+    {
+        $this->postJsonRpc($token, self::initializeMessage());
+        self::assertResponseStatusCodeSame(200);
+        $sessionId = $this->client->getResponse()->headers->get('Mcp-Session-Id');
+        self::assertIsString($sessionId);
+        $this->postJsonRpc($token, ['jsonrpc' => '2.0', 'method' => 'notifications/initialized'], $sessionId);
+        self::assertResponseStatusCodeSame(202);
+
+        return $sessionId;
+    }
+
+    /**
+     * @param mixed $arguments sent as they are, so a test can send what no schema allows
+     */
+    private function callTool(string $token, string $sessionId, string $toolName, mixed $arguments): void
+    {
+        $this->postJsonRpc($token, ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => $toolName, 'arguments' => $arguments]], $sessionId);
+    }
+
+    /**
+     * @return array{string, string, string, string, string, null, string, array<string, string>}
+     */
+    private function toolCallRow(User $user, string $tokenId, string $outcome): array
+    {
+        return ['token', $user->id()->toString(), $tokenId, ToolCallAuditor::ACTION, ToolCallAuditor::TOOL_TARGET_TYPE, null, '2026-11-10 09:00:20', ['outcome' => $outcome, 'tool' => WhoAmI::NAME]];
+    }
+
+    /**
+     * @return list<array{mixed, mixed, mixed, mixed, mixed, mixed, mixed, array<mixed>}> actor kind, user, token,
+     *                                                                                    action, target type, target,
+     *                                                                                    time, data by key
+     */
+    private function auditRowsOf(OrganizationId $organizationId): array
+    {
+        $rows = [];
+        $this->committedAs($organizationId, static function (Connection $migrator) use ($organizationId, &$rows): int {
+            $rows = $migrator->fetchAllNumeric(
+                "SELECT actor_kind, actor_user_id, actor_token_id, action, target_type, target_id, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), data::text FROM aud_event WHERE organization_id = ? ORDER BY at, id",
+                [$organizationId->toString()],
+            );
+
+            return 0;
+        });
+
+        return array_map(static function (array $row): array {
+            self::assertIsString($row[7]);
+            $data = json_decode($row[7], true, flags: \JSON_THROW_ON_ERROR);
+            self::assertIsArray($data);
+            ksort($data);
+
+            return [$row[0], $row[1], $row[2], $row[3], $row[4], $row[5], $row[6], $data];
+        }, $rows);
+    }
+
+    /**
+     * Every column of every row, as text, holds none of $secrets.
+     *
+     * @param list<string> $secrets
+     */
+    private function assertNoAuditRowHolds(OrganizationId $organizationId, array $secrets): void
+    {
+        $rowTexts = [];
+        $this->committedAs($organizationId, static function (Connection $migrator) use ($organizationId, &$rowTexts): int {
+            $rowTexts = $migrator->fetchFirstColumn('SELECT e::text FROM aud_event e WHERE organization_id = ?', [$organizationId->toString()]);
+
+            return 0;
+        });
+        self::assertNotSame([], $rowTexts);
+        foreach ($rowTexts as $rowText) {
+            self::assertIsString($rowText);
+            foreach ($secrets as $secret) {
+                self::assertStringNotContainsString($secret, $rowText);
+            }
+        }
+    }
+
+    private static function displayPrefixOf(string $token): string
+    {
+        return substr($token, 0, \strlen(ApiToken::PLAIN_PREFIX) + ApiToken::DISPLAY_PREFIX_LENGTH);
     }
 
     /**

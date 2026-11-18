@@ -27,6 +27,7 @@
         "lcobucci/jwt": "^5",
         "league/flysystem": "^3.36",
         "league/flysystem-aws-s3-v3": "^3.35",
+        "mcp/sdk": "0.9.0",
         "monolog/monolog": "^3.12",
         "nyholm/psr7": "^1.8",
         "open-telemetry/api": "^1.11",
