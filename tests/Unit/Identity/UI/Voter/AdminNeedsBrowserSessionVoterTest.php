@@ -152,7 +152,7 @@ final class AdminNeedsBrowserSessionVoterTest extends TestCase
 
     private static function tokenActor(): ApiTokenAuthentication
     {
-        return new ApiTokenAuthentication(self::sara(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000007f1', new OrganizationId(self::ACME_FOODS), ['read']), null);
+        return new ApiTokenAuthentication(self::sara(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000007f1', new OrganizationId(self::ACME_FOODS), ['read'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null);
     }
 
     private static function browserSession(): UsernamePasswordToken

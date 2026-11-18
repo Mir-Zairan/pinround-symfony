@@ -254,7 +254,7 @@ final class EnterChosenOrganizationTest extends TestCase
         if (null !== $userId) {
             $tokenStorage->setToken(null === $tokenOrganizationId
                 ? new UsernamePasswordToken(self::securityUser($userId), 'main', ['ROLE_USER'])
-                : new ApiTokenAuthentication(self::securityUser($userId), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId($tokenOrganizationId), ['read']), null));
+                : new ApiTokenAuthentication(self::securityUser($userId), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId($tokenOrganizationId), ['read'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null));
         }
 
         $this->tenantContext->reset();

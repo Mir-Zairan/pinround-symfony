@@ -47,7 +47,7 @@ final class McpRequestGuardTest extends TestCase
     {
         $this->storage = new InMemoryStorage();
         $this->toolCallLimiter = ConfiguredToolCallLimiter::on($this->storage, new MockClock(new \DateTimeImmutable(self::NOW)));
-        $this->currentAccess = new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read']);
+        $this->currentAccess = new ApiTokenAccess(self::OMARS_TOKEN, new OrganizationId(self::ACME_FOODS), ['read'], new \DateTimeImmutable('2099-06-18 09:00:20 UTC'));
     }
 
     #[Test]

@@ -89,7 +89,8 @@ final class TokenAuthenticatorTest extends TestCase
         $user = $token->getUser();
         self::assertInstanceOf(SecurityUser::class, $user);
         self::assertSame(self::OMAR, $user->id());
-        self::assertEquals(new ApiTokenAccess(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), ['read', 'rounds:write']), $token->access());
+        self::assertEquals(new ApiTokenAccess(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), ['read', 'rounds:write'], new \DateTimeImmutable('2099-05-30 09:00:00 UTC')), $token->access());
+        self::assertSame('2099-05-30T09:00:00+00:00', $token->access()->expiresAt->format(\DATE_ATOM), 'the access does not carry the token\'s own expiry');
         self::assertEquals($lastUsedAt, $token->lastUsedAt());
     }
 
@@ -222,7 +223,7 @@ final class TokenAuthenticatorTest extends TestCase
         $user = self::omar();
         $securityUser = SecurityUser::of($user, new Credential($user, new PasswordHash('$argon2id$v=19$m=10,t=3,p=1$stored'), new \DateTimeImmutable('2099-03-01 09:00:00 UTC')));
 
-        return new ApiTokenAuthentication($securityUser, new ApiTokenAccess(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), ['read']), $lastUsedAt);
+        return new ApiTokenAuthentication($securityUser, new ApiTokenAccess(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), ['read'], new \DateTimeImmutable('2099-05-30 09:00:00 UTC')), $lastUsedAt);
     }
 
     private static function omar(): User

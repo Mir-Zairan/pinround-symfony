@@ -55,6 +55,6 @@ final class ToolCallAuditorTest extends TestCase
 
     private function omarsAccess(): ApiTokenAccess
     {
-        return new ApiTokenAccess(GateFixture::OMARS_TOKEN, new OrganizationId(GateFixture::ACME_FOODS), ['read']);
+        return new ApiTokenAccess(GateFixture::OMARS_TOKEN, new OrganizationId(GateFixture::ACME_FOODS), ['read'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC'));
     }
 }

@@ -401,7 +401,7 @@ final class VoterMatrixTest extends KernelTestCase
         $hash = new PasswordHash('$argon2id$v=19$m=65536,t=4,p=1$NUkxU2sxQlFxbXpDaUZUQQ$suVp+0jzKZuqeONGVmUghGQxxI2vd02CMokdMtaQcfA');
         $securityUser = SecurityUser::of($user, new Credential($user, $hash, new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
         if (self::PERSONAL_ACCESS_TOKEN === $login) {
-            return new ApiTokenAuthentication($securityUser, new ApiTokenAccess(self::API_TOKEN, new OrganizationId(self::PEOPLE[$person][1]), ['read', 'rounds:write']), null);
+            return new ApiTokenAuthentication($securityUser, new ApiTokenAccess(self::API_TOKEN, new OrganizationId(self::PEOPLE[$person][1]), ['read', 'rounds:write'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null);
         }
 
         return new UsernamePasswordToken($securityUser, 'main', $securityUser->getRoles());

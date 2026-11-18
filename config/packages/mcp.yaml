@@ -1,7 +1,8 @@
 # The MCP server Claude Code connects to (ADR-0021): symfony/mcp-bundle, pinned to exactly 0.15.0 in composer.json,
 # on mcp/sdk 0.9. Keys checked against the bundle's config/options.php at install. POST /mcp is behind the stateless
 # api_token firewall (security.yaml); McpRequestGuard refuses a foreign Origin, an unknown Host and a body over 1 MB
-# before the firewall, and spends the per-token and per-organization limits (ToolCallLimiter) after it.
+# before the firewall, and spends the per-token and per-organization limits (ToolCallLimiter) after it;
+# McpSessionBinding then refuses a session that another token started.
 mcp:
     servers:
         pinround:
@@ -18,7 +19,8 @@ mcp:
                 allowed_hosts: ['%env(key:host:url:DEFAULT_URI)%']
             # On the state Valkey, which never evicts (ADR-0010) and which every app container shares; the default file
             # store would keep a session on one container only. The Mcp-Session-Id carries protocol state only: every
-            # request still authenticates by its own Bearer token.
+            # request still authenticates by its own Bearer token, and McpSessionBinding answers 404 to a session that
+            # another token started. Its binding lives as long as a session: keep ttl equal to its TTL_SECONDS.
             session:
                 store: cache
                 cache_pool: agent_api.mcp_session_cache
