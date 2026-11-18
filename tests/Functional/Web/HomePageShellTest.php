@@ -55,7 +55,7 @@ final class HomePageShellTest extends WebTestCase
     }
 
     #[Test]
-    public function theAvatarOpensAMenuWithProfileSecurityThemeAndLogOutInThatOrder(): void
+    public function theAvatarOpensAMenuWithProfileSecurityApiTokensThemeAndLogOutInThatOrder(): void
     {
         $page = $this->openHome();
         self::assertResponseStatusCodeSame(200);
@@ -72,7 +72,7 @@ final class HomePageShellTest extends WebTestCase
                 : $item->filter('button[type="submit"]')->text().' → '.$item->attr('action'),
             default => $item->nodeName(),
         });
-        self::assertSame(['Profile → /me/profile', 'Security → /me/security', 'Theme → /me/theme', 'Log out → /logout'], $items);
+        self::assertSame(['Profile → /me/profile', 'Security → /me/security', 'API tokens → /me/tokens', 'Theme → /me/theme', 'Log out → /logout'], $items);
 
         $themeForm = $menu->filter('form[action="/me/theme"][method="post"]');
         self::assertSame(array_values(ProfileController::THEME_OPTIONS), $themeForm->filter('button.seg')->each(static fn (Crawler $option): string => $option->text()));

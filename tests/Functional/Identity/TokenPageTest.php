@@ -6,11 +6,13 @@ namespace App\Tests\Functional\Identity;
 
 use App\Identity\Application\IssueApiToken;
 use App\Identity\Application\RecentAuth;
+use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\User;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\TokenController;
 use App\SharedKernel\Domain\OrganizationId;
+use App\Tests\Fixtures\Messaging\CapturedLogRecords;
 use App\Tests\Functional\Organization\LogsInAdmins;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -97,7 +99,20 @@ final class TokenPageTest extends WebTestCase
         self::assertSame(['read', 'rounds:write'], $page->filter('main input[name="scopes[]"][checked]')->each(static fn (Crawler $box): string => (string) $box->attr('value')));
         self::assertSame('90', $page->filter('main select[name="lifetime_days"] option[selected]')->attr('value'));
         self::assertCount(0, $page->filter('main input[name="new_token"]'));
+        self::assertCount(0, $page->filter('main [data-controller="copy-text"]'));
         self::assertCount(0, $page->filter('main [role="alert"]'));
+    }
+
+    #[Test]
+    public function theAvatarMenuLinksToTheTokensPage(): void
+    {
+        [$omar] = $this->omarInAcmeFoods();
+        $this->logIn($this->client, $omar);
+
+        $home = $this->client->request('GET', '/');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['API tokens'], $home->filter('header #avatar-menu-list a[href="/me/tokens"]')->each(static fn (Crawler $link): string => $link->text()));
     }
 
     #[Test]
@@ -148,6 +163,9 @@ final class TokenPageTest extends WebTestCase
         [$omar, $acmeFoods] = $this->omarInAcmeFoods();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $csrfToken = $this->createCsrfToken();
+        $capturedLogRecords = self::getContainer()->get(CapturedLogRecords::class);
+        \assert($capturedLogRecords instanceof CapturedLogRecords);
+        $capturedLogRecords->clear();
 
         $page = $this->postNewToken(['name' => 'Omar laptop', 'scopes' => ['tickets:move', 'read'], 'lifetime_days' => '30', '_csrf_token' => $csrfToken]);
 
@@ -156,11 +174,26 @@ final class TokenPageTest extends WebTestCase
         self::assertCount(0, $page->filter('main [role="alert"]'));
         $plainToken = (string) $page->filter('main input[name="new_token"]')->attr('value');
         self::assertMatchesRegularExpression(self::PLAIN_TOKEN, $plainToken);
+        $command = 'claude mcp add --transport http pinround https://localhost/mcp --header "Authorization: Bearer '.$plainToken.'"';
+        self::assertSame($command, $page->filter('main input[name="claude_mcp_add"]')->attr('value'));
         self::assertSame(
-            'claude mcp add --transport http pinround https://localhost/mcp --header "Authorization: Bearer '.$plainToken.'"',
-            $page->filter('main input[name="claude_mcp_add"]')->attr('value'),
+            [
+                ['copies' => $plainToken, 'button' => 'Copy token', 'liveRegions' => 1, 'hiddenControls' => 1],
+                ['copies' => $command, 'button' => 'Copy command', 'liveRegions' => 1, 'hiddenControls' => 1],
+            ],
+            $page->filter('main [data-controller="copy-text"]')->each(static fn (Crawler $copy): array => [
+                'copies' => $copy->filter('input[data-copy-text-target="source"]')->attr('value'),
+                'button' => trim($copy->filter('[data-copy-text-target="controls"] button[type="button"][data-action="copy-text#copy"]')->text()),
+                'liveRegions' => $copy->filter('[data-copy-text-target="controls"] [data-copy-text-target="status"][role="status"][aria-live="polite"]')->count(),
+                'hiddenControls' => $copy->filter('[data-copy-text-target="controls"][hidden]')->count(),
+            ]),
         );
         self::assertSame(2, substr_count((string) $this->client->getResponse()->getContent(), $plainToken), 'the token is in the page outside its two fields');
+        $loggedRecords = $capturedLogRecords->all();
+        self::assertNotSame([], $loggedRecords, 'nothing was logged while the token was made, so nothing was checked');
+        $logged = implode("\n", array_map(LoginLogLeakTest::textOf(...), $loggedRecords));
+        self::assertStringNotContainsString($plainToken, $logged);
+        self::assertStringNotContainsString(substr($plainToken, \strlen(ApiToken::PLAIN_PREFIX)), $logged);
         $listed = $this->listedTokenIds($page);
         self::assertCount(1, $listed);
         self::assertSame(1, $this->tokenCountOf($omar, $acmeFoods));
@@ -174,6 +207,7 @@ final class TokenPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame($listed, $this->listedTokenIds($reloaded));
         self::assertCount(0, $reloaded->filter('main input[name="new_token"]'));
+        self::assertCount(0, $reloaded->filter('main [data-controller="copy-text"]'));
         self::assertStringNotContainsString($plainToken, (string) $this->client->getResponse()->getContent());
         self::assertStringNotContainsString(substr($plainToken, 11), (string) $this->client->getResponse()->getContent());
     }
