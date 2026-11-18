@@ -4,21 +4,28 @@ declare(strict_types=1);
 
 namespace App\Assist\UI\Component;
 
+use App\Assist\Api\LocalAi;
+use App\Assist\Api\LocalResult;
+use App\Assist\Api\PolicyView;
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\UI\SummarySourceNote;
 use App\Assist\UI\ViewerAiPolicy;
 use App\Identity\Api\CurrentTimeZone;
+use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\UI\RelativeTime;
 use App\Ticketing\Api\TicketPageView;
+use App\Ticketing\Api\TicketPermission;
 use Psr\Clock\ClockInterface;
+use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
 
 /**
  * The ticket page's "The ask" (ticket-page.md): the current summary with its source note and the earlier summaries in
  * a lazy frame, or the ask's text cut at ASK_CUT_LENGTH with "Summarize with AI". Ticketing's page embeds it by name, as
  * its UI may not use Assist's Api (deptrac.yaml). On the page it renders idle from the TicketPageView and the viewer's
- * AI policy, which the header's Local AI chip has read already, so it adds no query to the page's budget
- * (performance-and-scale.md); SummaryController renders it again in the FRAME_ID frame with the latest request state.
+ * AI policy, which the header's Local AI chip has read already, and adds one indexed read to the page's budget
+ * (performance-and-scale.md): the laptop summary proposal shown under the summary. SummaryController renders it again
+ * in the FRAME_ID frame with the latest request state.
  */
 #[AsTwigComponent(name: 'TheAsk', template: '@Assist/components/TheAsk.html.twig')]
 final class TheAsk
@@ -34,6 +41,12 @@ final class TheAsk
 
     public const string ORIGINAL_TEXT_FROM_REPORT = 'Original text from the report';
     public const string ORIGINAL_TEXT_FROM_JIRA = 'Original text from Jira';
+
+    /** ticket-page.md, AI not available, for a laptop-only organization. */
+    public const string LAPTOP_NOT_RUNNING = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
+
+    /** Heading of the laptop summary proposal, followed by LocalResult's label; not in the prototype. */
+    public const string PROPOSAL_HEADING = 'Laptop summary';
 
     public const string STATE_IDLE = 'idle';
     public const string STATE_RUNNING = 'running';
@@ -55,7 +68,35 @@ final class TheAsk
         private readonly ViewerAiPolicy $viewerAiPolicy,
         private readonly ClockInterface $clock,
         private readonly CurrentTimeZone $currentTimeZone,
+        private readonly LocalAi $localAi,
+        private readonly AuthorizationCheckerInterface $authorizationChecker,
     ) {
+    }
+
+    /**
+     * The ticket's laptop summary proposal, which everyone who sees the ticket sees under its summary; one indexed read
+     * (LocalAi::proposalOf), so the template asks for it once.
+     */
+    public function proposal(): ?LocalResult
+    {
+        return $this->localAi->proposalOf($this->ticket->id, $this->ticket->currentSummary?->createdAt, $this->ticket->visibilityFacts->organizationId);
+    }
+
+    /**
+     * Whether "Use as main summary" shows: to the lead of the ticket's team and its reporter.
+     */
+    public function canChooseMainSummary(): bool
+    {
+        return $this->authorizationChecker->isGranted(TicketPermission::CHOOSE_MAIN_SUMMARY, $this->ticket->visibilityFacts);
+    }
+
+    /**
+     * Whether the organization runs AI on laptops for this person (laptop only or laptop first), so "Summarize with AI"
+     * carries what the browser needs to run it on the laptop.
+     */
+    public function isOnLaptop(): bool
+    {
+        return $this->viewerAiPolicy->policy()->isLaptopAllowed();
     }
 
     /**
@@ -75,12 +116,17 @@ final class TheAsk
 
     /**
      * Why "Summarize with AI" is hidden for this person and ticket; null when it shows. Reads the viewer's policy only
-     * for an ask with text and no summary, the only place the button may show.
+     * for an ask with text and no summary, the only place the button may show. In a laptop-only organization the server
+     * cannot tell whether this laptop is ready, so it is LAPTOP_NOT_RUNNING, which the browser hides when it is.
      */
     public function aiRefusal(): ?string
     {
         if (null !== $this->refusal) {
             return $this->refusal;
+        }
+        $policy = $this->viewerAiPolicy->policy();
+        if ($policy->isAllowed() && PolicyView::WHERE_LAPTOP === $policy->whereAiRuns) {
+            return self::LAPTOP_NOT_RUNNING;
         }
 
         return $this->viewerAiPolicy->serverTicketRefusalOf($this->ticket->isTeamOnly());
@@ -106,9 +152,9 @@ final class TheAsk
         if (null === $summary) {
             return null;
         }
-        $authorName = null === $summary->authorId ? null : ($this->ticket->displayNames[$summary->authorId->toString()] ?? null);
+        $nameOf = fn (?UserId $personId): ?string => null === $personId ? null : ($this->ticket->displayNames[$personId->toString()] ?? null);
 
-        return SummarySourceNote::of($summary, $authorName, $this->clock->now(), $this->currentTimeZone->zone());
+        return SummarySourceNote::of($summary, $nameOf($summary->authorId), $this->clock->now(), $this->currentTimeZone->zone(), $nameOf($summary->chosenById));
     }
 
     /**

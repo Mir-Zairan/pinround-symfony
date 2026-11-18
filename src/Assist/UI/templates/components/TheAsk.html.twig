@@ -69,7 +69,8 @@
                     {% endif %}
                     <p class="ticket__asked">{{ ask.askedLine }}</p>
                     {% set aiRefusal = ask.aiRefusal %}
-                    {% if aiRefusal is not null %}
+                    {% set isOnLaptop = ask.onLaptop %}
+                    {% if aiRefusal is not null and not isOnLaptop %}
                         <p class="ticket__ask-ai-off">{{ aiRefusal }}</p>
                     {% elseif state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_RUNNING') %}
                         {#- A form with the button off, so the summary-poll controller can offer it again after its last poll. -#}
@@ -78,15 +79,42 @@
                             <twig:Button type="submit" variant="tonal" :disabled="true" aria-busy="true" class="ticket__summarize" data-summary-poll-target="button" data-turbo-submits-with="Summarizing…">Summarizing…</twig:Button>
                         </form>
                     {% else %}
+                        {#- On a laptop the server cannot tell whether the laptop is ready: the line shows and the
+                            button stays hidden until the browser finds it ready (task 13b), so a page without
+                            JavaScript stays truthful. -#}
+                        {% if aiRefusal is not null %}
+                            <p class="ticket__ask-ai-off">{{ aiRefusal }}</p>
+                        {% endif %}
                         {% if state == constant('App\\Assist\\UI\\Component\\TheAsk::STATE_FAILED') %}
                             <p class="ticket__ask-failed">{{ ask.summaryRequest.sentence }}</p>
                         {% endif %}
                         {% if ask.notice is not null %}
                             <p class="ticket__ask-notice">{{ ask.notice }}</p>
                         {% endif %}
-                        <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions">
+                        {%- set laptopController = 'App\\Assist\\UI\\Controller\\LaptopController' %}
+                        <form method="post" action="{{ path(constant(controller ~ '::REQUEST_ROUTE'), {key: ticket.key}) }}" class="ticket__ask-actions"
+                            {%- if isOnLaptop %}
+                              data-laptop-summary-package-url-value="{{ path(constant(laptopController ~ '::PACKAGE_ROUTE')) }}"
+                              data-laptop-summary-result-url-value="{{ path(constant(laptopController ~ '::RESULT_ROUTE')) }}"
+                              data-laptop-summary-token-value="{{ csrf_token(constant(laptopController ~ '::CSRF_ID')) }}"
+                              data-laptop-summary-ticket-id-value="{{ ticket.id.toString }}"
+                            {%- endif %}{% if aiRefusal is not null %} hidden{% endif %}>
                             <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::CSRF_ID')) }}">
                             <twig:Button type="submit" variant="tonal" class="ticket__summarize" data-turbo-submits-with="Summarizing…">{{ summarizeLabel }}</twig:Button>
+                        </form>
+                    {% endif %}
+                </twig:Card>
+            {% endif %}
+            {% set proposal = ask.proposal %}
+            {% if proposal is not null %}
+                {#- The prototype's "Added explanation" block, for a laptop's result: user content, escaped like any text. -#}
+                <twig:Card tag="div" class="ticket__ask ticket__ask-proposal">
+                    <p class="ticket__ask-source"><strong>{{ constant('App\\Assist\\UI\\Component\\TheAsk::PROPOSAL_HEADING') }}</strong> · <span class="ticket__ask-proposal-label">{{ proposal.label }}</span></p>
+                    <div class="ticket__ask-summary-text ticket__ask-proposal-text">{{ proposal.text }}</div>
+                    {% if ask.canChooseMainSummary %}
+                        <form method="post" action="{{ path(constant(controller ~ '::MAIN_SUMMARY_ROUTE'), {key: ticket.key, packageId: proposal.packageId.toString}) }}" class="ticket__ask-actions" data-turbo-frame="_top">
+                            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(constant(controller ~ '::MAIN_SUMMARY_CSRF_ID')) }}">
+                            <twig:Button type="submit" variant="outline" class="ticket__use-as-main">Use as main summary</twig:Button>
                         </form>
                     {% endif %}
                 </twig:Card>

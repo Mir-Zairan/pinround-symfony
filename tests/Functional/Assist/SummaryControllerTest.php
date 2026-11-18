@@ -11,6 +11,7 @@ use App\Assist\Application\AiCallLimit;
 use App\Assist\Application\Summaries\GenerateSummary;
 use App\Assist\Application\Summaries\QueuedSummaries;
 use App\Assist\Application\Summaries\SummaryRequests;
+use App\Assist\UI\Component\TheAsk;
 use App\Assist\UI\Controller\SummaryController;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\Organization\Api\ActorContext;
@@ -65,7 +66,8 @@ final class SummaryControllerTest extends WebTestCase
     private const string USAGE_LIMITER_PREFIX = 'ai_calls_per_user-';
     private const string RUNNING = '[data-summary-poll-state-value="running"]';
     private const string FAILED_LINE = 'The AI answer failed. Try again.';
-    private const int POLL_QUERY_COUNT = 16;
+    /** 16, and since task 13 one indexed read of the laptop summary proposal (LocalAi::proposalOf). */
+    private const int POLL_QUERY_COUNT = 17;
     private const string ASK_STATE_FOCUS = 'div.ticket__ask-state[tabindex="-1"]';
 
     protected function setUp(): void
@@ -125,7 +127,7 @@ final class SummaryControllerTest extends WebTestCase
         yield 'AI off' => ['{"on": false, "where": "cloud"}', 'Omar', 'SHOP-1', 'Your admin turned AI help off.'];
         yield 'leads only, for Omar' => ['{"on": true, "who": "leads_only", "where": "cloud"}', 'Omar', 'SHOP-1', 'Your admin allows AI help for leads only.'];
         yield 'leads only, for Lena, who leads Shop' => ['{"on": true, "who": "leads_only", "where": "cloud"}', 'Lena', 'SHOP-1', null];
-        yield 'a laptop organization' => ['{"on": true, "who": "everyone", "where": "laptop"}', 'Omar', 'SHOP-1', 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'a laptop organization, until the browser finds the laptop ready' => ['{"on": true, "who": "everyone", "where": "laptop"}', 'Omar', 'SHOP-1', TheAsk::LAPTOP_NOT_RUNNING];
         yield 'laptop first goes to the cloud' => ['{"on": true, "who": "everyone", "where": "laptop_first"}', 'Omar', 'SHOP-1', null];
         yield 'a team-only ticket kept from cloud AI' => [self::CLOUD_AI, 'Omar', 'SHOP-2', 'Your admin keeps team-only tickets away from cloud AI.'];
         yield 'a team-only ticket the admin lets go to cloud AI' => ['{"on": true, "where": "cloud", "restricted_to_cloud": true}', 'Omar', 'SHOP-2', null];
@@ -143,8 +145,9 @@ final class SummaryControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $frame = $page->filter('turbo-frame#ticket-ask');
         self::assertSame(null === $expectedLine ? [] : [$expectedLine], $frame->filter('.ticket__ask-ai-off')->each(static fn (Crawler $line): string => $line->text()));
-        self::assertCount(null === $expectedLine ? 1 : 0, $frame->filter('.ticket__summarize'));
-        self::assertCount(null === $expectedLine ? 1 : 0, $frame->filter('form'));
+        // A laptop organization keeps the button hidden for the browser to show when the laptop is ready.
+        self::assertCount(null === $expectedLine ? 1 : 0, $frame->filter('form:not([hidden]) .ticket__summarize'));
+        self::assertCount(null === $expectedLine ? 1 : 0, $frame->filter('form:not([hidden])'));
     }
 
     #[Test]

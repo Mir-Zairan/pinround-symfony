@@ -1071,11 +1071,13 @@ final class TicketPageTest extends WebTestCase
      * more names query for both), What happened's moves (one query), the lead's Needs input dialog (one membership
      * read), and People's Ping button for Omar, whose ping limit comes with the settings and whose pinged state comes
      * from the ping window on Valkey, so it reads none. The ask's current summary and its count of earlier ones come
-     * with the ticket, and its author, on the page for nothing else, comes in the names batch. Conversation's thread and the Rounds section load in lazy frames
+     * with the ticket, and its author, on the page for nothing else, comes in the names batch; since task 13 the ask
+     * also reads the laptop summary proposal in one indexed query (LocalAi::proposalOf), the one query over the
+     * page's former budget of 10. Conversation's thread and the Rounds section load in lazy frames
      * of their own requests (TicketThreadTest, RoundsFrameTest), so the page reads none of them.
      */
     #[Test]
-    public function theCostliestWarmPageStaysWithinTheTenQueryBudget(): void
+    public function theCostliestWarmPageStaysWithinTheElevenQueryBudget(): void
     {
         new AddTicketEventPartitions($this->migrator(), new MockClock(new \DateTimeImmutable(self::NOW)))();
         $keys = $this->addTicketsToWalk();
@@ -1104,7 +1106,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame(['1 h ago · Sara moved it to To do', '5 Nov · Created by Lena'], self::activityLinesOf($this->client->getCrawler()));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
         self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
-        self::assertSame(10, $pageQueryCount);
+        self::assertSame(11, $pageQueryCount);
     }
 
     /**
@@ -1129,14 +1131,16 @@ final class TicketPageTest extends WebTestCase
             self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'), $uri);
         }
 
-        self::assertSame([7, 8, 7, 9], $queryCounts);
+        // Each with the ask's one read of the laptop summary proposal.
+        self::assertSame([8, 9, 8, 10], $queryCounts);
     }
 
     /**
      * Beyond the shell, with the steps, the rules and the team's people cached: the settings (step policy and triager,
      * one query), the ticket, the names of everyone in one batch, What happened's moves in one, the saved turn with the
      * waiting turns in one query, the ticket's place in the plain open list in one, for the lead's Needs input dialog
-     * which of the ticket's people are still members in one. People's Ping buttons read none: the ping limit comes with
+     * which of the ticket's people are still members in one, the ask's laptop summary proposal in one. People's Ping
+     * buttons read none: the ping limit comes with
      * the settings and the pinged state from the ping window on Valkey.
      */
     #[Test]
@@ -1161,7 +1165,7 @@ final class TicketPageTest extends WebTestCase
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
         self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
-        self::assertSame(7, $pageQueryCount);
+        self::assertSame(8, $pageQueryCount);
     }
 
     /**
@@ -1194,7 +1198,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
         self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
-        self::assertSame(6, $pageQueryCount);
+        self::assertSame(7, $pageQueryCount);
     }
 
     /**
