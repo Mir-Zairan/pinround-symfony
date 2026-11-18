@@ -50,9 +50,9 @@ use Symfony\Component\Clock\Test\ClockSensitiveTrait;
  * Laptop AI as the container wires it, as pinround_app in committed transactions under Acme Foods, so a refusal that
  * a page catches could not hide a written row behind a rollback: package() in the test's transaction, accept() in its
  * own. Lena leads the Shop team that owns SHOP; Omar (display name "Omar Haddad") is in Acme Foods but in no team, so
- * he sees the checkout ticket for everyone but not the team-only one; Mia leads the Ops team. The checkout ticket has a
- * current AI summary. The packages and audit entries are removed by hand after each test, as pinround_app may not
- * delete them. The clock is frozen in March 2027, which has its aud_event partition.
+ * he sees the checkout ticket for everyone but not the team-only one; Mia leads the Ops team; Raj is in Beta Bakery
+ * only. The checkout ticket has a current AI summary. The packages and audit entries are removed by hand after each
+ * test, as pinround_app may not delete them. The clock is frozen in March 2027, which has its aud_event partition.
  */
 final class LocalAiServiceTest extends KernelTestCase
 {
@@ -66,6 +66,7 @@ final class LocalAiServiceTest extends KernelTestCase
     private const string LENA = '0197a3c0-0000-7000-8000-0000000e6a11';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000e6a12';
     private const string MIA = '0197a3c0-0000-7000-8000-0000000e6a13';
+    private const string RAJ = '0197a3c0-0000-7000-8000-0000000e6a14';
     private const string UNKNOWN_PACKAGE = '0197a3c0-0000-7000-8000-0000000e6a59';
     private const string NOW = '2027-03-15 10:00:00 UTC';
     private const string TWO_MINUTES_LATER = '2027-03-15 10:02:00 UTC';
@@ -78,6 +79,7 @@ final class LocalAiServiceTest extends KernelTestCase
     private const string CHECKED_RESULT = "Pay does nothing on the last step.\nThe order is never sent MARKER-e6r.";
     private const string INSERT_PACKAGE = 'INSERT INTO ast_local_package (organization_id, id, user_id, ticket_id, purpose, prompt_version, created_at, expires_at, used_at, result_text, model)'
         ." VALUES (?, ?, ?, ?, 'summary', 'summary.v1', ?, ?, ?, ?, ?)";
+    private const string INSERT_MEMBERSHIP = "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2027-03-15 10:00:00+00')";
 
     private static ?TicketId $checkoutTicketId = null;
     private static ?TicketId $teamOnlyTicketId = null;
@@ -88,6 +90,7 @@ final class LocalAiServiceTest extends KernelTestCase
         self::shopTeamRows()->add(self::ACME_FOODS, self::SHOP_TEAM, self::SHOP_PROJECT, self::LENA, [self::LENA => ['Lena', 'lead', 'developer']]);
         self::shopTeamRows()->addUser(self::OMAR, 'Omar');
         self::shopTeamRows()->addUser(self::MIA, 'Mia');
+        self::shopTeamRows()->addUser(self::RAJ, 'Raj');
         self::migrator()->executeStatement("UPDATE idn_user SET name = 'Omar Haddad' WHERE id = ?", [self::OMAR]);
         self::asMigratorOf(self::ACME_FOODS, static function (Connection $migrator): void {
             $migrator->executeStatement(
@@ -96,11 +99,11 @@ final class LocalAiServiceTest extends KernelTestCase
             );
         });
         self::shopTeamRows()->addMember(self::ACME_FOODS, self::OPS_TEAM, self::MIA, 'lead', 'tester');
+        self::asMigratorOf(self::BETA_BAKERY, static function (Connection $migrator): void {
+            $migrator->executeStatement(self::INSERT_MEMBERSHIP, [self::BETA_BAKERY, self::RAJ]);
+        });
         self::transactions()->committedAs(self::ACME_FOODS, static function (): void {
-            self::connection()->executeStatement(
-                "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2027-03-15 10:00:00+00')",
-                [self::ACME_FOODS, self::OMAR],
-            );
+            self::connection()->executeStatement(self::INSERT_MEMBERSHIP, [self::ACME_FOODS, self::OMAR]);
             self::connection()->executeStatement(
                 "INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, '{}'::jsonb, '2027-03-15 10:00:00+00')",
                 [self::ACME_FOODS],
@@ -215,6 +218,8 @@ final class LocalAiServiceTest extends KernelTestCase
         yield 'AI in the cloud only, Lena on a team-only ticket she may see' => [self::LENA, '{"on": true, "where": "cloud"}', 'team-only', 'cloud_only', 'Your admin runs AI help in the company cloud, not on laptops.'];
         yield 'AI off' => [self::OMAR, '{"on": false, "where": "laptop"}', 'checkout', 'ai_off', 'Your admin turned AI help off.'];
         yield 'leads only, Omar leads no team' => [self::OMAR, '{"on": true, "where": "laptop", "who": "leads_only"}', 'checkout', 'leads_only', 'Your admin allows AI help for leads only.'];
+        // Refused as for a ticket he cannot see, so the answer never tells whether the ticket exists in Acme Foods.
+        yield 'Raj, a member of Beta Bakery only' => [self::RAJ, self::ON_THE_LAPTOP, 'checkout', 'cannot_see_ticket', 'AI help works only on tickets you can see.'];
     }
 
     #[Test]
@@ -508,6 +513,30 @@ final class LocalAiServiceTest extends KernelTestCase
         self::assertNotFound($refusal);
         self::assertSame($unusedRows, $this->packageRowsOf(self::ACME_FOODS));
         $this->assertOneRefusalAudited($package->packageId, LocalResultRefused::PACKAGE_NOT_FOUND);
+    }
+
+    /**
+     * Omar leaves Acme Foods after he was given the package: his result reads as for no package, the package stays
+     * unused, and the refusal is audited under him in the organization he left.
+     */
+    #[Test]
+    public function aResultOfAPosterWhoLeftTheOrganizationIsNotFoundAndChangesNothing(): void
+    {
+        $package = self::expectPackage($this->packageAs(self::OMAR, self::ON_THE_LAPTOP, self::checkoutTicketId()));
+        $unusedRows = $this->packageRowsOf(self::ACME_FOODS);
+        self::assertNotSame([], $unusedRows);
+        self::removeOmarFromAcmeFoods();
+        try {
+            $refusal = $this->acceptAs(self::OMAR, $package->packageId, self::RESULT);
+
+            self::assertNotFound($refusal);
+            self::assertSame($unusedRows, $this->packageRowsOf(self::ACME_FOODS));
+            $this->assertOneRefusalAudited($package->packageId, LocalResultRefused::PACKAGE_NOT_FOUND);
+        } finally {
+            self::asMigratorOf(self::ACME_FOODS, static function (Connection $migrator): void {
+                $migrator->executeStatement(self::INSERT_MEMBERSHIP, [self::ACME_FOODS, self::OMAR]);
+            });
+        }
     }
 
     /** Lena's package in Acme Foods and Omar's own in Beta Bakery: the entry stays in Omar's organization. */
@@ -811,10 +840,17 @@ final class LocalAiServiceTest extends KernelTestCase
         });
     }
 
+    private static function removeOmarFromAcmeFoods(): void
+    {
+        self::asMigratorOf(self::ACME_FOODS, static function (Connection $migrator): void {
+            $migrator->executeStatement('DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?', [self::ACME_FOODS, self::OMAR]);
+        });
+    }
+
     private static function removeRows(): void
     {
         self::removePackagesAndAuditEntries();
-        self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA], self::ACME_FOODS, self::BETA_BAKERY);
+        self::shopTeamRows()->removeAllOf([self::LENA, self::OMAR, self::MIA, self::RAJ], self::ACME_FOODS, self::BETA_BAKERY);
     }
 
     /**
