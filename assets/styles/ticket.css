@@ -282,6 +282,15 @@
   margin: 0;
 }
 
+.ticket__ask-actions[hidden] {
+  display: none;
+}
+
+/* .card has no margin, so the proposal would touch the card above it. */
+.ticket__ask-proposal {
+  margin-top: var(--space-12);
+}
+
 /* Open, the full text replaces the cut one. */
 .ticket__ask:has(.ticket__ask-more[open]) .ticket__ask-text--short {
   display: none;
