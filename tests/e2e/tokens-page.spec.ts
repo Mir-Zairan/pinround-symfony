@@ -17,6 +17,8 @@ const PLAIN_TOKEN = /^pr_[A-Za-z0-9_-]{43}$/;
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // COPIED_SHOWN_FOR_MS in copy-text_controller.js.
 const COPIED_SHOWN_FOR_MS = 2000;
+// The fake clock runs requestAnimationFrame callbacks at most this long after they are asked for.
+const ANIMATION_FRAME_MS = 16;
 const FROZEN_AT = new Date('2026-03-14T10:00:00Z');
 
 test.describe.configure({ mode: 'serial' });
@@ -104,12 +106,19 @@ test('a person makes a token, copies it, sees it only once and revokes it', asyn
   expect(command).toContain(`"Authorization: Bearer ${plainToken}"`);
 
   const tokenCopy = copyBlock(page, 'Copy token');
+  // Paused, the clock stands still between the copy and the steps below, so they time the message exactly.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 60_000));
   // The button shows once copy-text has connected, and click() waits for it to be visible.
   await tokenCopy.getByRole('button', { name: 'Copy token' }).click();
+  // The token reaches the clipboard in the same task that starts the Copied timer.
+  await expect.poll(() => clipboardText(page)).toBe(plainToken);
+  await page.clock.runFor(ANIMATION_FRAME_MS);
   await expect(tokenCopy.getByRole('status')).toHaveText('Copied');
-  expect(await clipboardText(page)).toBe(plainToken);
-  await page.clock.fastForward(COPIED_SHOWN_FOR_MS);
+  await page.clock.runFor(COPIED_SHOWN_FOR_MS - ANIMATION_FRAME_MS - 1);
+  await expect(tokenCopy.getByRole('status')).toHaveText('Copied');
+  await page.clock.runFor(1);
   await expect(tokenCopy.getByRole('status')).toHaveText('');
+  await page.clock.resume();
 
   const commandCopy = copyBlock(page, 'Copy command');
   await commandCopy.getByRole('button', { name: 'Copy command' }).click();
@@ -153,6 +162,26 @@ test('when the browser refuses to copy, the token is selected for a manual copy'
   await expect(tokenCopy.getByRole('status')).toHaveText('Could not copy. Select the text and copy it.');
   expect(await tokenField.evaluate((field: HTMLInputElement) => [field.selectionStart, field.selectionEnd])).toEqual([0, plainToken.length]);
   expect(await clipboardText(page)).not.toBe(plainToken);
+
+  await revokeToken(page, tokenName);
+});
+
+test('a browser without the Clipboard API shows no copy buttons, only the fields to copy by hand', async ({ page }) => {
+  const tokenName = uniqueTokenName();
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(Clipboard.prototype, 'writeText');
+  });
+  await openTokensPage(page);
+  expect(await page.evaluate(() => typeof navigator.clipboard?.writeText)).toBe('undefined');
+
+  await makeToken(page, tokenName);
+
+  const copyControls = page.getByRole('main').locator('[data-copy-text-target="controls"]');
+  await expect(copyControls).toHaveCount(2);
+  await expect(copyControls.first()).toBeHidden();
+  await expect(copyControls.last()).toBeHidden();
+  await expect(page.getByLabel('Token', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Add it to Claude Code')).toBeVisible();
 
   await revokeToken(page, tokenName);
 });

@@ -49,6 +49,11 @@
   gap: var(--space-8) var(--space-12);
 }
 
+/* display: flex above would win over the hidden attribute copy-text keeps where the browser cannot copy. */
+.security__copy-controls[hidden] {
+  display: none;
+}
+
 .api-tokens {
   display: flex;
   flex-direction: column;
