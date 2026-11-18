@@ -1,16 +1,18 @@
 {% extends '@Web/base.html.twig' %}
 
-{% block title %}Personal access tokens · pinround{% endblock %}
+{% block title %}API tokens · pinround{% endblock %}
 
-{# The form fields, errors and notices of the logged-out pages; security.css lays out the sections. #}
+{# The form fields, errors and notices of the logged-out pages; profile.css gives the scope checkboxes their choice group;
+   security.css lays out the sections, the copy fields and the list. #}
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
 {% endblock %}
 
 {% block main %}
     <div class="security">
-        <h1 class="security__title">Personal access tokens</h1>
+        <h1 class="security__title">API tokens</h1>
         {% for notice in page_flashes('notice') %}
             <p class="login__notice" role="status">{{ notice }}</p>
         {% endfor %}
@@ -20,22 +22,22 @@
                 <h2 class="security__heading" id="new-token-title">Copy your token now</h2>
                 <p class="login__hint">This is the only time pinround shows it. Keep it like a password.</p>
                 {# copy-text shows each Copy button only where the browser can copy, and copies the field's exact value. #}
-                <div {{ stimulus_controller('copy-text') }}>
+                <div class="security__copy" {{ stimulus_controller('copy-text') }}>
                     <label class="login__field">
                         Token
                         <input class="login__input" type="text" name="new_token" value="{{ newToken.reveal }}" readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
                     </label>
-                    <p {{ stimulus_target('copy-text', 'controls') }} hidden>
+                    <p class="security__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
                         <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy token</twig:Button>
                         <span class="login__hint" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
                     </p>
                 </div>
-                <div {{ stimulus_controller('copy-text') }}>
+                <div class="security__copy" {{ stimulus_controller('copy-text') }}>
                     <label class="login__field">
                         Add it to Claude Code
                         <input class="login__input" type="text" name="claude_mcp_add" value='claude mcp add --transport http pinround {{ mcpUrl }} --header "Authorization: Bearer {{ newToken.reveal }}"' readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
                     </label>
-                    <p {{ stimulus_target('copy-text', 'controls') }} hidden>
+                    <p class="security__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
                         <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy command</twig:Button>
                         <span class="login__hint" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
                     </p>
@@ -54,10 +56,10 @@
                     Name
                     <input class="login__input" type="text" name="name" value="{{ chosen.name }}" maxlength="100" required>
                 </label>
-                <fieldset class="login__field">
-                    <legend>What it may do</legend>
+                <fieldset class="profile__themes security__scopes">
+                    <legend class="profile__legend">What it may do</legend>
                     {% for scopeName, explanation in scopeChoices %}
-                        <label>
+                        <label class="profile__theme">
                             <input type="checkbox" name="scopes[]" value="{{ scopeName }}"{% if scopeName in chosen.scopes %} checked{% endif %}>
                             {{ explanation }}
                         </label>
@@ -71,7 +73,7 @@
                         {% endfor %}
                     </select>
                 </label>
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token('identity_token_create') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token(createCsrfTokenId) }}">
                 <div>
                     <twig:Button type="submit">Make token</twig:Button>
                 </div>
@@ -90,14 +92,14 @@
                     {% for token in tokens %}
                         <li class="api-tokens__row" data-token-id="{{ token.id }}">
                             <p><strong>{{ token.name }}</strong> <code>{{ token.prefix }}…</code></p>
-                            <p class="login__hint">{{ token.scopeNames|join(', ') }}</p>
+                            <p class="login__hint">{{ token.scopeNames|map(scopeName => scopeChoices[scopeName])|join(' ') }}</p>
                             <p class="login__hint">
                                 Made {{ token.createdAt|date('j M Y', app.user.timeZone) }}
                                 · Last used {{ token.lastUsedAt ? token.lastUsedAt|date('j M Y, H:i', app.user.timeZone) : 'never' }}
                                 · Works until {{ token.expiresAt|date('j M Y', app.user.timeZone) }}
                             </p>
-                            <form method="post" action="{{ path('identity_tokens_revoke', {id: token.id}) }}">
-                                <input type="hidden" name="_csrf_token" value="{{ csrf_token('identity_token_revoke') }}">
+                            <form class="api-tokens__revoke" method="post" action="{{ path('identity_tokens_revoke', {id: token.id}) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token(revokeCsrfTokenId) }}">
                                 <twig:Button type="submit" variant="outline">Revoke</twig:Button>
                             </form>
                         </li>

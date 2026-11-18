@@ -83,13 +83,18 @@ final class TokenPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         $this->assertNotStored();
-        self::assertSelectorTextSame('title', 'Personal access tokens · pinround');
+        self::assertSelectorTextSame('title', 'API tokens · pinround');
+        self::assertSelectorTextSame('main h1', 'API tokens');
         $listed = $this->listedTokenIds($page);
         self::assertNotSame([], $listed);
         self::assertSame([$newerTokenId, $olderTokenId], $listed);
         $row = $page->filter(\sprintf('main li.api-tokens__row[data-token-id="%s"]', $newerTokenId));
         self::assertStringContainsString('Claude Code', $row->text());
-        self::assertStringContainsString('read, rounds:write', $row->text());
+        self::assertSame(
+            TokenController::SCOPE_EXPLANATIONS['read'].' '.TokenController::SCOPE_EXPLANATIONS['rounds:write'],
+            $row->filter('p')->eq(1)->text(),
+        );
+        self::assertStringNotContainsString('rounds:write', $row->text());
         self::assertStringContainsString('Last used never', $row->text());
         self::assertMatchesRegularExpression('/pr_[A-Za-z0-9_-]{8}…/', $row->filter('code')->text());
         self::assertSame(
