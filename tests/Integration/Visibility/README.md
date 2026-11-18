@@ -35,5 +35,6 @@ Its data provider `viewers()` yields `[viewer, seesTeamOnly, seesNoTeamTicket]`.
 | Duplicate suggestions | planned | P06 |
 | Home, Whose turn, My reports | planned | P07 |
 | AI inputs | planned | P08 |
-| MCP tools | planned | P09 |
+| MCP tool `list_my_tickets` (`MyTicketQueries::myTicketsOf`): with both cast tickets waiting on each viewer, they get exactly those they may see, never the team-only ticket of a team they are not in, though it is their turn; assigned to them, they get both, as an assignee may see the ticket; another organization's admin, on whose user id both wait by commit, gets only their own organization's ticket | `MyTicketsLeakTest` | P09.T3 |
+| Other MCP tools | planned | P09 |
 | Export | planned | P11 |
