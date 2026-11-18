@@ -106,6 +106,20 @@ final class EndExpiredSessionTest extends TestCase
         self::assertSame('the token', $session->get('_security_main'));
     }
 
+    /**
+     * The personal access token paths ignore the cookie, so an expired session sent there stays as it is and unread.
+     */
+    #[Test]
+    public function itLeavesARequestUnderAStatelessFirewallAlone(): void
+    {
+        $session = self::sessionOf('-31 days', '-9 hours');
+
+        self::endExpiredSession(self::requestWithCookieFor($session, '/mcp'));
+
+        self::assertFalse($session->isStarted());
+        self::assertSame('the token', $session->get('_security_main'));
+    }
+
     #[Test]
     public function itLeavesARequestNoFirewallMatchesAlone(): void
     {
@@ -121,16 +135,17 @@ final class EndExpiredSessionTest extends TestCase
     }
 
     /**
-     * The firewalls of security.yaml: health without security, then main for every other path.
+     * The firewalls of security.yaml: health without security, api_token stateless, then main for every other path.
      */
     private static function firewallMap(): FirewallMap
     {
         return new FirewallMap(
             new ServiceLocator([
                 'health' => static fn (): FirewallContext => new FirewallContext([], config: new FirewallConfig('health', 'user_checker', securityEnabled: false)),
+                'api_token' => static fn (): FirewallContext => new FirewallContext([], config: new FirewallConfig('api_token', 'user_checker', stateless: true)),
                 'main' => static fn (): FirewallContext => new FirewallContext([], config: new FirewallConfig('main', 'user_checker')),
             ]),
-            ['health' => new PathRequestMatcher('^/health/'), 'main' => null],
+            ['health' => new PathRequestMatcher('^/health/'), 'api_token' => new PathRequestMatcher('^/(?:mcp|api/v1)(?:/|\\z)'), 'main' => null],
         );
     }
 
