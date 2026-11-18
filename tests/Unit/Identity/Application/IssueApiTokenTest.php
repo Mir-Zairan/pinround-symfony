@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Identity\Application;
 
 use App\Identity\Api\Event\ApiTokenIssued;
+use App\Identity\Application\ApiTokenRefused;
 use App\Identity\Application\IssueApiToken;
+use App\Identity\Application\NewApiToken;
 use App\Identity\Application\TooManyApiTokens;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenScope;
@@ -14,6 +16,7 @@ use App\Identity\Domain\IssuedApiToken;
 use App\Identity\Infrastructure\Security\HmacApiTokenHashing;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -149,6 +152,150 @@ final class IssueApiTokenTest extends TestCase
         $this->expectExceptionMessage('Live tokens were counted before the issuing lock of the person was taken.');
 
         $tokens->countLiveOf(new UserId(self::OMAR), new \DateTimeImmutable(self::NOW));
+    }
+
+    /**
+     * The page's checkboxes send the names in any order, and a crafted form may repeat one.
+     */
+    #[Test]
+    public function scopeNamesBecomeTheTokensScopesOnceEachInTheOrderOfTheCases(): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+
+        $newToken = $this->issueWithScopeNamesForOmar($tokens, 'Claude Code', ['tickets:move', 'read', 'tickets:move']);
+
+        self::assertSame(['read', 'tickets:move'], $newToken->token->scopeNames);
+        self::assertSame([$newToken->token->id], $tokens->ids());
+        self::assertSame('Claude Code', $newToken->token->name);
+        self::assertMatchesRegularExpression('/\Apr_[A-Za-z0-9_-]{43}\z/', $newToken->reveal());
+        self::assertSame(substr($newToken->reveal(), 0, 11), $newToken->token->prefix);
+        self::assertEquals(new \DateTimeImmutable(self::NOW), $newToken->token->createdAt);
+        self::assertEquals(new \DateTimeImmutable('2027-04-14 10:00:00 UTC'), $newToken->token->expiresAt);
+        self::assertNull($newToken->token->lastUsedAt);
+        $stored = $tokens->byIdForOwner($newToken->token->id, new UserId(self::OMAR));
+        self::assertNotNull($stored);
+        self::assertSame(new HmacApiTokenHashing(self::PEPPER)->hash($newToken->reveal()), $stored->tokenHash());
+        self::assertEquals(
+            [new ApiTokenIssued(self::ACME_FOODS, $newToken->token->id, self::OMAR, ['read', 'tickets:move'], new \DateTimeImmutable('2027-04-14 10:00:00 UTC'), self::OMAR, new \DateTimeImmutable(self::NOW))],
+            $this->events->publishedEvents,
+        );
+    }
+
+    #[Test]
+    public function theNewTokenIsNeitherDumpedNorSerializedWithItsPlainText(): void
+    {
+        $newToken = $this->issueWithScopeNamesForOmar($this->tokensOfAcmeFoods(), 'Claude Code', ['read']);
+
+        self::assertStringNotContainsString($newToken->reveal(), print_r($newToken, true));
+        self::assertStringNotContainsString($newToken->reveal(), var_export($newToken->__debugInfo(), true));
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('A new API token is never serialized.');
+
+        serialize($newToken);
+    }
+
+    /**
+     * @return iterable<string, array{list<string>}>
+     */
+    public static function scopeNamesNoTokenMayHave(): iterable
+    {
+        yield 'an unknown name' => [['read', 'admin']];
+        yield 'a known name in capitals' => [['READ']];
+        yield 'a known name with a capital' => [['Read']];
+        yield 'a known name with a space' => [[' read']];
+        yield 'an empty name' => [['']];
+        yield 'more names than there are scopes, all known' => [['read', 'read', 'read', 'read', 'read', 'read']];
+    }
+
+    /**
+     * @param list<string> $scopeNames
+     */
+    #[Test]
+    #[DataProvider('scopeNamesNoTokenMayHave')]
+    public function aScopeNameNoTokenMayHaveIsRefusedInThePagesWordsBeforeTheLock(array $scopeNames): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+
+        try {
+            $this->issueWithScopeNamesForOmar($tokens, 'Claude Code', $scopeNames);
+            self::fail('A token with the scope names '.implode(', ', $scopeNames).' was issued.');
+        } catch (ApiTokenRefused $refusal) {
+            self::assertSame('Choose only the things listed on this page.', $refusal->getMessage());
+        }
+
+        self::assertSame([], $tokens->calls);
+        self::assertSame([], $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>, int, string}>
+     */
+    public static function choicesApiTokenIssueRefuses(): iterable
+    {
+        yield 'no scope' => ['Claude Code', [], 30, 'Choose at least one thing the token may do.'];
+        yield 'a blank name' => [" \u{200B} ", ['read'], 30, 'Give the token a name.'];
+        yield 'a name with a line separator' => ["Omar\u{2028}laptop", ['read'], 30, 'A token name is one line of plain text.'];
+        yield 'a name with an escape character' => ["Omar \e[31mlaptop", ['read'], 30, 'A token name is one line of plain text.'];
+        yield 'a name of 101 characters' => [str_repeat('é', 101), ['read'], 30, 'A token name has at most 100 characters.'];
+        yield 'no days' => ['Claude Code', ['read'], 0, 'A token lasts from 1 to 365 days.'];
+        yield 'more than a year' => ['Claude Code', ['read'], 366, 'A token lasts from 1 to 365 days.'];
+    }
+
+    /**
+     * @param list<string> $scopeNames
+     */
+    #[Test]
+    #[DataProvider('choicesApiTokenIssueRefuses')]
+    public function aChoiceTheTokenRefusesIsRefusedWithItsMessageAndNothingIsAdded(string $name, array $scopeNames, int $lifetimeDays, string $message): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+
+        try {
+            new IssueApiToken($tokens, new HmacApiTokenHashing(self::PEPPER), $this->events)->issueWithScopeNames(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $name, $scopeNames, $lifetimeDays, new \DateTimeImmutable(self::NOW));
+            self::fail('The token was issued.');
+        } catch (ApiTokenRefused $refusal) {
+            self::assertSame($message, $refusal->getMessage());
+            self::assertInstanceOf(InvalidApiToken::class, $refusal->getPrevious());
+        }
+
+        self::assertSame([], $tokens->calls);
+        self::assertSame([], $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    #[Test]
+    public function aNameOfAHundredCharactersOfTwoBytesEachIsKept(): void
+    {
+        $newToken = $this->issueWithScopeNamesForOmar($this->tokensOfAcmeFoods(), str_repeat('é', 100), ['read']);
+
+        self::assertSame(str_repeat('é', 100), $newToken->token->name);
+    }
+
+    #[Test]
+    public function overTheCapTheRefusalIsTheSameAsWithScopesAndNothingIsAdded(): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+        $this->seedLiveTokens($tokens, self::ACME_FOODS, self::OMAR, IssueApiToken::MAX_LIVE_TOKENS_PER_USER);
+        $idsBefore = $tokens->ids();
+
+        try {
+            $this->issueWithScopeNamesForOmar($tokens, 'One too many', ['read']);
+            self::fail('A 21st live token was issued.');
+        } catch (TooManyApiTokens $refusal) {
+            self::assertSame('You have 20 tokens that still work. Revoke one before you make another.', $refusal->getMessage());
+        }
+
+        self::assertSame($idsBefore, $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    /**
+     * @param list<string> $scopeNames
+     */
+    private function issueWithScopeNamesForOmar(InMemoryApiTokens $tokens, string $name, array $scopeNames): NewApiToken
+    {
+        return new IssueApiToken($tokens, new HmacApiTokenHashing(self::PEPPER), $this->events)->issueWithScopeNames(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $name, $scopeNames, 30, new \DateTimeImmutable(self::NOW));
     }
 
     private function issueForOmar(InMemoryApiTokens $tokens, string $name): IssuedApiToken

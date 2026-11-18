@@ -105,7 +105,7 @@ final class InMemoryApiTokens implements ApiTokens
 
         return \count(array_filter(
             $this->tenantTokens(),
-            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, $at),
+            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, self::cutToSecond($at)),
         ));
     }
 
@@ -122,7 +122,7 @@ final class InMemoryApiTokens implements ApiTokens
     public function forUser(UserId $userId): array
     {
         $tokens = array_values(array_filter($this->tenantTokens(), static fn (ApiToken $token): bool => $token->userId()->equals($userId)));
-        usort($tokens, static fn (ApiToken $a, ApiToken $b): int => [$b->createdAt(), $b->id()] <=> [$a->createdAt(), $a->id()]);
+        usort($tokens, self::newestFirst(...));
 
         return \array_slice($tokens, 0, self::MAX_LISTED_TOKENS);
     }
@@ -131,9 +131,9 @@ final class InMemoryApiTokens implements ApiTokens
     {
         $tokens = array_values(array_filter(
             $this->tenantTokens(),
-            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, $at),
+            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, self::cutToSecond($at)),
         ));
-        usort($tokens, static fn (ApiToken $a, ApiToken $b): int => [$b->createdAt(), $b->id()] <=> [$a->createdAt(), $a->id()]);
+        usort($tokens, self::newestFirst(...));
 
         return \array_slice($tokens, 0, self::MAX_LISTED_TOKENS);
     }
@@ -188,7 +188,24 @@ final class InMemoryApiTokens implements ApiTokens
 
     private function isLive(ApiToken $token, \DateTimeImmutable $at): bool
     {
-        return !isset($this->revokedAt[self::rowKey($token->organizationId(), $token->id())]) && $token->expiresAt() > $at;
+        return !isset($this->revokedAt[self::rowKey($token->organizationId(), $token->id())]) && self::cutToSecond($token->expiresAt()) > $at;
+    }
+
+    /**
+     * By created_at, then the later id, as stored: a uuid column sorts as its lowercase text does.
+     */
+    private static function newestFirst(ApiToken $a, ApiToken $b): int
+    {
+        return [self::cutToSecond($b->createdAt()), strtolower($b->id())] <=> [self::cutToSecond($a->createdAt()), strtolower($a->id())];
+    }
+
+    /**
+     * As idn_api_token keeps a time and DoctrineApiTokens sends one: Doctrine's datetimetz format and the
+     * TIMESTAMP_FORMAT of DoctrineApiTokens both leave out the fraction of a second.
+     */
+    private static function cutToSecond(\DateTimeImmutable $time): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable('@'.$time->getTimestamp());
     }
 
     /**
