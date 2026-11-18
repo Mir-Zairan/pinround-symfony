@@ -6,4 +6,6 @@ Status: the two tables exist (`Version20261115120000`, with row-level security) 
 
 `UploadedMedia::statesOf(OrganizationId, UserId, mediaIds)` (implemented by `Application\UploaderMediaStates` over `MediaObjects::byIds`) answers `MediaImageStatus` pending, ready or rejected for the pictures that person uploaded, up to `MAX_MEDIA_IDS` = 50 in one query; any other id is left out. `GET /media/{id}/status` (`UploadStatusController`, uploader only, 404 for anything else, `no-store`, 120 a minute per person through `media_upload_status_per_user`) serves it to the form that waits for its screenshot (media-pipeline.md, Upload status).
 
+`UploadBeginLimit` (Api, implemented by `Infrastructure\RateLimit\SymfonyUploadBeginLimit` over `media_upload_begin_per_user` on the state Valkey) holds the per-person begin limit that the web (`POST /media/intents`) and MCP `create_upload` share: each counts a begin before it asks `Uploads::begin`, and a begin past the limit throws `UploadRefused::addingTooFast` ("You are adding files too fast. Wait a minute and try again.") with `retryAfterSeconds` (1 to the window length), which the web answers as 429 with `Retry-After`.
+
 See the [module catalogue](../../docs/02-architecture/modules.md#media-med_) and the tables in [data-model.md](../../docs/02-architecture/data-model.md#review-and-media).

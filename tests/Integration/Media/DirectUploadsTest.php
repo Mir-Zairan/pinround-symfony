@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Media;
 
+use App\Media\Api\CompletedUpload;
+use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadSlot;
 use App\Media\Api\UploadTarget;
@@ -190,6 +192,65 @@ final class DirectUploadsTest extends KernelTestCase
     }
 
     #[Test]
+    public function aCompleteInTransactionWithNoOpenTransactionIsRefusedAndChangesNothing(): void
+    {
+        $slot = $this->begin();
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+
+        try {
+            $this->uploads()->completeInTransaction(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId, $this->clock->now());
+            self::fail('An upload was completed in a transaction with none open.');
+        } catch (\LogicException $refused) {
+            self::assertSame('Reading an upload intent needs an open transaction.', $refused->getMessage());
+        } finally {
+            $this->entityManager()->clear();
+            $tenantContext->clear();
+        }
+
+        self::assertSame([[null]], $this->rowsOf('SELECT used_at FROM med_upload_intent'));
+        self::assertSame([], $this->rowsOf('SELECT id FROM med_object'));
+        self::assertSame([], $this->outboxMessages());
+    }
+
+    #[Test]
+    public function aCompleteInTransactionWritesInTheCallersTransactionAndItsRollbackLeavesNothing(): void
+    {
+        $slot = $this->begin();
+        $this->clock->modify('+2 minutes');
+
+        [$completed, $mediaObjectsInside, $outboxRowsInside] = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            $this->uploads()->completeInTransaction(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $slot->intentId, $this->clock->now()),
+            array_map(array_values(...), $this->connection()->fetchAllAssociative('SELECT id, status FROM med_object')),
+            $this->connection()->fetchOne("SELECT count(*) FROM messenger_outbox WHERE queue_name = 'outbox'"),
+        ]);
+
+        self::assertEquals(new CompletedUpload($slot->intentId, MediaImageStatus::Pending), $completed);
+        self::assertSame([[$slot->intentId, 'pending']], $mediaObjectsInside);
+        self::assertSame(1, $outboxRowsInside);
+        self::assertSame([[null]], $this->rowsOf('SELECT used_at FROM med_upload_intent'));
+        self::assertSame([], $this->rowsOf('SELECT id FROM med_object'));
+        self::assertSame([], $this->outboxMessages());
+    }
+
+    #[Test]
+    public function aSecondCompleteInTransactionAnswersThePictureOfTheFirstWithItsCurrentStatusAndWritesNothing(): void
+    {
+        $slot = $this->begin();
+        $first = $this->completedInTransaction($slot->intentId);
+        $this->rejectAsUnreadable($first->mediaId);
+        $this->clock->modify('+1 minute');
+
+        $second = $this->completedInTransaction($slot->intentId);
+
+        self::assertEquals(new CompletedUpload($slot->intentId, MediaImageStatus::Pending), $first);
+        self::assertEquals(new CompletedUpload($slot->intentId, MediaImageStatus::Rejected), $second);
+        self::assertSame([[$slot->intentId, 'rejected']], $this->rowsOf('SELECT id, status FROM med_object'));
+        self::assertSame([['2026-03-02 10:00']], $this->rowsOf("SELECT to_char(used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') FROM med_upload_intent"));
+        self::assertEquals([new ProcessUpload(self::ACME_FOODS, $slot->intentId)], $this->outboxMessages());
+    }
+
+    #[Test]
     public function aCompleteWhoseStoredTargetIsNowDeniedIsRefusedAndChangesNothing(): void
     {
         $slot = $this->begin();
@@ -252,6 +313,27 @@ final class DirectUploadsTest extends KernelTestCase
             $this->entityManager()->clear();
             $tenantContext->clear();
         }
+    }
+
+    private function completedInTransaction(string $intentId): CompletedUpload
+    {
+        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): CompletedUpload => $this->uploads()->completeInTransaction(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $intentId, $this->clock->now()));
+    }
+
+    /**
+     * As the processing worker would. Row-level security applies to the migrator too, so the tenant is set; the CHECK
+     * constraint wants a reason with the rejected status.
+     */
+    private function rejectAsUnreadable(string $mediaId): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $updatedRows = $this->migratorConnection()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement("UPDATE med_object SET status = 'rejected', reject_reason = 'unreadable' WHERE id = ?", [$mediaId]));
+        } finally {
+            $tenantContext->clear();
+        }
+        self::assertSame(1, $updatedRows);
     }
 
     /**
@@ -325,6 +407,11 @@ final class DirectUploadsTest extends KernelTestCase
 
     private function mediaRows(): MediaRows
     {
-        return new MediaRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
+        return new MediaRows($this->migratorConnection(), self::getContainer()->get(TenantContext::class));
+    }
+
+    private function migratorConnection(): Connection
+    {
+        return self::getContainer()->get('doctrine.dbal.migrator_connection');
     }
 }
