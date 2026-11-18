@@ -133,19 +133,19 @@
   "baseBranch": "main",
   "models": {
     "_comment": "Which model each role runs on. Settings, not calibration; a personal hygiene.json in the active Claude config directory overrides per person. Values: sonnet, opus, haiku, fable, a full model id, or inherit.",
-    "explorer": "sonnet",
+    "explorer": "opus",
     "judge": "opus",
     "reviewer": "inherit",
     "buildReviewer": "opus",
     "checklist": "haiku",
-    "implementer": "sonnet",
+    "implementer": "opus",
     "sensitiveImplementer": "inherit"
   },
   "depth": "standard",
   "_depth_comment": "quick | standard | thorough — how wide the option and approach panels are. Setting; overridable per person.",
   "output": {
     "_comment": "How the plugin talks to you (reference/voice.md). Settings; overridable per person.",
-    "didYouKnow": true,
+    "didYouKnow": false,
     "maxReportChars": 2400,
     "enforceLength": true,
     "budgetLine": true
@@ -753,7 +753,8 @@
       "dead-code",
       "ui-fidelity",
       "data-integrity",
-      "other-strict-types"
+      "other-strict-types",
+      "unclassified"
     ],
     "rejectThreshold": 2
   },
