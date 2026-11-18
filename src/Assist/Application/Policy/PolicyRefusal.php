@@ -28,7 +28,7 @@ enum PolicyRefusal: string
             self::LeadsOnly => 'Your admin allows AI help for leads only.',
             self::CannotSeeTicket => 'AI help works only on tickets you can see.',
             self::RestrictedTicketToCloud => 'Your admin keeps team-only tickets away from cloud AI.',
-            self::LaptopNotReady => 'AI help runs on your laptop, and Ollama is not ready there yet.',
+            self::LaptopNotReady => 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.',
             self::SecuritySensitiveDraftToCloud => 'This report mentions security, so it stays out of cloud AI.',
             self::CloudOnly => 'Your admin runs AI help in the company cloud, not on laptops.',
         };

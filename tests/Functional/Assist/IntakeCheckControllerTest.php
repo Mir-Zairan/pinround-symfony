@@ -119,7 +119,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         yield 'AI off' => ['Omar', '{"on": false, "where": "cloud"}', self::AI_OFF_LINE];
         yield 'leads only, for Omar' => ['Omar', '{"on": true, "who": "leads_only", "where": "cloud"}', 'Your admin allows AI help for leads only.'];
         yield 'leads only, for Lena, who leads Shop' => ['Lena', '{"on": true, "who": "leads_only", "where": "cloud"}', null];
-        yield 'a laptop organization' => ['Omar', '{"on": true, "who": "everyone", "where": "laptop"}', 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'a laptop organization' => ['Omar', '{"on": true, "who": "everyone", "where": "laptop"}', 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
     }
 
     #[Test]

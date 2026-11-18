@@ -134,8 +134,8 @@ final class OrgSettingsAiPolicyTest extends TestCase
         yield 'cloud AI for everyone, an open ticket' => [self::allowedView(), false, null];
         yield 'cloud AI for everyone, a team-only ticket the admin lets go to cloud AI' => [self::allowedView(isRestrictedToCloudAllowed: true), true, null];
         yield 'cloud AI, a team-only ticket kept from cloud AI' => [self::allowedView(), true, 'Your admin keeps team-only tickets away from cloud AI.'];
-        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), false, 'AI help runs on your laptop, and Ollama is not ready there yet.'];
-        yield 'laptop only says so before a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP), true, 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), false, 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
+        yield 'laptop only says so before a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP), true, 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
         yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), false, null];
         yield 'laptop first, a team-only ticket kept from cloud AI' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), true, 'Your admin keeps team-only tickets away from cloud AI.'];
         yield 'AI off says so before the ticket' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), true, 'Your admin turned AI help off.'];
@@ -160,7 +160,7 @@ final class OrgSettingsAiPolicyTest extends TestCase
     {
         yield 'cloud AI that keeps team-only tickets from it, as a draft is not team-only' => [self::allowedView(), null];
         yield 'laptop first goes to the cloud on the server' => [self::allowedView(PolicyView::WHERE_LAPTOP_FIRST), null];
-        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), 'AI help runs on your laptop, and Ollama is not ready there yet.'];
+        yield 'laptop only, which the server never runs' => [self::allowedView(PolicyView::WHERE_LAPTOP), 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.'];
         yield 'AI off' => [new PolicyView('ai_off', 'Your admin turned AI help off.', PolicyView::WHERE_CLOUD, false, false, false), 'Your admin turned AI help off.'];
         yield 'leads only says so before the laptop' => [new PolicyView('leads_only', 'Your admin allows AI help for leads only.', PolicyView::WHERE_LAPTOP, false, false, false), 'Your admin allows AI help for leads only.'];
     }

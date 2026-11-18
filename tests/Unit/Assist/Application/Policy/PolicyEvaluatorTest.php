@@ -27,7 +27,7 @@ final class PolicyEvaluatorTest extends TestCase
     private const string LEADS_ONLY = 'Your admin allows AI help for leads only.';
     private const string CANNOT_SEE = 'AI help works only on tickets you can see.';
     private const string RESTRICTED = 'Your admin keeps team-only tickets away from cloud AI.';
-    private const string LAPTOP_NOT_READY = 'AI help runs on your laptop, and Ollama is not ready there yet.';
+    private const string LAPTOP_NOT_READY = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
     private const string SECURITY_SENSITIVE_DRAFT = 'This report mentions security, so it stays out of cloud AI.';
     private const string CLOUD_ONLY = 'Your admin runs AI help in the company cloud, not on laptops.';
 

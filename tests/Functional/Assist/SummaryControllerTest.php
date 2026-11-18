@@ -8,6 +8,7 @@ use App\Assist\Api\Summaries;
 use App\Assist\Api\SummaryRequestRefused;
 use App\Assist\Api\SummaryRequestView;
 use App\Assist\Application\AiCallLimit;
+use App\Assist\Application\Policy\PolicyRefusal;
 use App\Assist\Application\Summaries\GenerateSummary;
 use App\Assist\Application\Summaries\QueuedSummaries;
 use App\Assist\Application\Summaries\SummaryRequests;
@@ -127,7 +128,7 @@ final class SummaryControllerTest extends WebTestCase
         yield 'AI off' => ['{"on": false, "where": "cloud"}', 'Omar', 'SHOP-1', 'Your admin turned AI help off.'];
         yield 'leads only, for Omar' => ['{"on": true, "who": "leads_only", "where": "cloud"}', 'Omar', 'SHOP-1', 'Your admin allows AI help for leads only.'];
         yield 'leads only, for Lena, who leads Shop' => ['{"on": true, "who": "leads_only", "where": "cloud"}', 'Lena', 'SHOP-1', null];
-        yield 'a laptop organization, until the browser finds the laptop ready' => ['{"on": true, "who": "everyone", "where": "laptop"}', 'Omar', 'SHOP-1', TheAsk::LAPTOP_NOT_RUNNING];
+        yield 'a laptop organization, until the browser finds the laptop ready' => ['{"on": true, "who": "everyone", "where": "laptop"}', 'Omar', 'SHOP-1', PolicyRefusal::LaptopNotReady->sentence()];
         yield 'laptop first goes to the cloud' => ['{"on": true, "who": "everyone", "where": "laptop_first"}', 'Omar', 'SHOP-1', null];
         yield 'a team-only ticket kept from cloud AI' => [self::CLOUD_AI, 'Omar', 'SHOP-2', 'Your admin keeps team-only tickets away from cloud AI.'];
         yield 'a team-only ticket the admin lets go to cloud AI' => ['{"on": true, "where": "cloud", "restricted_to_cloud": true}', 'Omar', 'SHOP-2', null];

@@ -43,9 +43,6 @@ final class TheAsk
     public const string ORIGINAL_TEXT_FROM_REPORT = 'Original text from the report';
     public const string ORIGINAL_TEXT_FROM_JIRA = 'Original text from Jira';
 
-    /** ticket-page.md, AI not available, for a laptop-only organization. */
-    public const string LAPTOP_NOT_RUNNING = 'Your company runs AI on each laptop, and it is not running on yours. Use “Local AI” at the top to set it up.';
-
     /** Heading of the laptop summary proposal, followed by LocalResult's label; not in the prototype. */
     public const string PROPOSAL_HEADING = 'Laptop summary';
 
@@ -124,19 +121,12 @@ final class TheAsk
     /**
      * Why "Summarize with AI" is hidden for this person and ticket; null when it shows. Reads the viewer's policy only
      * for an ask with text and no summary, the only place the button may show. In a laptop-only organization the server
-     * cannot tell whether this laptop is ready, so it is LAPTOP_NOT_RUNNING, which the browser hides when it is.
+     * cannot tell whether this laptop is ready, so it is PolicyRefusal::LaptopNotReady's line (ticket-page.md, AI not
+     * available), which the browser hides when it is.
      */
     public function aiRefusal(): ?string
     {
-        if (null !== $this->refusal) {
-            return $this->refusal;
-        }
-        $policy = $this->viewerAiPolicy->policy();
-        if ($policy->isAllowed() && PolicyView::WHERE_LAPTOP === $policy->whereAiRuns) {
-            return self::LAPTOP_NOT_RUNNING;
-        }
-
-        return $this->viewerAiPolicy->serverTicketRefusalOf($this->ticket->isTeamOnly());
+        return $this->refusal ?? $this->viewerAiPolicy->serverTicketRefusalOf($this->ticket->isTeamOnly());
     }
 
     public function shortAsk(): ?string

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Assist;
 
+use App\Assist\Application\Policy\PolicyRefusal;
 use App\Assist\UI\Component\TheAsk;
 use App\Assist\UI\Controller\SummaryController;
 use App\SharedKernel\Domain\OrganizationId;
@@ -263,7 +264,7 @@ final class LaptopSummaryProposalTest extends WebTestCase
      */
     public static function placesWhereAiRuns(): iterable
     {
-        yield 'laptop only' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop'], true, TheAsk::LAPTOP_NOT_RUNNING, true];
+        yield 'laptop only' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop'], true, PolicyRefusal::LaptopNotReady->sentence(), true];
         yield 'laptop first' => [['on' => true, 'who' => 'everyone', 'where' => 'laptop_first'], false, null, true];
         yield 'the cloud' => [['on' => true, 'who' => 'everyone', 'where' => 'cloud'], false, null, false];
         yield 'laptop only with AI off' => [['on' => false, 'where' => 'laptop'], true, 'Your admin turned AI help off.', false];
