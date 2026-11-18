@@ -1,0 +1,12 @@
+Hello,
+
+{{ subject }}:
+{% for line in lines %}
+
+- {{ line.name }} ({{ line.prefix }}) works until {{ line.worksUntil }}
+{% endfor %}
+
+To keep Claude Code or the browser plugin working, make a new token and put it in their settings:
+{{ tokensLink }}
+
+You get this email once per token, about a week before it stops working.

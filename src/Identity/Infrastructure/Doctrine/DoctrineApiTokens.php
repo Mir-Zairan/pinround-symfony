@@ -30,10 +30,13 @@ final readonly class DoctrineApiTokens implements ApiTokens
     // FOR UPDATE, not SKIP LOCKED: a token in use locks its row each minute (MARK_USED), and a skipped row would miss its
     // only warning. A claim that waited checks the row again, so a token revoked or claimed meanwhile is left out. Served
     // by idn_api_token_expires_at_id_live_idx.
-    private const string CLAIM_EXPIRY_WARNINGS = 'WITH claimed AS (UPDATE idn_api_token t SET expiry_warned_at = ?'
-        .' WHERE t.organization_id = ? AND t.expiry_warned_at IS NULL AND t.id IN ('
+    // The page is picked once, in a MATERIALIZED CTE: as `t.id IN (subquery)` the planner may rescan the subquery, and a
+    // rescan's FOR UPDATE skips the rows this statement already updated, so LIMIT would hand over the next ones too.
+    private const string CLAIM_EXPIRY_WARNINGS = 'WITH picked AS MATERIALIZED ('
         .'SELECT c.id FROM idn_api_token c WHERE c.organization_id = ? AND c.revoked_at IS NULL AND c.expiry_warned_at IS NULL'
-        .' AND c.expires_at >= ? AND c.expires_at < ? ORDER BY c.expires_at, c.id LIMIT ? FOR UPDATE)'
+        .' AND c.expires_at >= ? AND c.expires_at < ? ORDER BY c.expires_at, c.id LIMIT ? FOR UPDATE),'
+        .' claimed AS (UPDATE idn_api_token t SET expiry_warned_at = ? FROM picked'
+        .' WHERE t.organization_id = ? AND t.expiry_warned_at IS NULL AND t.id = picked.id'
         .' RETURNING t.id, t.user_id, t.name, t.prefix, t.expires_at)'
         .' SELECT id::text AS id, user_id::text AS user_id, name, prefix,'
         ." to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || '+00:00' AS expires_at"
@@ -219,13 +222,13 @@ final readonly class DoctrineApiTokens implements ApiTokens
         $organizationId = $this->tenantContext->require()->toString();
 
         $rows = $this->entityManager->getConnection()->fetchAllAssociative(self::CLAIM_EXPIRY_WARNINGS, [
-            $warnedAt->format(self::TIMESTAMP_FORMAT),
-            $organizationId,
             $organizationId,
             $expiresFrom->format(self::TIMESTAMP_FORMAT),
             $expiresBefore->format(self::TIMESTAMP_FORMAT),
             $limit,
-        ], [5 => ParameterType::INTEGER]);
+            $warnedAt->format(self::TIMESTAMP_FORMAT),
+            $organizationId,
+        ], [3 => ParameterType::INTEGER]);
 
         return array_map(static function (array $row): ExpiringApiToken {
             if (!\is_string($row['id']) || !\is_string($row['user_id']) || !\is_string($row['name']) || !\is_string($row['prefix']) || !\is_string($row['expires_at'])) {

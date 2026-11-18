@@ -164,6 +164,9 @@ framework:
             App\Notification\Infrastructure\Scheduler\ReleaseDueNotifications: async_notify
             # Sent with a TenantStamp by QueueDigests every 15 minutes, one per person with a ping or question due in a digest.
             App\Notification\Application\Digest\SendDigest: async_notify
+            # Sent with a TenantStamp by QueueApiTokenExpiryWarnings once a day, one per organization with a token expiring
+            # in about a week, and again by its handler, after the bus commits, while a page comes back full.
+            App\Identity\Infrastructure\Scheduler\SendApiTokenExpiryWarnings: async_notify
             # Sent straight from the request by MessengerSummaryJobQueue, with a TenantStamp: that request writes no row
             # the job could miss. Its handler marks the request on Valkey before it asks the AI, so a retry never pays for
             # a call twice; FailSummaryRequestOfAbandonedJob fails the request when the retries run out.

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{{ subject }}</title>
+</head>
+<body>
+    <p>Hello,</p>
+    <p>{{ subject }}:</p>
+    <ul>
+        {% for line in lines %}
+            <li>{{ line.name }} ({{ line.prefix }}) works until {{ line.worksUntil }}</li>
+        {% endfor %}
+    </ul>
+    <p>To keep Claude Code or the browser plugin working, make a new token and put it in their settings:</p>
+    <p><a href="{{ tokensLink }}">Your API tokens</a></p>
+    <p>You get this email once per token, about a week before it stops working.</p>
+</body>
+</html>
