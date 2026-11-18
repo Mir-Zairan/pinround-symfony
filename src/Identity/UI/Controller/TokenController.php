@@ -33,7 +33,7 @@ final class TokenController extends AbstractController
     public const string TOKEN_REVOKED = 'The token is revoked. It no longer works.';
     public const string LIFETIME_NOT_OFFERED = 'Choose how long the token works from the list.';
 
-    /** What each scope lets the token do, in the words the form shows; every scope ShowApiTokens names needs one. */
+    /** What each scope lets the token do, in the words the form and the list show; every scope ShowApiTokens names needs one. */
     public const array SCOPE_EXPLANATIONS = [
         'read' => 'Read your tickets, rounds and notes.',
         'rounds:write' => 'Add screenshots, notes and verdicts to your draft rounds.',
@@ -136,6 +136,8 @@ final class TokenController extends AbstractController
             'revokeError' => $revokeError,
             'newToken' => $newToken,
             'mcpUrl' => $request->getSchemeAndHttpHost().'/mcp',
+            'createCsrfTokenId' => self::CREATE_CSRF_ID,
+            'revokeCsrfTokenId' => self::REVOKE_CSRF_ID,
         ], new Response(status: $hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK)));
     }
 
