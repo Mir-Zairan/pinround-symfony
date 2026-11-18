@@ -287,6 +287,11 @@
   display: none;
 }
 
+/* Only a frame answer focuses the state (tabindex="-1"), to keep keyboard focus in the ask after the swap; it is not a control. */
+.ticket__ask-state:focus {
+  outline: none;
+}
+
 .ticket__details {
   display: flex;
   flex-direction: column;

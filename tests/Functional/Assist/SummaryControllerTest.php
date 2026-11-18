@@ -31,6 +31,8 @@ use App\Ticketing\UI\Voter\TicketVoter;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Random\Engine\Xoshiro256StarStar;
+use Random\Randomizer;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport;
@@ -64,6 +66,7 @@ final class SummaryControllerTest extends WebTestCase
     private const string RUNNING = '[data-summary-poll-state-value="running"]';
     private const string FAILED_LINE = 'The AI answer failed. Try again.';
     private const int POLL_QUERY_COUNT = 16;
+    private const string ASK_STATE_FOCUS = 'div.ticket__ask-state[tabindex="-1"]';
 
     protected function setUp(): void
     {
@@ -109,6 +112,7 @@ final class SummaryControllerTest extends WebTestCase
         $state = $frame->filter('[data-controller="summary-poll"]');
         self::assertSame(['idle', '/t/SHOP-1/summary'], [$state->attr('data-summary-poll-state-value'), $state->attr('data-summary-poll-url-value')]);
         self::assertCount(0, $frame->filter('.ticket__ask-ai-off'));
+        self::assertCount(0, $page->filter('[autofocus]'), 'Only a frame answer moves the focus.');
     }
 
     /**
@@ -170,6 +174,7 @@ final class SummaryControllerTest extends WebTestCase
         self::assertEquals([new GenerateSummary($this->acmeFoods->toString(), $this->shopTicketId, $this->idOf('Omar'))], $this->sentJobs());
         $frame = $this->client->getCrawler()->filter('turbo-frame#ticket-ask');
         self::assertCount(1, $frame->filter(self::RUNNING));
+        self::assertSame([self::ASK_STATE_FOCUS], $this->autofocusedOf($this->client->getCrawler()), 'Focus goes to the state that replaced the button pressed.');
         self::assertSame('Summarizing…', $frame->filter('button.ticket__summarize[disabled]')->text());
         self::assertCount(0, $frame->filter('button.ticket__summarize:not([disabled])'));
         $queued = $this->stateOf($this->shopTicketId);
@@ -365,6 +370,7 @@ final class SummaryControllerTest extends WebTestCase
         $button = $frame->filter('form[action="/t/SHOP-1/summary"] button.ticket__summarize[disabled]');
         self::assertSame(['Summarizing…', 'true', 'button'], [$button->text(), $button->attr('aria-busy'), $button->attr('data-summary-poll-target')]);
         self::assertContains('Turbo-Frame', $this->client->getResponse()->getVary());
+        self::assertSame([self::ASK_STATE_FOCUS], $this->autofocusedOf($this->client->getCrawler()));
     }
 
     #[Test]
@@ -449,9 +455,12 @@ final class SummaryControllerTest extends WebTestCase
     public function theEarlierSummariesListStopsAtItsLimitAndSaysHowManyAreNotShown(): void
     {
         $this->addSummary('human', 'The current one.', 'Lena', true, '2026-11-11 09:00:00+00');
-        // One more earlier summary than the list holds, inserted oldest last, so the oldest is the one left out.
+        // One more earlier summary than the list holds, inserted in a fixed shuffled order, so that neither insertion
+        // nor id order but only a newest-first cut by date leaves the oldest one out.
         $earlierCount = TicketSummaryQueries::EARLIER_LIMIT + 1;
-        for ($day = $earlierCount; $day >= 1; --$day) {
+        $insertionDays = new Randomizer(new Xoshiro256StarStar(2026))->shuffleArray(range(1, $earlierCount));
+        self::assertNotContains(1, [$insertionDays[0], $insertionDays[$earlierCount - 1]], 'The oldest is inserted neither first nor last.');
+        foreach ($insertionDays as $day) {
             $this->addSummary('human', 'Take of 2026-10-'.\sprintf('%02d', $day).'.', 'Lena', false, \sprintf('2026-10-%02d 09:00:00+00', $day));
         }
         $this->logIn($this->client, $this->people['Omar']);
@@ -641,6 +650,14 @@ final class SummaryControllerTest extends WebTestCase
         self::assertCount(1, $frame);
 
         return $frame;
+    }
+
+    /**
+     * @return list<string> each [autofocus] element of the answer as tag.class[tabindex], which Turbo focuses after its frame render
+     */
+    private function autofocusedOf(Crawler $answer): array
+    {
+        return $answer->filter('[autofocus]')->each(static fn (Crawler $element): string => \sprintf('%s.%s[tabindex="%s"]', $element->nodeName(), $element->attr('class'), $element->attr('tabindex')));
     }
 
     private function summaryToken(): string
