@@ -14,6 +14,8 @@
 # member with a valid form token counts, accepted or not, so one member cannot script begins against the storage.
 # Status polls (GET /media/{id}/status) get media_upload_status_per_user through UploadStatusController.
 # Server-side AI calls get ai_calls_per_user through SymfonyAiCallLimit (AiCallLimit), before any provider is asked.
+# Laptop AI requests (POST /ai/laptop/package and /ai/laptop/result) get ai_laptop_per_user through
+# SymfonyLaptopRequestLimit (LaptopRequestLimit), after the form token check and before the body is read.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
     # SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
@@ -94,5 +96,14 @@ framework:
             policy: fixed_window
             limit: 30
             interval: '60 minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # Both laptop AI routes together, keyed by the organization, the user id and the clock's minute
+        # (SymfonyLaptopRequestLimit): every refused result writes an audit entry, so a script of made-up package ids
+        # is stopped within a minute, while a person asking and posting by hand never meets it.
+        ai_laptop_per_user:
+            policy: fixed_window
+            limit: 30
+            interval: '1 minute'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
