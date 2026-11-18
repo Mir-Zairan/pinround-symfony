@@ -14,5 +14,7 @@ enum ToolCallOutcome: string
     case ReadOnly = 'read_only';
     case MissingScope = 'missing_scope';
     case InvalidInput = 'invalid_input';
+    /** The tool refused for a reason of the domain the caller can act on, such as a rejected picture. */
+    case Refused = 'refused';
     case Error = 'error';
 }
