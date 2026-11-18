@@ -11,6 +11,7 @@ use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Domain\User;
+use App\Media\Api\UploadRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -305,7 +306,7 @@ final class CreateUploadTest extends WebTestCase
 
         $this->callCreateUpload($token, $this->arguments());
 
-        $this->assertRefused(CreateUpload::ADDING_TOO_FAST);
+        $this->assertRefused(UploadRefused::ADDING_TOO_FAST);
         self::assertSame([], $this->storedIntents($this->acmeFoods));
         self::assertSame([$this->toolRow('Omar', $tokenId, CreateUpload::ROUND_AUDIT_TYPE, $omarsDraft, 'refused')], $this->toolRowsOf($this->acmeFoods));
     }

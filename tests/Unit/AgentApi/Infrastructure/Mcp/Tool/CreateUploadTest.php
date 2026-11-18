@@ -12,6 +12,7 @@ use App\Identity\Api\CurrentUser;
 use App\Media\Api\MediaPermission;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTarget;
+use App\Media\Infrastructure\RateLimit\SymfonyUploadBeginLimit;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundRefused;
 use App\SharedKernel\Domain\OrganizationId;
@@ -41,7 +42,7 @@ final class CreateUploadTest extends TestCase
     private const int BEGINS_PER_MINUTE = 3;
 
     private CreateUploadFakes $fakes;
-    private RateLimiterFactory $beginsPerUser;
+    private SymfonyUploadBeginLimit $uploadBeginLimit;
 
     protected function setUp(): void
     {
@@ -50,7 +51,7 @@ final class CreateUploadTest extends TestCase
             self::OMARS_DRAFT => [CreateUploadFakes::SHOP_1, CreateUploadFakes::OMAR],
             self::MIAS_DRAFT => [CreateUploadFakes::SHOP_2, CreateUploadFakes::MIA],
         ];
-        $this->beginsPerUser = new RateLimiterFactory(['id' => 'media_upload_begin_per_user', 'policy' => 'fixed_window', 'limit' => self::BEGINS_PER_MINUTE, 'interval' => '1 minute'], new InMemoryStorage());
+        $this->uploadBeginLimit = new SymfonyUploadBeginLimit(new RateLimiterFactory(['id' => 'media_upload_begin_per_user', 'policy' => 'fixed_window', 'limit' => self::BEGINS_PER_MINUTE, 'interval' => '1 minute'], new InMemoryStorage()), 1);
     }
 
     /**
@@ -308,7 +309,7 @@ final class CreateUploadTest extends TestCase
         $refusal = self::refusalOf(fn () => $this->callFor(self::arguments()));
 
         self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
-        self::assertSame(CreateUpload::ADDING_TOO_FAST, $refusal->getMessage());
+        self::assertSame(UploadRefused::ADDING_TOO_FAST, $refusal->getMessage());
         self::assertSame($beginsBefore, $this->fakes->begins);
     }
 
@@ -421,7 +422,7 @@ final class CreateUploadTest extends TestCase
             $fakes,
             $fakes,
             $fakes,
-            $this->beginsPerUser,
+            $this->uploadBeginLimit,
             new MockClock(self::NOW),
         );
     }

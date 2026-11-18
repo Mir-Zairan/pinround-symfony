@@ -10,6 +10,7 @@ use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\MediaPermission;
+use App\Media\Api\UploadBeginLimit;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\Uploads;
 use App\Media\Api\UploadTarget;
@@ -29,8 +30,6 @@ use Mcp\Schema\Result\CallToolResult;
 use Mcp\Schema\Tool;
 use Mcp\Schema\ToolAnnotations;
 use Psr\Clock\ClockInterface;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
@@ -57,8 +56,6 @@ final readonly class CreateUpload implements AgentTool
     public const string ROUND_UPLOAD_KIND = 'round';
     /** UploadPurpose::Screenshot, which this module may not read. */
     public const string SCREENSHOT_PURPOSE = 'screenshot';
-    /** The web's text for the same limit (UploadIntentController::ADDING_TOO_FAST, which this module may not read). */
-    public const string ADDING_TOO_FAST = 'You are adding files too fast. Wait a minute and try again.';
 
     /** A ticket key is far shorter; the cap only keeps a lookup from reading megabytes. */
     private const int MAX_KEY_LENGTH = 64;
@@ -74,8 +71,7 @@ final readonly class CreateUpload implements AgentTool
         private RoundCommands $roundCommands,
         private Uploads $uploads,
         private AuthorizationCheckerInterface $authorizationChecker,
-        #[Autowire(service: 'limiter.media_upload_begin_per_user')]
-        private RateLimiterFactoryInterface $beginsPerUser,
+        private UploadBeginLimit $uploadBeginLimit,
         private ClockInterface $clock,
     ) {
     }
@@ -136,21 +132,23 @@ final readonly class CreateUpload implements AgentTool
     }
 
     /**
-     * Spends one of the caller's begins first, as the web does, so a refused call counts too: the limiter is not
+     * Spends one of the caller's begins first, as the web does, so a refused call counts too: the limit is not
      * rolled back with the savepoint.
      *
-     * @throws ToolRefusal     refused, with the web's plain message, past media_upload_begin_per_user or when
-     *                         Uploads refuses the type, the size, a twenty-first upload waiting or a full storage;
-     *                         not found when the new draft or the upload is denied
+     * @throws ToolRefusal     refused, with Media's plain message, past UploadBeginLimit or when Uploads refuses
+     *                         the type, the size, a twenty-first upload waiting or a full storage; not found when the
+     *                         new draft or the upload is denied
      * @throws \Throwable      what startDraft throws, such as RoundRefused DRAFT_EXISTS when another request
-     *                         started the caller's draft meanwhile
+     *                         started the caller's draft meanwhile, and the begin counter's storage error
      * @throws \LogicException without a token, a user or a target of this tool
      */
     public function call(array $arguments, ?ToolTarget $target): CallToolResult
     {
         $callerId = $this->callerId();
-        if (!$this->beginsPerUser->create($callerId->toString())->consume()->isAccepted()) {
-            throw ToolRefusal::refused(self::ADDING_TOO_FAST);
+        try {
+            $this->uploadBeginLimit->consume($callerId);
+        } catch (UploadRefused $tooFast) {
+            throw ToolRefusal::refused($tooFast->getMessage());
         }
         $uploadTarget = $this->uploadTargetOf($target, $callerId);
         $bytes = $arguments['bytes'] ?? null;

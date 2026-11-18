@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Media\UI\Controller;
 
 use App\Media\Api\MediaPermission;
+use App\Media\Api\UploadBeginLimit;
 use App\Media\Api\UploadIntentNotFound;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\Uploads;
@@ -23,8 +24,6 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\RateLimiter\RateLimit;
-use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
@@ -34,7 +33,7 @@ use Symfony\Component\Routing\Attribute\Route;
  * object. Both need a member of the tenant, the form token in the X-CSRF-Token header and a body of at most 4 KB.
  *
  * In that order: a person with no actor in the tenant is forbidden; a missing or wrong token answers 422 as an expired
- * page; a begin past media_upload_begin_per_user (rate_limiter.yaml) answers 429 with a Retry-After in seconds; a larger
+ * page; a begin past UploadBeginLimit (media_upload_begin_per_user) answers 429 with a Retry-After in seconds; a larger
  * body 413; a body that is no begin request 400. Begin then asks MediaPermission UPLOAD on the target (403), and Uploads refuses a file type or size, a person
  * with too many uploads waiting, or a file the organization's storage has no room for, with its plain message (422)
  * before any URL is signed. Complete runs outside the request transaction, as Uploads::complete() opens its own, and answers an intent its person did not
@@ -58,7 +57,7 @@ final class UploadIntentController extends AbstractController
     public const string FORM_EXPIRED = DirectUploads::EXPIRED;
     public const string BODY_TOO_LARGE = 'This upload request is larger than 4 KB. Reload the page and try again.';
     public const string NOT_A_BEGIN_REQUEST = 'This upload request needs a purpose, a file type, a size and a target. Reload the page and try again.';
-    public const string ADDING_TOO_FAST = 'You are adding files too fast. Wait a minute and try again.';
+    public const string ADDING_TOO_FAST = UploadRefused::ADDING_TOO_FAST;
 
     /** One media object waits for the processing worker (MediaStatus::Pending, which the UI may not use). */
     private const string PENDING = 'pending';
@@ -75,8 +74,7 @@ final class UploadIntentController extends AbstractController
         private readonly Transactions $transactions,
         private readonly Uploads $uploads,
         private readonly ClockInterface $clock,
-        #[Autowire(service: 'limiter.media_upload_begin_per_user')]
-        private readonly RateLimiterFactoryInterface $beginsPerUser,
+        private readonly UploadBeginLimit $uploadBeginLimit,
         #[Autowire(param: 'media.upload_begin_per_user_minutes')]
         private readonly int $beginWindowMinutes,
     ) {
@@ -93,10 +91,12 @@ final class UploadIntentController extends AbstractController
             return self::refusal(self::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
         // After the token check, so a page of another site cannot spend a member's begins by posting in their session.
-        $beginLimit = $this->beginsPerUser->create($actor->userId()->toString())->consume();
-        if (!$beginLimit->isAccepted()) {
-            $refusal = self::refusal(self::ADDING_TOO_FAST, Response::HTTP_TOO_MANY_REQUESTS);
-            $refusal->headers->set('Retry-After', (string) $this->secondsToWaitFor($beginLimit));
+        try {
+            $this->uploadBeginLimit->consume($actor->userId());
+        } catch (UploadRefused $tooFast) {
+            $refusal = self::refusal($tooFast->getMessage(), Response::HTTP_TOO_MANY_REQUESTS);
+            // UploadBeginLimit always says the wait; the whole window is the longest it can be.
+            $refusal->headers->set('Retry-After', (string) ($tooFast->retryAfterSeconds ?? $this->beginWindowMinutes * 60));
 
             return $refusal;
         }
@@ -170,17 +170,6 @@ final class UploadIntentController extends AbstractController
         }
 
         return $this->currentActor->actorFor($this->getUser());
-    }
-
-    /**
-     * At least 1 and at most the window. Read against the wall clock, not ClockInterface, because the limiter counts
-     * its window on the wall clock.
-     */
-    private function secondsToWaitFor(RateLimit $refusedLimit): int
-    {
-        $secondsLeft = (int) ceil((float) $refusedLimit->getRetryAfter()->format('U.u') - microtime(true));
-
-        return min($this->beginWindowMinutes * 60, max(1, $secondsLeft));
     }
 
     private function hasValidToken(Request $request): bool
