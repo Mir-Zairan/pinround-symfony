@@ -6,7 +6,9 @@ namespace App\Tests\Functional\Web;
 
 use App\Assist\UI\LocalAiChip;
 use App\Identity\Domain\User;
+use App\Identity\Infrastructure\Security\TokenAuthenticator;
 use App\Notification\UI\Controller\PingController;
+use App\Organization\UI\EnterChosenOrganization;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
@@ -16,6 +18,7 @@ use App\SharedKernel\Infrastructure\Tracing\CurrentSpan;
 use App\Tests\Fixtures\Entity\TenantProbe;
 use App\Tests\Fixtures\Tracing\ExportedSpans;
 use App\Tests\Functional\Assist\Laptop\StoresAiSettings;
+use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Organization\SendsInvitationLinks;
 use App\Ticketing\UI\MoveToasts;
@@ -46,6 +49,7 @@ final class WorkerResetTest extends WebTestCase
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
+    use IssuesApiTokens;
     use IssuesCsrfTokens;
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
@@ -62,6 +66,9 @@ final class WorkerResetTest extends WebTestCase
     private const string DRAFT_TOKEN_KEY = '_csrf/https-review_draft_round:SHOP-1';
     /** Object storage and Mercure, as the test env sets them under HTTPS (LocalAiChipTest). */
     private const string CONNECT_SRC = "connect-src 'self' http://localhost:9000 https://localhost";
+    private const string TOKEN_PROBE = '/mcp/_test/token-probe';
+    /** After IssuesApiTokens' issue date, as TokenAuthenticatorTest has it; the token requests need no session. */
+    private const string TOKEN_NOW = '2099-03-20 09:00:00 UTC';
 
     private KernelBrowser $client;
     /** @var list<string> */
@@ -95,6 +102,7 @@ final class WorkerResetTest extends WebTestCase
             }
         }
         $this->removeCommittedProjects();
+        $this->removeApiTokens();
         $this->removeUsersAndOrganizations();
     }
 
@@ -216,6 +224,77 @@ final class WorkerResetTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['organizationId' => null, 'isEntityManagerOpen' => true], $this->responseJson());
+    }
+
+    /**
+     * TokenAuthenticator set the token's organization as tenant before the user checker refused the blocked user.
+     */
+    #[Test]
+    public function theNextRequestHasNoTenantAndAnOpenEntityManagerAfterABlockedUsersTokenWasRefused(): void
+    {
+        $this->useTokenClient();
+        $omar = $this->createUserWithoutOrganization('Omar Haddad');
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $this->addMembership($omar, $acmeFoods);
+        [, $token] = $this->issueApiToken($omar, $acmeFoods);
+        $this->blockUser($omar);
+        // A request starts with an empty entity manager; this one still holds Omar as Foundry created him, unblocked.
+        $this->entityManager()->clear();
+
+        $this->assertTheRefusedTokenLeavesTheNextRequestNoTenant($token, TokenAuthenticator::REFUSAL_MESSAGE);
+    }
+
+    /**
+     * TokenAuthenticator entered Beta Bakery; EnterChosenOrganization found Omar no longer a member of it.
+     */
+    #[Test]
+    public function theNextRequestHasNoTenantAndAnOpenEntityManagerAfterATokenWhoseUserLeftItsOrganizationWasRefused(): void
+    {
+        $this->useTokenClient();
+        $omar = $this->createUserWithoutOrganization('Omar Haddad');
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($omar, $acmeFoods);
+        $this->addMembership($omar, $betaBakery);
+        [, $token] = $this->issueApiToken($omar, $betaBakery);
+        $this->removeMembership($omar, $betaBakery);
+
+        $this->assertTheRefusedTokenLeavesTheNextRequestNoTenant($token, EnterChosenOrganization::NOT_A_MEMBER_OF_THE_TOKENS_ORGANIZATION);
+    }
+
+    #[Test]
+    public function theNextTokenRequestWorksInItsOwnTokensOrganizationAfterAnotherOrganizationsToken(): void
+    {
+        $this->useTokenClient();
+        $omar = $this->createUserWithoutOrganization('Omar Haddad');
+        $lena = $this->createUserWithoutOrganization('Lena Berg');
+        $acmeFoods = $this->createOrganization('Acme Foods');
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($omar, $acmeFoods);
+        $this->addMembership($lena, $betaBakery);
+        [$omarsTokenId, $omarsToken] = $this->issueApiToken($omar, $acmeFoods);
+        [$lenasTokenId, $lenasToken] = $this->issueApiToken($lena, $betaBakery);
+
+        $this->client->request('GET', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$omarsToken]);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([
+            'userId' => $omar->id()->toString(),
+            'organizationId' => $acmeFoods->toString(),
+            'tokenId' => $omarsTokenId,
+            'scopes' => ['read', 'rounds:write'],
+            'visibleTokenOrganizationIds' => [$acmeFoods->toString()],
+        ], $this->responseJson());
+
+        $this->client->request('GET', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$lenasToken]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([
+            'userId' => $lena->id()->toString(),
+            'organizationId' => $betaBakery->toString(),
+            'tokenId' => $lenasTokenId,
+            'scopes' => ['read', 'rounds:write'],
+            'visibleTokenOrganizationIds' => [$betaBakery->toString()],
+        ], $this->responseJson());
     }
 
     /**
@@ -483,6 +562,30 @@ final class WorkerResetTest extends WebTestCase
         $sessionHandler->open('', $this->client->getContainer()->getParameter('app.session_cookie_name'));
 
         return $sessionHandler;
+    }
+
+    /**
+     * Over HTTPS, from an address of its own so no other test's refused tokens count against it, on a clock after the
+     * tokens' issue date.
+     */
+    private function useTokenClient(): void
+    {
+        $this->client->setServerParameter('HTTPS', 'on');
+        $this->client->setServerParameter('REMOTE_ADDR', \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254)));
+        self::getContainer()->set('clock', new MockClock(self::TOKEN_NOW));
+    }
+
+    private function assertTheRefusedTokenLeavesTheNextRequestNoTenant(string $token, string $refusal): void
+    {
+        $this->client->request('GET', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$token]);
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame(['error' => $refusal], $this->responseJson());
+        self::assertNull($this->tenantContext()->get(), 'the refused request left the token\'s organization as tenant');
+
+        $this->client->request('GET', '/_test/worker-reset');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['organizationId' => null, 'isEntityManagerOpen' => true], $this->responseJson());
     }
 
     private function csrfTokenStorage(): RecordingCsrfTokenStorage

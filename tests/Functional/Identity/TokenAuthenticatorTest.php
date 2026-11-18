@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Identity;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
 use App\Organization\UI\EnterChosenOrganization;
+use App\SharedKernel\Application\TenantContext;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -138,6 +139,7 @@ final class TokenAuthenticatorTest extends WebTestCase
             self::assertResponseStatusCodeSame(401, $case);
             self::assertSame(['error' => TokenAuthenticator::REFUSAL_MESSAGE], $this->responseJson(), $case);
             self::assertResponseHeaderSame('WWW-Authenticate', 'Bearer', $case);
+            self::assertNull($this->tenantContext()->get(), $case);
             $this->assertNoCookieWasSet();
         }
 
@@ -184,6 +186,7 @@ final class TokenAuthenticatorTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(401);
         self::assertSame(['error' => TokenAuthenticator::REFUSAL_MESSAGE], $this->responseJson());
+        self::assertNull($this->tenantContext()->get(), 'the refused request left the token\'s organization as tenant');
         self::assertSame(['last_used_at' => null, 'revoked_at' => null], $this->usageOf($tokenId, $acmeFoods));
     }
 
@@ -206,7 +209,16 @@ final class TokenAuthenticatorTest extends WebTestCase
         self::assertResponseStatusCodeSame(401);
         self::assertSame(['error' => EnterChosenOrganization::NOT_A_MEMBER_OF_THE_TOKENS_ORGANIZATION], $this->responseJson());
         self::assertResponseHeaderSame('WWW-Authenticate', 'Bearer');
+        self::assertNull($this->tenantContext()->get(), 'the refused request left the token\'s organization as tenant');
         $this->assertNoCookieWasSet();
+    }
+
+    /**
+     * The client's kernel's, which the next main request would reset; read before it does.
+     */
+    private function tenantContext(): TenantContext
+    {
+        return $this->client->getContainer()->get(TenantContext::class);
     }
 
     private function assertNoCookieWasSet(): void

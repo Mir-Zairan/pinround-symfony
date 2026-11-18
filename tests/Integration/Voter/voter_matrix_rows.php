@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Conversation\Api\ConversationPermission;
+use App\Identity\UI\Voter\AdminNeedsBrowserSessionVoter;
 use App\Media\Api\MediaPermission;
 use App\Notification\Api\MutePermission;
 use App\Notification\Api\PingPermission;
@@ -35,8 +36,11 @@ use App\Workflow\Api\WorkflowPermission;
  * expected:  granted or denied.
  * twoStepProof: optional; decides for a person whose two-step login is on. true: they typed a code in this session 30
  *            minutes ago, within the 1 hour admin pages allow; an int: the code is that many seconds old; 'noCode': no
- *            code in this session. Without the option the person has no two-step login and no session. Every person's
- *            token is a password session.
+ *            code in this session. Without the option the person has no two-step login and no session.
+ * login:     optional; 'password session' (the default), or 'personal access token' for a request TokenAuthenticator
+ *            logged in with a token of the actor's organization.
+ * refusalReason: optional, for a denied row; text the denying votes must give, so the row fails when another voter
+ *            denies it in place of the one it is about.
  *
  * A row proves a team-role rule only when its actor has no org role that grants the same: Lena and Ben are Admins and
  * Raj is a Manager, so their TEAM_VIEW rows cite the org-role text; Noor (Lead) and Mia (Member, Viewer) carry the
@@ -88,6 +92,8 @@ $adminPings = 'An admin with no team role may see every ticket in the org (inclu
 $useAsMainSummary = '| Use an explanation as main summary | — | — | ✅ | ⚠️ if reporter | — | ⚠️ if reporter |';
 $seeForEveryoneTickets = '| See tickets (visibility "all") | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $invitationLinks = 'an invitation is accepted only by the account with the invited email, logged in, or by a logged-out person when nobody has an account with that email yet.';
+
+$adminNeedsABrowserSession = 'Admin pages and admin actions never accept a token';
 
 $seeADraftRound = '| See a draft round |';
 $editADraftRound = '| Start / edit / share a draft round |';
@@ -167,6 +173,26 @@ return [
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AdminPermission::AI, 'actor' => 'Raj', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+
+    // Each admin with a fresh code proof: the password session is granted (ADMIN_AREA and ADMIN_AI above), the token denied.
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminPages, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'granted', 'twoStepProof' => true],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => OrganizationPermission::ADMIN, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => OrganizationPermission::INVITE, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => AdminPermission::AREA, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => AdminPermission::AREA, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => AdminPermission::AREA, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => AdminPermission::AI, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => AdminPermission::AI, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
+    ['source' => $adminNeedsABrowserSession, 'attribute' => AdminPermission::AI, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'denied', 'twoStepProof' => true, 'login' => 'personal access token', 'refusalReason' => AdminNeedsBrowserSessionVoter::REFUSAL_REASON],
 
     ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Shop', 'expected' => 'granted'],
     ['source' => $teamsAtAGlance, 'attribute' => TeamPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Mobile', 'expected' => 'granted'],
