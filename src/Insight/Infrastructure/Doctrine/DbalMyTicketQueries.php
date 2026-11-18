@@ -20,8 +20,7 @@ use Doctrine\DBAL\Connection;
  * One query: the viewer's turn rows and the rows that name them as assignee, under the visibility predicate on the
  * row's copied columns, joined by primary key to Ticketing's view tkt_ticket_list_v for the key, title, step, asker
  * and last change (the one cross-module join ADR-0015 allows). One row past the limit tells whether more exist.
- * assignee_id has no index on ins_ticket_turn, so the assignee half reads the organization's open turn rows; they are
- * one per open ticket, and the MCP tool limits its calls per token.
+ * The turn half reads ins_ticket_turn_turn_user_id_base_score_idx and the assignee half ins_ticket_turn_assignee_id_idx.
  */
 final readonly class DbalMyTicketQueries implements MyTicketQueries
 {
