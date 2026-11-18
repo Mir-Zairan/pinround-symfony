@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\SharedKernel\Infrastructure\Scheduler;
 
 use App\SharedKernel\Infrastructure\Scheduler\DefaultSchedule;
+use App\SharedKernel\Infrastructure\Scheduler\DefaultScheduleLock;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
@@ -112,7 +113,7 @@ final class DefaultScheduleTest extends TestCase
 
     private function newGenerator(): MessageGenerator
     {
-        $schedule = new DefaultSchedule($this->state, $this->lockFactory)->getSchedule()
+        $schedule = new DefaultSchedule($this->state, new DefaultScheduleLock($this->lockFactory))->getSchedule()
             ->add(RecurringMessage::every('1 day', new \stdClass()));
 
         return new MessageGenerator($schedule, 'default', $this->clock);

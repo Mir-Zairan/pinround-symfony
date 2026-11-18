@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\SharedKernel\Infrastructure\Scheduler;
 
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Scheduler\Attribute\AsSchedule;
 use Symfony\Component\Scheduler\Schedule;
 use Symfony\Component\Scheduler\ScheduleProviderInterface;
@@ -22,13 +21,10 @@ use Symfony\Contracts\Cache\CacheInterface;
 #[AsSchedule('default')]
 final readonly class DefaultSchedule implements ScheduleProviderInterface
 {
-    public const string LOCK_NAME = 'scheduler_default';
-
     public function __construct(
         #[Autowire(service: 'cache.scheduler')]
         private CacheInterface $state,
-        #[Autowire(service: 'lock.factory')]
-        private LockFactory $lockFactory,
+        private DefaultScheduleLock $lock,
     ) {
     }
 
@@ -37,7 +33,7 @@ final readonly class DefaultSchedule implements ScheduleProviderInterface
         // After a long stop, each job runs once for the runs it missed, not once per missed run.
         return new Schedule()
             ->stateful($this->state)
-            ->lock($this->lockFactory->createLock(self::LOCK_NAME))
+            ->lock($this->lock)
             ->processOnlyLastMissedRun(true);
     }
 }
