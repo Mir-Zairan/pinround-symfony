@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
-use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\MediaPermission;
 use App\Media\Api\UploadBeginLimit;
@@ -18,13 +18,9 @@ use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\OpenDraftQueries;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
-use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
-use App\Ticketing\Api\TicketPermission;
-use App\Ticketing\Api\TicketTurnQueries;
-use App\Ticketing\Api\TicketVisibilityFacts;
 use Mcp\Schema\Content\TextContent;
 use Mcp\Schema\Result\CallToolResult;
 use Mcp\Schema\Tool;
@@ -63,10 +59,9 @@ final readonly class CreateUpload implements AgentTool
     private const int MAX_MIME_LENGTH = 100;
 
     public function __construct(
-        private CurrentApiToken $currentApiToken,
         private CurrentUser $currentUser,
         private TicketKeyQueries $ticketKeyQueries,
-        private TicketTurnQueries $ticketTurnQueries,
+        private TicketVisibilityCheck $ticketVisibilityCheck,
         private OpenDraftQueries $openDraftQueries,
         private RoundCommands $roundCommands,
         private Uploads $uploads,
@@ -126,7 +121,7 @@ final readonly class CreateUpload implements AgentTool
         if (null === $draft) {
             return new ToolTarget(RoundPermission::DRAFT_CREATE, $ticketId, self::TICKET_AUDIT_TYPE, $ticketId->toString());
         }
-        $this->refuseUnlessTicketVisible($ticketId);
+        $this->ticketVisibilityCheck->refuseUnlessVisible($ticketId);
 
         return new ToolTarget(MediaPermission::UPLOAD, new UploadTarget(self::ROUND_UPLOAD_KIND, $draft->roundId), self::ROUND_AUDIT_TYPE, $draft->roundId);
     }
@@ -156,7 +151,7 @@ final readonly class CreateUpload implements AgentTool
             throw new \LogicException('The input schema lets create_upload run only with "bytes" as an integer.');
         }
         try {
-            $slot = $this->uploads->begin($this->organizationId(), $callerId, $uploadTarget, self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
+            $slot = $this->uploads->begin($this->ticketVisibilityCheck->callerOrganizationId(), $callerId, $uploadTarget, self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
         } catch (UploadRefused $refused) {
             throw ToolRefusal::refused($refused->getMessage());
         } catch (UploadTargetDenied) {
@@ -198,29 +193,6 @@ final readonly class CreateUpload implements AgentTool
         }
 
         return $uploadTarget;
-    }
-
-    /**
-     * MediaPermission UPLOAD grants an unshared draft to its owner without reading the ticket, so the ticket is asked
-     * here, as set_verdict asks it.
-     *
-     * @throws ToolRefusal not found, for a ticket Ticketing does not read or TicketPermission VIEW denies
-     */
-    private function refuseUnlessTicketVisible(TicketId $ticketId): void
-    {
-        $ticket = $this->ticketTurnQueries->factsOf($ticketId) ?? throw ToolRefusal::notFound();
-        if (!$this->authorizationChecker->isGranted(TicketPermission::VIEW, TicketVisibilityFacts::ofSnapshot($this->organizationId(), $ticket))) {
-            throw ToolRefusal::notFound();
-        }
-    }
-
-    /**
-     * @throws \LogicException when the request has no personal access token, which the api_token firewall never lets
-     *                         through
-     */
-    private function organizationId(): OrganizationId
-    {
-        return ($this->currentApiToken->access() ?? throw new \LogicException('create_upload ran without a personal access token.'))->organizationId;
     }
 
     /**

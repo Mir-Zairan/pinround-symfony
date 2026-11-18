@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
-use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\CompletedUpload;
 use App\Media\Api\MediaImageStatus;
@@ -23,7 +23,6 @@ use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
-use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
 use Mcp\Schema\Content\TextContent;
@@ -35,7 +34,9 @@ use Psr\Clock\ClockInterface;
 /**
  * add_screenshot (P09.T5 step 3, FR-RND-16): puts a picture the caller uploaded through create_upload into their own
  * unshared draft round of the ticket, with its title, summary and pins, through Review's DraftScreenshotCommands and the
- * voter of the draft round editor (RoundPermission). Holds no state (ADR-0008).
+ * voter of the draft round editor (RoundPermission), once TicketVisibilityCheck grants the ticket, as set_verdict and
+ * create_upload ask it: a ticket the caller may no longer see is not found, also for the draft's owner, and the upload
+ * stays unused. Holds no state (ADR-0008).
  *
  * The upload is finished with Media's UploadCompletions in the gate's savepoint. A picture still processing is a
  * non-error answer, not a refusal, so the completion is kept and the next call with the same upload_id finds it. Review
@@ -56,9 +57,9 @@ final readonly class AddScreenshot implements AgentTool
     private const int MAX_KEY_OR_ID_LENGTH = 64;
 
     public function __construct(
-        private CurrentApiToken $currentApiToken,
         private CurrentUser $currentUser,
         private TicketKeyQueries $ticketKeyQueries,
+        private TicketVisibilityCheck $ticketVisibilityCheck,
         private UploadCompletions $uploadCompletions,
         private RoundQueries $roundQueries,
         private DraftScreenshotCommands $draftScreenshotCommands,
@@ -113,17 +114,21 @@ final readonly class AddScreenshot implements AgentTool
     }
 
     /**
-     * Reads the ticket's id by its key, what the upload was begun for, and that round, one query each. The voter of an
-     * unshared draft is RoundPermission EDIT; of any other round VIEW, as call() refuses it as read-only.
+     * Reads the ticket's id by its key, the ticket as TicketPermission VIEW decides on it, what the upload was begun
+     * for, and that round, one query each. The ticket is asked here because RoundPermission grants an unshared draft
+     * to its owner without reading it. The voter of an unshared draft is RoundPermission EDIT; of any other round
+     * VIEW, as call() refuses it as read-only.
      *
-     * @throws ToolRefusal     not found for an unknown key, an upload the caller did not begin, one of another
-     *                         organization, one begun for anything but a round, or a round of another ticket
-     * @throws \LogicException when the request has no token or user
+     * @throws ToolRefusal     not found for an unknown key, a ticket the caller may not see, an upload the caller
+     *                         did not begin, one of another organization, one begun for anything but a round, or a
+     *                         round of another ticket
+     * @throws \LogicException when the request has no token or user, or Ticketing cannot read the ticket's team
      */
     public function targetOf(array $arguments): ToolTarget
     {
         $ticketId = $this->ticketKeyQueries->idOf(self::stringAt($arguments, 'key')) ?? throw ToolRefusal::notFound();
-        $uploadTarget = $this->uploadCompletions->targetOf($this->organizationId(), $this->callerId(), self::stringAt($arguments, 'upload_id'));
+        $this->ticketVisibilityCheck->refuseUnlessVisible($ticketId);
+        $uploadTarget = $this->uploadCompletions->targetOf($this->ticketVisibilityCheck->callerOrganizationId(), $this->callerId(), self::stringAt($arguments, 'upload_id'));
         if (null === $uploadTarget || DraftScreenshotCommands::UPLOAD_TARGET_KIND !== $uploadTarget->kind) {
             throw ToolRefusal::notFound();
         }
@@ -170,7 +175,7 @@ final readonly class AddScreenshot implements AgentTool
     private function completedUploadOf(string $uploadId): CompletedUpload
     {
         try {
-            return $this->uploadCompletions->completeInTransaction($this->organizationId(), $this->callerId(), $uploadId, $this->clock->now());
+            return $this->uploadCompletions->completeInTransaction($this->ticketVisibilityCheck->callerOrganizationId(), $this->callerId(), $uploadId, $this->clock->now());
         } catch (UploadIntentNotFound|UploadTargetDenied) {
             throw ToolRefusal::notFound();
         } catch (UploadRefused) {
@@ -247,16 +252,6 @@ final readonly class AddScreenshot implements AgentTool
             [new TextContent(json_encode($answer, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE))],
             structuredContent: $answer,
         );
-    }
-
-    /**
-     * @throws \LogicException when the request has no token, which the api_token firewall never lets through
-     */
-    private function organizationId(): OrganizationId
-    {
-        $access = $this->currentApiToken->access() ?? throw new \LogicException('add_screenshot ran without a personal access token.');
-
-        return $access->organizationId;
     }
 
     /**

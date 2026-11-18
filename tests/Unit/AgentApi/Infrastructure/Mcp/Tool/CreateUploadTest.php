@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -400,7 +401,6 @@ final class CreateUploadTest extends TestCase
         $fakes = $this->fakes;
 
         return new CreateUpload(
-            $fakes,
             new class($fakes) implements CurrentUser {
                 public function __construct(private readonly CreateUploadFakes $fakes)
                 {
@@ -417,7 +417,7 @@ final class CreateUploadTest extends TestCase
                 }
             },
             $fakes,
-            $fakes,
+            new TicketVisibilityCheck($fakes, $fakes, $fakes),
             $fakes,
             $fakes,
             $fakes,
