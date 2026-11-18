@@ -8,12 +8,14 @@ use App\Insight\Api\MyTicket;
 use App\Insight\Api\MyTicketQueries;
 use App\Insight\Api\MyTickets;
 use App\Insight\Api\TicketViewer;
+use App\Insight\Infrastructure\Doctrine\DbalMyTicketQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
+use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
@@ -242,6 +244,25 @@ final class DbalMyTicketQueriesTest extends KernelTestCase
             \LogicException::class,
             'My tickets are read under the viewer\'s own organization as tenant.',
         ));
+    }
+
+    /**
+     * The SQL and the viewer name Acme Foods while the database tenant is Beta Bakery, so only row-level security can
+     * hide Acme Foods' turn rows and tickets.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
+    {
+        $this->addTheTickets();
+        self::assertNotSame([], $this->myTicketsOf(self::lena(), 50)->tickets);
+
+        $myTickets = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackUnderAnotherContext(
+            self::BETA_BAKERY,
+            self::ACME_FOODS,
+            fn (Connection $connection): MyTickets => new DbalMyTicketQueries($connection, $this->tenantContext())->myTicketsOf(self::lena(), 50),
+        );
+
+        self::assertSame([[], false], [$myTickets->tickets, $myTickets->hasMore]);
     }
 
     /**
