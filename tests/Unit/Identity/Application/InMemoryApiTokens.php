@@ -119,6 +119,35 @@ final class InMemoryApiTokens implements ApiTokens
         return null !== $token && $token->userId()->equals($ownerId) ? $token : null;
     }
 
+    public function byId(string $id): ?ApiToken
+    {
+        $tokens = $this->tenantTokens();
+        if (!Uuid::isValid($id)) {
+            return null;
+        }
+
+        return $tokens[strtolower($id)] ?? null;
+    }
+
+    public function livePage(\DateTimeImmutable $at, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array
+    {
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A page of tokens holds at least one.');
+        }
+        if ((null === $afterExpiresAt) !== (null === $afterId) || (null !== $afterId && !Uuid::isValid($afterId))) {
+            throw new \InvalidArgumentException('A page of tokens starts after both the expiry and the id of a token.');
+        }
+        $after = null === $afterExpiresAt || null === $afterId ? null : [self::cutToSecond($afterExpiresAt), strtolower($afterId)];
+        $tokens = array_values(array_filter(
+            $this->tenantTokens(),
+            fn (ApiToken $token): bool => $this->isLive($token, self::cutToSecond($at))
+                && (null === $after || [self::cutToSecond($token->expiresAt()), strtolower($token->id())] > $after),
+        ));
+        usort($tokens, static fn (ApiToken $a, ApiToken $b): int => [self::cutToSecond($a->expiresAt()), strtolower($a->id())] <=> [self::cutToSecond($b->expiresAt()), strtolower($b->id())]);
+
+        return \array_slice($tokens, 0, $limit);
+    }
+
     public function forUser(UserId $userId): array
     {
         $tokens = array_values(array_filter($this->tenantTokens(), static fn (ApiToken $token): bool => $token->userId()->equals($userId)));

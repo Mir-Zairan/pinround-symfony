@@ -58,5 +58,34 @@
                 {% endif %}
             {% endif %}
         </section>
+
+        <section class="people__tokens" aria-labelledby="people-tokens-title">
+            <h2 class="admin-tab__heading" id="people-tokens-title">API tokens</h2>
+            <p>Tokens that work now, the first to stop working at the top. Revoke one to stop it at once.</p>
+            {% if liveTokens is empty %}
+                <twig:EmptyState message="No API tokens work now."/>
+            {% else %}
+                <ul class="people__list">
+                    {% for token in liveTokens %}
+                        <li class="people__row people__token-row" data-token-id="{{ token.id }}">
+                            <span class="people__token-owner">{{ tokenOwnerNames[token.ownerId.toString] ?? 'Unknown person' }}</span>
+                            <span class="people__sub">
+                                {{ token.name }} · <code>{{ token.prefix }}…</code>
+                                · Works until {{ token.expiresAt|date('j M Y', app.user.timeZone) }}
+                            </span>
+                            <form class="people__revoke" method="post" action="{{ path('organization_admin_people_token_revoke', {id: token.id}) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token(revokeTokenCsrfId) }}">
+                                <twig:Button type="submit" variant="outline">Revoke</twig:Button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+                {% if tokensNextPage %}
+                    <div class="people__more">
+                        <twig:Button href="{{ path('organization_admin_people', tokensNextPage) }}" variant="outline">Show more</twig:Button>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </section>
     </div>
 {% endblock %}
