@@ -426,6 +426,17 @@ when@test:
         test.media_uploaded_media:
             alias: App\Media\Api\UploadedMedia
             public: true
+        # Nothing issues or checks a token before the P09.T1 token page and the token authenticator; ApiTokenWiringTest
+        # gets them as those will.
+        test.identity_api_token_hashing:
+            alias: App\Identity\Domain\ApiTokenHashing
+            public: true
+        test.identity_api_tokens:
+            alias: App\Identity\Domain\ApiTokens
+            public: true
+        test.identity_issue_api_token:
+            alias: App\Identity\Application\IssueApiToken
+            public: true
         # The container drops a private service no test asks for; the integration tests get the Api as a page does.
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries

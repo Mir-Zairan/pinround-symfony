@@ -13,6 +13,9 @@ use App\SharedKernel\Domain\UserId;
  */
 interface ApiTokens
 {
+    /** How many tokens forUser() lists at most: the newest ones. */
+    public const int MAX_LISTED_TOKENS = 50;
+
     /**
      * A new id no token has yet: a UUIDv7 (ADR-0006).
      */
@@ -44,9 +47,10 @@ interface ApiTokens
     public function byIdForOwner(string $id, UserId $ownerId): ?ApiToken;
 
     /**
-     * Every token of the user in the tenant, revoked and expired ones included, newest first.
+     * The user's MAX_LISTED_TOKENS newest tokens in the tenant, revoked and expired ones included, newest first (by
+     * created_at, then the later id). Older ones are left out, a live one too when 50 newer tokens were made since.
      *
-     * @return list<ApiToken>
+     * @return list<ApiToken> at most MAX_LISTED_TOKENS
      */
     public function forUser(UserId $userId): array;
 

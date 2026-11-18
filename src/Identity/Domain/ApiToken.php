@@ -22,8 +22,13 @@ final class ApiToken implements TenantOwned
     public const int NAME_MAX_LENGTH = 100;
     public const int DISPLAY_PREFIX_LENGTH = 8;
     private const int RANDOM_BYTES = 32;
-    // C0/C1 controls and the Unicode line and paragraph separators, which would break a line in a log or a header.
-    private const string LINE_BREAKING_OR_CONTROL = '/[\p{Cc}\p{Zl}\p{Zp}]/u';
+    // Any Unicode space, the no-break and ideographic ones included, which trim() leaves in place.
+    private const string SPACE_AT_EDGES = '/\A[\p{Z}\s]+|[\p{Z}\s]+\z/u';
+    // A character that shows: a name of only spaces and zero-width or byte order marks reads as blank in a list.
+    private const string VISIBLE_CHARACTER = '/[^\p{Z}\s\p{Cf}]/u';
+    // C0/C1 controls, the Unicode line and paragraph separators, which would break a line in a log or a header, and
+    // format characters (zero-width, bidirectional overrides), which would make a name look like another one.
+    private const string LINE_BREAKING_CONTROL_OR_FORMAT = '/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
 
     private readonly string $organizationId;
     private readonly string $id;
@@ -59,19 +64,24 @@ final class ApiToken implements TenantOwned
      * "pr_" and 32 random bytes in base64url; it is in the result only and never kept.
      *
      * @param string              $id     a UUID from ApiTokens::nextIdentity()
-     * @param string              $name   what the user calls it; trimmed, 1 to NAME_MAX_LENGTH characters, one line
+     * @param string              $name   what the user calls it; Unicode space trimmed, 1 to NAME_MAX_LENGTH characters,
+     *                                    one line
      * @param list<ApiTokenScope> $scopes at least one; repeats count once
      *
-     * @throws InvalidApiToken when the name is blank, too long or has a control character or line break, no scope is
-     *                         given, or $lifetimeDays is not between 1 and MAX_LIFETIME_DAYS
+     * @throws InvalidApiToken when the name is blank (only spaces and format characters counts as blank), too long or
+     *                         has a control character, a format character or a line break, no scope is given, or
+     *                         $lifetimeDays is not between 1 and MAX_LIFETIME_DAYS
      */
     public static function issue(string $id, OrganizationId $organizationId, UserId $userId, string $name, array $scopes, ApiTokenHashing $hashing, \DateTimeImmutable $issuedAt, int $lifetimeDays = self::DEFAULT_LIFETIME_DAYS): IssuedApiToken
     {
-        $trimmedName = trim($name);
-        if ('' === $trimmedName) {
+        $trimmedName = mb_check_encoding($name, 'UTF-8') ? preg_replace(self::SPACE_AT_EDGES, '', $name) : null;
+        if (null === $trimmedName) {
+            throw new InvalidApiToken('A token name is one line of plain text.');
+        }
+        if (1 !== preg_match(self::VISIBLE_CHARACTER, $trimmedName)) {
             throw new InvalidApiToken('Give the token a name.');
         }
-        if (!mb_check_encoding($trimmedName, 'UTF-8') || 1 === preg_match(self::LINE_BREAKING_OR_CONTROL, $trimmedName)) {
+        if (1 === preg_match(self::LINE_BREAKING_CONTROL_OR_FORMAT, $trimmedName)) {
             throw new InvalidApiToken('A token name is one line of plain text.');
         }
         if (mb_strlen($trimmedName) > self::NAME_MAX_LENGTH) {

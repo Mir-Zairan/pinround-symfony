@@ -100,6 +100,7 @@ final readonly class DoctrineApiTokens implements ApiTokens
             'SELECT t FROM '.ApiToken::class.' t WHERE t.userId = :userId ORDER BY t.createdAt DESC, t.id DESC',
         )
             ->setParameter('userId', $userId->toString())
+            ->setMaxResults(self::MAX_LISTED_TOKENS)
             ->getResult();
 
         return $tokens;

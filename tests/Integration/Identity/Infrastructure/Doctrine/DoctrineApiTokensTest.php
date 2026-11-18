@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Identity\Infrastructure\Doctrine;
 
 use App\Identity\Domain\ApiToken;
+use App\Identity\Domain\ApiTokens;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Infrastructure\Doctrine\DoctrineApiTokens;
 use App\Identity\Infrastructure\Security\HmacApiTokenHashing;
@@ -119,6 +120,39 @@ final class DoctrineApiTokensTest extends KernelTestCase
         ));
 
         self::assertSame([self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER, self::OMAR_EXPIRED], $listed);
+    }
+
+    /**
+     * 49 more of Omar's tokens, 1.5 to 49.5 hours before ISSUED_AT, added in a shuffled order: with the four of setUp
+     * that is 53, and the three oldest (49.5 and 48.5 hours back, and the one of 2020) are left out.
+     */
+    #[Test]
+    public function onlyTheNewestFiftyTokensAreListedNewestFirst(): void
+    {
+        $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
+        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
+            for ($i = 0; $i < 49; ++$i) {
+                $hoursBack = ($i * 17) % 49 + 1;
+                $this->add(self::extraTokenId($hoursBack), self::ACME_FOODS, self::OMAR, $issuedAt->modify(\sprintf('-%d minutes', $hoursBack * 60 + 30)));
+            }
+        });
+
+        $listed = $this->asAcmeFoods(fn (): array => array_map(
+            static fn (ApiToken $token): string => $token->id(),
+            $this->tokens()->forUser(new UserId(self::OMAR)),
+        ));
+
+        self::assertCount(ApiTokens::MAX_LISTED_TOKENS, $listed);
+        self::assertSame(
+            [
+                self::OMAR_SAME_SECOND,
+                self::OMAR_LIVE,
+                ...array_map(self::extraTokenId(...), range(1, 23)),
+                self::OMAR_OLDER,
+                ...array_map(self::extraTokenId(...), range(24, 47)),
+            ],
+            $listed,
+        );
     }
 
     #[Test]
@@ -278,6 +312,11 @@ final class DoctrineApiTokensTest extends KernelTestCase
         $issued = ApiToken::issue($id, new OrganizationId($organizationId), new UserId($userId), 'Claude Code', ApiTokenScope::claudeCodeDefaults(), new HmacApiTokenHashing(self::PEPPER), $issuedAt, $lifetimeDays);
         $this->tokens()->add($issued->token());
         $this->plainTokens[$id] = $issued->reveal();
+    }
+
+    private static function extraTokenId(int $hoursBack): string
+    {
+        return \sprintf('0197a3c0-0000-7000-8001-0000000000%02d', $hoursBack);
     }
 
     private function hashOf(string $tokenId): string

@@ -139,6 +139,11 @@ final class ApiTokenTest extends TestCase
     public static function refusedNames(): iterable
     {
         yield 'blank' => ["  \t ", 'Give the token a name.'];
+        yield 'only no-break spaces' => ["\u{00A0}\u{00A0}", 'Give the token a name.'];
+        yield 'only zero-width spaces' => ["\u{200B}\u{200B}", 'Give the token a name.'];
+        yield 'an ideographic space and a byte order mark' => ["\u{3000}\u{FEFF}", 'Give the token a name.'];
+        yield 'a right-to-left override' => ["laptop\u{202E}nimda", 'A token name is one line of plain text.'];
+        yield 'a zero-width space inside' => ["lap\u{200B}top", 'A token name is one line of plain text.'];
         yield 'a newline' => ["laptop\nadmin", 'A token name is one line of plain text.'];
         yield 'a carriage return' => ["laptop\radmin", 'A token name is one line of plain text.'];
         yield 'an escape' => ["laptop\e[31m", 'A token name is one line of plain text.'];
@@ -167,6 +172,12 @@ final class ApiTokenTest extends TestCase
     public function aPastedNameLosesItsTrailingLineEnd(): void
     {
         self::assertSame('Claude Code', self::issue(name: "Claude Code\r\n")->token()->name());
+    }
+
+    #[Test]
+    public function unicodeSpaceIsTrimmedFromTheEdgesButKeptInside(): void
+    {
+        self::assertSame("Claude\u{00A0}Code", self::issue(name: "\u{00A0}\u{3000}Claude\u{00A0}Code\u{2003} ")->token()->name());
     }
 
     /**
