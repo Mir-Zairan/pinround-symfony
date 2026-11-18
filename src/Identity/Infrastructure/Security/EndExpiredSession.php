@@ -16,7 +16,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * 8), so the firewall finds no token in the emptied session and the request goes on like any logged-out one: the login
  * page, or a redirect to it. The session's metadata gives both times; the login's session migration restamps its
  * creation time, so the absolute limit counts from the login. A request under a firewall without security (the
- * health probes) is left alone, so it never opens the session in Valkey.
+ * health probes) or a stateless one (the personal access token paths, which ignore the cookie) is left alone, so it
+ * never opens the session in Valkey.
  */
 #[AsEventListener(event: KernelEvents::REQUEST, priority: 9)]
 final readonly class EndExpiredSession
@@ -35,8 +36,9 @@ final readonly class EndExpiredSession
     public function __invoke(RequestEvent $event): void
     {
         $request = $event->getRequest();
+        $firewallConfig = $this->firewallMap->getFirewallConfig($request);
         if (!$event->isMainRequest() || !$request->hasPreviousSession()
-            || true !== $this->firewallMap->getFirewallConfig($request)?->isSecurityEnabled()) {
+            || true !== $firewallConfig?->isSecurityEnabled() || $firewallConfig->isStateless()) {
             return;
         }
 

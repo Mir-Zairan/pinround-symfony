@@ -36,4 +36,22 @@ interface LoginAssurance
      *              (isPasswordSession) and when the request has no session
      */
     public function hasConfirmedTwoStepLoginWithin(mixed $token, int $seconds): bool;
+
+    /**
+     * @param mixed $token the security token a voter decides on
+     *
+     * @return bool true when a personal access token authenticated it (the /mcp and /api/v1 firewall); false for a
+     *              browser session and anything else
+     */
+    public function isTokenAuthenticated(mixed $token): bool;
+
+    /**
+     * For the scope checks of the MCP tools and the REST API (ADR-0021).
+     *
+     * @param mixed $token the security token of the request, or the one a voter decides on
+     *
+     * @return ApiTokenAccess|null the organization and scopes of the personal access token that authenticated it; null
+     *                             whenever isTokenAuthenticated() is false
+     */
+    public function apiTokenAccessOf(mixed $token): ?ApiTokenAccess;
 }
