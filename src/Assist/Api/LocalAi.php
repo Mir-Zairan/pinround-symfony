@@ -84,8 +84,9 @@ interface LocalAi
      *
      * @throws MainSummaryRefused not_a_proposal when $packageId is not the ticket's proposal (unknown, another
      *                            ticket's or organization's, made the main summary already, or not the newest), and
-     *                            nothing changed; summary_rejected when Ticketing refuses the text as a summary, after
-     *                            the result was marked, so the caller must roll its transaction back
+     *                            nothing changed; summary_rejected when Ticketing refuses the text as a summary, and
+     *                            the mark is rolled back to a savepoint, so nothing changed and the caller may commit
+     * @throws \LogicException    when no transaction is open; nothing is read or written
      */
     public function makeMainSummary(LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, UserId $chooserId, OrganizationId $organizationId): void;
 }

@@ -173,8 +173,8 @@ final class SummaryController extends AbstractController
     }
 
     /**
-     * Runs without the request transaction: LocalAi::makeMainSummary marks the result before Ticketing checks its
-     * text, so a refusal must leave Transactions::run, which rolls the mark back, before it is answered.
+     * Runs without the request transaction, so the result is made the main summary, or nothing changed, before the
+     * answer: a refusal leaves Transactions::run rolled back as a whole.
      */
     #[Route('/t/{key}/summary/laptop/{packageId}', name: self::MAIN_SUMMARY_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function chooseMainSummary(string $key, string $packageId, Request $request): Response

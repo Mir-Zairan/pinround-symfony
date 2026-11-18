@@ -21,6 +21,7 @@ use App\Assist\Application\PromptRenderer;
 use App\Assist\Infrastructure\Uid\UuidV7LocalPackageIds;
 use App\Audit\Api\AuditLog;
 use App\Organization\Api\MemberNameQueries;
+use App\SharedKernel\Application\Savepoints;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -805,6 +806,7 @@ final class LocalAiServiceTest extends KernelTestCase
             $container->get(MemberNameQueries::class),
             $container->get(AuditLog::class),
             $container->get(Transactions::class),
+            $container->get(Savepoints::class),
             $summaryCommands,
             $container->get(\Psr\Clock\ClockInterface::class),
         );

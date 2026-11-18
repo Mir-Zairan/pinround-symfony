@@ -24,6 +24,7 @@ use App\Audit\Api\AuditEntry;
 use App\Audit\Api\AuditLog;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\MemberNameQueries;
+use App\SharedKernel\Application\Savepoints;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -57,6 +58,7 @@ final readonly class LocalAiService implements LocalAi
         private MemberNameQueries $memberNameQueries,
         private AuditLog $auditLog,
         private Transactions $transactions,
+        private Savepoints $savepoints,
         private TicketSummaryCommands $ticketSummaryCommands,
         private ClockInterface $clock,
     ) {
@@ -69,23 +71,27 @@ final readonly class LocalAiService implements LocalAi
 
     public function makeMainSummary(LocalPackageId $packageId, TicketId $ticketId, ?\DateTimeImmutable $currentSummaryCreatedAt, UserId $chooserId, OrganizationId $organizationId): void
     {
-        $madeMainAt = $this->clock->now();
-        $posted = $this->localPackages->markMadeMain($organizationId, $packageId, $ticketId, $currentSummaryCreatedAt, $madeMainAt)
-            ?? throw MainSummaryRefused::notAProposal();
-        try {
-            $this->ticketSummaryCommands->storeChosenLaptopSummary(
-                $organizationId,
-                $ticketId,
-                $posted->result->text,
-                $posted->result->posterId,
-                $posted->result->model->value,
-                $posted->promptVersion,
-                $chooserId,
-                $madeMainAt,
-            );
-        } catch (GeneratedSummaryRefused $refused) {
-            throw MainSummaryRefused::summaryRejected($refused->getMessage());
-        }
+        // The mark comes before Ticketing checks the text, so a refusal rolls it back here: a caller that catches the
+        // refusal and commits keeps the result a proposal.
+        $this->savepoints->run(function () use ($packageId, $ticketId, $currentSummaryCreatedAt, $chooserId, $organizationId): void {
+            $madeMainAt = $this->clock->now();
+            $posted = $this->localPackages->markMadeMain($organizationId, $packageId, $ticketId, $currentSummaryCreatedAt, $madeMainAt)
+                ?? throw MainSummaryRefused::notAProposal();
+            try {
+                $this->ticketSummaryCommands->storeChosenLaptopSummary(
+                    $organizationId,
+                    $ticketId,
+                    $posted->result->text,
+                    $posted->result->posterId,
+                    $posted->result->model->value,
+                    $posted->promptVersion,
+                    $chooserId,
+                    $madeMainAt,
+                );
+            } catch (GeneratedSummaryRefused $refused) {
+                throw MainSummaryRefused::summaryRejected($refused->getMessage());
+            }
+        });
     }
 
     public function package(LocalAiPurpose $purpose, TicketId $ticketId, UserId $requesterId, OrganizationId $organizationId): PromptPackage

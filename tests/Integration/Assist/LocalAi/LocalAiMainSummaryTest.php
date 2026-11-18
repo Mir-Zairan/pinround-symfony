@@ -156,23 +156,39 @@ final class LocalAiMainSummaryTest extends KernelTestCase
         self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30'], $this->madeMainTimes());
     }
 
+    /**
+     * The caller catches the refusal and commits, as a page that shows it would: the mark made before Ticketing
+     * refused the text is undone by makeMainSummary itself. A result stored with a control character stands for one
+     * Ticketing refuses, as accept() lets none through.
+     */
     #[Test]
-    public function aResultTicketingRefusesAsASummaryIsRefusedForItsRuleAndTheRollbackKeepsItTheProposal(): void
+    public function aResultTicketingRefusesAsASummaryIsRefusedForItsRuleAndStaysTheProposalWhenTheCallerCommits(): void
     {
-        $this->addResult(self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000f9a37', self::SHOP_7, '2027-03-15 10:06:00', str_repeat('a', 2001));
+        $refusedPackage = '0197a3c0-0000-7000-8000-0000000f9a37';
+        $this->addResult(self::ACME_FOODS, $refusedPackage, self::SHOP_7, '2027-03-15 10:06:00', "Pay does nothing\u{0007} on the last step.");
 
-        try {
-            $this->makeMainSummary('0197a3c0-0000-7000-8000-0000000f9a37', self::SHOP_7, self::SUMMARY_WRITTEN_AT);
-            self::fail('A result longer than a summary may be was made the main summary.');
-        } catch (MainSummaryRefused $refusal) {
-            self::assertSame(MainSummaryRefused::SUMMARY_REJECTED, $refusal->refusalCode);
-            self::assertSame('A summary has at most 2000 characters.', $refusal->getMessage());
-        }
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($refusedPackage): ?MainSummaryRefused {
+            try {
+                $this->localAi()->makeMainSummary(
+                    new LocalPackageId($refusedPackage),
+                    new TicketId(self::SHOP_7),
+                    new \DateTimeImmutable(self::SUMMARY_WRITTEN_AT),
+                    new UserId(self::LENA),
+                    new OrganizationId(self::ACME_FOODS),
+                );
+            } catch (MainSummaryRefused $refusal) {
+                return $refusal;
+            }
 
+            return null;
+        });
+
+        self::assertNotNull($refusal, 'A result Ticketing refuses was made the main summary.');
+        self::assertSame(MainSummaryRefused::SUMMARY_REJECTED, $refusal->refusalCode);
+        self::assertSame('A summary is plain UTF-8 text; this one holds a control character or is not UTF-8.', $refusal->getMessage());
         self::assertSame([self::CURRENT_SUMMARY_ROW], $this->summaryRows()->of(self::ACME_FOODS, self::SHOP_7));
         self::assertSame([self::MADE_MAIN => '2027-03-15 10:03:30'], $this->madeMainTimes());
-        self::getContainer()->get('doctrine')->resetManager();
-        self::assertSame('0197a3c0-0000-7000-8000-0000000f9a37', $this->proposalOf(self::SHOP_7, self::SUMMARY_WRITTEN_AT)?->packageId->toString());
+        self::assertSame($refusedPackage, $this->proposalOf(self::SHOP_7, self::SUMMARY_WRITTEN_AT)?->packageId->toString());
     }
 
     private function assertRefusedAsNotAProposal(string $packageId, string $ticketId): void
