@@ -172,6 +172,27 @@ final class DbalDraftScreenshotOfTest extends KernelTestCase
     }
 
     /**
+     * draftScreenshotOf's join with its organization conditions taken out, run as pinround_app: row-level security
+     * alone hides Beta Bakery's draft on Acme's ticket id from Acme Foods as tenant, and Beta's own tenant gets it.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsDraftOnTheTicketId(): void
+    {
+        $draftsAs = static fn (string $organizationId): array => self::transactions()->rolledBackAs($organizationId, static fn (): array => [
+            self::connection()->fetchOne('SELECT current_user'),
+            self::connection()->fetchFirstColumn(
+                'SELECT round.id FROM rvw_screenshot AS screenshot JOIN rvw_round AS round ON round.id = screenshot.round_id'
+                .' WHERE screenshot.id = ANY(CAST(:screenshots AS uuid[])) AND round.ticket_id = CAST(:ticket AS uuid)'
+                ." AND round.kind = 'draft' ORDER BY round.id",
+                ['screenshots' => '{'.self::OMARS_SHOT.','.self::BAKERY_SHOT.'}', 'ticket' => self::TICKET],
+            ),
+        ]);
+
+        self::assertSame(['pinround_app', [self::OMARS_DRAFT]], $draftsAs(self::ACME_FOODS));
+        self::assertSame(['pinround_app', [self::BAKERY_DRAFT]], $draftsAs(self::BETA_BAKERY));
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function malformedScreenshotIds(): iterable
