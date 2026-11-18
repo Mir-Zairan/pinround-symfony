@@ -23,8 +23,9 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
  * The ticket page's "The ask" (ticket-page.md): the current summary with its source note and the earlier summaries in
  * a lazy frame, or the ask's text cut at ASK_CUT_LENGTH with "Summarize with AI". Ticketing's page embeds it by name, as
  * its UI may not use Assist's Api (deptrac.yaml). On the page it renders idle from the TicketPageView and the viewer's
- * AI policy, which the header's Local AI chip has read already, and adds one indexed read to the page's budget
- * (performance-and-scale.md): the laptop summary proposal shown under the summary. SummaryController renders it again
+ * AI policy, which the header's Local AI chip has read already; in an organization whose AI runs on laptops it adds one
+ * indexed read to the page's budget (performance-and-scale.md): the laptop summary proposal shown under the summary.
+ * SummaryController renders it again
  * in the FRAME_ID frame with the latest request state.
  */
 #[AsTwigComponent(name: 'TheAsk', template: '@Assist/components/TheAsk.html.twig')]
@@ -75,10 +76,16 @@ final class TheAsk
 
     /**
      * The ticket's laptop summary proposal, which everyone who sees the ticket sees under its summary; one indexed read
-     * (LocalAi::proposalOf), so the template asks for it once.
+     * (LocalAi::proposalOf), so the template asks for it once. None in an organization whose AI runs in the cloud,
+     * which reads nothing: the page budget of a cloud organization stays as before laptop AI.
      */
     public function proposal(): ?LocalResult
     {
+        // The organization's setting, not this viewer's permission: everyone who sees the ticket sees the proposal.
+        if (PolicyView::WHERE_CLOUD === $this->viewerAiPolicy->policy()->whereAiRuns) {
+            return null;
+        }
+
         return $this->localAi->proposalOf($this->ticket->id, $this->ticket->currentSummary?->createdAt, $this->ticket->visibilityFacts->organizationId);
     }
 
