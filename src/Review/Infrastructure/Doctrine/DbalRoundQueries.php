@@ -16,6 +16,7 @@ use App\Review\Api\SharedRoundNotes;
 use App\Review\Api\TicketRounds;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\Domain\RoundId;
+use App\Review\Domain\ScreenshotId;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -29,9 +30,9 @@ use Doctrine\DBAL\Connection;
  * The rounds of a ticket from rvw_round, rvw_screenshot and rvw_pin through DBAL, after Ticketing's batch visibility
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
- * no screenshot or a screenshot with no pin costs no query. accessFactsOf, roundNotes and sharedRoundNotes send one query
- * each and make no visibility check: the first leaves the decision to RoundVoter, the second reads only the owner's own
- * draft, and the third leaves it to the caller's TicketVoter and RoundVoter. draftOf reads one draft of its owner with
+ * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, roundNotes and
+ * sharedRoundNotes send one query each and make no visibility check: the first two leave the decision to RoundVoter,
+ * the third reads only the owner's own draft, and the last leaves it to the caller's TicketVoter and RoundVoter. draftOf reads one draft of its owner with
  * its screenshots and pins, and needs none either.
  */
 final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
@@ -131,6 +132,38 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             null === $sharedAt ? null : new \DateTimeImmutable($sharedAt),
             self::text($roundRow['state'], 'state'),
             $this->screenshotsOf($organizationId->toString(), [$draftId])[$draftId] ?? [],
+        );
+    }
+
+    public function draftScreenshotOf(TicketId $ticketId, string $screenshotId): ?RoundAccessFacts
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        try {
+            $id = new ScreenshotId($screenshotId);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        // Both tables by their primary key (organization_id, id); the round conditions only filter that one row.
+        $roundRow = $this->connection->fetchAssociative(
+            'SELECT round.id, round.owner_id, round.shared_at IS NULL AS is_unshared_draft, round.deleted_at IS NOT NULL AS is_deleted'
+            .' FROM rvw_screenshot AS screenshot'
+            .' JOIN rvw_round AS round ON round.organization_id = screenshot.organization_id AND round.id = screenshot.round_id'
+            .' WHERE screenshot.organization_id = CAST(:organization AS uuid) AND screenshot.id = CAST(:screenshot AS uuid)'
+            ." AND round.ticket_id = CAST(:ticket AS uuid) AND round.kind = 'draft'",
+            ['organization' => $organizationId->toString(), 'screenshot' => $id->toString(), 'ticket' => $ticketId->toString()],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+
+        return new RoundAccessFacts(
+            $organizationId,
+            self::text($roundRow['id'], 'id'),
+            $ticketId,
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            self::boolean($roundRow['is_unshared_draft'], 'is_unshared_draft'),
+            self::boolean($roundRow['is_deleted'], 'is_deleted'),
         );
     }
 

@@ -472,6 +472,11 @@ final class GetRoundNotesTest extends TestCase
                     throw new \LogicException('get_round_notes reads the draft through roundNotes.');
                 }
 
+                public function draftScreenshotOf(TicketId $ticketId, string $screenshotId): ?RoundAccessFacts
+                {
+                    throw new \LogicException('get_round_notes never looks a round up by its picture.');
+                }
+
                 public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes
                 {
                     return GetRoundNotesTest::TICKET === $ticketId->toString() && GetRoundNotesTest::OMAR === $owner->toString() ? $this->draftNotes : null;

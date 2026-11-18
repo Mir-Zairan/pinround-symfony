@@ -14,6 +14,7 @@ use App\Review\Api\ChecklistPermission;
 use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ChecklistRefused;
 use App\Review\Api\ChecklistView;
+use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundRefused;
@@ -149,9 +150,21 @@ final class SetVerdictTest extends TestCase
 
         self::assertSame(RoundPermission::EDIT, $target->voterAttribute);
         self::assertSame([SetVerdict::SCREENSHOT_AUDIT_TYPE, self::OMARS_SHOT], [$target->auditType, $target->auditId]);
-        $facts = $this->rounds->accessFactsOf(self::OMARS_DRAFT);
-        self::assertEquals($facts, $target->subject);
-        self::assertSame([self::SHOP_1], $this->rounds->ticketsRead);
+        self::assertEquals(new RoundAccessFacts(new OrganizationId(self::ACME_FOODS), self::OMARS_DRAFT, new TicketId(self::SHOP_1), new UserId(self::OMAR), true, false), $target->subject);
+        self::assertSame([[self::SHOP_1, strtoupper(self::OMARS_SHOT)]], $this->rounds->screenshotsLookedUp);
+    }
+
+    /**
+     * Review finds the draft whoever owns it; RoundPermission EDIT, which only its owner is granted, keeps it from the
+     * caller, and the gate answers that denial as not found.
+     */
+    #[Test]
+    public function aScreenshotOfAnotherPersonsUnsharedDraftIsLeftToRoundEditOnThatPersonsDraft(): void
+    {
+        $target = $this->setVerdict()->targetOf(['key' => 'SHOP-1', 'screenshot_id' => self::MIAS_SHOT, 'verdict' => 'looks_right']);
+
+        self::assertSame(RoundPermission::EDIT, $target->voterAttribute);
+        self::assertEquals(new RoundAccessFacts(new OrganizationId(self::ACME_FOODS), self::MIAS_DRAFT, new TicketId(self::SHOP_1), new UserId(self::MIA), true, false), $target->subject);
     }
 
     #[Test]
@@ -167,7 +180,6 @@ final class SetVerdictTest extends TestCase
         self::assertSame(ToolCallOutcome::ReadOnly, $refusal->outcome);
         self::assertSame(ToolRefusal::READ_ONLY, $refusal->getMessage());
         self::assertSame([], $this->roundCommands->verdictsSet);
-        self::assertSame([], $this->roundCommands->textsEdited);
     }
 
     /**
@@ -175,12 +187,12 @@ final class SetVerdictTest extends TestCase
      */
     public static function screenshotsNotFound(): iterable
     {
-        yield 'another person\'s unshared draft' => ['SHOP-1', self::MIAS_SHOT];
         yield 'a report screenshot, of no draft' => ['SHOP-1', self::REPORT_SHOT];
         yield 'the draft of another ticket key' => ['SHOP-2', self::OMARS_SHOT];
         yield 'an unknown key' => ['SHOP-9', self::OMARS_SHOT];
         yield 'a lowercase key' => ['shop-1', self::OMARS_SHOT];
         yield 'an unknown screenshot' => ['SHOP-1', '019a5f00-0000-7000-8000-00000000e659'];
+        yield 'a malformed screenshot id' => ['SHOP-1', self::OMARS_SHOT."\n"];
     }
 
     #[Test]
@@ -204,74 +216,78 @@ final class SetVerdictTest extends TestCase
 
     #[Test]
     #[DataProvider('verdictNames')]
-    public function theVerdictNameIsSavedAsTheRoundsOwnAndNoTextIsTouchedWithoutASummary(string $verdict, string $storedVerdict): void
+    public function theVerdictNameIsSavedAsTheRoundsOwnAndTheSummaryIsKeptWithoutOne(string $verdict, string $storedVerdict): void
     {
         $result = $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => $verdict]);
 
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::OMARS_SHOT, $storedVerdict]], $this->roundCommands->verdictsSet);
-        self::assertSame([], $this->roundCommands->textsEdited);
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::OMARS_SHOT, $storedVerdict, null]], $this->roundCommands->verdictsSet);
         $answer = ['screenshot_id' => self::OMARS_SHOT, 'verdict' => $verdict, 'verdict_label' => SetVerdict::VERDICT_LABELS[$verdict], 'summary_saved' => false];
         self::assertSame($answer, $result['structured']);
         self::assertSame(json_encode($answer, \JSON_THROW_ON_ERROR), $result['text']);
     }
 
-    #[Test]
-    public function aSummaryIsSavedAfterTheVerdictAndKeepsTheScreenshotsTitle(): void
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function summaries(): iterable
     {
-        $result = $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'not_right_yet', 'summary' => 'The total still adds the old delivery fee.']);
+        yield 'a summary' => ['The total still adds the old delivery fee.'];
+        yield 'an empty one, which removes it' => [''];
+    }
 
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::OMARS_SHOT, RoundCommands::VERDICT_NOT_RIGHT_YET]], $this->roundCommands->verdictsSet);
-        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::OMARS_SHOT, 'Case B: the total', 'The total still adds the old delivery fee.']], $this->roundCommands->textsEdited);
+    #[Test]
+    #[DataProvider('summaries')]
+    public function aSummaryGoesWithTheVerdictToReviewAsItWasSentInOneCommand(string $summary): void
+    {
+        $result = $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'not_right_yet', 'summary' => $summary]);
+
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::OMARS_SHOT, RoundCommands::VERDICT_NOT_RIGHT_YET, $summary]], $this->roundCommands->verdictsSet);
         self::assertTrue($result['structured']['summary_saved'] ?? null);
     }
 
     /**
-     * 600 characters after trimming are kept, as the web's form keeps them; one more is refused as invalid input.
-     */
-    #[Test]
-    public function aSummaryOverSixHundredCharactersIsInvalidInputAfterTheVerdictWasAsked(): void
-    {
-        $keptSummary = ' '.str_repeat('é', 600)."\n";
-        $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right', 'summary' => $keptSummary]);
-
-        $refusal = self::refusalOf(fn () => $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right', 'summary' => str_repeat('é', 601)]));
-
-        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
-        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, 'A picture summary holds at most 600 characters.'), $refusal->getMessage());
-        self::assertSame([$keptSummary], array_column($this->roundCommands->textsEdited, 4));
-        self::assertCount(2, $this->roundCommands->verdictsSet, 'the second verdict was asked before its summary was refused');
-    }
-
-    /**
-     * @return iterable<string, array{RoundRefused, ToolCallOutcome}>
+     * @return iterable<string, array{RoundRefused, ToolCallOutcome, string}>
      */
     public static function roundRefusals(): iterable
     {
-        yield 'not found' => [new RoundRefused(RoundRefused::NOT_FOUND), ToolCallOutcome::NotFound];
-        yield 'no such screenshot' => [new RoundRefused(RoundRefused::SCREENSHOT_NOT_FOUND, 0, new \DomainException(RoundRefused::SCREENSHOT_NOT_FOUND)), ToolCallOutcome::NotFound];
-        yield 'shared since it was read' => [new RoundRefused('This draft round is shared, so it no longer changes.', 0, new \DomainException('This draft round is shared, so it no longer changes.')), ToolCallOutcome::ReadOnly];
-        yield 'closed' => [new RoundRefused('This draft round is closed.', 0, new \DomainException('This draft round is closed.')), ToolCallOutcome::ReadOnly];
+        yield 'not found' => [new RoundRefused(RoundRefused::NOT_FOUND), ToolCallOutcome::NotFound, ToolRefusal::NOT_FOUND];
+        yield 'no such screenshot' => [new RoundRefused(RoundRefused::SCREENSHOT_NOT_FOUND), ToolCallOutcome::NotFound, ToolRefusal::NOT_FOUND];
+        yield 'shared since it was read' => [RoundRefused::readOnly('This draft round is shared, so it no longer changes.'), ToolCallOutcome::ReadOnly, ToolRefusal::READ_ONLY];
+        yield 'closed' => [RoundRefused::readOnly('This draft round is closed.'), ToolCallOutcome::ReadOnly, ToolRefusal::READ_ONLY];
+        yield 'a summary over its cap' => [RoundRefused::invalidContent('A picture summary holds at most 600 characters.'), ToolCallOutcome::InvalidInput, \sprintf(ToolRefusal::INVALID_INPUT, 'A picture summary holds at most 600 characters.')];
     }
 
     #[Test]
     #[DataProvider('roundRefusals')]
-    public function reviewsRefusalIsTheToolsOwn(RoundRefused $roundRefusal, ToolCallOutcome $outcome): void
+    public function reviewsRefusalIsTheToolsOwnByItsKind(RoundRefused $roundRefusal, ToolCallOutcome $outcome, string $message): void
     {
         $this->roundCommands->refusal = $roundRefusal;
 
         $refusal = self::refusalOf(fn () => $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right', 'summary' => 'Fine.']));
 
         self::assertSame($outcome, $refusal->outcome);
-        self::assertSame([], $this->roundCommands->textsEdited);
+        self::assertSame($message, $refusal->getMessage());
+        self::assertSame([], $this->roundCommands->verdictsSet);
+    }
+
+    /**
+     * @return iterable<string, array{RoundRefused}>
+     */
+    public static function refusalsOfNoKind(): iterable
+    {
+        yield 'changed meanwhile' => [new RoundRefused(RoundRefused::DRAFT_CHANGED, 0, new \RuntimeException('The round changed since it was read.'))];
+        // The cause alone says nothing: only the kind Review set does.
+        yield 'a domain refusal Review gave no kind' => [new RoundRefused('A round holds at most 50 screenshots.', 0, new \DomainException('A round holds at most 50 screenshots.'))];
+        yield 'an invalid argument Review gave no kind' => [new RoundRefused('Not a kind.', 0, new \InvalidArgumentException('Not a kind.'))];
     }
 
     #[Test]
-    public function aDraftChangedMeanwhileGoesOnAsAFailure(): void
+    #[DataProvider('refusalsOfNoKind')]
+    public function aRefusalOfNoKindGoesOnAsAFailure(RoundRefused $roundRefusal): void
     {
-        $changed = new RoundRefused(RoundRefused::DRAFT_CHANGED, 0, new \RuntimeException('The round changed since it was read.'));
-        $this->roundCommands->refusal = $changed;
+        $this->roundCommands->refusal = $roundRefusal;
 
-        $this->expectExceptionObject($changed);
+        $this->expectExceptionObject($roundRefusal);
 
         $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right']);
     }
@@ -285,7 +301,7 @@ final class SetVerdictTest extends TestCase
 
         self::assertSame(ChecklistPermission::MARK_FIXED, $target->voterAttribute);
         self::assertSame([SetVerdict::CHECK_ITEM_AUDIT_TYPE, self::CHECK_ITEM], [$target->auditType, $target->auditId]);
-        self::assertSame([], $this->rounds->ticketsRead, 'a check item needs no round');
+        self::assertSame([], $this->rounds->screenshotsLookedUp, 'a check item needs no round');
 
         $result = $tool->call($arguments, $target);
 

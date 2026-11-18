@@ -19,6 +19,7 @@ use App\Review\Domain\RoundId;
 use App\Review\Domain\RoundKind;
 use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
+use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotVerdict;
@@ -48,7 +49,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         $organizationId = $this->tenantContext->require();
         // Before any query, so a list sized from outside is never walked past the cap.
         if (\count($screenshots) > Round::MAX_SCREENSHOTS) {
-            throw new RoundRefused(\sprintf('A round holds at most %d screenshots.', Round::MAX_SCREENSHOTS));
+            throw RoundRefused::invalidContent(\sprintf('A round holds at most %d screenshots.', Round::MAX_SCREENSHOTS));
         }
         $ticket = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
         if (!$ticket->reporterId->equals($reporterId)) {
@@ -70,7 +71,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
                 $reportedAt,
             );
         } catch (\InvalidArgumentException $invalidContent) {
-            throw new RoundRefused($invalidContent->getMessage(), 0, $invalidContent);
+            throw RoundRefused::invalidContent($invalidContent->getMessage(), $invalidContent);
         }
 
         try {
@@ -142,7 +143,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
     {
         // Before any read, so a list sized from outside is never walked past the cap.
         if (\count($pins) > Screenshot::MAX_PINS) {
-            throw new RoundRefused(\sprintf('A picture holds at most %d pins.', Screenshot::MAX_PINS));
+            throw RoundRefused::invalidContent(\sprintf('A picture holds at most %d pins.', Screenshot::MAX_PINS));
         }
         $draft = $this->ownDraft($roundId, $ownerId);
         $id = self::screenshotIdOf($screenshotId);
@@ -157,15 +158,24 @@ final readonly class UseCaseRoundCommands implements RoundCommands
     public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void
     {
         $draft = $this->ownDraft($roundId, $ownerId);
-        $screenshotVerdict = match ($verdict) {
-            null => null,
-            self::VERDICT_LOOKS_RIGHT => ScreenshotVerdict::LooksRight,
-            self::VERDICT_NOT_RIGHT_YET => ScreenshotVerdict::NotRight,
-            default => throw new RoundRefused(RoundRefused::UNKNOWN_VERDICT),
-        };
+        $screenshotVerdict = self::screenshotVerdictOf($verdict);
         $id = self::screenshotIdOf($screenshotId);
 
         $this->changeAndSave($draft, $at, static fn (Round $round) => $round->setVerdict($ownerId, $id, $screenshotVerdict));
+    }
+
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void
+    {
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $screenshotVerdict = self::screenshotVerdictOf($verdict);
+        $id = self::screenshotIdOf($screenshotId);
+
+        $this->changeAndSave($draft, $at, static function (Round $round) use ($ownerId, $id, $screenshotVerdict, $summary): void {
+            $round->setVerdict($ownerId, $id, $screenshotVerdict);
+            if (null !== $summary) {
+                $round->editScreenshotText($ownerId, $id, self::titleOf($round, $id), $summary);
+            }
+        });
     }
 
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int
@@ -239,18 +249,52 @@ final readonly class UseCaseRoundCommands implements RoundCommands
     }
 
     /**
+     * @throws RoundRefused UNKNOWN_VERDICT, as invalid content, for anything but the two verdicts and null
+     */
+    private static function screenshotVerdictOf(?string $verdict): ?ScreenshotVerdict
+    {
+        return match ($verdict) {
+            null => null,
+            self::VERDICT_LOOKS_RIGHT => ScreenshotVerdict::LooksRight,
+            self::VERDICT_NOT_RIGHT_YET => ScreenshotVerdict::NotRight,
+            default => throw RoundRefused::invalidContent(RoundRefused::UNKNOWN_VERDICT),
+        };
+    }
+
+    /**
+     * @throws \LogicException when the round has no such picture, which a change of it refused before
+     */
+    private static function titleOf(Round $round, ScreenshotId $screenshotId): ?string
+    {
+        foreach ($round->screenshots() as $screenshot) {
+            if ($screenshot->id()->equals($screenshotId)) {
+                return $screenshot->title();
+            }
+        }
+
+        throw new \LogicException('The picture was changed a moment ago, so the round has it.');
+    }
+
+    /**
+     * ownDraft read the round as the owner's undeleted draft, so a domain refusal of a round that was shared or closed
+     * before the change is read-only; the change itself may share it, as shareDraftAtHandOff does.
+     *
      * @param \Closure(Round): void $change
      *
-     * @throws RoundRefused   with the domain's reason when it refuses the change, or DRAFT_CHANGED when another
+     * @throws RoundRefused   with the domain's reason when it refuses the change (read-only for a shared or closed
+     *                        draft, invalid content for content that breaks a rule), or DRAFT_CHANGED when another
      *                        request saved the round since it was read; nothing is saved
      * @throws RoundSlotTaken when another round has the number the change gave this one; nothing is saved
      */
     private function changeAndSave(Round $round, \DateTimeImmutable $at, \Closure $change): void
     {
+        $wasChangeable = $round->isUnsharedDraft() && RoundState::Open === $round->state();
         try {
             $change($round);
-        } catch (\DomainException|\InvalidArgumentException $refused) {
-            throw new RoundRefused($refused->getMessage(), 0, $refused);
+        } catch (\InvalidArgumentException $invalidContent) {
+            throw RoundRefused::invalidContent($invalidContent->getMessage(), $invalidContent);
+        } catch (\DomainException $refused) {
+            throw $wasChangeable ? new RoundRefused($refused->getMessage(), 0, $refused) : RoundRefused::readOnly($refused->getMessage(), $refused);
         }
         try {
             $this->rounds->save($round, $at);

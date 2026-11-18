@@ -10,40 +10,37 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * Records the draft verdict and text changes set_verdict makes. Like UseCaseRoundCommands it refuses a verdict it does
- * not know with UNKNOWN_VERDICT, and a summary over 600 characters after trimming as the domain's
- * InvalidArgumentException wrapped in RoundRefused; $refusal, when set, is thrown by the next setDraftVerdict, as the
- * real command does for a draft that is gone, shared or changed. The commands set_verdict never uses throw.
+ * Records the verdicts and summaries set_verdict saves. Like UseCaseRoundCommands it refuses a verdict it does not
+ * know with UNKNOWN_VERDICT as invalid content; $refusal, when set, is thrown by the next call instead and nothing is
+ * recorded, as the real command saves nothing when it refuses. The content rules, such as the summary's cap, are
+ * Review's: the functional test proves them through the real command. The commands set_verdict never uses throw.
  */
 final class RecordingRoundCommands implements RoundCommands
 {
-    /** @var list<array{string, string, string, string|null}> round, owner, screenshot and verdict of each call */
+    /** @var list<array{string, string, string, string, string|null}> round, owner, screenshot, verdict and summary of each call */
     public array $verdictsSet = [];
-
-    /** @var list<array{string, string, string, string|null, string|null}> round, owner, screenshot, title, summary */
-    public array $textsEdited = [];
 
     public ?RoundRefused $refusal = null;
 
-    public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void
     {
         if (null !== $this->refusal) {
             throw $this->refusal;
         }
-        if (!\in_array($verdict, [null, self::VERDICT_LOOKS_RIGHT, self::VERDICT_NOT_RIGHT_YET], true)) {
-            throw new RoundRefused(RoundRefused::UNKNOWN_VERDICT);
+        if (!\in_array($verdict, [self::VERDICT_LOOKS_RIGHT, self::VERDICT_NOT_RIGHT_YET], true)) {
+            throw RoundRefused::invalidContent(RoundRefused::UNKNOWN_VERDICT);
         }
-        $this->verdictsSet[] = [$roundId, $ownerId->toString(), $screenshotId, $verdict];
+        $this->verdictsSet[] = [$roundId, $ownerId->toString(), $screenshotId, $verdict, $summary];
+    }
+
+    public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void
+    {
+        throw new \LogicException('set_verdict saves a verdict with its summary, in one command.');
     }
 
     public function editDraftScreenshot(string $roundId, UserId $ownerId, string $screenshotId, ?string $title, ?string $summary, \DateTimeImmutable $at): void
     {
-        if (null !== $summary && mb_strlen(trim($summary)) > 600) {
-            $tooLong = new \InvalidArgumentException('A picture summary holds at most 600 characters.');
-
-            throw new RoundRefused($tooLong->getMessage(), 0, $tooLong);
-        }
-        $this->textsEdited[] = [$roundId, $ownerId->toString(), $screenshotId, $title, $summary];
+        throw new \LogicException('set_verdict saves a summary with its verdict, in one command.');
     }
 
     public function createReport(TicketId $ticketId, array $screenshots, UserId $reporterId, \DateTimeImmutable $reportedAt): string
