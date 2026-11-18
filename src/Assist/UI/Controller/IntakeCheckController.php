@@ -164,7 +164,7 @@ final class IntakeCheckController extends AbstractController
      */
     private function visibleDuplicatesOf(IntakeCheckView $check, ActorContext $actor): array
     {
-        $duplicateKeys = $check->suggestion?->duplicateKeys ?? [];
+        $duplicateKeys = $check->suggestion->duplicateKeys ?? [];
         if ([] === $duplicateKeys) {
             return [];
         }
