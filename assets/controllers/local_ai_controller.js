@@ -1,5 +1,5 @@
 import { Controller } from '@hotwired/stimulus';
-import { CHOSEN_MODEL_KEY, LAST_CHECK_KEY, MODEL_NAME, readLastCheck } from '../local_ai_storage.js';
+import { CHOSEN_MODEL_KEY, MODEL_NAME, NOT_FOUND_CHECK, readLastCheck, rememberLastCheck } from '../local_ai_storage.js';
 
 const CHECK_TIMEOUT_MS = 3000;
 const NOT_CHECKED = { state: 'not-checked', model: null, models: [] };
@@ -35,6 +35,15 @@ export default class extends Controller {
     this.#showLastCheck();
   }
 
+  // On local-ai:checked, which a laptop run also sends when Ollama stops answering: shows a last check it did not make.
+  followLastCheck(event) {
+    const outcome = event.detail;
+    if (this.pendingCheck || typeof outcome?.state !== 'string' || outcome.state === this.element.dataset.state) {
+      return;
+    }
+    this.#showOutcome(outcome);
+  }
+
   async check() {
     if (this.pendingCheck) {
       return;
@@ -54,7 +63,7 @@ export default class extends Controller {
     this.checkButtonTarget.disabled = false;
     const outcome = this.#outcomeOf(models);
     this.#showOutcome(outcome);
-    this.#rememberOutcome(outcome);
+    rememberLastCheck(outcome);
     this.#reportStatus(outcome.state === 'ready', outcome.model);
   }
 
@@ -70,7 +79,7 @@ export default class extends Controller {
       // Storage off or full: the choice holds for this page only.
     }
     this.#showModel(model);
-    this.#rememberOutcome({ state: 'ready', model, models });
+    rememberLastCheck({ state: 'ready', model, models });
     this.#reportStatus(true, model);
   }
 
@@ -94,7 +103,7 @@ export default class extends Controller {
 
   #outcomeOf(models) {
     if (models === null) {
-      return { state: 'not-found', model: null, models: [] };
+      return NOT_FOUND_CHECK;
     }
     if (models.length === 0) {
       return { state: 'no-model', model: null, models: [] };
@@ -155,15 +164,6 @@ export default class extends Controller {
     }
   }
 
-  // Then dispatches local-ai:checked, so a feature on this page that runs on the laptop reads the new check at once.
-  #rememberOutcome(outcome) {
-    try {
-      sessionStorage.setItem(LAST_CHECK_KEY, JSON.stringify(outcome));
-    } catch {
-      // Storage off or full: the next page shows "not checked".
-    }
-    this.dispatch('checked');
-  }
 
   #showState(state) {
     this.element.dataset.state = state;

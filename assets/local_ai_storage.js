@@ -8,6 +8,8 @@ export const CHOSEN_MODEL_KEY = 'pinround.localAiModel';
 // Every page renders a new header, so the last check's result is kept for the tab and shown again without calling
 // Ollama; a browser that refuses storage shows "not checked" instead.
 export const LAST_CHECK_KEY = 'pinround.localAiLastCheck';
+// The local-ai controller's own event name, so TheAsk's local-ai:checked@window action hears both writers.
+const CHECKED_EVENT = 'local-ai:checked';
 
 /**
  * The chip's last check in this tab, as {state, model, models}. Null when there is none, storage is off, or what is
@@ -38,4 +40,21 @@ export function readLastCheck() {
 export function readyModel() {
   const lastCheck = readLastCheck();
   return lastCheck?.state === 'ready' ? lastCheck.model : null;
+}
+
+/** What a check that could not reach Ollama finds. */
+export const NOT_FOUND_CHECK = Object.freeze({ state: 'not-found', model: null, models: [] });
+
+/**
+ * Keeps a check's result, {state, model, models}, as the last check in this tab, then dispatches local-ai:checked on
+ * the window with it as detail, so the chip and every feature on the page that runs on the laptop follow it at once. A
+ * browser that refuses storage keeps nothing: its next page shows "not checked".
+ */
+export function rememberLastCheck(outcome) {
+  try {
+    sessionStorage.setItem(LAST_CHECK_KEY, JSON.stringify(outcome));
+  } catch {
+    // Storage off or full.
+  }
+  window.dispatchEvent(new CustomEvent(CHECKED_EVENT, { detail: outcome }));
 }

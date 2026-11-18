@@ -30,6 +30,9 @@ const NOT_READY_LINE = 'Your company runs AI on each laptop, and it is not runni
 const RUNNING_LINE = 'Running on this laptop. Ticket text stays on this laptop.';
 const UNREACHABLE_LINE = 'pinround could not reach Ollama on this laptop. Use “Local AI” at the top to set it up.';
 const NO_SUMMARY_LINE = 'Ollama on this laptop gave no summary. Use “Local AI” at the top to check it.';
+const CLOUD_NEXT_LINE = 'Ollama on this laptop did not answer. Press again to use cloud AI.';
+/** SummaryController's failed frame, as the cloud press is answered here. */
+const CLOUD_FAILED_LINE = 'The AI answer failed. Try again.';
 /** LaptopController::TOO_MANY_REQUESTS. */
 const TOO_MANY_LINE = 'You sent too many laptop AI requests. Wait a minute and try again.';
 /** SummaryController::MADE_MAIN_SUMMARY. */
@@ -117,6 +120,25 @@ function recordConsole(page: Page): string[] {
 async function openTicket(page: Page, key: string): Promise<void> {
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+}
+
+/** Answers the cloud press here, so no job reaches the shared async_ai queue. */
+async function answerCloudSummaryHere(page: Page, key: string): Promise<void> {
+  await page.route(`**/t/${key}/summary`, async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'text/html; charset=UTF-8', body: `<turbo-frame id="ticket-ask"><div class="ticket__ask-state"><p class="ticket__ask-failed">${CLOUD_FAILED_LINE}</p></div></turbo-frame>` });
+  });
+}
+
+function localAiChip(page: Page): Locator {
+  return page.getByRole('banner').getByRole('button', { name: /^Local AI: / });
+}
+
+function chipState(page: Page): Locator {
+  return page.locator('.local-ai__chip [data-states]:not([hidden])');
 }
 
 function summarizeButton(page: Page): Locator {
@@ -221,6 +243,22 @@ test.describe('an organization whose AI runs only on laptops', () => {
     await expect(summarizeButton(page)).not.toHaveAttribute('aria-busy');
     await expect(summarizeButton(page)).toBeFocused();
     await expect(proposal(page)).toHaveCount(0);
+    // Only laptops run AI here: the press stays on the laptop, which still counts as ready until a check says otherwise.
+    await expect(chipState(page)).toHaveText('Local AI: ready');
+    await expect(notReadyLine(page)).toBeHidden();
+
+    // A check that no longer finds Ollama: the line about the last press goes with the button.
+    await page.route(OLLAMA_TAGS_URL, (route) => route.abort('connectionrefused'));
+    await localAiChip(page).click();
+    const sheet = page.getByRole('dialog', { name: 'AI on your laptop' });
+    await sheet.getByRole('button', { name: 'Check again' }).click();
+    await expect(sheet.getByRole('status')).toHaveText('pinround could not reach Ollama on this laptop.', { useInnerText: true });
+    await page.keyboard.press('Escape');
+
+    await expect(notReadyLine(page)).toHaveText(NOT_READY_LINE);
+    await expect(summarizeForm(page)).toBeHidden();
+    await expect(laptopStatusLine(page)).toBeHidden();
+    await expect(laptopStatusLine(page)).toHaveText('');
   });
 
   test('a refused package shows its sentence without asking Ollama, and an answer that is only thinking says Ollama gave no summary', async ({ browser, page }) => {
@@ -257,7 +295,7 @@ test.describe('an organization whose AI runs only on laptops', () => {
     await expect(summarizeButton(page)).toHaveCount(0);
 
     await page.route(OLLAMA_TAGS_URL, (route) => answerAsOllama(route, page, { models: [{ name: MODEL, model: MODEL }] }));
-    await page.getByRole('banner').getByRole('button', { name: /^Local AI: / }).click();
+    await localAiChip(page).click();
     const sheet = page.getByRole('dialog', { name: 'AI on your laptop' });
     await sheet.getByRole('button', { name: 'Check again' }).click();
     await expect(sheet.getByRole('status')).toContainText(MODEL);
@@ -287,24 +325,45 @@ test.describe('an organization whose AI runs on laptops first, then in the cloud
     expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/'))).toEqual(['/ai/laptop/package', '/ai/laptop/result']);
   });
 
+  test('a laptop whose Ollama stopped answering counts as not found, and the next press goes to the cloud', async ({ browser, page }) => {
+    const key = await makeTicketWithAnAsk(browser, 'Gift card balance never updates');
+    await seedReadyLaptop(page);
+    const postedPaths = recordPathsPosted(page);
+    let generateCalls = 0;
+    await page.route(OLLAMA_GENERATE_URL, (route) => {
+      generateCalls += 1;
+      return route.abort('connectionrefused');
+    });
+    await answerCloudSummaryHere(page, key);
+    await openTicket(page, key);
+
+    await summarizeButton(page).click();
+
+    await expect(laptopStatusLine(page)).toHaveText(CLOUD_NEXT_LINE);
+    await expect(summarizeButton(page)).toBeEnabled();
+    await expect(chipState(page)).toHaveText('Local AI: not found');
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('pinround.localAiLastCheck') ?? 'null'))).toEqual({ state: 'not-found', model: null, models: [] });
+    expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([]);
+
+    await summarizeButton(page).click();
+
+    await expect(page.locator('#ticket-ask .ticket__ask-failed')).toHaveText(CLOUD_FAILED_LINE);
+    expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([`/t/${key}/summary`]);
+    expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/package'))).toEqual(['/ai/laptop/package']);
+    expect(generateCalls).toBe(1);
+  });
+
   test('a laptop that is not ready leaves the press to the cloud', async ({ browser, page }) => {
     const key = await makeTicketWithAnAsk(browser, 'Order total shows the wrong currency');
     const postedPaths = recordPathsPosted(page);
-    // The press is answered here, so no job reaches the shared async_ai queue.
-    await page.route(`**/t/${key}/summary`, async (route) => {
-      if (route.request().method() !== 'POST') {
-        await route.continue();
-        return;
-      }
-      await route.fulfill({ status: 200, contentType: 'text/html; charset=UTF-8', body: `<turbo-frame id="ticket-ask"><div class="ticket__ask-state"><p class="ticket__ask-failed">The AI answer failed. Try again.</p></div></turbo-frame>` });
-    });
+    await answerCloudSummaryHere(page, key);
     await openTicket(page, key);
 
     await expect(notReadyLine(page)).toHaveCount(0);
     await expect(summarizeButton(page)).toBeVisible();
     await summarizeButton(page).click();
 
-    await expect(page.locator('#ticket-ask .ticket__ask-failed')).toHaveText('The AI answer failed. Try again.');
+    await expect(page.locator('#ticket-ask .ticket__ask-failed')).toHaveText(CLOUD_FAILED_LINE);
     expect(postedPaths.filter((path) => path === `/t/${key}/summary`)).toEqual([`/t/${key}/summary`]);
     expect(postedPaths.filter((path) => path.startsWith('/ai/laptop/package'))).toEqual([]);
   });

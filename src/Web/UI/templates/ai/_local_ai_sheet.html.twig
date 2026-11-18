@@ -8,7 +8,7 @@
     statusUrl: path(constant(laptopController ~ '::STATUS_ROUTE')),
     csrfHeader: constant(laptopController ~ '::CSRF_HEADER'),
     csrfToken: csrf_token(constant(laptopController ~ '::CSRF_ID')),
-}) }} data-action="beforeunload@window->local-ai#leavePage pagehide@window->local-ai#leavePage">
+}) }} data-action="beforeunload@window->local-ai#leavePage pagehide@window->local-ai#leavePage local-ai:checked@window->local-ai#followLastCheck">
     <twig:Dialog id="local-ai-sheet" title="AI on your laptop">
         <twig:block name="trigger">
             <button type="button" class="chip local-ai__chip" aria-haspopup="dialog" data-action="dialog#open">

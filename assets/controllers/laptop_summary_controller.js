@@ -1,7 +1,7 @@
 import { Controller } from '@hotwired/stimulus';
 import { frameOfAnswer, swapFrameChildren } from '../frame_poll.js';
-import { FAILED_LINE, LaptopRunRefused, RUNNING_LINE, summarizeOnLaptop } from '../laptop_run.js';
-import { readyModel } from '../local_ai_storage.js';
+import { CLOUD_NEXT_LINE, FAILED_LINE, LaptopRunRefused, RUNNING_LINE, summarizeOnLaptop } from '../laptop_run.js';
+import { NOT_FOUND_CHECK, readyModel, rememberLastCheck } from '../local_ai_storage.js';
 
 const LEFT_PAGE = Symbol('left the page');
 
@@ -9,13 +9,15 @@ const LEFT_PAGE = Symbol('left the page');
 // run it on the laptop (laptop_run.js). The laptop counts as ready when the header's Local AI chip last found it ready
 // in this tab (local_ai_storage.js); nothing here calls Ollama before the press. A not-ready line a ready laptop cures
 // (notReadyLine) is hidden and the form shown while it is ready; without one, a not-ready laptop leaves the form to its
-// normal cloud submit. A press on a ready laptop runs the summary there, then reads the ask's frame again to show the
-// proposal. The AI never writes on its own: the result is only a proposal until a person presses "Use as main summary".
+// normal cloud submit, and when Ollama stops answering there the laptop counts as not found, so the next press goes to
+// the cloud. A press on a ready laptop runs the summary there, then reads the ask's frame again to show the proposal.
+// The AI never writes on its own: the result is only a proposal until a person presses "Use as main summary".
 export default class extends Controller {
   static targets = ['form', 'button', 'notReadyLine', 'statusLine'];
   static values = { packageUrl: String, resultUrl: String, frameUrl: String, generateUrl: String, csrfHeader: String, token: String, ticketId: String };
 
   #run = null;
+  #isReady = null;
 
   connect() {
     this.followCheck();
@@ -25,14 +27,22 @@ export default class extends Controller {
     this.#run?.abort(LEFT_PAGE);
   }
 
-  // On connect and on local-ai:checked.
+  // On connect and on local-ai:checked. A line about the last press is old news once the readiness changes.
   followCheck() {
-    if (this.#run !== null || !this.hasNotReadyLineTarget) {
+    if (this.#run !== null) {
       return;
     }
     const isReady = readyModel() !== null;
-    this.notReadyLineTarget.hidden = isReady;
-    this.formTarget.hidden = !isReady;
+    if (isReady === this.#isReady) {
+      return;
+    }
+    this.#isReady = isReady;
+    this.statusLineTarget.hidden = true;
+    this.statusLineTarget.textContent = '';
+    if (this.hasNotReadyLineTarget) {
+      this.notReadyLineTarget.hidden = isReady;
+      this.formTarget.hidden = !isReady;
+    }
   }
 
   // On the form's submit, before Turbo's: only a ready laptop takes the press from the cloud.
@@ -55,7 +65,7 @@ export default class extends Controller {
     this.#run = run;
     const readyLabel = this.buttonTarget.textContent;
     this.#showRunning();
-    let failureLine = null;
+    let refusal = null;
     try {
       await summarizeOnLaptop({
         packageUrl: this.packageUrlValue,
@@ -67,17 +77,29 @@ export default class extends Controller {
         model,
       }, run.signal);
     } catch (failure) {
-      failureLine = failure instanceof LaptopRunRefused ? failure.line : FAILED_LINE;
+      refusal = failure instanceof LaptopRunRefused ? failure : new LaptopRunRefused(FAILED_LINE);
     }
     if (run.signal.reason === LEFT_PAGE) {
       return;
     }
     this.#run = null;
-    if (failureLine !== null) {
-      this.#showFailure(failureLine, readyLabel, hadFocus);
+    if (refusal === null) {
+      await this.#showProposal(frame, hadFocus);
       return;
     }
-    await this.#showProposal(frame, hadFocus);
+    this.#giveButtonBack(readyLabel, hadFocus);
+    this.#showLine(this.#lineAfter(refusal));
+  }
+
+  // Where the cloud may take the press (no not-ready line), Ollama that stopped answering makes the laptop not found.
+  // Also catches up with a check made while the press ran.
+  #lineAfter(refusal) {
+    const mayFallBackToCloud = refusal.isOllamaSilent && !this.hasNotReadyLineTarget;
+    if (mayFallBackToCloud) {
+      rememberLastCheck(NOT_FOUND_CHECK);
+    }
+    this.followCheck();
+    return mayFallBackToCloud && !this.#isReady ? CLOUD_NEXT_LINE : refusal.line;
   }
 
   #showRunning() {
@@ -88,12 +110,11 @@ export default class extends Controller {
     this.#showLine(RUNNING_LINE);
   }
 
-  #showFailure(line, readyLabel, hadFocus) {
+  #giveButtonBack(readyLabel, hadFocus) {
     const button = this.buttonTarget;
     button.disabled = false;
     button.removeAttribute('aria-busy');
     button.textContent = readyLabel;
-    this.#showLine(line);
     if (hadFocus) {
       button.focus();
     }

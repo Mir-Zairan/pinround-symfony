@@ -8,7 +8,9 @@ const THINKING = /<think>[\s\S]*?(?:<\/think>|$)/g;
 
 export const RUNNING_LINE = 'Running on this laptop. Ticket text stays on this laptop.';
 export const FAILED_LINE = 'The AI answer failed. Try again.';
-const UNREACHABLE_LINE = 'pinround could not reach Ollama on this laptop. Use “Local AI” at the top to set it up.';
+/** After Ollama did not answer where the cloud may take the press; not in the prototype. */
+export const CLOUD_NEXT_LINE = 'Ollama on this laptop did not answer. Press again to use cloud AI.';
+const UNREACHABLE_LINE ='pinround could not reach Ollama on this laptop. Use “Local AI” at the top to set it up.';
 const TOO_SLOW_LINE = 'Ollama on this laptop took too long to answer. Try again, or use “Local AI” at the top to pick another model.';
 const NO_SUMMARY_LINE = 'Ollama on this laptop gave no summary. Use “Local AI” at the top to check it.';
 
