@@ -9,6 +9,7 @@ use App\Assist\Application\Summaries\GenerateSummary;
 use App\Conversation\Api\Event\ConversationEvent;
 use App\Identity\Api\Event\IdentityEvent;
 use App\Identity\Application\EmailPasswordResetLink;
+use App\Identity\Infrastructure\Scheduler\SendApiTokenExpiryWarnings;
 use App\Media\Api\Event\MediaEvent;
 use App\Media\Application\ProcessUpload;
 use App\Notification\Api\Event\NotificationEvent;
@@ -78,6 +79,7 @@ final class OutboxRelayRoutesConfigTest extends TestCase
                 RefreshBell::class,
                 ReleaseDueNotifications::class,
                 SendDigest::class,
+                SendApiTokenExpiryWarnings::class,
             ], 'async_notify') + [GenerateSummary::class => 'async_ai', GenerateIntakeSuggestion::class => 'async_ai'],
             array_filter(self::routing(self::messengerConfig()), static fn (mixed $transport): bool => 'outbox' !== $transport),
         );

@@ -35,6 +35,7 @@ final class AdminNeedsBrowserSessionTest extends WebTestCase
     private const array ADMIN_ROUTES = [
         ['GET', '/admin/people'],
         ['POST', '/admin/people/invite'],
+        ['POST', '/admin/people/tokens/0197a3c0-0000-7000-8000-00000000a7e1/revoke'],
         ['GET', '/admin/ai'],
         ['POST', '/admin/ai'],
         ['POST', '/admin/ai/provider-key'],
