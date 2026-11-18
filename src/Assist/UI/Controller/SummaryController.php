@@ -50,7 +50,7 @@ use Symfony\UX\Turbo\TurboBundle;
  *
  * POST /t/{key}/summary/laptop/{packageId} is "Use as main summary" on the ticket's laptop summary proposal
  * (LocalAi::makeMainSummary). An unknown key, a ticket the person may not see and a person who is neither the lead of
- * the ticket's team nor its reporter (TicketPermission::CHOOSE_MAIN_SUMMARY) answer the ticket's 404; then an expired
+ * the ticket's team nor its reporter, or a reporter who is a Viewer of that team (TicketPermission::CHOOSE_MAIN_SUMMARY), answer the ticket's 404; then an expired
  * form 422; then a malformed package id and any result that is not the ticket's proposal 404, and a text Ticketing
  * refuses as a summary 422 with its sentence, nothing changed. A made main summary answers 303 to the ticket with the
  * toast MADE_MAIN_SUMMARY. A refusal answers a Turbo form with a toast stream, any other form with 303 and the toast

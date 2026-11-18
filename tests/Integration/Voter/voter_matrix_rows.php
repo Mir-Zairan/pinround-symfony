@@ -321,7 +321,8 @@ return [
     ['source' => $managerAssigns, 'attribute' => TicketPermission::ASSIGN, 'actor' => 'Sara', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
 
     ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Lena', 'subject' => 'Team-only Shop ticket', 'expected' => 'granted'],
-    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'granted'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Mia', 'subject' => 'Team-only Support ticket reported by Mia', 'expected' => 'denied'],
+    ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Omar', 'subject' => 'Team-only Support ticket reported by Omar', 'expected' => 'granted'],
     ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Noor', 'subject' => 'For-everyone Shop ticket reported by Noor', 'expected' => 'granted'],
     ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Omar', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $useAsMainSummary, 'attribute' => TicketPermission::CHOOSE_MAIN_SUMMARY, 'actor' => 'Raj', 'subject' => 'Team-only Shop ticket', 'expected' => 'denied'],

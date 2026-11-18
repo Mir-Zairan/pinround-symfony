@@ -146,6 +146,23 @@ final class LaptopSummaryProposalTest extends WebTestCase
         self::assertSame([[self::PROPOSAL_TEXT, 'laptop', true, $this->idOf('Mia')], [self::CURRENT_SUMMARY, 'ai', false, null]], $this->summaryRows());
     }
 
+    #[Test]
+    public function aViewerOfShopWhoReportedTheTicketSeesNoButtonAndChoosingAnswers404(): void
+    {
+        $this->addTeamRole($this->people['Mia'], $this->acmeFoods, $this->shop, 'viewer');
+        $this->setReporterOfShop1('Mia');
+        $this->logIn($this->client, $this->people['Mia']);
+        $page = $this->client->request('GET', '/t/SHOP-1');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.ticket__ask-proposal'));
+        self::assertCount(0, $page->filter('.ticket__ask-proposal form'));
+
+        $this->postChoice('SHOP-1', self::PROPOSAL, $this->csrfTokenFor($this->client, SummaryController::MAIN_SUMMARY_CSRF_ID));
+
+        self::assertResponseStatusCodeSame(404);
+        $this->assertNothingChanged();
+    }
+
     /**
      * @return iterable<string, array{string, string, string}> the person, the ticket key and the package id
      */

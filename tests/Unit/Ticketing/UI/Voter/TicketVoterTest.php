@@ -49,7 +49,7 @@ final class TicketVoterTest extends TestCase
      * Every role against every attribute, on the tickets of ticket(). Lena leads Shop; Omar is a member (developer)
      * and Mia a member (tester) of Shop; the Shop viewer is its viewer; Raj is a Manager with no team role, and Raj in
      * Shop a Manager who is also a member of Shop; Sara is an Admin with no team role; Ben reported every Acme Foods
-     * ticket and has no role; the triager is Acme Foods' triager and has no role; the outsider has no role; the Beta
+     * ticket but the two "reported by" ones and has no role; the triager is Acme Foods' triager and has no role; the outsider has no role; the Beta
      * Bakery admin is an Admin of Beta Bakery.
      *
      * @return iterable<string, array{string, string, string, bool}> actor, attribute, ticket, granted
@@ -62,7 +62,9 @@ final class TicketVoterTest extends TestCase
             'Lena on Mobile' => [self::LENA, 'Mobile', [true, false, false, false, false]],
             'Omar' => [self::OMAR, 'team-only Shop', [true, true, true, false, false]],
             'Mia' => [self::MIA, 'team-only Shop', [true, true, true, false, false]],
+            'Omar who reported it' => [self::OMAR, 'team-only Shop reported by Omar', [true, true, true, false, true]],
             'the Shop viewer' => [self::SHOP_VIEWER, 'team-only Shop', [true, false, false, false, false]],
+            'the Shop viewer who reported it' => [self::SHOP_VIEWER, 'team-only Shop reported by the Shop viewer', [true, false, false, false, false]],
             'Raj on a ticket for everyone' => [self::RAJ, 'Shop', [true, false, false, false, false]],
             'Raj' => [self::RAJ, 'team-only Shop', [false, false, false, false, false]],
             'Raj in Shop' => [self::RAJ_IN_SHOP, 'team-only Shop', [true, true, true, false, false]],
@@ -125,6 +127,8 @@ final class TicketVoterTest extends TestCase
         return match ($name) {
             'Shop' => new TicketVisibilityFacts($acmeFoods, TicketVisibilityFacts::FOR_EVERYONE, new TeamId(self::SHOP), $ben),
             'team-only Shop' => new TicketVisibilityFacts($acmeFoods, TicketVisibilityFacts::TEAM_ONLY, new TeamId(self::SHOP), $ben),
+            'team-only Shop reported by Omar' => new TicketVisibilityFacts($acmeFoods, TicketVisibilityFacts::TEAM_ONLY, new TeamId(self::SHOP), new UserId(self::OMAR)),
+            'team-only Shop reported by the Shop viewer' => new TicketVisibilityFacts($acmeFoods, TicketVisibilityFacts::TEAM_ONLY, new TeamId(self::SHOP), new UserId(self::SHOP_VIEWER)),
             'Mobile' => new TicketVisibilityFacts($acmeFoods, TicketVisibilityFacts::FOR_EVERYONE, new TeamId(self::MOBILE), $ben),
             'team-only with no team' => new TicketVisibilityFacts($acmeFoods, TicketVisibilityFacts::TEAM_ONLY, null, $ben),
             'Checkout' => new TicketVisibilityFacts(new OrganizationId(self::BETA_BAKERY), TicketVisibilityFacts::TEAM_ONLY, new TeamId(self::CHECKOUT), new UserId(self::BETA_ADMIN)),

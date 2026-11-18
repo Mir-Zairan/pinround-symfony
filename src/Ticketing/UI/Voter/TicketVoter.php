@@ -17,7 +17,7 @@ use Symfony\Component\Security\Core\Authorization\Voter\Vote;
  * personas-and-roles.md) from the request's actor. VIEW is the ticket visibility predicate, nothing else. EDIT and MOVE
  * are a Lead's or Member's of the ticket's team, ASSIGN a Lead's only: a Viewer, and a Manager or Admin with no such team
  * role, is denied, and so is everyone for a ticket with no team. CHOOSE_MAIN_SUMMARY is the Lead's of the ticket's team
- * or its reporter's, both of whom the visibility predicate lets see it. A ticket of another organization is denied for every attribute.
+ * or its reporter's unless that reporter is a Viewer of the team; the visibility predicate lets both see it. A ticket of another organization is denied for every attribute.
  *
  * VIEW reads the organization's triager, so it needs the request's open transaction under the actor's organization.
  *
@@ -50,7 +50,17 @@ final class TicketVoter extends DenyByDefaultVoter
         }
         if (TicketPermission::CHOOSE_MAIN_SUMMARY === $attribute) {
             // The visibility predicate lets both see the ticket, so VIEW needs no second read here.
-            return $subject->reporterId->equals($actor->userId()) || (null !== $subject->teamId && $actor->roles()->isLeadOf($subject->teamId));
+            if (null !== $subject->teamId) {
+                if ($actor->roles()->isLeadOf($subject->teamId)) {
+                    return true;
+                }
+                // The matrix's "if reporter" is the Member and Other user columns'; its Viewer column has no exception.
+                if ($actor->roles()->isViewerOf($subject->teamId)) {
+                    return false;
+                }
+            }
+
+            return $subject->reporterId->equals($actor->userId());
         }
         if (null === $subject->teamId) {
             return false;
