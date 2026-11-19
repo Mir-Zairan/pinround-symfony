@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Rest;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReport;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReportUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
@@ -95,6 +98,31 @@ final readonly class RestToolController
     public function draftScreenshots(string $key, Request $request): Response
     {
         return $this->idempotent($request, fn (array $body): Response => $this->run(AddScreenshot::NAME, [...$body, 'key' => $key], Response::HTTP_OK));
+    }
+
+    /**
+     * A new, empty notebook of the caller (create_notebook, notebooks:write).
+     */
+    #[Route('/api/v1/notebooks', name: 'api_v1_notebooks', methods: ['POST'])]
+    public function notebooks(Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->run(CreateNotebook::NAME, $body, Response::HTTP_CREATED));
+    }
+
+    /**
+     * {mime, bytes, sha256} begins an upload for the caller's own notebook (create_notebook_upload, notebooks:write);
+     * apart from /api/v1/uploads, whose body names a ticket or a project, as the notebook is in the path here.
+     */
+    #[Route('/api/v1/notebooks/{id}/uploads', name: 'api_v1_notebook_uploads', methods: ['POST'])]
+    public function notebookUploads(string $id, Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->run(CreateNotebookUpload::NAME, [...$body, 'notebook' => $id], Response::HTTP_CREATED));
+    }
+
+    #[Route('/api/v1/notebooks/{id}/screenshots', name: 'api_v1_notebook_screenshots', methods: ['POST'])]
+    public function notebookScreenshots(string $id, Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->run(AddNotebookScreenshot::NAME, [...$body, 'notebook' => $id], Response::HTTP_OK));
     }
 
     #[Route('/api/v1/me/tickets', name: 'api_v1_my_tickets', methods: ['GET'])]

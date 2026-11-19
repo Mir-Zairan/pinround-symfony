@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\AgentApi\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
 use App\AgentApi\Infrastructure\Mcp\Tool\SaveScenarios;
@@ -224,14 +227,22 @@ final class SaveScenariosTest extends WebTestCase
     }
 
     /**
-     * Notebooks never make a ticket (ADR-0046): reading, listing and saving leave tkt_ticket as it was.
+     * Notebooks never make a ticket (ADR-0046): making one, uploading and adding a picture, reading, listing and
+     * saving leave tkt_ticket as it was.
      */
     #[Test]
     public function noNotebookToolMakesATicket(): void
     {
         [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::NotebooksWrite]);
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, 'ready');
         $ticketsBefore = $this->ticketCount();
 
+        $this->callTool($token, CreateNotebook::NAME, ['title' => 'Delivery questions']);
+        $this->answer();
+        $this->callTool($token, CreateNotebookUpload::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'mime' => 'image/png', 'bytes' => 2048, 'sha256' => str_repeat('a', 64)]);
+        $this->answer();
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->answer();
         $this->callTool($token, ListMyNotebooks::NAME, []);
         $this->answer();
         $this->callTool($token, GetNotebook::NAME, ['notebook' => self::LENAS_NOTEBOOK]);

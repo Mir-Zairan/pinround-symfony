@@ -8,6 +8,7 @@ use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\Connection;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * The notebook tools' tests through POST /mcp: a session started as Claude Code starts it, notebooks seeded straight
@@ -162,15 +163,86 @@ trait CallsNotebookTools
     }
 
     /**
+     * An upload $person began for the target, as Media stores it: unused when $status is null, else completed, with the
+     * media object its completion made under the intent's id in the state processing left it.
+     *
+     * @param 'ready'|'pending'|'rejected'|null $status
+     *
+     * @return string the intent's id, which is the picture's
+     */
+    private function addUpload(OrganizationId $organizationId, User $person, string $targetKind, string $targetId, ?string $status): string
+    {
+        $intentId = Uuid::v7()->toRfc4122();
+        $storageKey = \sprintf('uploads/%s/%s', $organizationId->toString(), $intentId);
+        $intent = [$organizationId->toString(), $intentId, $person->id()->toString(), $targetKind, $targetId, $storageKey, null === $status ? null : '2026-11-10 09:00:05+00'];
+        $variants = json_encode(['view' => 'media/'.$intentId.'/view.webp', 'thumb' => 'media/'.$intentId.'/thumb.webp'], \JSON_THROW_ON_ERROR);
+        $picture = [
+            $organizationId->toString(), $intentId, $storageKey, $person->id()->toString(), $status,
+            'rejected' === $status ? 'The file is not a picture.' : null,
+            ...('ready' === $status ? [hash('sha256', $intentId), 1280, 800, $variants] : [null, null, null, null]),
+        ];
+        $this->committedAs($organizationId, static function (Connection $migrator) use ($intent, $picture, $status): int|string {
+            $migrator->executeStatement(
+                "INSERT INTO med_upload_intent (organization_id, id, user_id, purpose, target_kind, target_id, max_bytes, mime_allowed, storage_key, expires_at, used_at)
+                 VALUES (?, ?, ?, 'screenshot', ?, ?, 245760, '{image/png}', ?, TIMESTAMPTZ '2026-11-11 09:00:00+00', CAST(? AS TIMESTAMPTZ))",
+                $intent,
+            );
+            if (null === $status) {
+                return 0;
+            }
+
+            return $migrator->executeStatement(
+                "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status, reject_reason, sha256, width, height, variants)
+                 VALUES (?, ?, ?, 'image/png', 2048, ?, TIMESTAMPTZ '2026-11-10 09:00:05+00', ?, ?, ?, ?, ?, CAST(? AS jsonb))",
+                $picture,
+            );
+        });
+
+        return $intentId;
+    }
+
+    /**
+     * @return list<list<mixed>> each notebook's id, owner, title, screenshots (as stored, JSON) and version, by id
+     */
+    private function notebookRowsOf(OrganizationId $organizationId): array
+    {
+        $rows = [];
+        $this->committedAs($organizationId, static function (Connection $migrator) use (&$rows): int {
+            $rows = $migrator->fetchAllNumeric('SELECT id, owner_id, title, screenshots::text, version FROM rvw_notebook ORDER BY id');
+
+            return 0;
+        });
+
+        return $rows;
+    }
+
+    /**
+     * @return list<list<mixed>> each upload intent's id, target kind, target id and when it was used (UTC, null while
+     *                           unused), by id
+     */
+    private function uploadIntentsOf(OrganizationId $organizationId): array
+    {
+        $rows = [];
+        $this->committedAs($organizationId, static function (Connection $migrator) use (&$rows): int {
+            $rows = $migrator->fetchAllNumeric("SELECT id, target_kind, target_id, to_char(used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM med_upload_intent ORDER BY id");
+
+            return 0;
+        });
+
+        return $rows;
+    }
+
+    /**
      * Through the migrator, before LogsInUsers' tearDown deletes the organizations.
      */
     private function removeNotebooksAndAuditRows(): void
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['aud_event', 'rvw_notebook'] as $table) {
+                foreach (['aud_event', 'api_idempotency_key', 'rvw_notebook', 'med_object', 'med_upload_intent'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
+                $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
 
                 return 0;
             });

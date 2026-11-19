@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\AgentApi\Rest;
 
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -72,7 +73,7 @@ final class RestApiTest extends WebTestCase
         $this->removeSeededRounds();
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['aud_event', 'api_idempotency_key', 'rvw_report_draft', 'med_object', 'med_upload_intent'] as $table) {
+                foreach (['aud_event', 'api_idempotency_key', 'rvw_report_draft', 'rvw_notebook', 'med_object', 'med_upload_intent'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
                 $migrator->executeStatement("DELETE FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0", [$organizationId]);
@@ -280,7 +281,7 @@ final class RestApiTest extends WebTestCase
         $this->stepId = $this->addTodoStep();
         $ticketId = $this->addTicket('SHOP-1');
         $miasDraft = $this->addRound($ticketId, null, 'draft', 'Mia', null);
-        $uploadId = $this->addReadyUpload($miasDraft);
+        $uploadId = $this->addReadyUpload('Mia', 'round', $miasDraft);
         [$tokenId, $token] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
 
         $this->request($token, 'POST', '/api/v1/tickets/SHOP-404/draft/screenshots', ['upload_id' => $uploadId, 'title' => 'Cart total']);
@@ -300,6 +301,81 @@ final class RestApiTest extends WebTestCase
         self::assertEqualsCanonicalizing([[$tokenId, 'not_found'], [$tokenId, 'ok']], $this->addScreenshotAuditRows());
     }
 
+    /**
+     * Lena makes a notebook twice with one Idempotency-Key, begins an upload for it and adds a picture: one notebook,
+     * the picture in it, and no ticket.
+     */
+    #[Test]
+    public function theOwnerMakesANotebookOnceForOneIdempotencyKeyUploadsForItAndAddsAPictureWithoutATicket(): void
+    {
+        [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+
+        $this->request($token, 'POST', '/api/v1/notebooks', ['title' => 'Coupon questions'], ['HTTP_IDEMPOTENCY_KEY' => 'notebook-1']);
+        self::assertResponseStatusCodeSame(201);
+        $first = $this->json();
+        $notebookId = $first['notebook_id'] ?? null;
+        self::assertIsString($notebookId);
+        $this->request($token, 'POST', '/api/v1/notebooks', ['title' => 'Coupon questions'], ['HTTP_IDEMPOTENCY_KEY' => 'notebook-1']);
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame($first, $this->json());
+        self::assertSame('true', $this->client->getResponse()->headers->get(RestToolController::REPLAYED_HEADER));
+        self::assertSame([[$notebookId, 'Coupon questions', 0]], $this->rowsOf('SELECT id, title, jsonb_array_length(screenshots) FROM rvw_notebook'));
+
+        $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/uploads', ['mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256]);
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame(['upload_id', 'put_url', 'headers', 'expires_at'], array_keys($this->json()));
+        self::assertSame([['notebook', $notebookId]], $this->rowsOf('SELECT target_kind, target_id FROM med_upload_intent'));
+
+        $uploadId = $this->addReadyUpload('Lena', 'notebook', $notebookId);
+        $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/screenshots', ['upload_id' => $uploadId, 'title' => 'Cart total']);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['notebook_id' => $notebookId, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ADDED, 'screenshot_count' => 1], $this->json());
+        self::assertSame([[$notebookId, 'Coupon questions', 1]], $this->rowsOf('SELECT id, title, jsonb_array_length(screenshots) FROM rvw_notebook'));
+        self::assertSame(0, $this->rowCountOf('tkt_ticket'));
+    }
+
+    /**
+     * Omar and Sara hold notebooks:write, so only the owner rule can refuse them; an unknown and a malformed id are
+     * 404 too, never 500. Lena's token without notebooks:write is 403 on each route. Nothing changes.
+     */
+    #[Test]
+    public function anotherPersonsNotebookAnUnknownIdAndATokenWithoutNotebooksWriteAreRefusedAndNothingChanges(): void
+    {
+        [, $lenasToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        $this->request($lenasToken, 'POST', '/api/v1/notebooks', ['title' => 'Coupon questions']);
+        self::assertResponseStatusCodeSame(201);
+        $lenasNotebook = $this->json()['notebook_id'] ?? null;
+        self::assertIsString($lenasNotebook);
+        $lenasUpload = $this->addReadyUpload('Lena', 'notebook', $lenasNotebook);
+        $file = ['mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256];
+        $notebooksBefore = $this->rowsOf('SELECT id, owner_id, title, screenshots::text, version FROM rvw_notebook');
+        $intentsBefore = $this->rowsOf('SELECT id, used_at FROM med_upload_intent ORDER BY id');
+
+        foreach (['Omar', 'Sara'] as $person) {
+            [, $token] = $this->issueApiToken($this->people[$person], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+            foreach ([$lenasNotebook, '0197a3c0-0000-7000-8000-0000000b9999', 'not-a-notebook'] as $notebookId) {
+                $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/uploads', $file);
+                self::assertResponseStatusCodeSame(404, $person.' '.$notebookId);
+                self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+                $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/screenshots', ['upload_id' => $lenasUpload]);
+                self::assertResponseStatusCodeSame(404, $person.' '.$notebookId);
+                self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+            }
+        }
+
+        [, $readToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::RoundsWrite, ApiTokenScope::ReportsWrite]);
+        $missingScope = ['error' => \sprintf(ToolRefusal::MISSING_SCOPE, 'notebooks:write'), 'outcome' => 'missing_scope'];
+        foreach ([['/api/v1/notebooks', ['title' => 'Another']], ['/api/v1/notebooks/'.$lenasNotebook.'/uploads', $file], ['/api/v1/notebooks/'.$lenasNotebook.'/screenshots', ['upload_id' => $lenasUpload]]] as [$path, $body]) {
+            $this->request($readToken, 'POST', $path, $body);
+            self::assertResponseStatusCodeSame(403, $path);
+            self::assertSame($missingScope, $this->json());
+        }
+
+        self::assertSame($notebooksBefore, $this->rowsOf('SELECT id, owner_id, title, screenshots::text, version FROM rvw_notebook'));
+        self::assertSame($intentsBefore, $this->rowsOf('SELECT id, used_at FROM med_upload_intent ORDER BY id'));
+        self::assertSame(0, $this->rowCountOf('tkt_ticket'));
+    }
+
     private function addTodoStep(): string
     {
         $stepId = Uuid::v7()->toRfc4122();
@@ -313,29 +389,29 @@ final class RestApiTest extends WebTestCase
     }
 
     /**
-     * An upload Mia began for $roundId and completed, with the ready picture its completion and processing made under
-     * the intent's id, as Media stores them.
+     * An upload $person began for the target and completed, with the ready picture its completion and processing made
+     * under the intent's id, as Media stores them.
      *
      * @return string the intent's id, which is the picture's
      */
-    private function addReadyUpload(string $roundId): string
+    private function addReadyUpload(string $person, string $targetKind, string $targetId): string
     {
         $intentId = Uuid::v7()->toRfc4122();
         $organizationId = $this->acmeFoods->toString();
-        $mia = $this->people['Mia']->id()->toString();
+        $uploader = $this->people[$person]->id()->toString();
         $storageKey = \sprintf('uploads/%s/%s', $organizationId, $intentId);
         $variants = json_encode(['view' => 'media/'.$intentId.'/view.webp', 'thumb' => 'media/'.$intentId.'/thumb.webp'], \JSON_THROW_ON_ERROR);
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $intentId, $mia, $roundId, $storageKey, $variants): int|string {
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $intentId, $uploader, $targetKind, $targetId, $storageKey, $variants): int|string {
             $migrator->executeStatement(
                 "INSERT INTO med_upload_intent (organization_id, id, user_id, purpose, target_kind, target_id, max_bytes, mime_allowed, storage_key, expires_at, used_at)
-                 VALUES (?, ?, ?, 'screenshot', 'round', ?, 245760, '{image/png}', ?, TIMESTAMPTZ '2026-11-11 09:00:00+00', TIMESTAMPTZ '2026-11-10 09:00:05+00')",
-                [$organizationId, $intentId, $mia, $roundId, $storageKey],
+                 VALUES (?, ?, ?, 'screenshot', ?, ?, 245760, '{image/png}', ?, TIMESTAMPTZ '2026-11-11 09:00:00+00', TIMESTAMPTZ '2026-11-10 09:00:05+00')",
+                [$organizationId, $intentId, $uploader, $targetKind, $targetId, $storageKey],
             );
 
             return $migrator->executeStatement(
                 "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status, reject_reason, sha256, width, height, variants)
                  VALUES (?, ?, ?, 'image/png', 2048, ?, TIMESTAMPTZ '2026-11-10 09:00:05+00', 'ready', NULL, ?, 1280, 800, CAST(? AS jsonb))",
-                [$organizationId, $intentId, $storageKey, $mia, hash('sha256', $intentId), $variants],
+                [$organizationId, $intentId, $storageKey, $uploader, hash('sha256', $intentId), $variants],
             );
         });
 

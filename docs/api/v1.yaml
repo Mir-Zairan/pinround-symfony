@@ -120,6 +120,76 @@ paths:
         '404': { $ref: '#/components/responses/Refused' }
         '409': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks:
+    post:
+      summary: Make a new, empty private notebook of mine (create_notebook, scope notebooks:write).
+      description: Only its owner ever sees it (ADR-0046). Each request without an Idempotency-Key makes another one.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201': { description: '{notebook_id}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks/{id}/uploads:
+    post:
+      summary: Begin one screenshot upload for my own notebook (create_notebook_upload, scope notebooks:write).
+      description: >-
+        Then PUT the file to `put_url` with the `headers` given, before `expires_at`, and add it with
+        `POST /api/v1/notebooks/{id}/screenshots`. Another person's notebook is 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mime, bytes, sha256]
+              properties:
+                mime: { type: string, enum: [image/png, image/jpeg, image/webp] }
+                bytes: { type: integer, maximum: 15728640 }
+                sha256: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+      responses:
+        '201': { description: '{upload_id, put_url, headers, expires_at}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks/{id}/screenshots:
+    post:
+      summary: Add a picture uploaded for this notebook at its end (add_notebook_screenshot, scope notebooks:write).
+      description: >-
+        At most 10 pictures, each once. A picture still being processed is added and shows once ready. An upload begun
+        for anything but this notebook, or by anyone else, is 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [upload_id]
+              properties:
+                upload_id: { type: string }
+                title: { type: string, maxLength: 120 }
+                summary: { type: string, maxLength: 600 }
+                pins: { type: array, maxItems: 100, items: { type: object } }
+      responses:
+        '200': { description: '{notebook_id, media_id, status: added, screenshot_count}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
 components:
   securitySchemes:
     token:
