@@ -487,7 +487,7 @@ Full-screen view of one section with After/Before toggle, pins, a bar with the c
 - Accept: AI suggestion pins show only on the After picture; choosing a verdict moves to the next pin.
 
 **FR-RND-09 — Draft round** · Must · 🏁 · Prototype: `Main › Ticket` (Draft round · only you can see this)
-The assignee of an open ticket can start one draft round per ticket: add screenshots, drop pins with notes, set a verdict per screenshot (**Looks right** / **Not right yet**), write a summary per screenshot ([FR-RND-16](#rnd--screenshots-pins-and-rounds)), remove screenshots. Status "1 of 2 look right".
+The assignee of an open ticket, or the person whose turn it is ([FR-RND-17](#rnd--screenshots-pins-and-rounds), [ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md)), can start one draft round per ticket for themselves: add screenshots, drop pins with notes, set a verdict per screenshot (**Looks right** / **Not right yet**), write a summary per screenshot ([FR-RND-16](#rnd--screenshots-pins-and-rounds)), remove screenshots. Status "1 of 2 look right".
 
 **FR-RND-10 — Draft visibility** · Must · 🏁 · Prototype: same, tag PRIVATE
 Only the owner sees an unshared draft (not admins, not the lead). The owner's personal access token with scope `read` can read it through MCP.

@@ -139,8 +139,8 @@ final class CreateUploadTest extends WebTestCase
     }
 
     /**
-     * Mia reported SHOP-1 and may see and edit it, but only its assignee may start a draft: the voter denies her, which
-     * the gate answers as not found.
+     * Mia reported SHOP-1 and may see and edit it, but she is not its assignee and it is not her turn, so the voter
+     * denies her, which the gate answers as not found.
      */
     #[Test]
     public function aPersonWhoMayNotStartADraftIsNotFoundAndNothingIsWritten(): void

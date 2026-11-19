@@ -48,7 +48,7 @@ final class DraftRoundController extends AbstractController
     /** With the round's number. */
     public const string DRAFT_SHARED = 'Shared with the team as round %d.';
     public const string DRAFT_DELETED = 'Draft round deleted.';
-    public const string ONLY_THE_ASSIGNEE_STARTS = "Only the ticket's assignee can start a draft round.";
+    public const string ONLY_THE_ASSIGNEE_OR_TURN_STARTS = 'Only the assignee, or the person whose turn it is, can start a draft round.';
 
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
@@ -82,7 +82,7 @@ final class DraftRoundController extends AbstractController
         return $this->respondToAction($request, $key, function () use ($key, $csrfToken, $now): string {
             $visible = $this->visibleTicketLookup->visibleTicketOf($key);
             if (!$this->isGranted(RoundPermission::DRAFT_CREATE, $visible->ticket->id)) {
-                throw new RefusedWithToast(self::ONLY_THE_ASSIGNEE_STARTS);
+                throw new RefusedWithToast(self::ONLY_THE_ASSIGNEE_OR_TURN_STARTS);
             }
             $this->refuseAnExpiredForm($key, $csrfToken);
             $this->roundCommands->startDraft($visible->ticket->id, $visible->actor->userId(), $now);

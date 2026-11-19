@@ -133,6 +133,9 @@ final class VoterMatrixTest extends KernelTestCase
     private const string DONE_STEP = '0197a3c0-0000-7000-8000-00000000f0d1';
     private const string ASSIGNED_TICKET = '0197a3c0-0000-7000-8000-0000000009f6';
     private const string DONE_TICKET = '0197a3c0-0000-7000-8000-0000000009f7';
+    private const string TESTING_STEP = '0197a3c0-0000-7000-8000-00000000f0d2';
+    /** Assigned to Omar, in Testing with Mia as its tester, and Mia's turn in the turn read model (ADR-0044). */
+    private const string TESTING_TICKET = '0197a3c0-0000-7000-8000-0000000009f9';
     private const string ROUND = '0197a3c0-0000-7000-8000-0000000009f8';
 
     /** Each ticket id subject of DRAFT_CREATE by name; Omar is the assignee of the two Shop tickets of Acme Foods that have one. */
@@ -140,6 +143,7 @@ final class VoterMatrixTest extends KernelTestCase
         'Unassigned Shop ticket' => self::SHOP_TICKET,
         'Shop ticket assigned to Omar' => self::ASSIGNED_TICKET,
         'Done Shop ticket assigned to Omar' => self::DONE_TICKET,
+        'Shop ticket in Testing, Mia\'s turn' => self::TESTING_TICKET,
         'Ticket nobody has, for a draft round' => self::NO_TICKET,
     ];
 
@@ -507,6 +511,10 @@ final class VoterMatrixTest extends KernelTestCase
                 "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Done', 'done', 'done', 'core', 7)",
                 [self::ACME_FOODS, self::DONE_STEP],
             ));
+            self::migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Testing', 'check', 'test', 'core', 5)",
+                [self::ACME_FOODS, self::TESTING_STEP],
+            ));
         } finally {
             $tenantContext->clear();
         }
@@ -517,6 +525,18 @@ final class VoterMatrixTest extends KernelTestCase
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::ASSIGNED_TICKET, self::PROJECT, 3, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0]]);
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::DONE_TICKET, self::PROJECT, 4, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0]]);
         $tickets->moveToStepOf(self::ACME_FOODS, self::DONE_TICKET, self::DONE_STEP);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::TESTING_TICKET, self::PROJECT, 5, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0], 'tester_id' => self::PEOPLE['Mia'][0]]);
+        $tickets->moveToStepOf(self::ACME_FOODS, self::TESTING_TICKET, self::TESTING_STEP);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            self::migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
+                 SELECT organization_id, id, team_id, project_id, 'check', tester_id, NULL, 'test', 10, '2027-03-15 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
+                [self::TESTING_TICKET],
+            ));
+        } finally {
+            $tenantContext->clear();
+        }
     }
 
     private static function removeSeededRows(): void

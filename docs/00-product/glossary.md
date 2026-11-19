@@ -64,7 +64,7 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Group** — See *Five groups*.
 
-**Hand-off** — The moment a ticket leaves its assignee (for example "Send to code review"). If the assignee has an unshared draft round, pinround asks: share it, or keep it private.
+**Hand-off** — The moment a ticket leaves the person who has it (for example "Send to code review", or the tester's "Needs changes"). If that person has an unshared draft round with a screenshot, pinround asks: share it, or keep it private.
 
 **In short** — The short AI summary at the top of "The ask" on a ticket. It says who or what wrote it.
 

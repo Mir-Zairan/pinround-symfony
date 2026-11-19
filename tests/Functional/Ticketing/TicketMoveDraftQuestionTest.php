@@ -79,6 +79,9 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     private string $omarsDraft;
     private string $lenasDraft;
 
+    /** How many rounds SHOP-1 has once a test has seeded its own; stateOf checks it. */
+    private int $seededRoundCount = 3;
+
     protected function setUp(): void
     {
         $this->client = self::createClient([], ['HTTPS' => 'on']);
@@ -161,6 +164,35 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertSame(array_diff_key($before['rounds'], [$this->omarsDraft => true]), array_diff_key($after['rounds'], [$this->omarsDraft => true]), 'Lena\'s draft and Mia\'s round stay as they were.');
 
         $this->assertASecondMoveAsksNothing($after);
+    }
+
+    /**
+     * ADR-0044: the dialog follows the draft's owner, not the verb, so the tester's "Needs changes" asks about her own
+     * draft as the assignee's "Start work" asks about his.
+     */
+    #[Test]
+    public function aTestersNeedsChangesAsksAboutHerDraftThenShareSendsTheTicketBackAndSharesIt(): void
+    {
+        $miasDraft = $this->putShop1InTestingWithAMiasDraftOfOneScreenshot();
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', '/t/SHOP-1/move/needs_changes', $this->moveFields());
+
+        self::assertResponseStatusCodeSame(409);
+        $this->assertTheQuestionPage(1, 2, 'In progress', '/t/SHOP-1/move/needs_changes');
+        self::assertSame($before, $this->stateOf());
+
+        $this->client->request('POST', '/t/SHOP-1/move/needs_changes', $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']));
+
+        self::assertStringEndsWith('Your draft is now round 2 for the team.', $this->toastAfterTheRedirect());
+        $after = $this->stateOf();
+        self::assertSame($this->steps['progress'], $after['ticket']['step_id']);
+        self::assertSame(
+            [...$before['rounds'][$miasDraft], 'number' => 2, 'shared_at' => self::NOW_AS_STORED, 'version' => 3, 'decision' => 'shared', 'decided_at' => self::NOW_AS_STORED],
+            $after['rounds'][$miasDraft],
+        );
+        self::assertSame(array_diff_key($before['rounds'], [$miasDraft => true]), array_diff_key($after['rounds'], [$miasDraft => true]), 'Omar\'s and Lena\'s drafts and Mia\'s first round stay as they were.');
     }
 
     #[Test]
@@ -614,6 +646,31 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertSame($state['rounds'], $after['rounds']);
     }
 
+    /**
+     * Mia becomes Shop's tester and SHOP-1's, the ticket goes to Testing (its version stays), and Mia starts an
+     * undecided draft with one ready screenshot.
+     *
+     * @return string the id of Mia's draft
+     */
+    private function putShop1InTestingWithAMiasDraftOfOneScreenshot(): string
+    {
+        $miaId = $this->people['Mia']->id()->toString();
+        $shopId = $this->shop->toString();
+        $testingStepId = $this->steps['test'];
+        $ticketId = $this->ticketId;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($miaId, $shopId, $testingStepId, $ticketId): int {
+            $migrator->executeStatement("UPDATE org_team_member SET job = 'tester' WHERE team_id = ? AND user_id = ?", [$shopId, $miaId]);
+            $migrator->executeStatement('UPDATE tkt_ticket SET step_id = ?, tester_id = ? WHERE id = ?', [$testingStepId, $miaId, $ticketId]);
+
+            return 0;
+        });
+        $miasDraft = $this->addRound($this->ticketId, null, 'draft', 'Mia', null);
+        $this->addScreenshot($miasDraft, $this->addMedia('ready', 'Mia'), 0, null, null);
+        $this->seededRoundCount = 4;
+
+        return $miasDraft;
+    }
+
     private function addOmarsScreenshots(int $count): void
     {
         for ($position = 0; $position < $count; ++$position) {
@@ -783,7 +840,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             self::assertIsString($round['id']);
             $rounds[$round['id']] = $round;
         }
-        self::assertCount(3, $rounds);
+        self::assertCount($this->seededRoundCount, $rounds);
 
         return ['ticket' => ['step_id' => $ticket['step_id'], 'version' => $ticket['version'], 'events' => $ticket['events']], 'rounds' => $rounds];
     }

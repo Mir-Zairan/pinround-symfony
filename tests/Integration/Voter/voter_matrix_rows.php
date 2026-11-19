@@ -57,7 +57,8 @@ use App\Workflow\Api\WorkflowPermission;
  * Or a round (RoundPermission VIEW, EDIT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
  *            "Shared round of Omar on a team-only Shop ticket" or "… Support ticket", "… on a ticket nobody has", or
  *            "Shared round of another organization" or "Unshared draft round of Omar in another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
- *            assigned to Omar", "Done Shop ticket assigned to Omar", "Ticket nobody has, for a draft round".
+ *            assigned to Omar", "Done Shop ticket assigned to Omar", "Shop ticket in Testing, Mia's turn" (assigned to Omar),
+ *            "Ticket nobody has, for a draft round".
  *
  * The roles doc has no mute row: whoever may see a ticket may mute it for themselves (MuteVoter), so the
  * NOTIFICATION_MUTE rows cite the visibility text.
@@ -469,4 +470,11 @@ return [
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Done Shop ticket assigned to Omar', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Unassigned Shop ticket', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Ticket nobody has, for a draft round', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Mia', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Lena', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Raj', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Sara', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Noor', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Ben', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
 ];

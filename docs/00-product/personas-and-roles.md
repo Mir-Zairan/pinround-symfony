@@ -123,7 +123,7 @@ Legend: ✅ allowed · ⚠️ allowed with a condition (see note) · — not all
 | Checklist item OK / Not fixed | — | — | — | ⚠️ job tester | — | — |
 | Pin verdict in a review round (Fixed / Still wrong), section verdict | — | — | ✅ | ⚠️ job tester or the round's reviewer | — | — |
 | Keep / dismiss AI suggestion pin | — | — | ✅ | ⚠️ the round's reviewer | — | — |
-| Start / edit / share a draft round | — | — | ⚠️ if assignee | ⚠️ if assignee | — | — |
+| Start / edit / share a draft round | — | — | ⚠️ if assignee or it is their turn ⁸ | ⚠️ if assignee or it is their turn ⁸ | — | — |
 | See a draft round | ⚠️ only after shared (never unshared) | ⚠️ only after shared | ⚠️ owner, or after shared (a lead never sees others' unshared drafts) | ⚠️ owner, or after shared | ⚠️ after shared | — |
 | Summarize with AI (shared summary) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | — | — |
 | Explain it to me (private) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy |
@@ -145,6 +145,7 @@ Notes:
 5. The exact rule is the canonical [ticket visibility predicate](../02-architecture/data-model.md#ticket-visibility-predicate). It is the same for lists, search, duplicate suggestions, My reports, Home, counts, emails, AI, MCP and exports.
 6. Creating any token asks for the password and MFA again if the last check is older than 10 minutes. Admin pages and admin actions never accept a token: `ADMIN_*` voters deny every token-authenticated request, so a token cannot be used to skip admin MFA.
 7. The simple "New ticket" form files a ticket straight onto the team's board, so it needs a Lead, Member or Viewer role on that team; everyone can still report a problem through the intake ([ADR-0038](../03-adr/0038-create-ticket-team-form-needs-team-role.md)).
+8. "Their turn" is the turn read model's person, for example the tester in Testing or the reviewer in Code review, and only on a ticket they may see and not in Done ([ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md)). The owner keeps editing and sharing their draft after the turn passes on.
 
 ## Special visibility rules
 
