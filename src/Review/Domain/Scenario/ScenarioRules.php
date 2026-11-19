@@ -8,7 +8,8 @@ namespace App\Review\Domain\Scenario;
  * The scenario format of ADR-0046 (FR-EXP-04), the same rules as docs/api/scenario.v1.json; a unit test keeps the two
  * in step. A scenario is data the extension plays, never code. Lengths count characters (code points), as JSON
  * Schema's maxLength does, and text is kept as sent, not trimmed, so the schema and these rules accept the same
- * values. One rule the schema cannot carry: every go_to url stays on the scheme, host and port of start_url.
+ * values. Two rules the schema cannot carry: a port is 1 to 65535, and every go_to url stays on the scheme, host and
+ * port of start_url.
  */
 final class ScenarioRules
 {
@@ -39,8 +40,9 @@ final class ScenarioRules
     public const array LOCATOR_KINDS = ['role', 'text', 'label'];
 
     // Written to mean the same in PCRE and ECMAScript, so the schema carries this very string. The host allows no
-    // "@" or "\", so no browser reads a host other than the one compared here.
-    public const string URL_PATTERN = '^(https?)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::([0-9]{1,5}))?(?:[/?#][^\s\\\\\x00-\x1f\x7f]*)?$';
+    // "@" or "\", so no browser reads a host other than the one compared here. The byte order mark is written as
+    // itself: ECMAScript's \s holds it and PCRE's does not, and neither reads the other's escape for it.
+    public const string URL_PATTERN = '^(https?)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::([0-9]{1,5}))?(?:[/?#][^\s\\\\\x00-\x1f\x7f'."\u{FEFF}".']*)?$';
     public const string ROLE_PATTERN = '^[a-z]+(?:-[a-z]+)*$';
 
     public const array SCENARIO_FIELDS = ['title', 'why', 'setup', 'start_url', 'steps'];
@@ -48,8 +50,14 @@ final class ScenarioRules
     // The schema's "\S" in ECMAScript: Unicode white space and the byte order mark are blank.
     private const string NOT_BLANK = '/(*UCP)[^\s\x{FEFF}]/u';
 
+    private const int MAX_PORT = 65535;
+
     /**
-     * @param mixed $decoded the scenarios as json_decode($json, true) gives them: a list of at most 20 objects
+     * Decode the JSON with json_decode($json) and its objects as stdClass, never with $associative true: that would
+     * turn {} and {"0": …} into PHP lists, and they would pass where the schema wants a list. An array with string
+     * keys is read as an object too, so the scenarios ScenarioRules gave (Scenarios::toArray) parse again.
+     *
+     * @param mixed $decoded a list of at most MAX_SCENARIOS scenario objects
      *
      * @throws ScenarioRefused with the first rule broken, checking each scenario's fields in order, then its steps
      */
@@ -69,11 +77,9 @@ final class ScenarioRules
         return new Scenarios($scenarios);
     }
 
-    private static function scenario(mixed $fields, string $place): Scenario
+    private static function scenario(mixed $scenario, string $place): Scenario
     {
-        if (!\is_array($fields)) {
-            throw ScenarioRefused::at($place, ScenarioRefused::SCENARIO_FIELDS);
-        }
+        $fields = self::fieldsOf($scenario) ?? throw ScenarioRefused::at($place, ScenarioRefused::SCENARIO_FIELDS);
         self::refuseUnlessFieldsAre($fields, self::SCENARIO_FIELDS, [], $place, ScenarioRefused::SCENARIO_FIELDS);
         $title = self::text($fields['title'], 'title', self::TITLE_MAX_LENGTH, false, $place);
         $why = self::text($fields['why'], 'why', self::WHY_MAX_LENGTH, false, $place);
@@ -99,11 +105,9 @@ final class ScenarioRules
         return new Scenario($title, $why, $setup, $startUrl, $checkedSteps);
     }
 
-    private static function step(mixed $fields, string $startOrigin, string $place): ScenarioStep
+    private static function step(mixed $step, string $startOrigin, string $place): ScenarioStep
     {
-        if (!\is_array($fields)) {
-            throw ScenarioRefused::at($place, ScenarioRefused::STEP_NOT_AN_OBJECT);
-        }
+        $fields = self::fieldsOf($step) ?? throw ScenarioRefused::at($place, ScenarioRefused::STEP_NOT_AN_OBJECT);
         $type = $fields['type'] ?? null;
         if (!\is_string($type) || !\array_key_exists($type, self::STEP_FIELDS)) {
             throw ScenarioRefused::at($place, \sprintf(ScenarioRefused::STEP_TYPE, implode(', ', array_keys(self::STEP_FIELDS))));
@@ -130,11 +134,9 @@ final class ScenarioRules
         return new ScenarioStep($type, $say, $target, $text, $option, $url);
     }
 
-    private static function target(mixed $fields, string $place): ScenarioTarget
+    private static function target(mixed $target, string $place): ScenarioTarget
     {
-        if (!\is_array($fields)) {
-            throw ScenarioRefused::at($place, ScenarioRefused::TARGET);
-        }
+        $fields = self::fieldsOf($target) ?? throw ScenarioRefused::at($place, ScenarioRefused::TARGET);
         foreach (array_keys($fields) as $key) {
             if ('name' !== $key && !\in_array($key, self::LOCATOR_KINDS, true)) {
                 throw ScenarioRefused::at($place, ScenarioRefused::TARGET);
@@ -167,7 +169,8 @@ final class ScenarioRules
     }
 
     /**
-     * @throws ScenarioRefused when the value is not text, not UTF-8, over the cap, or blank where it may not be
+     * @throws ScenarioRefused when the value is not text, not UTF-8, holds a NUL character (PostgreSQL's jsonb refuses
+     *                         one), is over the cap, or is blank where it may not be
      */
     private static function text(mixed $value, string $field, int $maxLength, bool $mayBeBlank, string $place): string
     {
@@ -176,6 +179,9 @@ final class ScenarioRules
         }
         if (!mb_check_encoding($value, 'UTF-8')) {
             throw ScenarioRefused::at($place, \sprintf(ScenarioRefused::NOT_UTF8, $field));
+        }
+        if (str_contains($value, "\0")) {
+            throw ScenarioRefused::at($place, \sprintf(ScenarioRefused::NUL, $field));
         }
         if (mb_strlen($value, 'UTF-8') > $maxLength) {
             throw ScenarioRefused::at($place, \sprintf(ScenarioRefused::TOO_LONG, $field, number_format($maxLength)));
@@ -189,7 +195,7 @@ final class ScenarioRules
 
     /**
      * @return string|null "scheme://host:port" in lowercase with the default port filled in, or null when the url is
-     *                     no full http or https address
+     *                     no full http or https address or its port is outside 1 to MAX_PORT
      */
     private static function originOf(string $url): ?string
     {
@@ -200,8 +206,23 @@ final class ScenarioRules
         $scheme = $parts[1];
         $defaultPort = 'https' === $scheme ? 443 : 80;
         $port = isset($parts[3]) && '' !== $parts[3] ? (int) $parts[3] : $defaultPort;
+        if ($port < 1 || $port > self::MAX_PORT) {
+            return null;
+        }
 
         return \sprintf('%s://%s:%d', $scheme, strtolower($parts[2]), $port);
+    }
+
+    /**
+     * @return array<mixed>|null the fields of a JSON object, decoded as stdClass or as an array; null for any other value
+     */
+    private static function fieldsOf(mixed $value): ?array
+    {
+        if ($value instanceof \stdClass) {
+            return get_object_vars($value);
+        }
+
+        return \is_array($value) ? $value : null;
     }
 
     /**

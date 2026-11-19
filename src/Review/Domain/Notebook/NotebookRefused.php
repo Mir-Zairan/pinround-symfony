@@ -12,7 +12,7 @@ final class NotebookRefused extends \DomainException
     public const string TITLE_BLANK = 'Give the notebook a title.';
     public const string TITLE_TOO_LONG = 'Keep the notebook title to 120 characters or fewer.';
     public const string TOO_MANY_SCREENSHOTS = 'A notebook holds at most 10 screenshots.';
-    public const string TOO_MANY_SCENARIOS = 'A notebook holds at most 20 scenarios.';
+    public const string UNSAVABLE_TEXT = 'This text has a character we cannot save. Remove it and try again.';
     public const string SAME_PICTURE_TWICE = 'Each picture can be in the notebook only once.';
     public const string PICTURE_NOT_UPLOADED = 'Add a screenshot you uploaded yourself.';
     public const string PICTURE_TITLE_TOO_LONG = 'Keep the title to 120 characters or fewer.';

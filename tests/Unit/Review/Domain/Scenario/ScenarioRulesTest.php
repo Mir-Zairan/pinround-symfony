@@ -70,6 +70,7 @@ final class ScenarioRulesTest extends TestCase
 
         self::assertSame($sent, $parsed->toArray());
         self::assertEquals($parsed, ScenarioRules::parse($parsed->toArray()));
+        self::assertEquals($parsed, ScenarioRules::parse(json_decode(json_encode($sent, \JSON_THROW_ON_ERROR), false, 512, \JSON_THROW_ON_ERROR)), 'Objects decoded as stdClass read the same.');
     }
 
     /**
@@ -158,6 +159,21 @@ final class ScenarioRulesTest extends TestCase
             ['first' => self::scenario([self::click()])],
             'Send the scenarios as a list.',
             [self::scenario([self::click()])],
+        ];
+        yield 'scenarios sent as an empty JSON object' => [
+            json_decode('{}', false, 512, \JSON_THROW_ON_ERROR),
+            'Send the scenarios as a list.',
+            json_decode('[]', false, 512, \JSON_THROW_ON_ERROR),
+        ];
+        yield 'scenarios sent as a JSON object keyed 0' => [
+            json_decode('{"0": '.self::json(self::scenario([self::click()])).'}', false, 512, \JSON_THROW_ON_ERROR),
+            'Send the scenarios as a list.',
+            json_decode('['.self::json(self::scenario([self::click()])).']', false, 512, \JSON_THROW_ON_ERROR),
+        ];
+        yield 'steps sent as a JSON object keyed 0' => [
+            json_decode('['.self::json(self::scenario([], ['steps' => (object) ['0' => self::click()]])).']', false, 512, \JSON_THROW_ON_ERROR),
+            'Scenario 1: steps must be a list.',
+            json_decode('['.self::json(self::scenario([self::click()])).']', false, 512, \JSON_THROW_ON_ERROR),
         ];
         yield 'scenarios sent as one string' => [
             '[{"title": "The stock warning shows"}]',
@@ -269,6 +285,36 @@ final class ScenarioRulesTest extends TestCase
             'Scenario 1, step 1: say is not valid UTF-8.',
             [self::scenario([['type' => 'pause', 'say' => "Caf\xC3\xA9"]])],
         ];
+        yield 'a title with a NUL character' => [
+            [self::scenario([self::click()], ['title' => "The stock\0warning"])],
+            'Scenario 1: title must not hold a NUL character.',
+            [self::scenario([self::click()], ['title' => 'The stock warning'])],
+        ];
+        yield 'a setup of only a NUL character' => [
+            [self::scenario([self::click()], ['setup' => "\0"])],
+            'Scenario 1: setup must not hold a NUL character.',
+            [self::scenario([self::click()], ['setup' => ''])],
+        ];
+        yield 'a typed text with a NUL character' => [
+            [self::scenario([self::click(), ['type' => 'type', 'say' => 'Type.', 'target' => ['label' => 'Note'], 'text' => "3\0"]])],
+            'Scenario 1, step 2: text must not hold a NUL character.',
+            [self::scenario([self::click(), ['type' => 'type', 'say' => 'Type.', 'target' => ['label' => 'Note'], 'text' => '3']])],
+        ];
+        yield 'a target label with a NUL character' => [
+            [self::scenario([self::click(['label' => "\0Note"])])],
+            'Scenario 1, step 1: target.label must not hold a NUL character.',
+            [self::scenario([self::click(['label' => 'Note'])])],
+        ];
+        yield 'a target name that is no UTF-8' => [
+            [self::scenario([self::click(['role' => 'button', 'name' => "Sav\xC3\x28"])])],
+            'Scenario 1, step 1: target.name is not valid UTF-8.',
+            [self::scenario([self::click(['role' => 'button', 'name' => "Sav\xC3\xA9"])])],
+        ];
+        yield 'a target name nested one level deeper than text' => [
+            [self::scenario([self::click(['role' => 'button', 'name' => ['text' => 'Save']])])],
+            'Scenario 1, step 1: target.name must be text.',
+            [self::scenario([self::click(['role' => 'button', 'name' => 'Save'])])],
+        ];
         yield 'a title that is a number' => [
             [self::scenario([self::click()], ['title' => 12])],
             'Scenario 1: title must be text.',
@@ -369,6 +415,31 @@ final class ScenarioRulesTest extends TestCase
             'Scenario 1: start_url must be a full http or https address, like http://localhost:8000/orders.',
             [self::scenario([self::click()], ['start_url' => 'http://[::1]:8000/x'])],
         ];
+        yield 'a start_url with a byte order mark' => [
+            [self::scenario([self::click()], ['start_url' => self::START_URL."\u{FEFF}x"])],
+            'Scenario 1: start_url must be a full http or https address, like http://localhost:8000/orders.',
+            [self::scenario([self::click()], ['start_url' => self::START_URL."\u{200B}x"])],
+        ];
+        yield 'a start_url on port 65536' => [
+            [self::scenario([self::click()], ['start_url' => 'http://localhost:65536/orders'])],
+            'Scenario 1: start_url must be a full http or https address, like http://localhost:8000/orders.',
+            [self::scenario([self::click()], ['start_url' => 'http://localhost:65535/orders'])],
+        ];
+        yield 'a start_url on port 0' => [
+            [self::scenario([self::click()], ['start_url' => 'https://localhost:0/orders'])],
+            'Scenario 1: start_url must be a full http or https address, like http://localhost:8000/orders.',
+            [self::scenario([self::click()], ['start_url' => 'https://localhost:1/orders'])],
+        ];
+        yield 'a go_to on port 65536' => [
+            [self::scenario([self::goTo('http://localhost:65536/cart')], ['start_url' => 'http://localhost:65535/orders'])],
+            'Scenario 1, step 1: url must be a full http or https address, like http://localhost:8000/orders.',
+            [self::scenario([self::goTo('http://localhost:65535/cart')], ['start_url' => 'http://localhost:65535/orders'])],
+        ];
+        yield 'a go_to on port 0' => [
+            [self::scenario([self::goTo('http://localhost:00000/cart')], ['start_url' => 'http://localhost:1/orders'])],
+            'Scenario 1, step 1: url must be a full http or https address, like http://localhost:8000/orders.',
+            [self::scenario([self::goTo('http://localhost:00001/cart')], ['start_url' => 'http://localhost:1/orders'])],
+        ];
         yield 'a file: start_url' => [
             [self::scenario([self::click()], ['start_url' => 'file:///etc/passwd'])],
             'Scenario 1: start_url must be a full http or https address, like http://localhost:8000/orders.',
@@ -436,6 +507,11 @@ final class ScenarioRulesTest extends TestCase
         }
         self::assertArrayNotHasKey('pattern', self::arrayAt($schema, 'properties', 'setup'));
         self::assertArrayNotHasKey('pattern', self::arrayAt($schema, '$defs', 'textValue'));
+        // Every text the rules check for a NUL refuses one in the schema too; url and role patterns leave none out.
+        foreach ([['properties', 'title'], ['properties', 'why'], ['properties', 'setup'], ['$defs', 'say'], ['$defs', 'textValue'], ['$defs', 'filledTextValue']] as $path) {
+            self::assertSame(['pattern' => '\x00'], self::node($schema, ...[...$path, 'not']), implode('/', $path));
+        }
+        self::assertSame('#/$defs/step', self::node($schema, 'properties', 'steps', 'items', '$ref'));
 
         $stepDefinitions = self::listAt($schema, '$defs', 'step', 'oneOf');
         self::assertSame(array_keys(ScenarioRules::STEP_FIELDS), array_map(static fn (mixed $step): mixed => self::node($step, 'properties', 'type', 'const'), $stepDefinitions));
@@ -464,6 +540,9 @@ final class ScenarioRulesTest extends TestCase
             self::assertFalse(self::node($target, 'additionalProperties'));
         }
         self::assertSame(['role', 'name'], array_keys(self::arrayAt($targetDefinitions[0], 'properties')));
+        self::assertSame('#/$defs/filledTextValue', self::node($targetDefinitions[0], 'properties', 'name', '$ref'));
+        self::assertSame('#/$defs/filledTextValue', self::node($targetDefinitions[1], 'properties', 'text', '$ref'));
+        self::assertSame('#/$defs/filledTextValue', self::node($targetDefinitions[2], 'properties', 'label', '$ref'));
         self::assertSame(ScenarioRules::ROLE_PATTERN, self::node($targetDefinitions[0], 'properties', 'role', 'pattern'));
         self::assertSame(ScenarioRules::TEXT_VALUE_MAX_LENGTH, self::node($targetDefinitions[0], 'properties', 'role', 'maxLength'));
         self::assertSame(['text'], array_keys(self::arrayAt($targetDefinitions[1], 'properties')));
@@ -498,6 +577,14 @@ final class ScenarioRulesTest extends TestCase
     private static function goTo(string $url): array
     {
         return ['type' => 'go_to', 'say' => 'Open the page.', 'url' => $url];
+    }
+
+    /**
+     * @param array<string, mixed> $scenario
+     */
+    private static function json(array $scenario): string
+    {
+        return json_encode($scenario, \JSON_THROW_ON_ERROR);
     }
 
     private static function urlOfLength(int $length): string

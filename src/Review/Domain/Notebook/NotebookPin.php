@@ -23,13 +23,15 @@ final readonly class NotebookPin
      * The note is trimmed and may be empty; x and y are rounded to two decimals after the check, as a round's pins are.
      * Lengths count characters, as PostgreSQL's char_length does.
      *
-     * @throws NotebookRefused when x or y is outside 0 to 100, or the note is longer than Pin::NOTE_MAX_LENGTH
+     * @throws NotebookRefused when x or y is outside 0 to 100, the note is not valid UTF-8 or holds a NUL character, or
+     *                         it is longer than Pin::NOTE_MAX_LENGTH
      */
     public static function placed(float $xPercent, float $yPercent, string $note): self
     {
         if (!self::isPercent($xPercent) || !self::isPercent($yPercent)) {
             throw NotebookRefused::because(NotebookRefused::PIN_OUTSIDE);
         }
+        NotebookText::refuseUnlessSavable($note);
         $trimmedNote = trim($note);
         if (mb_strlen($trimmedNote) > Pin::NOTE_MAX_LENGTH) {
             throw NotebookRefused::because(NotebookRefused::PIN_NOTE_TOO_LONG);

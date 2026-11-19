@@ -21,6 +21,7 @@ final class ScenarioRefused extends \DomainException
     public const string STEP_FIELDS = 'a step of type %s takes %s.';
     public const string NOT_TEXT = '%s must be text.';
     public const string NOT_UTF8 = '%s is not valid UTF-8.';
+    public const string NUL = '%s must not hold a NUL character.';
     public const string BLANK = '%s must not be blank.';
     public const string TOO_LONG = 'keep %s to %s characters or fewer.';
     public const string START_URL = 'start_url must be a full http or https address, like http://localhost:8000/orders.';

@@ -7,11 +7,11 @@ namespace App\Review\Domain\Notebook;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * The notebooks of the tenant's people. Each method needs an open transaction under the organization as tenant, and
- * reads or writes that organization's rows only; every read and write names the owner, so another person's notebook
- * is not found exactly like one that does not exist.
+ * The stored notebooks of the tenant's people. Each method needs an open transaction under the organization as
+ * tenant, and reads or writes that organization's rows only; every read and write names the owner, so another
+ * person's notebook is not found exactly like one that does not exist.
  */
-interface Notebooks
+interface NotebookRows
 {
     public const int MAX_PAGE_SIZE = 100;
 
@@ -26,7 +26,8 @@ interface Notebooks
     /**
      * @return Notebook|null null when the tenant has no such notebook of $owner
      *
-     * @throws \LogicException when no transaction is open or no tenant is set
+     * @throws \LogicException when no transaction is open or no tenant is set, or the stored row has another shape
+     *                         than this port writes or breaks a notebook or scenario rule
      */
     public function ofOwner(NotebookId $id, UserId $owner): ?Notebook;
 
@@ -51,6 +52,17 @@ interface Notebooks
      * @throws \LogicException when no transaction is open or no tenant is set
      */
     public function save(Notebook $notebook): bool;
+
+    /**
+     * Stores that $owner used the notebook at $at, held at its creation time as Notebook::markedUsed holds it. Only
+     * last_used_at changes: the version stays, so a notebook read before can still be saved, and that save then
+     * writes its own last use time over this one.
+     *
+     * @return bool false when the tenant has no such notebook of $owner; nothing is written then
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function markUsed(NotebookId $id, UserId $owner, \DateTimeImmutable $at): bool;
 
     /**
      * @param int|null $expectedVersion when given, removes the notebook only while it is still at that version

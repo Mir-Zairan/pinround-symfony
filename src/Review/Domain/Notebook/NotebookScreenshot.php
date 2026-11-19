@@ -33,9 +33,9 @@ final readonly class NotebookScreenshot
      * @param string            $mediaId the uuid of the Media object that holds the picture, in any case
      * @param list<NotebookPin> $pins    numbered 1, 2, … in this order
      *
-     * @throws NotebookRefused when the media id is not a UUIDv7, the title is longer than Screenshot::TITLE_MAX_LENGTH
-     *                         or the summary than Screenshot::SUMMARY_MAX_LENGTH, or there are more than
-     *                         Screenshot::MAX_PINS pins
+     * @throws NotebookRefused when the media id is not a UUIDv7, the title or summary is not valid UTF-8 or holds a NUL
+     *                         character, the title is longer than Screenshot::TITLE_MAX_LENGTH or the summary than
+     *                         Screenshot::SUMMARY_MAX_LENGTH, or there are more than Screenshot::MAX_PINS pins
      */
     public static function of(string $mediaId, ?string $title, ?string $summary, array $pins): self
     {
@@ -43,6 +43,8 @@ final readonly class NotebookScreenshot
         if (1 !== preg_match(self::CANONICAL_UUID_V7, $lowercaseMediaId)) {
             throw NotebookRefused::because(NotebookRefused::PICTURE_NOT_UPLOADED);
         }
+        NotebookText::refuseUnlessSavable($title);
+        NotebookText::refuseUnlessSavable($summary);
         $trimmedTitle = self::blankToNull($title);
         if (null !== $trimmedTitle && mb_strlen($trimmedTitle) > Screenshot::TITLE_MAX_LENGTH) {
             throw NotebookRefused::because(NotebookRefused::PICTURE_TITLE_TOO_LONG);

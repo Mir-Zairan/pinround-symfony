@@ -9,10 +9,13 @@ use App\Review\Domain\Notebook\NotebookCursor;
 use App\Review\Domain\Notebook\NotebookId;
 use App\Review\Domain\Notebook\NotebookPin;
 use App\Review\Domain\Notebook\NotebookRefused;
-use App\Review\Domain\Notebook\Notebooks;
+use App\Review\Domain\Notebook\NotebookRows;
 use App\Review\Domain\Notebook\NotebookScreenshot;
 use App\Review\Domain\Notebook\NotebooksPage;
 use App\Review\Domain\Notebook\NotebookSummary;
+use App\Review\Domain\Scenario\ScenarioRefused;
+use App\Review\Domain\Scenario\ScenarioRules;
+use App\Review\Domain\Scenario\Scenarios;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -21,20 +24,24 @@ use Doctrine\DBAL\ParameterType;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Notebooks on rvw_notebook, under row-level security and with the organization and the owner in every WHERE, so the
+ * NotebookRows on rvw_notebook, under row-level security and with the organization and the owner in every WHERE, so the
  * primary key and the owner index serve each query. The screenshots column is a jsonb array of
  * {media_id, title, summary, pins: [{x_pct, y_pct, note}]}, as rvw_report_draft keeps it; the scenarios column a jsonb
- * array of the scenarios as given.
+ * array of the scenarios in scenario.v1.json's format, read back through ScenarioRules.
  */
-final readonly class DbalNotebooks implements Notebooks
+final readonly class DbalNotebooks implements NotebookRows
 {
     private const string COLUMNS = 'id, organization_id, owner_id, title, screenshots, scenarios, version, created_at, updated_at, last_used_at';
 
     // Microseconds and the offset, so a time reads back exactly as it was written.
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:s.uP';
 
-    // Written and read with the same depth, so a scenario too deep to read back is refused when it is written.
-    private const int SCENARIOS_MAX_DEPTH = 32;
+    // json_decode counts the value inside the deepest object as a level too. Screenshots: the list, a picture, its
+    // pins, a pin and its values, the deepest this class writes.
+    private const int SCREENSHOTS_MAX_DEPTH = 5;
+
+    // The list, a scenario, its steps, a step, its target and its values: the deepest ScenarioRules accepts.
+    private const int SCENARIOS_MAX_DEPTH = 6;
 
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
@@ -133,6 +140,20 @@ final readonly class DbalNotebooks implements Notebooks
         );
     }
 
+    public function markUsed(NotebookId $id, UserId $owner, \DateTimeImmutable $at): bool
+    {
+        return 1 === $this->connection->executeStatement(
+            'UPDATE rvw_notebook SET last_used_at = GREATEST(created_at, CAST(:at AS timestamptz))'
+            .' WHERE organization_id = :organization AND id = :id AND owner_id = :owner',
+            [
+                'at' => $at->format(self::TIMESTAMP_FORMAT),
+                'organization' => $this->requireTenant()->toString(),
+                'id' => $id->toString(),
+                'owner' => $owner->toString(),
+            ],
+        );
+    }
+
     public function delete(NotebookId $id, UserId $owner, ?int $expectedVersion = null): bool
     {
         $parameters = ['organization' => $this->requireTenant()->toString(), 'id' => $id->toString(), 'owner' => $owner->toString()];
@@ -164,32 +185,33 @@ final readonly class DbalNotebooks implements Notebooks
         ], $screenshots), \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_PRESERVE_ZERO_FRACTION);
     }
 
-    /**
-     * @param list<array<string, mixed>> $scenarios
-     *
-     * @throws \JsonException when a scenario nests deeper than SCENARIOS_MAX_DEPTH
-     */
-    private static function scenariosJsonOf(array $scenarios): string
+    private static function scenariosJsonOf(Scenarios $scenarios): string
     {
-        // An empty scenario would encode as [], not {}; the object flag keeps each one an object.
-        return json_encode(
-            array_map(static fn (array $scenario): object => (object) $scenario, $scenarios),
-            \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES | \JSON_PRESERVE_ZERO_FRACTION,
-            self::SCENARIOS_MAX_DEPTH,
-        );
+        return json_encode($scenarios->toArray(), \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES);
     }
 
     /**
      * @param array<string, mixed> $row
      *
-     * @throws \LogicException when a stored value has another shape than this class writes, or breaks a notebook rule
+     * @throws \LogicException when a stored value has another shape than this class writes, or breaks a notebook or
+     *                         scenario rule
      */
     private static function notebookOf(array $row): Notebook
     {
-        $screenshots = json_decode(self::stringOf($row, 'screenshots'), true, 8, \JSON_THROW_ON_ERROR);
-        $scenarios = json_decode(self::stringOf($row, 'scenarios'), true, self::SCENARIOS_MAX_DEPTH, \JSON_THROW_ON_ERROR);
-        if (!\is_array($screenshots) || !array_is_list($screenshots) || !\is_array($scenarios) || !array_is_list($scenarios)) {
-            throw new \LogicException('A stored notebook has screenshots or scenarios that are not a list.');
+        try {
+            $screenshots = json_decode(self::stringOf($row, 'screenshots'), true, self::SCREENSHOTS_MAX_DEPTH, \JSON_THROW_ON_ERROR);
+            // Objects as stdClass, as ScenarioRules::parse asks.
+            $decodedScenarios = json_decode(self::stringOf($row, 'scenarios'), false, self::SCENARIOS_MAX_DEPTH, \JSON_THROW_ON_ERROR);
+        } catch (\JsonException $tooDeep) {
+            throw new \LogicException('A stored notebook nests its screenshots or scenarios deeper than DbalNotebooks writes.', 0, $tooDeep);
+        }
+        if (!\is_array($screenshots) || !array_is_list($screenshots)) {
+            throw new \LogicException('A stored notebook has screenshots that are not a list.');
+        }
+        try {
+            $scenarios = ScenarioRules::parse($decodedScenarios);
+        } catch (ScenarioRefused $broken) {
+            throw new \LogicException('A stored notebook has scenarios ScenarioRules refuses.', 0, $broken);
         }
 
         try {
@@ -199,7 +221,7 @@ final readonly class DbalNotebooks implements Notebooks
                 new UserId(self::stringOf($row, 'owner_id')),
                 self::stringOf($row, 'title'),
                 array_map(self::screenshotOf(...), $screenshots),
-                array_map(self::scenarioOf(...), $scenarios),
+                $scenarios,
                 self::intOf($row, 'version'),
                 new \DateTimeImmutable(self::stringOf($row, 'created_at')),
                 new \DateTimeImmutable(self::stringOf($row, 'updated_at')),
@@ -236,25 +258,6 @@ final readonly class DbalNotebooks implements Notebooks
                 return NotebookPin::placed((float) $xPercent, (float) $yPercent, $note);
             }, $stored['pins'])),
         );
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private static function scenarioOf(mixed $stored): array
-    {
-        if (!\is_array($stored)) {
-            throw new \LogicException('A stored notebook scenario is not an object.');
-        }
-        $scenario = [];
-        foreach ($stored as $key => $value) {
-            if (!\is_string($key)) {
-                throw new \LogicException('A stored notebook scenario is not an object.');
-            }
-            $scenario[$key] = $value;
-        }
-
-        return $scenario;
     }
 
     /**

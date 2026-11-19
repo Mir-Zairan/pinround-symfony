@@ -7,15 +7,20 @@ namespace App\Tests\Integration\Review\Infrastructure\Doctrine;
 use App\Review\Domain\Notebook\Notebook;
 use App\Review\Domain\Notebook\NotebookId;
 use App\Review\Domain\Notebook\NotebookPin;
+use App\Review\Domain\Notebook\NotebookRefused;
 use App\Review\Domain\Notebook\NotebookScreenshot;
 use App\Review\Domain\Notebook\NotebooksPage;
 use App\Review\Domain\Notebook\NotebookSummary;
+use App\Review\Domain\Scenario\ScenarioRefused;
+use App\Review\Domain\Scenario\ScenarioRules;
+use App\Review\Domain\Scenario\Scenarios;
 use App\Review\Infrastructure\Doctrine\DbalNotebooks;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -56,16 +61,24 @@ final class DbalNotebooksTest extends KernelTestCase
         parent::tearDown();
     }
 
+    /**
+     * The click's target name is as deep as ScenarioRules lets a scenario nest, the depth DbalNotebooks reads back.
+     */
     #[Test]
     public function aNotebookIsReadBackAsWrittenWithItsPicturesAndScenariosInOrder(): void
     {
         $written = self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::EARLIER)
             ->withScreenshotAdded(NotebookScreenshot::of(self::SECOND_MEDIA, 'Case B — Prix affiché en €', null, [NotebookPin::placed(12.5, 0.0, 'Why grey?'), NotebookPin::placed(100.0, 99.99, '')]), new \DateTimeImmutable(self::LATER))
             ->withScreenshotAdded(NotebookScreenshot::of(self::FIRST_MEDIA, null, "Line one\r\nline two\u{2028}", []), new \DateTimeImmutable(self::LATER))
-            ->withScenarios([
-                ['title' => 'The banner shows', 'steps' => [['type' => 'go_to', 'url' => 'http://localhost:8000/cart'], ['type' => 'expect_text', 'target' => ['role' => 'alert'], 'value' => 'Out of stock']]],
-                ['title' => 'No steps yet', 'steps' => []],
-            ], new \DateTimeImmutable(self::LATER));
+            ->withScenarios(ScenarioRules::parse([
+                self::scenario('The banner shows', [
+                    ['type' => 'go_to', 'say' => 'Open the cart.', 'url' => 'http://localhost:8000/cart'],
+                    ['type' => 'click', 'say' => 'Order.', 'target' => ['role' => 'button', 'name' => 'Order now']],
+                    ['type' => 'type', 'say' => 'Clear it.', 'target' => ['label' => 'Quantity'], 'text' => ''],
+                    ['type' => 'expect_text', 'say' => "\u{FEFF}Prix affiché.\r\n", 'target' => ['role' => 'alert'], 'text' => 'Out of stock — 0 €'],
+                ]),
+                self::scenario('A second case', [['type' => 'expect_visible', 'say' => 'The banner.', 'target' => ['text' => 'Stock']]]),
+            ]), new \DateTimeImmutable(self::LATER));
         $this->insertCommitted($written);
 
         $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
@@ -73,6 +86,8 @@ final class DbalNotebooksTest extends KernelTestCase
         self::assertNotNull($read);
         self::assertEquals($written, $read);
         self::assertSame([self::SECOND_MEDIA, self::FIRST_MEDIA], array_map(static fn (NotebookScreenshot $screenshot): string => $screenshot->mediaId(), $read->screenshots()));
+        self::assertSame($written->scenarios()->toArray(), $read->scenarios()->toArray());
+        self::assertSame(['The banner shows', 'A second case'], array_map(static fn (array $scenario): string => $scenario['title'], $read->scenarios()->toArray()));
         self::assertSame('2027-03-15 11:20:30.250001+01:00', $read->createdAt()->setTimezone(new \DateTimeZone('+01:00'))->format('Y-m-d H:i:s.uP'));
     }
 
@@ -85,7 +100,7 @@ final class DbalNotebooksTest extends KernelTestCase
     public function theOwnersListHoldsOnlyTheirOwnNotebooksLastUsedFirstAPageAtATime(): void
     {
         $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_SECOND, self::LENA, self::LATER));
-        $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::EARLIER)->withScenarios([['title' => 'One']], new \DateTimeImmutable(self::EARLIER)));
+        $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::EARLIER)->withScenarios(ScenarioRules::parse([self::scenario('One', [['type' => 'pause', 'say' => 'Wait.']])]), new \DateTimeImmutable(self::EARLIER)));
         $this->insertCommitted(self::notebook(self::ACME_FOODS, self::OMARS, self::OMAR, self::LATER));
         $this->insertCommitted(self::notebook(self::BETA_BAKERY, self::BETA_LENAS, self::LENA, self::LATER));
         $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_THIRD, self::LENA, self::LATER)->withScreenshotAdded(NotebookScreenshot::of(self::FIRST_MEDIA, null, null, []), new \DateTimeImmutable(self::LATER)));
@@ -186,7 +201,7 @@ final class DbalNotebooksTest extends KernelTestCase
         $later = new \DateTimeImmutable(self::LATER);
         $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
         self::assertNotNull($read);
-        $asOmar = Notebook::restored($read->id(), $read->organizationId(), new UserId(self::OMAR), 'Taken', [], [], 1, $read->createdAt(), $later, $later);
+        $asOmar = Notebook::restored($read->id(), $read->organizationId(), new UserId(self::OMAR), 'Taken', [], new Scenarios([]), 1, $read->createdAt(), $later, $later);
 
         $written = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => [
             'Omar' => $this->notebooks()->save($asOmar),
@@ -199,6 +214,152 @@ final class DbalNotebooksTest extends KernelTestCase
         self::assertNotNull($saved);
         self::assertSame(['Cart page', 2], [$saved->title(), $saved->version()]);
         self::assertEquals([new \DateTimeImmutable(self::EARLIER), $later, $later], [$saved->createdAt(), $saved->updatedAt(), $saved->lastUsedAt()]);
+    }
+
+    /**
+     * Changed at LATER and used at LATEST: each time column holds its own value, so a write or read that swapped or
+     * shared them would show.
+     */
+    #[Test]
+    public function aNotebookUsedAfterItsLastChangeKeepsBothTimes(): void
+    {
+        $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::EARLIER)
+            ->renamed('Cart page', new \DateTimeImmutable(self::LATER))
+            ->markedUsed(new \DateTimeImmutable(self::LATEST)));
+
+        $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
+        $columns = $this->storedTimesOf(self::LENAS_FIRST);
+
+        self::assertNotNull($read);
+        self::assertEquals([new \DateTimeImmutable(self::EARLIER), new \DateTimeImmutable(self::LATER), new \DateTimeImmutable(self::LATEST)], [$read->createdAt(), $read->updatedAt(), $read->lastUsedAt()]);
+        self::assertEquals(['created_at' => new \DateTimeImmutable(self::EARLIER), 'updated_at' => new \DateTimeImmutable(self::LATER), 'last_used_at' => new \DateTimeImmutable(self::LATEST)], $columns);
+
+        $changedAt = new \DateTimeImmutable('2027-03-18 07:30:00.125+01:00');
+        $usedAt = new \DateTimeImmutable('2027-03-19 16:45:10.000002+01:00');
+        self::assertTrue($this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notebooks()->save($read->renamed('Shop page', $changedAt)->markedUsed($usedAt))));
+        self::assertEquals(['created_at' => new \DateTimeImmutable(self::EARLIER), 'updated_at' => $changedAt, 'last_used_at' => $usedAt], $this->storedTimesOf(self::LENAS_FIRST), 'A save writes each time to its own column too.');
+    }
+
+    #[Test]
+    public function markingUsedMovesOnlyTheLastUseTimeAndOnlyForTheOwner(): void
+    {
+        $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::LATER));
+        $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
+        self::assertNotNull($read);
+
+        $marked = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => [
+            'Omar' => $this->notebooks()->markUsed(new NotebookId(self::LENAS_FIRST), new UserId(self::OMAR), new \DateTimeImmutable('2027-03-20 10:00:00+01:00')),
+            'unknown' => $this->notebooks()->markUsed(new NotebookId(self::LENAS_SECOND), new UserId(self::LENA), new \DateTimeImmutable('2027-03-20 10:00:00+01:00')),
+            'Lena' => $this->notebooks()->markUsed(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA), new \DateTimeImmutable(self::LATEST)),
+        ]);
+
+        self::assertSame(['Omar' => false, 'unknown' => false, 'Lena' => true], $marked);
+        $used = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
+        self::assertNotNull($used);
+        self::assertSame([1, 'Notebook '.self::LENAS_FIRST], [$used->version(), $used->title()], 'Marking used is no save.');
+        self::assertEquals(['created_at' => new \DateTimeImmutable(self::LATER), 'updated_at' => new \DateTimeImmutable(self::LATER), 'last_used_at' => new \DateTimeImmutable(self::LATEST)], $this->storedTimesOf(self::LENAS_FIRST));
+        self::assertTrue($this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notebooks()->save($read->renamed('Cart page', new \DateTimeImmutable(self::LATEST)))), 'The version read before still saves.');
+    }
+
+    #[Test]
+    public function aClockBehindTheCreationTimeMarksUsedAtTheCreationTime(): void
+    {
+        $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::LATER)->markedUsed(new \DateTimeImmutable(self::LATEST)));
+
+        $marked = $this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->notebooks()->markUsed(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA), new \DateTimeImmutable(self::EARLIER)));
+
+        self::assertTrue($marked);
+        self::assertEquals(new \DateTimeImmutable(self::LATER), $this->storedTimesOf(self::LENAS_FIRST)['last_used_at']);
+    }
+
+    /**
+     * PostgreSQL refuses a NUL in text and jsonb and json_encode refuses invalid UTF-8; the domain refuses both first,
+     * so no row is written or changed and no driver error reaches the person.
+     */
+    #[Test]
+    public function aTitleOrNoteWithANulCharacterOrInvalidUtf8IsRefusedAndNothingIsWritten(): void
+    {
+        $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::EARLIER));
+        $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
+        self::assertNotNull($read);
+        $later = new \DateTimeImmutable(self::LATER);
+        $refusedReasons = [];
+
+        foreach (["Cart\0page", "Caf\xC3\x28"] as $text) {
+            $changes = [
+                'new' => fn () => $this->notebooks()->insert(Notebook::start(new NotebookId(self::LENAS_SECOND), new OrganizationId(self::ACME_FOODS), new UserId(self::LENA), $text, $later)),
+                'rename' => fn () => $this->notebooks()->save($read->renamed($text, $later)),
+                'pin note' => fn () => $this->notebooks()->save($read->withScreenshotAdded(NotebookScreenshot::of(self::FIRST_MEDIA, null, null, [NotebookPin::placed(1.0, 1.0, $text)]), $later)),
+            ];
+            foreach ($changes as $change) {
+                try {
+                    $this->transactions()->committedAs(self::ACME_FOODS, $change);
+                    self::fail('A text with a NUL character or invalid UTF-8 was written.');
+                } catch (NotebookRefused $refused) {
+                    $refusedReasons[] = $refused->getMessage();
+                }
+            }
+        }
+
+        self::assertSame(array_fill(0, 6, NotebookRefused::UNSAVABLE_TEXT), $refusedReasons);
+        $stored = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): NotebooksPage => $this->notebooks()->forOwner(new UserId(self::LENA), null, 20));
+        self::assertSame([[self::LENAS_FIRST, 'Notebook '.self::LENAS_FIRST, 0]], array_map(static fn (NotebookSummary $notebook): array => [$notebook->id->toString(), $notebook->title, $notebook->screenshotCount], $stored->notebooks));
+        self::assertSame(1, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)))?->version());
+    }
+
+    /**
+     * Rows in another shape than DbalNotebooks writes, put in through the migrator: each read fails loudly with the
+     * reason, never as a notebook with the broken part left out.
+     *
+     * @return iterable<string, array{string, string, string, string|null}>
+     */
+    public static function malformedRows(): iterable
+    {
+        $deeper = self::scenario('A case', [['type' => 'click', 'say' => 'Order.', 'target' => ['role' => 'button', 'name' => ['text' => 'Order now']]]]);
+
+        yield 'a screenshot without media_id' => [
+            '[{"title": null, "summary": null, "pins": []}]',
+            '[]',
+            'A stored notebook screenshot has another shape than DbalNotebooks writes.',
+            null,
+        ];
+        yield 'a pin that is not {x_pct, y_pct, note}' => [
+            '[{"media_id": "'.self::FIRST_MEDIA.'", "title": null, "summary": null, "pins": [{"x": 1, "y": 1, "note": ""}]}]',
+            '[]',
+            'A stored notebook pin is not {x_pct, y_pct, note}.',
+            null,
+        ];
+        yield 'a scenario that is not an object' => [
+            '[]',
+            '["Show the stock warning"]',
+            'A stored notebook has scenarios ScenarioRules refuses.',
+            'Scenario 1: a scenario has exactly title, why, setup, start_url and steps.',
+        ];
+        yield 'a scenario one level deeper than the rules allow' => [
+            '[]',
+            json_encode([$deeper], \JSON_THROW_ON_ERROR),
+            'A stored notebook nests its screenshots or scenarios deeper than DbalNotebooks writes.',
+            null,
+        ];
+    }
+
+    #[Test]
+    #[DataProvider('malformedRows')]
+    public function aStoredRowInAnotherShapeIsNotReadAsANotebook(string $screenshotsJson, string $scenariosJson, string $expectedMessage, ?string $expectedScenarioReason): void
+    {
+        $this->insertRow(self::LENAS_FIRST, $screenshotsJson, $scenariosJson);
+
+        try {
+            $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
+            self::fail('A malformed row was read as a notebook.');
+        } catch (\LogicException $broken) {
+            self::assertSame($expectedMessage, $broken->getMessage());
+            if (null !== $expectedScenarioReason) {
+                $reason = $broken->getPrevious();
+                self::assertInstanceOf(ScenarioRefused::class, $reason);
+                self::assertSame($expectedScenarioReason, $reason->reason);
+            }
+        }
     }
 
     #[Test]
@@ -241,6 +402,16 @@ final class DbalNotebooksTest extends KernelTestCase
         $this->notebooks()->forOwner(new UserId(self::LENA), null, 20);
     }
 
+    /**
+     * @param list<array<string, mixed>> $steps
+     *
+     * @return array<string, mixed>
+     */
+    private static function scenario(string $title, array $steps): array
+    {
+        return ['title' => $title, 'why' => 'OrderLine::warn() runs when stock is 0.', 'setup' => 'One SHOP product with no stock.', 'start_url' => 'http://localhost:8000/orders', 'steps' => $steps];
+    }
+
     private static function notebook(string $organizationId, string $id, string $owner, string $at): Notebook
     {
         return Notebook::start(new NotebookId($id), new OrganizationId($organizationId), new UserId($owner), 'Notebook '.$id, new \DateTimeImmutable($at));
@@ -251,6 +422,37 @@ final class DbalNotebooksTest extends KernelTestCase
         $this->transactions()->committedAs($notebook->organizationId()->toString(), function () use ($notebook): void {
             $this->notebooks()->insert($notebook);
         });
+    }
+
+    /**
+     * @return array{created_at: \DateTimeImmutable, updated_at: \DateTimeImmutable, last_used_at: \DateTimeImmutable}
+     */
+    private function storedTimesOf(string $id): array
+    {
+        $connection = self::getContainer()->get('doctrine.dbal.default_connection');
+        $row = $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array|false => $connection->fetchAssociative('SELECT created_at, updated_at, last_used_at FROM rvw_notebook WHERE id = ?', [$id]));
+        self::assertIsArray($row);
+        self::assertIsString($row['created_at']);
+        self::assertIsString($row['updated_at']);
+        self::assertIsString($row['last_used_at']);
+
+        return ['created_at' => new \DateTimeImmutable($row['created_at']), 'updated_at' => new \DateTimeImmutable($row['updated_at']), 'last_used_at' => new \DateTimeImmutable($row['last_used_at'])];
+    }
+
+    private function insertRow(string $id, string $screenshotsJson, string $scenariosJson): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $migrator->transactional(static fn (Connection $connection): int|string => $connection->executeStatement(
+                'INSERT INTO rvw_notebook (organization_id, id, owner_id, title, screenshots, scenarios, version, created_at, updated_at, last_used_at)'
+                .' VALUES (?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), 1, ?, ?, ?)',
+                [self::ACME_FOODS, $id, self::LENA, 'Broken', $screenshotsJson, $scenariosJson, self::EARLIER, self::EARLIER, self::EARLIER],
+            ));
+        } finally {
+            $tenantContext->clear();
+        }
     }
 
     private function removeNotebooks(): void

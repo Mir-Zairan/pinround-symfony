@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Scenario v1",
-  "description": "One scenario that the pinround browser extension plays step by step on a host the person allowed (ADR-0046, FR-EXP-04). It is data only: a step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. Lengths count characters. The server also checks one rule this schema cannot: every go_to url stays on the scheme, host and port of start_url. A notebook holds the list in #/$defs/scenarios.",
+  "description": "One scenario that the pinround browser extension plays step by step on a host the person allowed (ADR-0046, FR-EXP-04). It is data only: a step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. Lengths count characters. Text holds no NUL character, which the server cannot store. The server also checks two rules this schema cannot: a port is 1 to 65535, and every go_to url stays on the scheme, host and port of start_url. A notebook holds the list in #/$defs/scenarios.",
   "type": "object",
   "additionalProperties": false,
   "required": ["title", "why", "setup", "start_url", "steps"],
@@ -10,18 +10,21 @@
       "description": "What the case shows, in one line.",
       "type": "string",
       "maxLength": 120,
-      "pattern": "\\S"
+      "pattern": "\\S",
+      "not": { "pattern": "\\x00" }
     },
     "why": {
       "description": "What in the code makes the case happen.",
       "type": "string",
       "maxLength": 600,
-      "pattern": "\\S"
+      "pattern": "\\S",
+      "not": { "pattern": "\\x00" }
     },
     "setup": {
       "description": "What data the case needs, in plain words. Claude Code prepares it in the person's app before the person plays the scenario. May be empty.",
       "type": "string",
-      "maxLength": 600
+      "maxLength": 600,
+      "not": { "pattern": "\\x00" }
     },
     "start_url": {
       "description": "The page the scenario starts on.",
@@ -45,22 +48,25 @@
       "description": "A full http or https address. The host takes no user name, so no \"@\" and no \"\\\".",
       "type": "string",
       "maxLength": 1000,
-      "pattern": "^(https?)://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(?::([0-9]{1,5}))?(?:[/?#][^\\s\\\\\\x00-\\x1f\\x7f]*)?$"
+      "pattern": "^(https?)://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(?::([0-9]{1,5}))?(?:[/?#][^\\s\\\\\\x00-\\x1f\\x7f\ufeff]*)?$"
     },
     "say": {
       "description": "The line the player shows while the step runs.",
       "type": "string",
       "maxLength": 200,
-      "pattern": "\\S"
+      "pattern": "\\S",
+      "not": { "pattern": "\\x00" }
     },
     "textValue": {
       "type": "string",
-      "maxLength": 1000
+      "maxLength": 1000,
+      "not": { "pattern": "\\x00" }
     },
     "filledTextValue": {
       "type": "string",
       "maxLength": 1000,
-      "pattern": "\\S"
+      "pattern": "\\S",
+      "not": { "pattern": "\\x00" }
     },
     "target": {
       "description": "How the step finds its element: exactly one of these.",

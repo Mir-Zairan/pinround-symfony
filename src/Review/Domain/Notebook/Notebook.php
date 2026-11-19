@@ -4,23 +4,22 @@ declare(strict_types=1);
 
 namespace App\Review\Domain\Notebook;
 
+use App\Review\Domain\Scenario\Scenarios;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 
 /**
  * A person's private notebook (ADR-0046): pinned screenshots and the scenarios Claude Code wrote for them. Only its
  * owner may see it; it belongs to no ticket. Every change returns a new notebook at the same version, which
- * Notebooks::save writes only over that version.
+ * NotebookRows::save writes only over that version.
  */
 final readonly class Notebook
 {
     public const int TITLE_MAX_LENGTH = 120;
     public const int MAX_SCREENSHOTS = 10;
-    public const int MAX_SCENARIOS = 20;
 
     /**
-     * @param list<NotebookScreenshot>   $screenshots
-     * @param list<array<string, mixed>> $scenarios
+     * @param list<NotebookScreenshot> $screenshots
      */
     private function __construct(
         private NotebookId $id,
@@ -28,7 +27,7 @@ final readonly class Notebook
         private UserId $ownerId,
         private string $title,
         private array $screenshots,
-        private array $scenarios,
+        private Scenarios $scenarios,
         private int $version,
         private \DateTimeImmutable $createdAt,
         private \DateTimeImmutable $updatedAt,
@@ -40,18 +39,18 @@ final readonly class Notebook
      * A new, empty notebook at version 1. The title is trimmed; lengths count characters, as PostgreSQL's char_length
      * does.
      *
-     * @throws NotebookRefused when the title is blank or longer than TITLE_MAX_LENGTH
+     * @throws NotebookRefused when the title is blank, longer than TITLE_MAX_LENGTH, not valid UTF-8 or holds a NUL
+     *                         character
      */
     public static function start(NotebookId $id, OrganizationId $organizationId, UserId $ownerId, string $title, \DateTimeImmutable $at): self
     {
-        return new self($id, $organizationId, $ownerId, self::checkedTitle($title), [], [], 1, $at, $at, $at);
+        return new self($id, $organizationId, $ownerId, self::checkedTitle($title), [], new Scenarios([]), 1, $at, $at, $at);
     }
 
     /**
-     * A stored notebook as Notebooks reads it back, under the rules of start() and of each change.
+     * A stored notebook as NotebookRows reads it back, under the rules of start() and of each change.
      *
-     * @param list<NotebookScreenshot>   $screenshots
-     * @param list<array<string, mixed>> $scenarios
+     * @param list<NotebookScreenshot> $screenshots
      *
      * @throws NotebookRefused           when a rule of start() or of a change would refuse it
      * @throws \InvalidArgumentException when the version is below 1, or a time is before $createdAt
@@ -62,7 +61,7 @@ final readonly class Notebook
         UserId $ownerId,
         string $title,
         array $screenshots,
-        array $scenarios,
+        Scenarios $scenarios,
         int $version,
         \DateTimeImmutable $createdAt,
         \DateTimeImmutable $updatedAt,
@@ -75,11 +74,12 @@ final readonly class Notebook
             throw new \InvalidArgumentException('A notebook is changed and used no earlier than it was created.');
         }
 
-        return new self($id, $organizationId, $ownerId, self::checkedTitle($title), self::checkedScreenshots($screenshots), self::checkedScenarios($scenarios), $version, $createdAt, $updatedAt, $lastUsedAt);
+        return new self($id, $organizationId, $ownerId, self::checkedTitle($title), self::checkedScreenshots($screenshots), $scenarios, $version, $createdAt, $updatedAt, $lastUsedAt);
     }
 
     /**
-     * @throws NotebookRefused when the title is blank or longer than TITLE_MAX_LENGTH
+     * @throws NotebookRefused when the title is blank, longer than TITLE_MAX_LENGTH, not valid UTF-8 or holds a NUL
+     *                         character
      */
     public function renamed(string $title, \DateTimeImmutable $at): self
     {
@@ -97,20 +97,16 @@ final readonly class Notebook
     }
 
     /**
-     * This notebook with $scenarios in place of its scenarios. Only their number is checked here; what a scenario
-     * holds is checked before it gets here (P13.T7).
-     *
-     * @param list<array<string, mixed>> $scenarios
-     *
-     * @throws NotebookRefused when there are more than MAX_SCENARIOS
+     * This notebook with $scenarios in place of its scenarios; ScenarioRules checked them, their number too.
      */
-    public function withScenarios(array $scenarios, \DateTimeImmutable $at): self
+    public function withScenarios(Scenarios $scenarios, \DateTimeImmutable $at): self
     {
-        return $this->changed($this->title, $this->screenshots, self::checkedScenarios($scenarios), $at);
+        return $this->changed($this->title, $this->screenshots, $scenarios, $at);
     }
 
     /**
-     * This notebook last used at $at, as when its owner picks it as a target; nothing else changes.
+     * This notebook last used at $at, as when its owner picks it as a target; nothing else changes. NotebookRows::markUsed
+     * stores the same without a save.
      */
     public function markedUsed(\DateTimeImmutable $at): self
     {
@@ -145,10 +141,7 @@ final readonly class Notebook
         return $this->screenshots;
     }
 
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public function scenarios(): array
+    public function scenarios(): Scenarios
     {
         return $this->scenarios;
     }
@@ -179,10 +172,9 @@ final readonly class Notebook
     /**
      * A change is a use too. A clock behind the creation time is held at it, as rvw_notebook's CHECKs require.
      *
-     * @param list<NotebookScreenshot>   $screenshots
-     * @param list<array<string, mixed>> $scenarios
+     * @param list<NotebookScreenshot> $screenshots
      */
-    private function changed(string $title, array $screenshots, array $scenarios, \DateTimeImmutable $at): self
+    private function changed(string $title, array $screenshots, Scenarios $scenarios, \DateTimeImmutable $at): self
     {
         $changedAt = max($this->createdAt, $at);
 
@@ -194,6 +186,7 @@ final readonly class Notebook
      */
     private static function checkedTitle(string $title): string
     {
+        NotebookText::refuseUnlessSavable($title);
         $trimmed = trim($title);
         if ('' === $trimmed) {
             throw NotebookRefused::because(NotebookRefused::TITLE_BLANK);
@@ -226,21 +219,5 @@ final readonly class Notebook
         }
 
         return $screenshots;
-    }
-
-    /**
-     * @param list<array<string, mixed>> $scenarios
-     *
-     * @return list<array<string, mixed>>
-     *
-     * @throws NotebookRefused
-     */
-    private static function checkedScenarios(array $scenarios): array
-    {
-        if (\count($scenarios) > self::MAX_SCENARIOS) {
-            throw NotebookRefused::because(NotebookRefused::TOO_MANY_SCENARIOS);
-        }
-
-        return $scenarios;
     }
 }

@@ -9,6 +9,8 @@ use App\Review\Domain\Notebook\NotebookId;
 use App\Review\Domain\Notebook\NotebookPin;
 use App\Review\Domain\Notebook\NotebookRefused;
 use App\Review\Domain\Notebook\NotebookScreenshot;
+use App\Review\Domain\Scenario\ScenarioRules;
+use App\Review\Domain\Scenario\Scenarios;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
@@ -30,7 +32,7 @@ final class NotebookTest extends TestCase
     {
         $notebook = self::started("  Order page\t");
 
-        self::assertSame(['Order page', [], [], 1], [$notebook->title(), $notebook->screenshots(), $notebook->scenarios(), $notebook->version()]);
+        self::assertSame(['Order page', [], [], 1], [$notebook->title(), $notebook->screenshots(), $notebook->scenarios()->all(), $notebook->version()]);
         self::assertTrue($notebook->ownerId()->equals(new UserId(self::LENA)));
         self::assertTrue($notebook->organizationId()->equals(new OrganizationId(self::ACME_FOODS)));
         self::assertEquals([new \DateTimeImmutable(self::CREATED), new \DateTimeImmutable(self::CREATED), new \DateTimeImmutable(self::CREATED)], [$notebook->createdAt(), $notebook->updatedAt(), $notebook->lastUsedAt()]);
@@ -50,6 +52,32 @@ final class NotebookTest extends TestCase
         self::assertRefused(NotebookRefused::TITLE_TOO_LONG, static fn (): Notebook => $notebook->renamed(str_repeat('a', 121), new \DateTimeImmutable(self::LATER)));
         self::assertSame('Order page', $notebook->title(), 'A refused rename leaves the notebook as it was.');
         self::assertSame(str_repeat('a', 120), $notebook->renamed(str_repeat('a', 120), new \DateTimeImmutable(self::LATER))->title());
+    }
+
+    /**
+     * PostgreSQL stores no NUL character in text or jsonb, and json_encode refuses invalid UTF-8: each is refused with
+     * the plain message before a notebook holds it, and the valid twin beside it passes.
+     */
+    #[Test]
+    public function textWithANulCharacterOrInvalidUtf8IsRefusedAndTheNotebookStaysAsItWas(): void
+    {
+        $notebook = self::started('Order page');
+        $later = new \DateTimeImmutable(self::LATER);
+
+        foreach (["Order\0page", "Order page\0", "Caf\xC3\x28"] as $title) {
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): Notebook => self::started($title));
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): Notebook => $notebook->renamed($title, $later));
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): Notebook => self::restored($title, [], 1, $later));
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): NotebookScreenshot => NotebookScreenshot::of(self::mediaId(1), $title, null, []));
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): NotebookScreenshot => NotebookScreenshot::of(self::mediaId(1), null, $title, []));
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): NotebookPin => NotebookPin::placed(1.0, 1.0, $title));
+        }
+
+        self::assertSame(['Order page', 1], [$notebook->title(), $notebook->version()], 'A refused rename leaves the notebook as it was.');
+        self::assertEquals(new \DateTimeImmutable(self::CREATED), $notebook->updatedAt());
+        self::assertSame('Café', $notebook->renamed("Caf\xC3\xA9", $later)->title());
+        $twin = NotebookScreenshot::of(self::mediaId(1), "Line one\r\nline two", "\u{FEFF}Summary", [NotebookPin::placed(1.0, 1.0, "Why\u{2028}grey?")]);
+        self::assertSame(["Line one\r\nline two", "\u{FEFF}Summary", "Why\u{2028}grey?"], [$twin->title(), $twin->summary(), $twin->pins()[0]->note()]);
     }
 
     #[Test]
@@ -106,14 +134,27 @@ final class NotebookTest extends TestCase
         }
     }
 
+    /**
+     * ScenarioRules holds the one cap on scenarios; a notebook keeps the Scenarios they accepted, as a change.
+     */
     #[Test]
-    public function aTwentyFirstScenarioIsRefusedAndTwentyPass(): void
+    public function aNotebookKeepsTheScenariosTheRulesAcceptedAsAChange(): void
     {
         $notebook = self::started('Order page');
+        $scenarios = ScenarioRules::parse([[
+            'title' => 'A warning shows',
+            'why' => 'OrderLine::warn() runs when stock is 0.',
+            'setup' => '',
+            'start_url' => 'http://localhost:8000/orders',
+            'steps' => [['type' => 'expect_text', 'say' => 'The warning shows.', 'text' => 'Out of stock']],
+        ]]);
 
-        self::assertCount(20, $notebook->withScenarios(array_fill(0, 20, ['title' => 'A warning shows']), new \DateTimeImmutable(self::LATER))->scenarios());
-        self::assertRefused(NotebookRefused::TOO_MANY_SCENARIOS, static fn (): Notebook => $notebook->withScenarios(array_fill(0, 21, ['title' => 'A warning shows']), new \DateTimeImmutable(self::LATER)));
-        self::assertSame([], $notebook->scenarios());
+        $changed = $notebook->withScenarios($scenarios, new \DateTimeImmutable(self::LATER));
+
+        self::assertSame($scenarios, $changed->scenarios());
+        self::assertSame([1, 'Order page'], [$changed->version(), $changed->title()]);
+        self::assertEquals([new \DateTimeImmutable(self::LATER), new \DateTimeImmutable(self::LATER)], [$changed->updatedAt(), $changed->lastUsedAt()]);
+        self::assertSame([], $notebook->scenarios()->all(), 'The notebook it changed keeps none.');
     }
 
     #[Test]
@@ -204,7 +245,7 @@ final class NotebookTest extends TestCase
             new UserId(self::LENA),
             $title,
             $screenshots,
-            [],
+            new Scenarios([]),
             $version,
             new \DateTimeImmutable(self::CREATED),
             $updatedAt,
