@@ -43,7 +43,7 @@
                 {% endif %}
             </div>
 
-            <div data-report-form-target="duplicates">{{ duplicatesHtml|raw }}</div>
+            <div data-report-form-target="duplicates">{% include '@Ticketing/_report_duplicates.html.twig' with {duplicates: duplicates} only %}</div>
 
             <div class="report__field">
                 <label class="login__field">
@@ -153,7 +153,7 @@
                 <p class="report__preview" role="status" aria-live="polite"{% if preview == '' %} hidden{% endif %} data-report-form-target="previewLine"><strong>When you send:</strong> <span data-report-form-target="preview">{{ preview }}</span></p>
                 <div class="report__buttons">
                     <twig:Button variant="text" href="{{ path('web_home') }}">Cancel</twig:Button>
-                    <twig:Button type="submit" data-report-form-target="submit">Create ticket</twig:Button>
+                    <twig:Button type="submit">Create ticket</twig:Button>
                 </div>
             </div>
         </form>

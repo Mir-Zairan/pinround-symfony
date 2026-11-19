@@ -26,6 +26,7 @@ use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
+use App\Ticketing\Application\CreateTicket\ProjectNotOfTeam;
 use App\Ticketing\Application\CreateTicket\TicketDescriptionOverLimit;
 use App\Ticketing\Application\CreateTicket\TicketTitleMissing;
 use App\Ticketing\Application\CreateTicket\TicketTitleOverLimit;
@@ -105,7 +106,7 @@ final class ReportController extends AbstractController
                 $actor = $this->reporter();
                 $teams = $this->reportFormChoices->teamsFor($actor);
 
-                return $this->renderForm($actor, $teams, self::defaultInputOf($teams));
+                return $this->renderReportPage($actor, $teams, self::defaultInputOf($teams));
             });
         }
 
@@ -118,7 +119,7 @@ final class ReportController extends AbstractController
                 $actor = $this->reporter();
                 $teams = $this->reportFormChoices->teamsFor($actor);
                 if (!$this->isCsrfTokenValid(self::CSRF_ID, $csrfToken)) {
-                    throw new TicketFormRefused($this->renderForm($actor, $teams, $input, ['form' => NewTicketController::FORM_EXPIRED]));
+                    throw new TicketFormRefused($this->renderReportPage($actor, $teams, $input, ['form' => NewTicketController::FORM_EXPIRED]));
                 }
                 [$team, $project, $assignee, $errors] = $this->whereItGoes($teams, $input);
                 $errors = [...$errors, ...self::fieldErrorsOf($input)];
@@ -127,7 +128,7 @@ final class ReportController extends AbstractController
                     $errors['screenshot'] = $screenshotRefusal;
                 }
                 if ([] !== $errors || null === $project) {
-                    throw new TicketFormRefused($this->renderForm($actor, $teams, $input, $errors));
+                    throw new TicketFormRefused($this->renderReportPage($actor, $teams, $input, $errors));
                 }
 
                 // The same duplicates the preview showed, asked again now, so "dupe" holds exactly when one is shown.
@@ -161,12 +162,12 @@ final class ReportController extends AbstractController
                     $errors = ['assignee' => self::ASSIGNEE_UNKNOWN];
                 } catch (NewTicketReportRefused $screenshotRefused) {
                     $errors = ['screenshot' => $screenshotRefused->getMessage()];
-                } catch (ProjectNotFound|ProjectHasNoTeam) {
-                    // The project was removed or lost its team after the choices were read.
+                } catch (ProjectNotFound|ProjectHasNoTeam|ProjectNotOfTeam) {
+                    // The project was removed, lost its team or moved to another team after the choices were read.
                     $errors = ['project' => self::PROJECT_UNKNOWN];
                 }
 
-                throw new TicketFormRefused($this->renderForm($actor, $teams, $input, $errors));
+                throw new TicketFormRefused($this->renderReportPage($actor, $teams, $input, $errors));
             });
         } catch (TicketFormRefused $refused) {
             return $refused->formPage();
@@ -186,7 +187,8 @@ final class ReportController extends AbstractController
     {
         $actor = $this->reporter();
         $teams = $this->reportFormChoices->teamsFor($actor);
-        [$duplicatesHtml, $sentence] = $this->liveParts($actor, $teams, ReportFormInput::fromRequest($request));
+        [$duplicates, $sentence] = $this->liveParts($actor, $teams, ReportFormInput::fromRequest($request));
+        $duplicatesHtml = $this->renderView('@Ticketing/_report_duplicates.html.twig', ['duplicates' => $duplicates]);
 
         return new JsonResponse(['duplicates' => $duplicatesHtml, 'preview' => $sentence]);
     }
@@ -222,7 +224,7 @@ final class ReportController extends AbstractController
                 return [null, null, null, ['team' => self::TEAM_UNKNOWN]];
             }
         }
-        $projects = null === $team ? array_merge(...array_map(static fn (ReportTeamChoice $choice): array => $choice->projects, $teams)) : $team->projects;
+        $projects = $team->projects ?? array_merge(...array_map(static fn (ReportTeamChoice $choice): array => $choice->projects, $teams));
         $project = array_values(array_filter($projects, static fn (TeamProjectChoice $choice): bool => $choice->id() === $input->projectId))[0] ?? null;
         $errors = null === $project ? ['project' => self::PROJECT_UNKNOWN] : [];
         $assignee = null;
@@ -287,27 +289,26 @@ final class ReportController extends AbstractController
     }
 
     /**
-     * The duplicates box as HTML and the "When you send:" words, or an empty one while no project is picked.
+     * The possible duplicates and the "When you send:" words, or empty words while no project is picked.
      *
      * @param list<ReportTeamChoice> $teams
      *
-     * @return array{string, string}
+     * @return array{list<IntakeCandidate>, string}
      */
     private function liveParts(ActorContext $actor, array $teams, ReportFormInput $input): array
     {
         [$team, $project, $assignee] = $this->whereItGoes($teams, $input);
         $facts = $this->previewFactsOf($actor, $input, !$input->isNotSure());
-        $duplicatesHtml = $this->renderView('@Ticketing/_report_duplicates.html.twig', ['duplicates' => $facts->duplicates]);
         $nextKey = null === $project ? null : $this->projectQueries->nextTicketKeyOf($project->id());
         if (null === $nextKey || (null === $team && !$input->isNotSure())) {
-            return [$duplicatesHtml, ''];
+            return [$facts->duplicates, ''];
         }
         $person = null;
         if (null !== $team && null !== $assignee) {
             $person = $assignee->equals($actor->userId()) ? 'you' : (array_values(array_filter($team->giveTo, static fn (array $choice): bool => $choice['id'] === $assignee->toString()))[0]['label'] ?? null);
         }
 
-        return [$duplicatesHtml, ReportPreviewSentence::of($nextKey, $facts->reasonPhrases, $this->checkerNameOf($actor, $team), $person, null === $team ? null : ($team->leadFirstName ?? $this->leadFirstNameOf($team)), $facts->isTeamOnly)];
+        return [$facts->duplicates, ReportPreviewSentence::of($nextKey, $facts->reasonPhrases, $this->checkerNameOf($actor, $team), $person, null === $team ? null : ($team->leadFirstName ?? $this->leadFirstNameOf($team)), $facts->isTeamOnly)];
     }
 
     /**
@@ -353,9 +354,9 @@ final class ReportController extends AbstractController
      * @param list<ReportTeamChoice> $teams
      * @param array<string, string>  $errors
      */
-    private function renderForm(ActorContext $actor, array $teams, ReportFormInput $input, array $errors = []): Response
+    private function renderReportPage(ActorContext $actor, array $teams, ReportFormInput $input, array $errors = []): Response
     {
-        [$duplicatesHtml, $preview] = $this->liveParts($actor, $teams, $input);
+        [$duplicates, $preview] = $this->liveParts($actor, $teams, $input);
         $allProjects = array_merge([], ...array_map(static fn (ReportTeamChoice $choice): array => $choice->projects, $teams));
         $uploadProject = array_values(array_filter($allProjects, static fn (TeamProjectChoice $choice): bool => $choice->id() === $input->projectId))[0] ?? $allProjects[0] ?? null;
 
@@ -373,7 +374,7 @@ final class ReportController extends AbstractController
             'priorityLabels' => NewTicketController::PRIORITY_LABELS,
             'titleMaxLength' => NewTicketController::TITLE_MAX_LENGTH,
             'descriptionMaxLength' => NewTicketController::DESCRIPTION_MAX_LENGTH,
-            'duplicatesHtml' => $duplicatesHtml,
+            'duplicates' => $duplicates,
             'preview' => $preview,
         ], new Response(null, [] === $errors ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY));
     }

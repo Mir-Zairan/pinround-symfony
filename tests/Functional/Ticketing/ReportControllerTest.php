@@ -7,10 +7,20 @@ namespace App\Tests\Functional\Ticketing;
 use App\Identity\Domain\User;
 use App\Review\UI\Component\RoundsSection;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Ticketing\Api\DraftChoice;
+use App\Ticketing\Api\MoveResult;
+use App\Ticketing\Api\ProblemReport;
+use App\Ticketing\Api\ReportedTicket;
+use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
+use App\Ticketing\Application\CreateTicket\ProjectNotOfTeam;
+use App\Ticketing\Application\ProjectNotFound;
+use App\Ticketing\Application\UseCaseTicketCommands;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\ReportController;
 use Doctrine\DBAL\Connection;
@@ -252,6 +262,25 @@ final class ReportControllerTest extends WebTestCase
         self::assertSame('{dupe}', $this->ticketRow('SHOP-43')[3]);
     }
 
+    /**
+     * The page itself, not the live answer, shows the duplicates box, with the old title as text, not markup.
+     */
+    #[Test]
+    public function aRefusedReportPageShowsTheSimilarTicketsWithTheirTitlesEscaped(): void
+    {
+        $this->addOpenTicket($this->shopProject, 'SHOP-41', 'Cart total counted twice <b>at</b> checkout', 'all', $this->shop->toString());
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport(['title' => 'Cart total counted twice', ...$this->resolved(['assignee_id' => 'Mia'])]);
+
+        self::assertResponseStatusCodeSame(422);
+        $box = $page->filter('[data-report-form-target="duplicates"]');
+        self::assertSame(['SHOP-41'], $box->filter('.report-duplicates__key')->each(static fn (Crawler $key): string => $key->text()));
+        self::assertSame('Cart total counted twice <b>at</b> checkout', $box->filter('.report-duplicates__item a')->text());
+        self::assertCount(0, $box->filter('b'));
+        self::assertSame(1, $this->ticketCount(), 'Only SHOP-41.');
+    }
+
     #[Test]
     public function aShortTitleGetsNoSuggestionsAndNobodyOutsideTheOrganizationGetsAPreview(): void
     {
@@ -294,6 +323,60 @@ final class ReportControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame($message, $page->filter('#report-'.$field.'-error, #screenshot-error')->text());
+        self::assertSame('Kept as typed', $page->filter('textarea[name="description"]')->text());
+        self::assertSame(0, $this->ticketCount());
+    }
+
+    /**
+     * @return iterable<string, array{\DomainException}>
+     */
+    public static function projectRefusalsAfterTheChoicesWereRead(): iterable
+    {
+        yield 'the project moved to another team' => [new ProjectNotOfTeam('That project is not one of the team\'s.')];
+        yield 'the project lost its team' => [new ProjectHasNoTeam('That project has no team, so it takes no tickets.')];
+        yield 'the project was removed' => [new ProjectNotFound('That project does not exist.')];
+    }
+
+    #[Test]
+    #[DataProvider('projectRefusalsAfterTheChoicesWereRead')]
+    public function aProjectThatChangesBeforeTheSaveIsRefusedOnTheProjectField(\DomainException $refusal): void
+    {
+        self::getContainer()->set(UseCaseTicketCommands::class, new readonly class($refusal) implements TicketCommands {
+            public function __construct(private \DomainException $refusal)
+            {
+            }
+
+            public function report(ProblemReport $report): ReportedTicket
+            {
+                throw $this->refusal;
+            }
+
+            public function create(OrganizationId $organizationId, UserId $reporter, string $projectId, string $title, string $description, string $type, string $priority, ?UserId $assignee, \DateTimeImmutable $reportedAt): string
+            {
+                throw new \LogicException('Report a problem creates no ticket through create.');
+            }
+
+            public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
+            {
+                throw new \LogicException('Report a problem moves no ticket.');
+            }
+
+            public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int
+            {
+                throw new \LogicException('Report a problem gives no ticket.');
+            }
+
+            public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
+            {
+                throw new \LogicException('Report a problem moves no ticket.');
+            }
+        });
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport(['description' => 'Kept as typed']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(ReportController::PROJECT_UNKNOWN, $page->filter('#report-project-error')->text());
         self::assertSame('Kept as typed', $page->filter('textarea[name="description"]')->text());
         self::assertSame(0, $this->ticketCount());
     }

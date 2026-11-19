@@ -126,10 +126,6 @@ final readonly class CreateTicket
     }
 
     /**
-     * A viewer is refused too, as a viewer cannot move the ticket (ADR-0013); a user of another organization has no
-     * roles here.
-     */
-    /**
      * The use case behind {@see TicketCommands::report}, which carries the contract.
      */
     public function report(ProblemReport $report): ReportedTicket
@@ -145,7 +141,7 @@ final readonly class CreateTicket
         $project = $this->organizationProjects->lockedProjectOf($report->organizationId, $report->projectId);
         $projectTeam = $project->owningTeam() ?? throw new ProjectHasNoTeam('That project has no team, so it takes no tickets.');
         if (null !== $report->teamId && !$report->teamId->equals($projectTeam)) {
-            throw new ProjectHasNoTeam('That project is not one of the team\'s.');
+            throw new ProjectNotOfTeam('That project is not one of the team\'s.');
         }
         if (null !== $report->teamId && null !== $report->assignee) {
             if (!$this->membershipQueries->rolesOf($report->reporter, $report->organizationId)->isInTeam($report->teamId)) {
@@ -207,6 +203,10 @@ final readonly class CreateTicket
         return new ReportedTicket($ticket->key()->toString(), array_map(static fn (CheckReason $reason): string => $reason->value, $reasons), $isTeamOnly);
     }
 
+    /**
+     * A viewer is refused too, as a viewer cannot move the ticket (ADR-0013); a user of another organization has no
+     * roles here.
+     */
     private function refuseAnAssigneeOutside(TeamId $team, UserId $assignee, OrganizationId $organizationId): void
     {
         $roles = $this->membershipQueries->rolesOf($assignee, $organizationId);

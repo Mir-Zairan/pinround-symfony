@@ -20,6 +20,7 @@ use App\Media\Api\UploadTarget;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Application\OpenInvitationLink;
 use App\Organization\Domain\TeamSlug;
+use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundAccessFacts;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -157,6 +158,11 @@ final class VoterMatrixTest extends KernelTestCase
         'Unshared draft round of Omar in another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, true, false],
         'Shared round of another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, false, false],
     ];
+
+    private const string REPORT_DRAFT = '0197a3c0-0000-7000-8000-0000000009fa';
+    private const string REPORT_DRAFT_OF_MIA = 'Report draft of Mia';
+    /** For an attribute whose voter takes no subject, such as REVOKE_CURRENT_TOKEN. */
+    private const string NO_SUBJECT = 'No subject';
 
     private const string PASSWORD_SESSION = 'password session';
     private const string PERSONAL_ACCESS_TOKEN = 'personal access token';
@@ -343,8 +349,16 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket|TicketId|RoundAccessFacts
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket|TicketId|RoundAccessFacts|ReportDraftView|null
     {
+        if (self::NO_SUBJECT === $name) {
+            return null;
+        }
+        if (self::REPORT_DRAFT_OF_MIA === $name) {
+            $at = new \DateTimeImmutable(self::NOW);
+
+            return new ReportDraftView(self::REPORT_DRAFT, new UserId(self::PEOPLE['Mia'][0]), 'SHOP', 'Refund button freezes', '', [], 1, $at, $at);
+        }
         if (isset(self::TICKET_IDS[$name])) {
             return new TicketId(self::TICKET_IDS[$name]);
         }
@@ -389,7 +403,7 @@ final class VoterMatrixTest extends KernelTestCase
                 null === $invitee ? null : new UserId(self::PEOPLE[$invitee][0]),
             );
         }
-        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation, a ticket or a comment of VoterMatrixTest.');
+        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation, a ticket, a comment, a report draft or no subject of VoterMatrixTest.');
 
         return new TeamId(self::TEAMS[$name]);
     }
