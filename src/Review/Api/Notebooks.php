@@ -31,8 +31,10 @@ interface Notebooks
      *
      * @return string the notebook's uuid
      *
-     * @throws NotebookRefused a title rule (blank, over 120 characters, unsavable text); NOT_YOURS_TO_MAKE when the
-     *                         person is no member of the tenant's organization; nothing is saved
+     * @throws NotebookRefused a title rule (blank, over 120 characters, unsavable text); NOT_YOURS_TO_MAKE when
+     *                         NotebookVoter denies EDIT on the new notebook; nothing is saved. Membership is not checked
+     *                         here: as for report drafts, the request's tenant is always one of the person's organizations
+     *                         (EnterChosenOrganization), so a non-member never gets this far
      * @throws \LogicException when nobody is logged in, no transaction is open or no tenant is set
      */
     public function create(string $title, \DateTimeImmutable $at): string;

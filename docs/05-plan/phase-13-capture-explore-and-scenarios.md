@@ -142,7 +142,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - **Files:** `migrations/*`, `src/Review/{Domain,Application,Infrastructure,UI,Api}/*Notebook*`, `src/AgentApi/Infrastructure/Mcp/Tool/{ListMyNotebooks,GetNotebook}.php`, `src/AgentApi/UI/Rest/*`.
 - **Acceptance:**
   - [ ] Lena's notebook is not found for Omar, Sara and another organization (HTML, queries, direct URL, REST, MCP).
-  - [ ] An 11th screenshot is refused with a plain message and nothing changes.
+  - [x] An 11th screenshot is refused with a plain message and nothing changes.
   - [ ] `get_notebook` returns titles, summaries and pin notes inside delimiters, unchanged.
 - **Tests:** isolation and catalogue tests; voter tests; MCP and REST contract tests; functional tests for the page.
 - **Prototype check:** none; list and card follow the report drafts list.
@@ -156,8 +156,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. Add the scenario format and an example to the reporting guide.
 - **Files:** `docs/api/scenario.v1.json`, `src/Review/Domain/Scenario*`, `src/AgentApi/Infrastructure/Mcp/Tool/SaveScenarios.php`.
 - **Acceptance:**
-  - [ ] An unknown step type, a CSS or XPath target, 31 steps, 21 scenarios or an over-cap text are refused with a plain error and nothing is saved.
-  - [ ] A `go_to` URL whose host differs from `start_url`'s host is refused.
+  - [x] An unknown step type, a CSS or XPath target, 31 steps, 21 scenarios or an over-cap text are refused with a plain error and nothing is saved.
+  - [x] A `go_to` URL whose host differs from `start_url`'s host is refused.
   - [ ] Without `notebooks:write` the tool errors and nothing changes; another person's notebook is not found.
 - **Tests:** unit tests per rule (each with a valid twin that passes); MCP contract tests.
 - **Prototype check:** none.
@@ -224,3 +224,4 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-19 (P13.T10, blocked): the task needs P11.T7's retention job, which is not built (P11 has no ticked criteria). Left out by the product owner's choice until P11.T7 lands. That job must keep media a report draft still references (see P13.T2's "Make it a new ticket").
 - 2026-11-19 (scope): this session built T1's owed proofs, T2, T3 and T4. T5 to T9 wait for the next session.
 - 2026-11-20 (P13.T6, storage): `rvw_notebook` differs from ADR-0046's sketch: the column is `title`, not `name`, there is no `project_id` column (add it with a migration when a notebook gets a project), and `version` and `last_used_at` are added for saves over the version read and the last-used list. The port is `Review\Domain\Notebook\NotebookRows`, so the planned `Review\Api\Notebooks` keeps its name; a `Notebook` holds `Scenarios`, so `ScenarioRules` is the one place for the 20 cap, and `ScenarioRules::parse` wants JSON decoded with objects as stdClass (`json_decode($json)`). `NotebookRows::markUsed` stores a use without a save. `NotebookScreenshot::of` and `NotebookPin::placed` still repeat `ReportDraftContentRules::checkedScreenshot`'s checks, and `ReportDraftContentRules` does not yet refuse a NUL character or invalid UTF-8 the way notebooks do (`create_report` passes its text to it unchecked; seen by reading, not by a test).
+- 2026-11-20 (P13.T6 and P13.T7, Api): `Review\Api\Notebooks` is built and proven at the Api level (`UseCaseNotebooksTest`, `NotebookLeakTest`, `NotebookCapsAgreeTest`, `ScenarioRulesTest`). Ticked: T6's 11th-screenshot criterion and T7's two rule criteria (each rule in `ScenarioRulesTest` with a valid twin; "nothing is saved" by `replaceScenarios` in `UseCaseNotebooksTest`). Still open: T6's isolation criterion needs the page, REST and MCP proofs, T6's `get_notebook` and T7's scope criterion need the MCP tools, and T7's `save_scenarios` must call `replaceScenarios`. Choices to keep: a picture still processing is accepted into a notebook (the contract says "still processing or ready", as an agent adds it right after its upload); only a rejected one or one not the person's upload is refused. `forOwner` asks no voter: the owner is the logged-in person and the query names them, so it lists nobody else's. `create`'s `NOT_YOURS_TO_MAKE` comes only when NotebookVoter finds no actor: `RequestScopedCurrentActor` gives a non-member an actor with no roles, so the voter grants a non-member's own new notebook (`theVoterLetsANonMemberMakeANotebookUnderATenantSheIsNoMemberOf`); as for report drafts, the guard is `EnterChosenOrganization`, which never makes a non-member's organization the tenant. Gates on this branch: Unit/Review, Integration/Review, Integration/Visibility, the Identity suites, `DatabaseRolesTest` (with the migrations diff), `phpstan` and `deptrac` green.

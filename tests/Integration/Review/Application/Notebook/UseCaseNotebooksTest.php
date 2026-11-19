@@ -7,7 +7,10 @@ namespace App\Tests\Integration\Review\Application\Notebook;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\UploadedMedia;
 use App\Organization\Api\ActorContext;
+use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\Roles;
+use App\Organization\Infrastructure\Doctrine\DbalMembershipQueries;
+use App\Organization\Infrastructure\Security\RequestScopedCurrentActor;
 use App\Review\Api\NotebookRefused;
 use App\Review\Api\Notebooks;
 use App\Review\Api\NotebookSummary;
@@ -179,8 +182,8 @@ final class UseCaseNotebooksTest extends KernelTestCase
     }
 
     /**
-     * Lena is no longer a member of Acme Foods: NotebookVoter has no actor for her and denies, though the notebook is
-     * hers, so the read alone must not let a change through.
+     * NotebookVoter has no actor for Lena and denies, though the notebook is hers, so the read alone must not let a
+     * change through, and create refuses to make one.
      */
     #[Test]
     public function whenTheVoterDeniesTheOwnerHerNotebookIsNotFoundAndNothingIsWritten(): void
@@ -191,16 +194,37 @@ final class UseCaseNotebooksTest extends KernelTestCase
         $writes = self::writesOn(self::LENAS_NOTEBOOK);
         self::assertNotEmpty($writes);
         foreach ($writes as $method => $write) {
-            $refused = $this->refusalOf('Lena', $write, isMember: false);
+            $refused = $this->refusalOf('Lena', $write, hasActor: false);
             self::assertSame([NotebookRefused::NOT_FOUND, true], [$refused->getMessage(), $refused->isNotFound()], $method);
         }
-        $created = $this->refusalOf('Lena', static fn (Notebooks $notebooks): string => $notebooks->create('Cart page', new \DateTimeImmutable(self::ADDED)), isMember: false);
+        $created = $this->refusalOf('Lena', static fn (Notebooks $notebooks): string => $notebooks->create('Cart page', new \DateTimeImmutable(self::ADDED)), hasActor: false);
 
         self::assertSame([NotebookRefused::NOT_YOURS_TO_MAKE, false], [$created->getMessage(), $created->isNotFound()]);
-        self::assertNull($this->committedAs('Lena', static fn (Notebooks $notebooks): ?NotebookView => $notebooks->get(self::LENAS_NOTEBOOK), isMember: false));
+        self::assertNull($this->committedAs('Lena', static fn (Notebooks $notebooks): ?NotebookView => $notebooks->get(self::LENAS_NOTEBOOK), hasActor: false));
         self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
         self::assertSame([self::LENAS_NOTEBOOK], $this->storedIdsOf(self::ACME_FOODS), 'No notebook was made.');
-        self::assertNotNull($this->committedAs('Lena', static fn (Notebooks $notebooks): ?NotebookView => $notebooks->get(self::LENAS_NOTEBOOK)), 'As a member she gets it.');
+        self::assertNotNull($this->committedAs('Lena', static fn (Notebooks $notebooks): ?NotebookView => $notebooks->get(self::LENAS_NOTEBOOK)), 'With an actor she gets it.');
+    }
+
+    /**
+     * The real actor lookup gives a person with no membership in the tenant's organization an actor with no roles, so
+     * NotebookVoter grants her her own new notebook there. What keeps a non-member out is the tenant: as for report
+     * drafts, EnterChosenOrganization never makes such an organization the tenant of her request.
+     */
+    #[Test]
+    public function theVoterLetsANonMemberMakeANotebookUnderATenantSheIsNoMemberOf(): void
+    {
+        $notebookId = $this->transactions()->committedAs(self::ACME_FOODS, function (): string {
+            $membershipQueries = new DbalMembershipQueries(self::getContainer()->get('doctrine.dbal.default_connection'));
+            self::assertSame([], $membershipQueries->membersAmong(new OrganizationId(self::ACME_FOODS), [new UserId(self::LENA)]), 'Lena is no member of Acme Foods.');
+
+            return $this->notebooksWithTheRealActorLookupOf('Lena', $membershipQueries)->create('Cart page', new \DateTimeImmutable(self::CREATED));
+        });
+
+        self::assertSame([$notebookId], $this->storedIdsOf(self::ACME_FOODS));
+        $view = $this->committedAs('Lena', static fn (Notebooks $notebooks): ?NotebookView => $notebooks->get($notebookId));
+        self::assertNotNull($view);
+        self::assertSame([self::LENA, self::ACME_FOODS, 'Cart page'], [$view->ownerId->toString(), $view->organizationId->toString(), $view->title]);
     }
 
     #[Test]
@@ -540,25 +564,24 @@ final class UseCaseNotebooksTest extends KernelTestCase
      * @template T
      *
      * @param \Closure(Notebooks): T $work
-     * @param bool                   $isMember false when $person is no longer a member there, so NotebookVoter has no
-     *                                         actor for them
+     * @param bool                   $hasActor false when the actor lookup NotebookVoter asks finds none for $person
      *
      * @return T
      */
-    private function committedAs(string $person, \Closure $work, bool $isMember = true, ?NotebookRows $rowsOfTheTab = null): mixed
+    private function committedAs(string $person, \Closure $work, bool $hasActor = true, ?NotebookRows $rowsOfTheTab = null): mixed
     {
         [, $organizationId] = self::PEOPLE[$person];
 
-        return $this->transactions()->committedAs($organizationId, fn (): mixed => $work($this->notebooksOf($person, $isMember, $rowsOfTheTab ?? $this->notebookRows())));
+        return $this->transactions()->committedAs($organizationId, fn (): mixed => $work($this->notebooksOf($person, $hasActor, $rowsOfTheTab ?? $this->notebookRows())));
     }
 
     /**
      * @param \Closure(Notebooks): mixed $work
      */
-    private function refusalOf(string $person, \Closure $work, bool $isMember = true, ?NotebookRows $rowsOfTheTab = null): NotebookRefused
+    private function refusalOf(string $person, \Closure $work, bool $hasActor = true, ?NotebookRows $rowsOfTheTab = null): NotebookRefused
     {
         try {
-            $this->committedAs($person, $work, $isMember, $rowsOfTheTab);
+            $this->committedAs($person, $work, $hasActor, $rowsOfTheTab);
         } catch (NotebookRefused $refused) {
             // The rollback closed the entity manager; the next transaction needs a fresh one, as a new request has.
             self::getContainer()->get('doctrine')->resetManager();
@@ -568,7 +591,7 @@ final class UseCaseNotebooksTest extends KernelTestCase
         self::fail(\sprintf('%s was let through.', $person));
     }
 
-    private function notebooksOf(string $person, bool $isMember, NotebookRows $rows): UseCaseNotebooks
+    private function notebooksOf(string $person, bool $hasActor, NotebookRows $rows): UseCaseNotebooks
     {
         [$userId] = self::PEOPLE[$person];
         $tenantContext = self::getContainer()->get(TenantContext::class);
@@ -581,7 +604,7 @@ final class UseCaseNotebooksTest extends KernelTestCase
             'Ben' => new ActorContext(new UserId(self::BEN), $betaBakery, new Roles(true, false, [], [], [])),
             'Lena at Beta Bakery' => new ActorContext(new UserId(self::LENA), $betaBakery, Roles::none()),
         ];
-        if (!$isMember) {
+        if (!$hasActor) {
             unset($actors[$person]);
         }
         $tokenStorage = new TokenStorage();
@@ -593,6 +616,28 @@ final class UseCaseNotebooksTest extends KernelTestCase
         \assert($uploadedMedia instanceof UploadedMedia);
 
         return new UseCaseNotebooks($rows, $access, $currentUser, $uploadedMedia, $tenantContext);
+    }
+
+    /**
+     * Notebooks whose NotebookVoter finds $person's actor as a request does, through RequestScopedCurrentActor on
+     * $membershipQueries.
+     */
+    private function notebooksWithTheRealActorLookupOf(string $person, MembershipQueries $membershipQueries): UseCaseNotebooks
+    {
+        [$userId] = self::PEOPLE[$person];
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tokenUser = new InMemoryUser($person, null);
+        $currentUser = self::createStub(CurrentUser::class);
+        $currentUser->method('id')->willReturn(new UserId($userId));
+        $currentUser->method('idOf')->willReturnCallback(static fn (mixed $user): ?UserId => $user === $tokenUser ? new UserId($userId) : null);
+        $tokenStorage = new TokenStorage();
+        $tokenStorage->setToken(new UsernamePasswordToken($tokenUser, 'main'));
+        $currentActor = new RequestScopedCurrentActor($currentUser, $tenantContext, $membershipQueries);
+        $access = new SymfonyNotebookAccess(new AuthorizationChecker($tokenStorage, new AccessDecisionManager([new NotebookVoter($currentActor, $tenantContext)])));
+        $uploadedMedia = self::getContainer()->get('test.media_uploaded_media');
+        \assert($uploadedMedia instanceof UploadedMedia);
+
+        return new UseCaseNotebooks($this->notebookRows(), $access, $currentUser, $uploadedMedia, $tenantContext);
     }
 
     private function lenasNotebook(): NotebookView
