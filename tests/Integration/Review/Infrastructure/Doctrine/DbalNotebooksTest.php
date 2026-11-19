@@ -401,7 +401,7 @@ final class DbalNotebooksTest extends KernelTestCase
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Notebooks are read and written in a transaction under the organization as tenant; none is open.');
+        $this->expectExceptionMessageIsOrContains('Notebooks are read and written in a transaction under the organization as tenant; none is open.');
         $this->notebooks()->forOwner(new UserId(self::LENA), null, 20);
     }
 

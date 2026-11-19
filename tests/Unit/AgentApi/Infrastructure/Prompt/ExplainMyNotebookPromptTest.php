@@ -46,7 +46,7 @@ final class ExplainMyNotebookPromptTest extends TestCase
         self::assertTrue(mb_check_encoding($text, 'UTF-8'));
         self::assertStringStartsNotWith("\u{FEFF}", $text);
         self::assertStringNotContainsString("\r", $text);
-        self::assertSame(0, preg_match('/[\x00-\x09\x0B-\x1F\x7F\x{2028}\x{2029}]/u', $text), 'a control character other than the line feed');
+        self::assertDoesNotMatchRegularExpression('/[\x00-\x09\x0B-\x1F\x7F\x{2028}\x{2029}]/u', $text, 'a control character other than the line feed');
         self::assertStringEndsWith(".\n", $text);
         self::assertStringEndsNotWith("\n\n", $text);
     }

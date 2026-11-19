@@ -37,7 +37,7 @@ final class NotebookCursorTest extends TestCase
     public function anIdThatIsNotACanonicalLowercaseUuidV7IsRefused(string $notebookId): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A notebook cursor\'s notebook id must be a canonical lowercase UUIDv7.');
+        $this->expectExceptionMessageIsOrContains('A notebook cursor\'s notebook id must be a canonical lowercase UUIDv7.');
 
         new NotebookCursor(new \DateTimeImmutable(self::LAST_USED_AT), $notebookId);
     }
