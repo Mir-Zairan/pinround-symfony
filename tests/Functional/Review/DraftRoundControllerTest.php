@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
+use App\Media\UI\Controller\UploadIntentController;
+use App\Media\UI\Controller\UploadStatusController;
 use App\Review\Api\RoundRefused;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\Controller\RefusedWithToast;
+use App\Review\UI\Controller\RoundController;
 use App\Review\UI\DraftRoundController;
 use App\Review\UI\RoundsController;
+use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
@@ -53,6 +57,9 @@ final class DraftRoundControllerTest extends WebTestCase
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     private const string PRIVATE_HEADLINE = 'Draft round · only you can see this';
     private const string OMAR_DRAFT_SHOT = 'Omar own draft shot';
+    private const string MIA_DRAFT_SHOT = 'Mia own draft shot';
+    private const string MIA_DRAFT_NOTE = 'Mia private note';
+    private const string MIA_DRAFT_SUMMARY = 'What the tester saw';
     /** Who may see SHOP-1 but may not start, share or delete Omar's draft. */
     private const array OTHERS = ['Lena', 'Mia', 'Raj', 'Sara'];
 
@@ -108,6 +115,9 @@ final class DraftRoundControllerTest extends WebTestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->createdOrganizationIds as $organizationId) {
+            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM med_upload_intent WHERE organization_id = ?', [$organizationId]));
+        }
         $this->removeSeededRounds();
         $this->removeCommittedProjects();
         $this->removeUsersAndOrganizations();
@@ -357,6 +367,92 @@ final class DraftRoundControllerTest extends WebTestCase
         }
     }
 
+    /**
+     * ADR-0044, P13.T1: Mia's draft on SHOP-1 in Testing, opened by its own URLs as someone else would type them. The
+     * round page it would get once shared, share, delete, the editor's live actions with the props Mia's page signed,
+     * an upload to it and its picture's upload state all answer as for a round that does not exist, and nothing is
+     * stored. Mia's shared report stays readable for each of them, so the refusals are about the draft, not the ticket.
+     */
+    #[Test]
+    public function theTestersUnsharedDraftIsNotFoundAtEveryUrlForTheAssigneeTheLeadTheAdminAndAnotherOrganization(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->putInTestingWithMiasTurn($ticketId);
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Mia report shot', null);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Mia', null);
+        $draftPicture = $this->addMedia('ready', 'Mia');
+        $draftShot = $this->addScreenshot($draft, $draftPicture, 0, self::MIA_DRAFT_SHOT, self::MIA_DRAFT_SUMMARY, 'not_right');
+        $this->addPin($draftShot, 1, '10.00', '20.00', self::MIA_DRAFT_NOTE, 'Mia');
+        $ben = $this->otherOrganizationsAdmin();
+        $picturesToAdd = ['Omar' => $this->addMedia('ready', 'Omar'), 'Lena' => $this->addMedia('ready', 'Lena'), 'Sara' => $this->addMedia('ready', 'Sara')];
+        $picturesToAdd['Ben'] = $picturesToAdd['Omar'];
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $miasEditor = $this->frame()->filter('#round-'.$draft.' .draft-round-editor');
+        self::assertCount(1, $miasEditor, 'Mia sees her own draft.');
+        $miasProps = (string) $miasEditor->attr('data-live-props-value');
+        self::assertNotSame('', $miasProps);
+        $this->client->request('GET', '/media/'.$draftPicture.'/status');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['status' => 'ready'], $this->jsonAnswer(), 'Mia reads the state of her draft\'s picture.');
+        $before = $this->draftState($ticketId, $report, $draft);
+        self::assertNotSame([], $before['pins']);
+
+        foreach (['Omar', 'Lena', 'Sara', 'Ben'] as $person) {
+            $this->logIn($this->client, 'Ben' === $person ? $ben : $this->people[$person]);
+            // Ben may not see SHOP-1 at all, so he is refused at the ticket before any round is read.
+            $roundPageRefusal = 'Ben' === $person ? RoundsController::NOT_FOUND : RoundController::NOT_FOUND;
+            $draftRefusal = 'Ben' === $person ? RoundsController::NOT_FOUND : RoundRefused::NOT_FOUND;
+            if ('Ben' !== $person) {
+                self::assertSame(['Round 0 · Report · by Mia · 0 pins'], $this->frame()->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person);
+                $this->assertHoldsNothingOfMiasDraft($person.' in the Rounds section', $draft);
+                $this->client->request('GET', '/t/SHOP-1/rounds/0');
+                self::assertResponseStatusCodeSame(200, $person.' opens the shared report.');
+            }
+
+            foreach (['/t/SHOP-1/rounds/1', '/t/SHOP-1/rounds/1/focus'] as $roundPage) {
+                $this->client->request('GET', $roundPage);
+                self::assertResponseStatusCodeSame(404, $person.' '.$roundPage);
+                self::assertStringContainsString($roundPageRefusal, (string) $this->client->getResponse()->getContent(), $person.' '.$roundPage);
+                $this->assertHoldsNothingOfMiasDraft($person.' '.$roundPage, $draft);
+            }
+
+            foreach ([$this->shareUrl($draft), $this->deleteUrl($draft)] as $url) {
+                $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
+                self::assertResponseStatusCodeSame(404, $person.' '.$url);
+                self::assertStringContainsString($draftRefusal, (string) $this->client->getResponse()->getContent(), $person.' '.$url);
+            }
+
+            foreach ([
+                'addScreenshot' => ['mediaId' => $picturesToAdd[$person]],
+                'removeScreenshot' => ['screenshotId' => $draftShot],
+                'editScreenshotText' => ['screenshotId' => $draftShot, 'title' => 'Hijacked', 'summary' => 'Hijacked'],
+                'setVerdict' => ['screenshotId' => $draftShot, 'verdict' => 'looks_right'],
+                'setPins' => ['screenshotId' => $draftShot, 'pins' => []],
+            ] as $action => $args) {
+                $this->postLiveAction($this->client, $miasProps, $action, $args);
+                self::assertResponseStatusCodeSame(404, $person.' '.$action);
+                // The draft's id is in the props the request sent, which the test error page shows back.
+                $this->assertHoldsNothingOfMiasDraft($person.' '.$action, null);
+            }
+
+            $this->beginUploadTo($draft);
+            self::assertResponseStatusCodeSame(403, $person.' uploads to the draft.');
+            $refusalOfTheDraft = $this->jsonAnswer();
+            $this->beginUploadTo(Uuid::v7()->toRfc4122());
+            self::assertResponseStatusCodeSame(403, $person.' uploads to an unknown round.');
+            self::assertSame(['message' => UploadIntentController::NOT_ALLOWED], $refusalOfTheDraft, $person);
+            self::assertSame($this->jsonAnswer(), $refusalOfTheDraft, $person.': the draft is refused as a round that does not exist.');
+
+            $this->client->request('GET', '/media/'.$draftPicture.'/status');
+            self::assertResponseStatusCodeSame(404, $person.' reads the state of the draft\'s picture.');
+            self::assertSame(['message' => UploadStatusController::NOTHING_UPLOADED], $this->jsonAnswer(), $person);
+
+            self::assertSame($before, $this->draftState($ticketId, $report, $draft), $person.': nothing changes.');
+        }
+    }
+
     #[Test]
     public function sharingTurnsTheDraftIntoTheNextNumberedRoundReadOnlyForItsOwnerAndSeenByTheLead(): void
     {
@@ -550,6 +646,72 @@ final class DraftRoundControllerTest extends WebTestCase
             self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' [data-controller="copy-text"]'), $person.': a shared round has no box, not even for its owner.');
             self::assertStringNotContainsString('Read my pinround notes', (string) $this->client->getResponse()->getContent(), $person);
         }
+    }
+
+    /**
+     * @param string|null $draft the draft's id, also looked for unless the request itself carried it
+     */
+    private function assertHoldsNothingOfMiasDraft(string $message, ?string $draft): void
+    {
+        $content = (string) $this->client->getResponse()->getContent();
+        foreach (array_filter([self::MIA_DRAFT_SHOT, self::MIA_DRAFT_NOTE, self::MIA_DRAFT_SUMMARY, $draft], static fn (?string $privateText): bool => null !== $privateText) as $privateText) {
+            self::assertStringNotContainsString($privateText, $content, $message);
+        }
+    }
+
+    /**
+     * Posts a begin request as the presigned-upload controller sends it, for a screenshot of the round $roundId.
+     */
+    private function beginUploadTo(string $roundId): void
+    {
+        $this->client->request(
+            'POST',
+            '/media/intents',
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_X_CSRF_TOKEN' => $this->csrfTokenFor($this->client, UploadIntentController::CSRF_ID)],
+            json_encode(['purpose' => 'screenshot', 'mime' => 'image/png', 'bytes' => 245_760, 'target' => ['kind' => 'round', 'id' => $roundId]], \JSON_THROW_ON_ERROR),
+        );
+    }
+
+    /**
+     * @return array<string, mixed> the JSON answer of the last request
+     */
+    private function jsonAnswer(): array
+    {
+        $answer = json_decode((string) $this->client->getResponse()->getContent(), true, 8, \JSON_THROW_ON_ERROR);
+        self::assertIsArray($answer);
+        $fields = [];
+        foreach ($answer as $name => $value) {
+            self::assertIsString($name);
+            $fields[$name] = $value;
+        }
+
+        return $fields;
+    }
+
+    /**
+     * What a stray write would change: the ticket's rounds, the report's and the draft's screenshots, the draft's pins,
+     * and the organization's upload intents.
+     *
+     * @return array{rounds: list<array<string, mixed>>, screenshots: list<array<string, mixed>>, pins: list<array<string, mixed>>, intents: list<array<string, mixed>>}
+     */
+    private function draftState(string $ticketId, string $report, string $draft): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $intents = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$intents): int {
+            $intents = $migrator->fetchAllAssociative('SELECT id, user_id, target_kind, target_id FROM med_upload_intent WHERE organization_id = ? ORDER BY id', [$organizationId]);
+
+            return \count($intents);
+        });
+
+        return [
+            'rounds' => $this->roundRowsOf($ticketId),
+            'screenshots' => [...$this->screenshotRowsOf($report), ...$this->screenshotRowsOf($draft)],
+            'pins' => $this->pinRowsOf($draft),
+            'intents' => $intents,
+        ];
     }
 
     private function frame(): Crawler
