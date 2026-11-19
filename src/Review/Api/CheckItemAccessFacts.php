@@ -16,8 +16,8 @@ final readonly class CheckItemAccessFacts
 {
     /**
      * @param string                  $itemId    the item's id, lowercase
-     * @param string                  $roundId   the id of its checklist round, lowercase
-     * @param int                     $pinNumber the number of its pin on its Round 0 picture, from 1
+     * @param string                  $roundId   the id of its round, the checklist or a findings round, lowercase
+     * @param int                     $pinNumber the number of its pin on its picture, from 1
      * @param TicketTurnSnapshot|null $ticket    the item's ticket as the caller already read it, under the same tenant in
      *                                           the same transaction, so the voter need not read it again; null for the
      *                                           voter to read it

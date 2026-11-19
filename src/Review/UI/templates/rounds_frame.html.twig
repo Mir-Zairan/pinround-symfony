@@ -37,6 +37,9 @@
                 {% if card.moreScreenshotsNote is not null %}
                     <p class="round-card__more">{{ card.moreScreenshotsNote }}</p>
                 {% endif %}
+                {% if card.findingsChecklist is not null %}
+                    {{ include('@Review/_checklist_card.html.twig', {checklist: card.findingsChecklist}) }}
+                {% endif %}
                 {% endif %}
                 {% if card.isPrivateDraft %}
                     <div class="round-card__actions">
