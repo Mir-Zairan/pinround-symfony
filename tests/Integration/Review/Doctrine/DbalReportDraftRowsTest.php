@@ -6,6 +6,8 @@ namespace App\Tests\Integration\Review\Doctrine;
 
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
+use App\Review\Api\ReportDraftsPage;
+use App\Review\Api\ReportDraftSummary;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Infrastructure\Doctrine\DbalReportDraftRows;
 use App\SharedKernel\Application\TenantContext;
@@ -31,6 +33,7 @@ final class DbalReportDraftRowsTest extends KernelTestCase
     private const string MIAS_SECOND = '0197a3c0-0000-7000-8000-0000000f6112';
     private const string OMARS = '0197a3c0-0000-7000-8000-0000000f6113';
     private const string BETA_MIAS = '0197a3c0-0000-7000-8000-0000000f6114';
+    private const string MIAS_THIRD = '0197a3c0-0000-7000-8000-0000000f6115';
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000f6121';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000f6122';
     // An offset other than UTC, so a time written without its offset would read back an hour off.
@@ -63,17 +66,47 @@ final class DbalReportDraftRowsTest extends KernelTestCase
         self::assertEquals(self::content()->screenshots, $draft->screenshots);
     }
 
+    /**
+     * Two of Mia's drafts tie on updated_at, inserted lowest id first; Omar's and another organization's draft of Mia
+     * sit at the same time and would come between them if the owner or the tenant were not in the query.
+     */
     #[Test]
-    public function theOwnersListHoldsOnlyTheirOwnDraftsNewestChangeFirst(): void
+    public function theOwnersListHoldsOnlyTheirOwnDraftsNewestChangeFirstAPageAtATime(): void
     {
         $this->insertCommitted(self::ACME_FOODS, self::MIAS_FIRST, self::MIA, self::content(), self::EARLIER);
+        $this->insertCommitted(self::ACME_FOODS, self::MIAS_SECOND, self::MIA, new ReportDraftContent('No pictures', '', []), self::LATER);
         $this->insertCommitted(self::ACME_FOODS, self::OMARS, self::OMAR, self::content(), self::LATER);
-        $this->insertCommitted(self::ACME_FOODS, self::MIAS_SECOND, self::MIA, self::content(), self::LATER);
         $this->insertCommitted(self::BETA_BAKERY, self::BETA_MIAS, self::MIA, self::content(), self::LATER);
+        $this->insertCommitted(self::ACME_FOODS, self::MIAS_THIRD, self::MIA, self::content(), self::LATER);
 
-        $ids = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => array_map(static fn ($draft): string => $draft->id, $this->rows()->forOwner(new UserId(self::MIA))));
+        // One draft a page, so the cursor falls between the two tied drafts.
+        $pages = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $pages = [$this->rows()->forOwner(new UserId(self::MIA), null, 1)];
+            while (null !== $pages[\count($pages) - 1]->nextCursor && \count($pages) < 5) {
+                $pages[] = $this->rows()->forOwner(new UserId(self::MIA), $pages[\count($pages) - 1]->nextCursor, 1);
+            }
 
-        self::assertSame([self::MIAS_SECOND, self::MIAS_FIRST], $ids);
+            return $pages;
+        });
+
+        self::assertSame(
+            [[[self::MIAS_THIRD, 'Total is doubled', 2]], [[self::MIAS_SECOND, 'No pictures', 0]], [[self::MIAS_FIRST, 'Total is doubled', 2]]],
+            array_map(static fn (ReportDraftsPage $page): array => array_map(static fn (ReportDraftSummary $draft): array => [$draft->id, $draft->title, $draft->screenshotCount], $page->drafts), $pages),
+        );
+        self::assertEquals(new \DateTimeImmutable(self::LATER), $pages[1]->drafts[0]->updatedAt);
+        self::assertNull($pages[2]->nextCursor, 'No draft follows the last one.');
+    }
+
+    #[Test]
+    public function aFullLastPageHasNoNextCursor(): void
+    {
+        $this->insertCommitted(self::ACME_FOODS, self::MIAS_FIRST, self::MIA, self::content(), self::EARLIER);
+        $this->insertCommitted(self::ACME_FOODS, self::MIAS_SECOND, self::MIA, self::content(), self::LATER);
+
+        $page = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->rows()->forOwner(new UserId(self::MIA), null, 2));
+
+        self::assertCount(2, $page->drafts);
+        self::assertNull($page->nextCursor);
     }
 
     /**
@@ -137,7 +170,7 @@ final class DbalReportDraftRowsTest extends KernelTestCase
         self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
 
         $this->expectException(\LogicException::class);
-        $this->rows()->forOwner(new UserId(self::MIA));
+        $this->rows()->forOwner(new UserId(self::MIA), null, 20);
     }
 
     private static function content(): ReportDraftContent

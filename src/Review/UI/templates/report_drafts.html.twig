@@ -1,6 +1,7 @@
 {% extends '@Web/base.html.twig' %}
 
-{#- The person's own report drafts (ReportDraftController::list), newest change first. Nobody else ever sees this list. -#}
+{#- The person's own report drafts (ReportDraftController::list), newest change first, a page at a time; "Show more"
+    opens the next page. Nobody else ever sees this list. -#}
 
 {% block title %}Report drafts · pinround{% endblock %}
 
@@ -15,18 +16,21 @@
         <h1 class="security__title">Report drafts</h1>
         <p class="login__hint">Reports your Claude Code or the browser extension prepared for you. Only you see them. Check one, then send it to make the ticket.</p>
         {% if drafts is empty %}
-            <twig:EmptyState message="You have no report drafts." />
+            <twig:EmptyState message="{{ isLaterPage ? 'No more report drafts.' : 'You have no report drafts.' }}" />
         {% else %}
             <ul class="report-drafts__list">
                 {% for draft in drafts %}
                     <li class="report-drafts__item">
                         <twig:Card tag="article" class="report-drafts__card" aria-labelledby="report-draft-{{ loop.index }}">
                             <h2 class="security__heading" id="report-draft-{{ loop.index }}"><a href="{{ path('review_report_draft', {id: draft.id}) }}">{{ draft.title }}</a></h2>
-                            <p class="login__hint">{{ draft.projectKey }} · {{ draft.screenshots|length }} {{ draft.screenshots|length == 1 ? 'screenshot' : 'screenshots' }}</p>
+                            <p class="login__hint">{{ draft.projectKey }} · {{ draft.screenshotCount }} {{ draft.screenshotCount == 1 ? 'screenshot' : 'screenshots' }}</p>
                         </twig:Card>
                     </li>
                 {% endfor %}
             </ul>
+            {% if nextAfter %}
+                <p><twig:Button variant="text" href="{{ path('review_report_drafts', {after: nextAfter}) }}" rel="next">Show more</twig:Button></p>
+            {% endif %}
         {% endif %}
     </div>
 {% endblock %}

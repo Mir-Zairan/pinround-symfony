@@ -6,6 +6,9 @@ namespace App\Review\Infrastructure\Doctrine;
 
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
+use App\Review\Api\ReportDraftCursor;
+use App\Review\Api\ReportDraftsPage;
+use App\Review\Api\ReportDraftSummary;
 use App\Review\Api\ReportDraftView;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\ReportDraft\ReportDraftRows;
@@ -13,6 +16,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\ParameterType;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -58,14 +62,33 @@ final readonly class DbalReportDraftRows implements ReportDraftRows
         );
     }
 
-    public function forOwner(UserId $owner): array
+    public function forOwner(UserId $owner, ?ReportDraftCursor $after, int $pageSize): ReportDraftsPage
     {
+        $parameters = ['organization' => $this->requireTenant()->toString(), 'owner' => $owner->toString(), 'limit' => $pageSize + 1];
+        $afterCondition = '';
+        if (null !== $after) {
+            // The first comparison bounds the owner index's updated_at range; the second breaks ties on the id.
+            $afterCondition = ' AND updated_at <= :after_at AND (updated_at < :after_at OR id < :after_id)';
+            $parameters['after_at'] = $after->updatedAt->format('Y-m-d H:i:s.uP');
+            $parameters['after_id'] = $after->draftId;
+        }
         $rows = $this->connection->fetchAllAssociative(
-            'SELECT '.self::COLUMNS.' FROM rvw_report_draft WHERE organization_id = :organization AND owner_id = :owner ORDER BY updated_at DESC, id DESC',
-            ['organization' => $this->requireTenant()->toString(), 'owner' => $owner->toString()],
+            'SELECT id, project_key, title, jsonb_array_length(screenshots) AS screenshot_count, updated_at FROM rvw_report_draft'
+            .' WHERE organization_id = :organization AND owner_id = :owner'.$afterCondition.' ORDER BY updated_at DESC, id DESC LIMIT :limit',
+            $parameters,
+            ['limit' => ParameterType::INTEGER],
         );
+        $drafts = array_map(static fn (array $row): ReportDraftSummary => new ReportDraftSummary(
+            self::stringOf($row, 'id'),
+            self::stringOf($row, 'project_key'),
+            self::stringOf($row, 'title'),
+            (int) self::stringOrIntOf($row, 'screenshot_count'),
+            new \DateTimeImmutable(self::stringOf($row, 'updated_at')),
+        ), \array_slice($rows, 0, $pageSize));
+        $last = $drafts[\count($drafts) - 1] ?? null;
+        $nextCursor = \count($rows) > $pageSize && null !== $last ? new ReportDraftCursor($last->updatedAt, $last->id) : null;
 
-        return array_map(self::viewOf(...), $rows);
+        return new ReportDraftsPage($drafts, $nextCursor);
     }
 
     public function ofOwner(string $id, UserId $owner, bool $lock = false): ?ReportDraftView

@@ -10,6 +10,7 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
+use App\Review\Api\ReportDraftCursor;
 use App\Review\Api\ReportDraftPermission;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
@@ -48,10 +49,15 @@ final class ReportDraftController extends AbstractController
     public const string DELETED = 'Report draft deleted.';
     public const string FORM_EXPIRED = 'This form expired. Reload the page and try again.';
     public const string SEND_NEEDS_A_PERSON = 'Only you can send this report, from your browser.';
+    /** The list's query parameter of the next page's cursor, as afterOf writes it. */
+    public const string AFTER_QUERY = 'after';
+    public const string LIST_PAGE_NOT_FOUND = 'That page of report drafts does not exist.';
 
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
     private const string CSRF_ID_PREFIX = 'review_report_draft:';
+    /** "<updated_at in Unix seconds>.<its microseconds>.<draft id>", as afterOf writes it. */
+    private const string AFTER = '/^(\d{1,11})\.(\d{6})\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\z/';
 
     public function __construct(
         private readonly ReportDrafts $reportDrafts,
@@ -69,11 +75,17 @@ final class ReportDraftController extends AbstractController
     }
 
     #[Route('/report-drafts', name: self::LIST_ROUTE, methods: ['GET'])]
-    public function list(): Response
+    public function list(Request $request): Response
     {
         $actor = $this->actor();
+        $after = $this->cursorOf($request);
+        $page = $this->reportDrafts->forOwner($actor->userId(), $after);
 
-        return $this->render('@Review/report_drafts.html.twig', ['drafts' => $this->reportDrafts->forOwner($actor->userId())]);
+        return $this->render('@Review/report_drafts.html.twig', [
+            'drafts' => $page->drafts,
+            'isLaterPage' => null !== $after,
+            'nextAfter' => null === $page->nextCursor ? null : self::afterOf($page->nextCursor),
+        ]);
     }
 
     #[Route('/report-drafts/{id}', name: self::PAGE_ROUTE, methods: ['GET'])]
@@ -94,20 +106,17 @@ final class ReportDraftController extends AbstractController
                 $this->reportDrafts->update($draft->id, $draft->ownerId, $request->request->getInt(self::VERSION_FIELD), self::postedContentOf($draft, $request), $now);
             });
         } catch (ReportDraftRefused $refused) {
-            if ($refused->isNotFound()) {
-                throw $this->createNotFoundException(ReportDraftRefused::NOT_FOUND);
-            }
-            // The posted fields match pictures by position and carry the old version's text; shown over the fresh
-            // draft, a second Save would overwrite the other tab's change.
-            $postedForm = ReportDraftRefused::DRAFT_CHANGED === $refused->getMessage() ? null : $request;
-
-            return $this->transactions->run(fn (): Response => $this->renderPage($this->ownDraft($id, ReportDraftPermission::VIEW), $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY, $postedForm));
+            return $this->renderRefusedForm($id, $request, $refused);
         }
         $this->addFlash(self::TOAST, self::SAVED);
 
         return $this->redirectToRoute(self::PAGE_ROUTE, ['id' => strtolower($id)], Response::HTTP_SEE_OTHER);
     }
 
+    /**
+     * Send is the edit form's second button: it saves the posted fields at the posted version, then sends that saved
+     * draft, in one transaction, so a refusal of either keeps the draft as it was and shows the form as posted.
+     */
     #[Route('/report-drafts/{id}/send', name: self::SEND_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function send(string $id, Request $request): Response
     {
@@ -115,21 +124,18 @@ final class ReportDraftController extends AbstractController
         $now = $this->clock->now();
         try {
             $key = $this->transactions->run(function () use ($id, $request, $now): string {
-                $draft = $this->ownDraft($id, ReportDraftPermission::VIEW);
+                $draft = $this->ownDraft($id, ReportDraftPermission::EDIT);
                 if (!$this->isGranted(ReportDraftPermission::SEND, $draft)) {
                     throw ReportDraftRefused::because(self::SEND_NEEDS_A_PERSON);
                 }
                 $this->refuseAnExpiredForm($draft->id, $request);
+                $postedVersion = $request->request->getInt(self::VERSION_FIELD);
+                $this->reportDrafts->update($draft->id, $draft->ownerId, $postedVersion, self::postedContentOf($draft, $request), $now);
 
-                return $this->reportDrafts->send($draft->id, $draft->ownerId, $request->request->getInt(self::VERSION_FIELD), $now);
+                return $this->reportDrafts->send($draft->id, $draft->ownerId, $postedVersion + 1, $now);
             });
         } catch (ReportDraftRefused $refused) {
-            if ($refused->isNotFound()) {
-                throw $this->createNotFoundException(ReportDraftRefused::NOT_FOUND);
-            }
-            $this->addFlash(self::TOAST, $refused->getMessage());
-
-            return $this->redirectToRoute(self::PAGE_ROUTE, ['id' => strtolower($id)], Response::HTTP_SEE_OTHER);
+            return $this->renderRefusedForm($id, $request, $refused);
         }
         $this->addFlash(self::TOAST, \sprintf(self::SENT, $key));
 
@@ -184,6 +190,45 @@ final class ReportDraftController extends AbstractController
         }
 
         return $draft;
+    }
+
+    /**
+     * The page again with the refusal over the form, after the refused transaction rolled back.
+     *
+     * @throws \Symfony\Component\HttpKernel\Exception\NotFoundHttpException for ReportDraftRefused::NOT_FOUND
+     */
+    private function renderRefusedForm(string $id, Request $request, ReportDraftRefused $refused): Response
+    {
+        if ($refused->isNotFound()) {
+            throw $this->createNotFoundException(ReportDraftRefused::NOT_FOUND);
+        }
+        // The posted fields match pictures by position and carry the old version's text; shown over the fresh
+        // draft, a second Save would overwrite the other tab's change.
+        $postedForm = ReportDraftRefused::DRAFT_CHANGED === $refused->getMessage() ? null : $request;
+
+        return $this->transactions->run(fn (): Response => $this->renderPage($this->ownDraft($id, ReportDraftPermission::VIEW), $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY, $postedForm));
+    }
+
+    /**
+     * @throws \Symfony\Component\HttpKernel\Exception\NotFoundHttpException for an AFTER_QUERY value afterOf does not
+     *                                                                       write
+     */
+    private function cursorOf(Request $request): ?ReportDraftCursor
+    {
+        if (!$request->query->has(self::AFTER_QUERY)) {
+            return null;
+        }
+        $after = $request->query->all()[self::AFTER_QUERY];
+        if (!\is_string($after) || 1 !== preg_match(self::AFTER, $after, $parts)) {
+            throw $this->createNotFoundException(self::LIST_PAGE_NOT_FOUND);
+        }
+
+        return new ReportDraftCursor(new \DateTimeImmutable('@'.$parts[1].'.'.$parts[2]), $parts[3]);
+    }
+
+    private static function afterOf(ReportDraftCursor $cursor): string
+    {
+        return $cursor->updatedAt->format('U.u').'.'.$cursor->draftId;
     }
 
     /**

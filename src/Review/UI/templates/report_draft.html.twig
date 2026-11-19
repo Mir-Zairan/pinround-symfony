@@ -59,22 +59,18 @@
                 </twig:Card>
             {% endfor %}
 
+            {#- Save changes comes first, so Enter in a field saves rather than sends. Send saves what is typed, then sends it. -#}
             <p class="report-draft__actions">
                 <twig:Button type="submit" variant="outline">Save changes</twig:Button>
+                <twig:Button type="submit" formaction="{{ path('review_report_draft_send', {id: draft.id}) }}">Send</twig:Button>
             </p>
         </form>
 
         <div class="report-draft__actions">
-            <form method="post" action="{{ path('review_report_draft_send', {id: draft.id}) }}">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
-                <input type="hidden" name="version" value="{{ draft.version }}">
-                <twig:Button type="submit">Send</twig:Button>
-            </form>
             <form method="post" action="{{ path('review_report_draft_delete', {id: draft.id}) }}" data-turbo-confirm="Delete this report draft? This cannot be undone.">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
                 <twig:Button type="submit" variant="text">Delete draft</twig:Button>
             </form>
         </div>
-        <p class="login__hint">Send saves nothing you typed above: press Save changes first.</p>
     </div>
 {% endblock %}

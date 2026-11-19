@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Review\Application\ReportDraft;
 
 use App\Review\Api\ReportDraftContent;
+use App\Review\Api\ReportDraftCursor;
+use App\Review\Api\ReportDraftsPage;
 use App\Review\Api\ReportDraftView;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -25,9 +27,10 @@ interface ReportDraftRows
     public function insert(OrganizationId $organizationId, string $id, UserId $owner, string $projectKey, ReportDraftContent $content, \DateTimeImmutable $at): void;
 
     /**
-     * @return list<ReportDraftView> newest change first
+     * At most $pageSize of the owner's drafts, newest change first (updated_at, then id, highest first), starting
+     * right after $after; the next cursor is set only when another draft follows.
      */
-    public function forOwner(UserId $owner): array;
+    public function forOwner(UserId $owner, ?ReportDraftCursor $after, int $pageSize): ReportDraftsPage;
 
     /**
      * @param bool $lock true to hold the row until the caller's transaction ends (SELECT … FOR UPDATE), so a second

@@ -16,6 +16,9 @@ interface ReportDrafts
 {
     public const int MAX_SCREENSHOTS = 10;
 
+    /** The drafts one page of forOwner holds at most. */
+    public const int DRAFTS_PER_PAGE = 20;
+
     /** The upload target kind of a picture for a report draft that is not made yet; its id is the project key. */
     public const string NEW_REPORT_UPLOAD_TARGET_KIND = 'new_report';
 
@@ -32,13 +35,14 @@ interface ReportDrafts
     public function create(OrganizationId $organizationId, UserId $owner, string $projectKey, ReportDraftContent $content, \DateTimeImmutable $at): string;
 
     /**
-     * The owner's drafts, newest change first; one query.
+     * One page of the owner's drafts, at most DRAFTS_PER_PAGE, newest change first (updated_at, then id, highest
+     * first); one query on the owner index, reading only the columns a ReportDraftSummary carries.
      *
-     * @return list<ReportDraftView>
+     * @param ReportDraftCursor|null $after null for the first page; else the page starts right after that place
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */
-    public function forOwner(UserId $owner): array;
+    public function forOwner(UserId $owner, ?ReportDraftCursor $after = null): ReportDraftsPage;
 
     /**
      * One draft of $owner, or null for a malformed or unknown id and for another person's draft alike.

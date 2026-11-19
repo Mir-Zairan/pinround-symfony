@@ -8,8 +8,10 @@ use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadedMedia;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
+use App\Review\Api\ReportDraftCursor;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
+use App\Review\Api\ReportDraftsPage;
 use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
@@ -58,9 +60,9 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         return $id;
     }
 
-    public function forOwner(UserId $owner): array
+    public function forOwner(UserId $owner, ?ReportDraftCursor $after = null): ReportDraftsPage
     {
-        return $this->rows->forOwner($owner);
+        return $this->rows->forOwner($owner, $after, self::DRAFTS_PER_PAGE);
     }
 
     public function ofOwner(string $draftId, UserId $owner): ?ReportDraftView
