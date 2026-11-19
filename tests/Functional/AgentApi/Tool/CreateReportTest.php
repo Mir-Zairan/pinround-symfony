@@ -17,6 +17,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -90,6 +91,33 @@ final class CreateReportTest extends WebTestCase
         self::assertIsString($intentId);
         self::assertSame([[$intentId, $this->people['Mia']->id()->toString(), 'new_report', 'SHOP', null]], $this->rowsOf('SELECT id, user_id, target_kind, target_id, used_at FROM med_upload_intent ORDER BY id'));
         self::assertSame([['token', $tokenId, 'project', $this->shopProject, CreateReportUpload::NAME, 'ok']], $this->toolRows());
+    }
+
+    /**
+     * The fields that differ from a PNG screenshot of 240 KB, and Media's plain message for them.
+     *
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function filesRefusedBeforeAnyUrl(): iterable
+    {
+        yield 'a GIF' => [['mime' => 'image/gif'], 'This file is not a PNG, JPEG or WebP screenshot.'];
+        yield 'a file one byte over 15 MB' => [['bytes' => 15 * 1024 * 1024 + 1], 'This file is empty or bigger than 15 MB. Pick a screenshot of up to 15 MB.'];
+    }
+
+    /**
+     * @param array<string, mixed> $fields
+     */
+    #[Test]
+    #[DataProvider('filesRefusedBeforeAnyUrl')]
+    public function aReportUploadOfTheWrongTypeOrSizeIsRefusedWithMediasMessageAndBeginsNothing(array $fields, string $message): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+
+        $this->callTool($token, CreateReportUpload::NAME, [...['project' => 'SHOP', 'mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256], ...$fields]);
+
+        $this->assertRefused($message);
+        self::assertSame([], $this->rowsOf('SELECT id FROM med_upload_intent'));
+        self::assertSame([['token', $tokenId, 'project', $this->shopProject, CreateReportUpload::NAME, 'refused']], $this->toolRows());
     }
 
     #[Test]
