@@ -27,7 +27,7 @@ use Symfony\Component\Routing\Attribute\Route;
  * person sees. The list, last used first; one notebook's page with its pictures, pins and scenarios by title; Rename and
  * Delete. Every read and write goes through Notebooks, which asks NotebookVoter, so a notebook that is not the person's,
  * is another organization's, or is unknown or malformed is the one 404 NotebookRefused::NOT_FOUND, before the form is
- * read.
+ * read; so is one another tab deleted meanwhile.
  *
  * The pages read in the request transaction. Rename and Delete run without it, each in a transaction of its own, so a
  * refusal leaves nothing and the toast is set only once the change is committed.
@@ -51,6 +51,8 @@ final class NotebookController extends AbstractController
     private const string CSRF_ID_PREFIX = 'review_notebook:';
     /** "<last_used_at in Unix seconds>.<its microseconds>.<notebook id>", as afterOf writes it; the id as NotebookCursor takes it. */
     private const string AFTER = '/^(\d{1,11})\.(\d{6})\.([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\z/';
+    /** No C0 control character or DEL; with /u, invalid UTF-8 matches nothing either. */
+    private const string SHOWABLE_TITLE = '/\A[^\x00-\x1F\x7F]*\z/u';
 
     public function __construct(
         private readonly Notebooks $notebooks,
@@ -104,18 +106,21 @@ final class NotebookController extends AbstractController
     public function rename(string $id, Request $request): Response
     {
         $this->refuseWithoutTenant();
-        $title = $request->request->getString(self::TITLE_FIELD);
         $now = $this->clock->now();
         try {
-            $this->transactions->run(function () use ($id, $request, $title, $now): void {
+            $this->transactions->run(function () use ($id, $request, $now): void {
                 $notebook = $this->ownNotebook($id);
                 if (!$this->isFormTokenValid($notebook->id, $request)) {
                     throw NotebookRefused::because(RefusedWithToast::FORM_EXPIRED);
                 }
-                $this->notebooks->rename($notebook->id, $title, $now);
+                $this->notebooks->rename($notebook->id, $request->request->getString(self::TITLE_FIELD), $now);
             });
         } catch (NotebookRefused $refused) {
-            return $this->renderRefusedRename($id, $title, $refused);
+            if ($refused->isNotFound()) {
+                throw $this->createNotFoundException(NotebookRefused::NOT_FOUND);
+            }
+
+            return $this->renderRefusedRename($id, $request, $refused);
         }
         $this->addFlash(self::TOAST, self::RENAMED);
 
@@ -135,6 +140,9 @@ final class NotebookController extends AbstractController
                 try {
                     $this->notebooks->delete($notebook->id);
                 } catch (NotebookRefused $refused) {
+                    if ($refused->isNotFound()) {
+                        throw $this->createNotFoundException(NotebookRefused::NOT_FOUND);
+                    }
                     throw new RefusedWithToast($refused->getMessage());
                 }
             });
@@ -171,15 +179,16 @@ final class NotebookController extends AbstractController
 
     /**
      * The page again with the refusal over the rename form, after the refused transaction rolled back. The form keeps
-     * the typed title unless it holds a NUL character or invalid UTF-8, which the page cannot show as typed.
+     * the typed title unless it holds a control character or invalid UTF-8, which the page cannot show as typed.
      *
      * @throws \Symfony\Component\HttpKernel\Exception\NotFoundHttpException when the notebook is gone meanwhile
      */
-    private function renderRefusedRename(string $id, string $postedTitle, NotebookRefused $refused): Response
+    private function renderRefusedRename(string $id, Request $request, NotebookRefused $refused): Response
     {
-        return $this->transactions->run(function () use ($id, $postedTitle, $refused): Response {
+        return $this->transactions->run(function () use ($id, $request, $refused): Response {
             $notebook = $this->ownNotebook($id);
-            $isPostedTitleShowable = mb_check_encoding($postedTitle, 'UTF-8') && !str_contains($postedTitle, "\0");
+            $postedTitle = $request->request->getString(self::TITLE_FIELD);
+            $isPostedTitleShowable = 1 === preg_match(self::SHOWABLE_TITLE, $postedTitle);
 
             return $this->renderPage($notebook, $refused->getMessage(), $isPostedTitleShowable ? $postedTitle : $notebook->title, Response::HTTP_UNPROCESSABLE_ENTITY);
         });

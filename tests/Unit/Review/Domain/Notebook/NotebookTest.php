@@ -80,6 +80,37 @@ final class NotebookTest extends TestCase
         self::assertSame(["Line one\r\nline two", "\u{FEFF}Summary", "Why\u{2028}grey?"], [$twin->title(), $twin->summary(), $twin->pins()[0]->note()]);
     }
 
+    /**
+     * A notebook title is one line: a C0 control character or DEL inside it is refused with the plain message, each
+     * beside a valid twin. Line breaks and tabs around it are trimmed, as spaces are. U+2028, a line separator outside
+     * C0, stays allowed: the pages and tools escape it where it is printed.
+     */
+    #[Test]
+    public function aTitleWithAControlCharacterInsideIsRefusedAndItsTwinPasses(): void
+    {
+        $notebook = self::started('Order page');
+        $later = new \DateTimeImmutable(self::LATER);
+        $refusedWithTwin = [
+            'CRLF' => ["Order\r\npage", "Order page\r\n"],
+            'line feed' => ["Order\npage", "\nOrder page"],
+            'tab' => ["Order\tpage", "\tOrder page"],
+            'ESC' => ["\e[31mOrder page", '[31mOrder page'],
+            'unit separator' => ["Order\x1Fpage", 'Order page'],
+            'DEL' => ["Order\x7Fpage", 'Order page'],
+        ];
+
+        foreach ($refusedWithTwin as $case => [$refused, $twin]) {
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): Notebook => self::started($refused));
+            self::assertRefused(NotebookRefused::UNSAVABLE_TEXT, static fn (): Notebook => $notebook->renamed($refused, $later));
+            self::assertSame(trim($twin), self::started($twin)->title(), $case);
+            self::assertSame(trim($twin), $notebook->renamed($twin, $later)->title(), $case);
+        }
+
+        self::assertSame(['Order page', 1], [$notebook->title(), $notebook->version()], 'A refused rename leaves the notebook as it was.');
+        self::assertSame("Order\u{2028}page", $notebook->renamed("Order\u{2028}page", $later)->title(), 'U+2028 is no C0 control.');
+        self::assertSame("Order\e[31m page", self::restored("Order\e[31m page", [], 1, $later)->title(), 'A title stored before the rule stays readable.');
+    }
+
     #[Test]
     public function anEleventhScreenshotIsRefusedAndTheTenthPasses(): void
     {

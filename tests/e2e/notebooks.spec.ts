@@ -50,7 +50,7 @@ test('Lena opens My notebooks from the report drafts list, renames a notebook an
   const { context, page } = await openAs(browser, LENA_STORAGE_STATE);
 
   await page.goto('/report-drafts');
-  await page.getByRole('link', { name: 'Your notebooks' }).click();
+  await page.getByRole('link', { name: 'My notebooks' }).click();
 
   await expect(page).toHaveURL(/\/notebooks$/);
   await expect(page.getByRole('heading', { name: 'My notebooks', level: 1 })).toBeVisible();

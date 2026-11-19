@@ -39,16 +39,17 @@ final readonly class Notebook
      * A new, empty notebook at version 1. The title is trimmed; lengths count characters, as PostgreSQL's char_length
      * does.
      *
-     * @throws NotebookRefused when the title is blank, longer than TITLE_MAX_LENGTH, not valid UTF-8 or holds a NUL
-     *                         character
+     * @throws NotebookRefused when the title is blank, longer than TITLE_MAX_LENGTH, not valid UTF-8, or holds a C0
+     *                         control character or DEL once trimmed
      */
     public static function start(NotebookId $id, OrganizationId $organizationId, UserId $ownerId, string $title, \DateTimeImmutable $at): self
     {
-        return new self($id, $organizationId, $ownerId, self::checkedTitle($title), [], new Scenarios([]), 1, $at, $at, $at);
+        return new self($id, $organizationId, $ownerId, self::checkedNewTitle($title), [], new Scenarios([]), 1, $at, $at, $at);
     }
 
     /**
-     * A stored notebook as NotebookRows reads it back, under the rules of start() and of each change.
+     * A stored notebook as NotebookRows reads it back, under the rules of start() and of each change, but for the
+     * control characters other than NUL: a title stored before that rule stays readable.
      *
      * @param list<NotebookScreenshot> $screenshots
      *
@@ -78,12 +79,12 @@ final readonly class Notebook
     }
 
     /**
-     * @throws NotebookRefused when the title is blank, longer than TITLE_MAX_LENGTH, not valid UTF-8 or holds a NUL
-     *                         character
+     * @throws NotebookRefused when the title is blank, longer than TITLE_MAX_LENGTH, not valid UTF-8, or holds a C0
+     *                         control character or DEL once trimmed
      */
     public function renamed(string $title, \DateTimeImmutable $at): self
     {
-        return $this->changed(self::checkedTitle($title), $this->screenshots, $this->scenarios, $at);
+        return $this->changed(self::checkedNewTitle($title), $this->screenshots, $this->scenarios, $at);
     }
 
     /**
@@ -196,6 +197,22 @@ final readonly class Notebook
         }
 
         return $trimmed;
+    }
+
+    /**
+     * A title is one line of plain text: a C0 control character (a line break, ESC, …) or DEL inside it would break
+     * the lists and logs that print it, so it is refused as unsavable. Line breaks and tabs around the title are trimmed as spaces are.
+     *
+     * @throws NotebookRefused
+     */
+    private static function checkedNewTitle(string $title): string
+    {
+        $checked = self::checkedTitle($title);
+        if (1 === preg_match('/[\x00-\x1F\x7F]/', $checked)) {
+            throw NotebookRefused::because(NotebookRefused::UNSAVABLE_TEXT);
+        }
+
+        return $checked;
     }
 
     /**

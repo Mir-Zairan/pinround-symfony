@@ -7,8 +7,10 @@ namespace App\Tests\Functional\Review;
 use App\Identity\Domain\User;
 use App\Review\Api\NotebookRefused;
 use App\Review\Domain\Notebook\NotebookRefused as NotebookRuleBroken;
+use App\Review\Infrastructure\Doctrine\DbalNotebooks;
 use App\Review\UI\Controller\RefusedWithToast;
 use App\Review\UI\NotebookController;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -16,10 +18,14 @@ use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\Attributes\TestWith;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -36,7 +42,7 @@ final class NotebookControllerTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
-    use SeedsTicketRounds;
+    use SeedsMediaObjects;
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string LIST = '/notebooks';
@@ -72,9 +78,14 @@ final class NotebookControllerTest extends WebTestCase
     protected function tearDown(): void
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
-            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM rvw_notebook WHERE organization_id = ?', [$organizationId]));
+            $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
+                foreach (['rvw_notebook', 'med_object'] as $table) {
+                    $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
+                }
+
+                return 0;
+            });
         }
-        $this->removeSeededRounds();
         $this->removeUsersAndOrganizations();
     }
 
@@ -213,6 +224,10 @@ final class NotebookControllerTest extends WebTestCase
         self::assertStringContainsString('No scenarios yet.', $page->filter('section[aria-labelledby=notebook-scenarios-heading]')->text());
     }
 
+    /**
+     * A stranger gets the one 404 before the form is read: not the expired form's refusal for a missing token, nor a
+     * 400 for a list where the title belongs.
+     */
     #[Test]
     public function nobodyButTheOwnerOpensRenamesOrDeletesTheNotebookAndNothingChanges(): void
     {
@@ -225,10 +240,18 @@ final class NotebookControllerTest extends WebTestCase
             $this->client->request('GET', self::LIST.'/'.self::LENAS_NOTEBOOK);
             self::assertResponseStatusCodeSame(404, $name);
             self::assertStringContainsString(NotebookRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent(), $name);
-            foreach (['/rename', '/delete'] as $action) {
-                $this->client->request('POST', self::LIST.'/'.self::LENAS_NOTEBOOK.$action, [...$this->formFields(self::LENAS_NOTEBOOK), NotebookController::TITLE_FIELD => 'Changed by '.$name]);
-                self::assertResponseStatusCodeSame(404, $name.$action);
-                self::assertStringContainsString(NotebookRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent(), $name.$action);
+            $forms = [
+                'a valid form' => [...$this->formFields(self::LENAS_NOTEBOOK), NotebookController::TITLE_FIELD => 'Changed by '.$name],
+                'no form token' => [NotebookController::TITLE_FIELD => 'Changed by '.$name],
+                'a list of titles' => [...$this->formFields(self::LENAS_NOTEBOOK), NotebookController::TITLE_FIELD => ['Changed by '.$name]],
+            ];
+            foreach ($forms as $form => $fields) {
+                foreach (['/rename', '/delete'] as $action) {
+                    $case = \sprintf('%s%s with %s', $name, $action, $form);
+                    $this->client->request('POST', self::LIST.'/'.self::LENAS_NOTEBOOK.$action, $fields);
+                    self::assertResponseStatusCodeSame(404, $case);
+                    self::assertStringContainsString(NotebookRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent(), $case);
+                }
             }
             $list = $this->client->request('GET', self::LIST);
             self::assertResponseStatusCodeSame(200, $name);
@@ -283,7 +306,7 @@ final class NotebookControllerTest extends WebTestCase
 
     /**
      * Each refusal shows the rule's own words over the form and saves nothing. The form keeps a typed title it can show
-     * as typed; one with a NUL or invalid UTF-8 shows the saved title instead.
+     * as typed; one with a control character or invalid UTF-8 shows the saved title instead.
      */
     #[Test]
     public function aRefusedRenameShowsTheReasonAndChangesNothing(): void
@@ -298,6 +321,8 @@ final class NotebookControllerTest extends WebTestCase
             'blank' => ['   ', NotebookRuleBroken::TITLE_BLANK, '   '],
             'a NUL character' => ["Coupon\0notes", NotebookRuleBroken::UNSAVABLE_TEXT, self::TITLE],
             'invalid UTF-8' => ["Coupon \xC3\x28 notes", NotebookRuleBroken::UNSAVABLE_TEXT, self::TITLE],
+            'an escape character' => ["\e[31mCoupon notes", NotebookRuleBroken::UNSAVABLE_TEXT, self::TITLE],
+            'a line break' => ["Coupon\r\nnotes", NotebookRuleBroken::UNSAVABLE_TEXT, self::TITLE],
         ];
         foreach ($refusals as $case => [$title, $reason, $shownTitle]) {
             $page = $this->client->request('POST', self::LIST.'/'.self::LENAS_NOTEBOOK.'/rename', [...$this->formFields(self::LENAS_NOTEBOOK), NotebookController::TITLE_FIELD => $title]);
@@ -364,6 +389,52 @@ final class NotebookControllerTest extends WebTestCase
         self::assertSame([self::LENAS_SECOND_NOTEBOOK], $this->notebookIds());
     }
 
+    /**
+     * Another tab deleted the notebook after this request read it: the one 404, with no toast left for the next page,
+     * as for a notebook gone before the read.
+     */
+    #[Test]
+    #[TestWith(['/rename'])]
+    #[TestWith(['/delete'])]
+    public function aNotebookDeletedMeanwhileIsNotFoundAndLeavesNoToast(string $action): void
+    {
+        $this->addNotebook($this->acmeFoods, 'Lena', self::LENAS_NOTEBOOK, self::TITLE, self::USED_AT);
+        $before = $this->notebookRowOf(self::LENAS_NOTEBOOK);
+        self::getContainer()->set(DbalNotebooks::class, NotebookRowsChangedMeanwhile::deletedAfterTheFirstRead(self::realNotebookRows()));
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', self::LIST.'/'.self::LENAS_NOTEBOOK.$action, [...$this->formFields(self::LENAS_NOTEBOOK), NotebookController::TITLE_FIELD => 'Coupon field answers']);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(NotebookRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+        self::assertSame($before, $this->notebookRowOf(self::LENAS_NOTEBOOK));
+        $list = $this->client->request('GET', self::LIST);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(0, $list->filter('.toast-region [data-toast-message-value]')->count(), 'No toast is left over.');
+    }
+
+    /**
+     * Another tab saved the notebook after this request read it: delete removes nothing and says so on the notebook's
+     * page.
+     */
+    #[Test]
+    public function aDeleteOfANotebookSavedMeanwhileSaysItChangedAndRemovesNothing(): void
+    {
+        $this->addNotebook($this->acmeFoods, 'Lena', self::LENAS_NOTEBOOK, self::TITLE, self::USED_AT);
+        $before = $this->notebookRowOf(self::LENAS_NOTEBOOK);
+        self::getContainer()->set(DbalNotebooks::class, NotebookRowsChangedMeanwhile::savedBeforeTheDelete(self::realNotebookRows()));
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('POST', self::LIST.'/'.self::LENAS_NOTEBOOK.'/delete', $this->formFields(self::LENAS_NOTEBOOK));
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(self::LIST.'/'.self::LENAS_NOTEBOOK, $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(NotebookRefused::NOTEBOOK_CHANGED, $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        self::assertSame($before, $this->notebookRowOf(self::LENAS_NOTEBOOK));
+    }
+
     #[Test]
     public function theListRunsAsManyQueriesForTwentyNotebooksAsForOne(): void
     {
@@ -390,7 +461,7 @@ final class NotebookControllerTest extends WebTestCase
         $drafts = $this->client->request('GET', '/report-drafts');
 
         self::assertResponseStatusCodeSame(200);
-        $link = $drafts->filter('main a')->reduce(static fn (Crawler $anchor): bool => 'Your notebooks' === trim($anchor->text()));
+        $link = $drafts->filter('main a')->reduce(static fn (Crawler $anchor): bool => 'My notebooks' === trim($anchor->text()));
         self::assertSame([self::LIST], $link->each(static fn (Crawler $anchor): ?string => $anchor->attr('href')));
     }
 
@@ -417,6 +488,42 @@ final class NotebookControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(302);
         self::assertSame('/org/choose', $this->client->getResponse()->headers->get('Location'));
+    }
+
+    /**
+     * No route reaches the controller without a tenant today: the firewall and the organization choice stop such a
+     * request first. The controller still refuses one on its own, before Notebooks would throw for the missing tenant,
+     * so it is called here straight, with no tenant set.
+     */
+    #[Test]
+    public function theControllerRefusesARequestWithoutATenantBeforeItReadsAnything(): void
+    {
+        $this->addNotebook($this->acmeFoods, 'Lena', self::LENAS_NOTEBOOK, self::TITLE, self::USED_AT);
+        $before = $this->notebookRowOf(self::LENAS_NOTEBOOK);
+        $controller = self::getContainer()->get(NotebookController::class);
+        self::assertNull(self::getContainer()->get(TenantContext::class)->get());
+        $form = new Request(request: [NotebookController::TITLE_FIELD => 'Renamed without a tenant']);
+        $calls = [
+            'list' => static fn (): Response => $controller->list(new Request()),
+            'page' => static fn (): Response => $controller->page(self::LENAS_NOTEBOOK),
+            'rename' => static fn (): Response => $controller->rename(self::LENAS_NOTEBOOK, $form),
+            'delete' => static fn (): Response => $controller->delete(self::LENAS_NOTEBOOK, $form),
+        ];
+
+        foreach ($calls as $case => $call) {
+            try {
+                $call();
+                self::fail($case.' answered without a tenant.');
+            } catch (AccessDeniedException $refused) {
+                self::assertSame('Access Denied.', $refused->getMessage(), $case);
+            }
+        }
+        self::assertSame($before, $this->notebookRowOf(self::LENAS_NOTEBOOK));
+    }
+
+    private static function realNotebookRows(): DbalNotebooks
+    {
+        return new DbalNotebooks(self::getContainer()->get('doctrine.dbal.default_connection'), self::getContainer()->get(TenantContext::class));
     }
 
     /**
