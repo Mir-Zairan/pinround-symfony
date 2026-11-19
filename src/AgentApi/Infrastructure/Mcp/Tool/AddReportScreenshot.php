@@ -129,17 +129,16 @@ final readonly class AddReportScreenshot implements AgentTool
         }
         $screenshot = new ScreenshotWithPins($picture->mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
         try {
-            $this->reportDrafts->addScreenshot($draft->id, $this->callerId(), $screenshot, $this->clock->now());
+            $added = $this->reportDrafts->addScreenshot($draft->id, $this->callerId(), $screenshot, $this->clock->now());
         } catch (ReportDraftRefused $refused) {
             throw $refused->isNotFound() ? ToolRefusal::notFound() : ToolRefusal::refused($refused->getMessage());
         }
 
-        $isInDraftAlready = \in_array(strtolower($picture->mediaId), array_map(static fn (ScreenshotWithPins $saved): string => $saved->mediaId, $draft->screenshots), true);
         $answer = [
             'draft_id' => $draft->id,
             'media_id' => $picture->mediaId,
-            'status' => $isInDraftAlready ? self::ALREADY_IN_DRAFT : self::ADDED,
-            'screenshot_count' => \count($draft->screenshots) + ($isInDraftAlready ? 0 : 1),
+            'status' => $added->wasAddedBefore ? self::ALREADY_IN_DRAFT : self::ADDED,
+            'screenshot_count' => $added->screenshotCount,
         ];
 
         return new CallToolResult(

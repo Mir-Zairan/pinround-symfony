@@ -56,7 +56,7 @@ final readonly class UseCaseNotebooks implements Notebooks
         return $notebook->id()->toString();
     }
 
-    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void
+    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int
     {
         $notebook = $this->editableNotebook($notebookId);
         $changed = self::obeyingTheRules(static fn (): Notebook => $notebook->withScreenshotAdded(NotebookScreenshot::of(
@@ -67,6 +67,8 @@ final readonly class UseCaseNotebooks implements Notebooks
         ), $at));
         $this->refuseUnlessOwnUsablePicture($notebook, $screenshot->mediaId);
         $this->save($changed);
+
+        return \count($changed->screenshots());
     }
 
     public function rename(string $notebookId, string $title, \DateTimeImmutable $at): void

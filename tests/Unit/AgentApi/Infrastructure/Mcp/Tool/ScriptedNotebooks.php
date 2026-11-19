@@ -54,7 +54,7 @@ final class ScriptedNotebooks implements Notebooks
         throw new \LogicException('save_scenarios makes no notebook.');
     }
 
-    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void
+    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int
     {
         throw new \LogicException('save_scenarios adds no picture.');
     }

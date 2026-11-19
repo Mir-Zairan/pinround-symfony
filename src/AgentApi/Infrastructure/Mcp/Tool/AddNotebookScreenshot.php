@@ -126,12 +126,12 @@ final readonly class AddNotebookScreenshot implements AgentTool
         }
         $screenshot = new ScreenshotWithPins($picture->mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
         try {
-            $this->notebooks->addScreenshot($notebook->id, $screenshot, $this->clock->now());
+            $screenshotCount = $this->notebooks->addScreenshot($notebook->id, $screenshot, $this->clock->now());
         } catch (NotebookRefused $refused) {
             throw $refused->isNotFound() ? ToolRefusal::notFound() : ToolRefusal::refused($refused->getMessage());
         }
 
-        $answer = ['notebook_id' => $notebook->id, 'media_id' => $picture->mediaId, 'status' => self::ADDED, 'screenshot_count' => \count($notebook->screenshots) + 1];
+        $answer = ['notebook_id' => $notebook->id, 'media_id' => $picture->mediaId, 'status' => self::ADDED, 'screenshot_count' => $screenshotCount];
 
         return new CallToolResult(
             [new TextContent(json_encode($answer, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE))],

@@ -44,13 +44,15 @@ interface Notebooks
      * Adds one picture at the end of the notebook. The picture is a Media object the person uploaded, still processing
      * or ready, as an agent adds it right after its upload.
      *
+     * @return int the pictures the notebook holds after the add, as saved over the version read
+     *
      * @throws NotebookRefused NOT_FOUND; at most MAX_SCREENSHOTS pictures, each once, and the picture's own rules
      *                         (title, summary, pins); a RoundRefused MEDIA_ text for a picture that is not the person's
      *                         upload or was rejected; NOTEBOOK_CHANGED when another request saved it meanwhile; nothing
      *                         is saved
      * @throws \LogicException when no transaction is open or no tenant is set
      */
-    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void;
+    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int;
 
     /**
      * @throws NotebookRefused NOT_FOUND; a title rule; NOTEBOOK_CHANGED; nothing is saved

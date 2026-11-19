@@ -261,6 +261,24 @@ final class UseCaseNotebooksTest extends KernelTestCase
         self::assertEquals([new \DateTimeImmutable(self::ADDED), new \DateTimeImmutable(self::ADDED)], [$view->updatedAt, $view->lastUsedAt]);
     }
 
+    /**
+     * Three pictures stored at version 1, so the count it answers differs from the version it saves.
+     */
+    #[Test]
+    public function addScreenshotAnswersThePictureCountItSaved(): void
+    {
+        $notebook = self::notebook(self::ACME_FOODS, self::LENAS_NOTEBOOK, self::LENA, self::CREATED);
+        foreach (range(1, 3) as $number) {
+            $notebook = $notebook->withScreenshotAdded(NotebookScreenshot::of(self::mediaId($number), null, null, []), new \DateTimeImmutable(self::CREATED));
+        }
+        $this->insert($notebook);
+
+        $screenshotCount = $this->committedAs('Lena', static fn (Notebooks $notebooks): int => $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins(self::mediaId(4), null, null, []), new \DateTimeImmutable(self::ADDED)));
+
+        self::assertSame(4, $screenshotCount);
+        self::assertSame([4, 2], [\count($this->lenasNotebook()->screenshots), $this->lenasNotebook()->version]);
+    }
+
     #[Test]
     public function anEleventhScreenshotIsRefusedAndTheNotebookIsUnchanged(): void
     {

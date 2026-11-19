@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Review\Application\ReportDraft;
 
 use App\Media\Api\MediaImageStatus;
+use App\Review\Api\AddedReportDraftScreenshot;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftRefused;
@@ -73,8 +74,9 @@ final class UseCaseReportDraftsTest extends KernelTestCase
     {
         $this->insertMiasDraft(2);
 
-        $this->addAs(self::MIA, new ScreenshotWithPins(strtoupper(self::mediaId(3)), 'Third', null, []));
+        $added = $this->addAs(self::MIA, new ScreenshotWithPins(strtoupper(self::mediaId(3)), 'Third', null, []));
 
+        self::assertEquals(new AddedReportDraftScreenshot(false, 3), $added);
         $draft = $this->miasDraft();
         self::assertSame([self::mediaId(1), self::mediaId(2), self::mediaId(3)], array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $draft->screenshots));
         self::assertSame(['Third', 2], [$draft->screenshots[2]->title, $draft->version]);
@@ -91,8 +93,9 @@ final class UseCaseReportDraftsTest extends KernelTestCase
         $this->insertMiasDraft(2);
         $before = $this->miasDraft();
 
-        $this->addAs(self::MIA, new ScreenshotWithPins(strtoupper(self::mediaId(1)), 'Another title', 'Another summary', []));
+        $added = $this->addAs(self::MIA, new ScreenshotWithPins(strtoupper(self::mediaId(1)), 'Another title', 'Another summary', []));
 
+        self::assertEquals(new AddedReportDraftScreenshot(true, 2), $added);
         self::assertEquals($before, $this->miasDraft());
     }
 
@@ -112,7 +115,8 @@ final class UseCaseReportDraftsTest extends KernelTestCase
 
         self::assertSame(ReportDraftRefused::TOO_MANY_SCREENSHOTS, $refusal);
         self::assertEquals($before, $this->miasDraft());
-        $this->addAs(self::MIA, new ScreenshotWithPins(self::mediaId(10), null, null, []));
+        $added = $this->addAs(self::MIA, new ScreenshotWithPins(self::mediaId(10), null, null, []));
+        self::assertEquals(new AddedReportDraftScreenshot(true, 10), $added);
         self::assertEquals($before, $this->miasDraft(), 'One of the ten again is a no-op, not a refusal, on a full draft.');
     }
 
@@ -278,12 +282,10 @@ final class UseCaseReportDraftsTest extends KernelTestCase
     /**
      * @throws ReportDraftRefused after its transaction rolled back
      */
-    private function addAs(string $owner, ScreenshotWithPins $screenshot): void
+    private function addAs(string $owner, ScreenshotWithPins $screenshot): AddedReportDraftScreenshot
     {
         try {
-            $this->transactions()->committedAs(self::ACME_FOODS, function () use ($owner, $screenshot): void {
-                $this->reportDrafts()->addScreenshot(self::MIAS_DRAFT, new UserId($owner), $screenshot, new \DateTimeImmutable(self::ADDED));
-            });
+            return $this->transactions()->committedAs(self::ACME_FOODS, fn (): AddedReportDraftScreenshot => $this->reportDrafts()->addScreenshot(self::MIAS_DRAFT, new UserId($owner), $screenshot, new \DateTimeImmutable(self::ADDED)));
         } catch (ReportDraftRefused $refused) {
             // The rollback closed the entity manager; the next transaction needs a fresh one, as a new request has.
             self::getContainer()->get('doctrine')->resetManager();

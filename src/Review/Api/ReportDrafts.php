@@ -82,13 +82,17 @@ interface ReportDrafts
     public function update(string $draftId, UserId $owner, int $expectedVersion, ReportDraftContent $content, \DateTimeImmutable $at): void;
 
     /**
-     * Adds one picture at the end of the draft, or does nothing when the picture is in it already.
+     * Adds one picture at the end of the draft, or does nothing when the picture is in it already, even when the draft
+     * is full. Locks the draft's row until the caller's transaction ends.
+     *
+     * @return AddedReportDraftScreenshot whether the picture was in the draft already, and the draft's picture count
+     *                                    after the call, both as found under the row lock
      *
      * @throws ReportDraftRefused NOT_FOUND for a draft that is not $owner's; TOO_MANY_SCREENSHOTS when it is full;
      *                            otherwise as create for the picture; nothing is saved
      * @throws \LogicException    when no transaction is open or no tenant is set
      */
-    public function addScreenshot(string $draftId, UserId $owner, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void;
+    public function addScreenshot(string $draftId, UserId $owner, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedReportDraftScreenshot;
 
     /**
      * Removes the draft and forgets its pictures' places; the pictures stay in Media until retention removes them.

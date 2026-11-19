@@ -142,6 +142,49 @@ final class AddReportScreenshotTest extends WebTestCase
         self::assertSame(3, $version);
     }
 
+    /**
+     * Two captures in a row: each answer counts the pictures its own add left in the draft.
+     */
+    #[Test]
+    public function twoCapturesInARowAnswerTheCountEachOneLeft(): void
+    {
+        $secondPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', 'ready');
+        $thirdPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', null);
+        [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $secondPicture]);
+        self::assertSame(['draft_id' => self::LENAS_DRAFT, 'media_id' => $secondPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 2], $this->answer());
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $thirdPicture]);
+
+        self::assertSame(['draft_id' => self::LENAS_DRAFT, 'media_id' => $thirdPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 3], $this->answer());
+        [$screenshots, $version] = $this->screenshotsVersionAndUpdatedAtOf(self::LENAS_DRAFT);
+        self::assertSame([self::FIRST_PICTURE, $secondPicture, $thirdPicture], array_column($screenshots, 'media_id'));
+        self::assertSame(4, $version);
+    }
+
+    /**
+     * The tenth picture sent again, as after a lost answer, is in the full draft already: not the cap's refusal.
+     */
+    #[Test]
+    public function theTenthPictureSentAgainIsAlreadyInTheFullDraftAndNothingChanges(): void
+    {
+        $nearlyFullDraft = '0197a3c0-0000-7000-8000-0000000f0006';
+        $pictures = array_map(static fn (int $number): array => self::storedPicture(Uuid::v7()->toRfc4122()), range(1, 9));
+        $this->addReportDraft($this->people['Lena'], $nearlyFullDraft, 'SHOP', $pictures);
+        $tenthPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $nearlyFullDraft, 'upload_id' => $tenthPicture]);
+        self::assertSame(['draft_id' => $nearlyFullDraft, 'media_id' => $tenthPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 10], $this->answer());
+        $draftsBefore = $this->draftRows();
+
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $nearlyFullDraft, 'upload_id' => $tenthPicture]);
+
+        self::assertSame(['draft_id' => $nearlyFullDraft, 'media_id' => $tenthPicture, 'status' => AddReportScreenshot::ALREADY_IN_DRAFT, 'screenshot_count' => 10], $this->answer());
+        self::assertSame($draftsBefore, $this->draftRows());
+        self::assertSame(2, $this->screenshotsVersionAndUpdatedAtOf($nearlyFullDraft)[1]);
+        self::assertSame(array_fill(0, 2, [$tokenId, AddReportScreenshot::AUDIT_TARGET_TYPE, $nearlyFullDraft, AddReportScreenshot::NAME, 'ok']), $this->toolRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function aRejectedPictureIsRefusedAndTheDraftStaysAsItWas(): void
     {

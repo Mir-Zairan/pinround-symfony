@@ -52,13 +52,7 @@ final readonly class ToolCallGate
      */
     public function call(AgentTool $tool, array $arguments): CallToolResult
     {
-        $access = $this->currentApiToken->access()
-            ?? throw new \LogicException('An MCP tool call passed the api_token firewall without a personal access token.');
-        $userId = $this->currentUser->id()
-            ?? throw new \LogicException('An MCP tool call passed the api_token firewall without a user.');
-        if (!$this->connection->isTransactionActive()) {
-            throw new \LogicException('An MCP tool call runs in the request transaction; none is open.');
-        }
+        [$access, $userId] = $this->callerOf();
         $definition = $tool->definition();
 
         try {
@@ -93,6 +87,41 @@ final readonly class ToolCallGate
         }
 
         return $toolAnswer;
+    }
+
+    /**
+     * Refuses, without running the tool, a call whose target id no target can have, such as a REST path id longer than
+     * the tool's input schema allows: after the same scope check as call(), it is not found (ADR-0013), with its audit
+     * row and no target.
+     *
+     * @throws ToolRefusal     missing scope, else not found; always, after the audit row was written
+     * @throws \LogicException as call()
+     */
+    public function refuseAsNotFound(AgentTool $tool): never
+    {
+        [$access, $userId] = $this->callerOf();
+        $refusal = $access->hasScope($tool->requiredScope()) ? ToolRefusal::notFound() : ToolRefusal::missingScope($tool->requiredScope());
+        $this->toolCallAuditor->record($access, $userId, $tool->definition()->name, null, $refusal->outcome);
+
+        throw $refusal;
+    }
+
+    /**
+     * @return array{ApiTokenAccess, UserId}
+     *
+     * @throws \LogicException when the request has no token, no user or no open transaction
+     */
+    private function callerOf(): array
+    {
+        $access = $this->currentApiToken->access()
+            ?? throw new \LogicException('An MCP tool call passed the api_token firewall without a personal access token.');
+        $userId = $this->currentUser->id()
+            ?? throw new \LogicException('An MCP tool call passed the api_token firewall without a user.');
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('An MCP tool call runs in the request transaction; none is open.');
+        }
+
+        return [$access, $userId];
     }
 
     /**

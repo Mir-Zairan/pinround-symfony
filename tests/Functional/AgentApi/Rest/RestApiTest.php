@@ -8,6 +8,7 @@ use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Rest\RestRequestGuard;
@@ -24,6 +25,7 @@ use App\Tests\Functional\Review\SeedsTicketRounds;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -474,6 +476,53 @@ final class RestApiTest extends WebTestCase
         self::assertSame(['error' => \sprintf(ToolRefusal::MISSING_SCOPE, 'reports:write'), 'outcome' => 'missing_scope'], $this->json());
 
         self::assertSame($draftsBefore, $this->rowsOf('SELECT id, owner_id, screenshots::text, version FROM rvw_report_draft'));
+        self::assertSame(0, $this->rowCountOf('tkt_ticket'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string, string}> the path with %s for the id, the tool it runs,
+     *                                                                 its scope, and whether its body names an upload
+     *                                                                 or a file
+     */
+    public static function routesWithAnIdInThePath(): iterable
+    {
+        yield 'report screenshots' => ['/api/v1/reports/%s/screenshots', AddReportScreenshot::NAME, 'reports:write', 'upload'];
+        yield 'notebook uploads' => ['/api/v1/notebooks/%s/uploads', CreateNotebookUpload::NAME, 'notebooks:write', 'file'];
+        yield 'notebook screenshots' => ['/api/v1/notebooks/%s/screenshots', AddNotebookScreenshot::NAME, 'notebooks:write', 'upload'];
+        yield 'draft round screenshots' => ['/api/v1/tickets/%s/draft/screenshots', AddScreenshot::NAME, 'rounds:write', 'upload'];
+    }
+
+    /**
+     * An id over the tool's 64 characters names nothing: not found, as v1.yaml promises, not the schema's 422, with
+     * the tool's not_found audit row. A token without the route's scope still gets 403 first. Nothing changes.
+     */
+    #[Test]
+    #[DataProvider('routesWithAnIdInThePath')]
+    public function aPathIdOverSixtyFourCharactersIsNotFoundAndNothingChanges(string $pathFormat, string $toolName, string $scope, string $bodyKind): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite, ApiTokenScope::NotebooksWrite, ApiTokenScope::RoundsWrite]);
+        $this->request($token, 'POST', '/api/v1/reports', ['project' => 'SHOP', 'title' => 'Total is doubled']);
+        self::assertResponseStatusCodeSame(201);
+        $this->request($token, 'POST', '/api/v1/notebooks', ['title' => 'Coupon questions']);
+        self::assertResponseStatusCodeSame(201);
+        $body = 'file' === $bodyKind ? ['mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256] : ['upload_id' => $this->addReadyUpload('Lena', 'new_report', 'SHOP')];
+        $stateQuery = "SELECT 'draft', id, screenshots::text || ' v' || version FROM rvw_report_draft UNION ALL SELECT 'notebook', id, screenshots::text || ' v' || version FROM rvw_notebook UNION ALL SELECT 'intent', id, target_kind || ' ' || coalesce(used_at::text, 'unused') FROM med_upload_intent ORDER BY 1, 2";
+        $stateBefore = $this->rowsOf($stateQuery);
+        self::assertCount('file' === $bodyKind ? 2 : 3, $stateBefore);
+        $pathId = '0197a3c0-0000-7000-8000-0000000f9999'.str_repeat('0', 29); // 65 characters
+
+        $this->request($token, 'POST', \sprintf($pathFormat, $pathId), $body);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+
+        [$readTokenId, $readToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::Read]);
+        $this->request($readToken, 'POST', \sprintf($pathFormat, $pathId), $body);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['error' => \sprintf(ToolRefusal::MISSING_SCOPE, $scope), 'outcome' => 'missing_scope'], $this->json());
+        self::assertEqualsCanonicalizing([[$tokenId, 'not_found'], [$readTokenId, 'missing_scope']], $this->toolAuditRowsOf($toolName));
+        self::assertSame($stateBefore, $this->rowsOf($stateQuery));
         self::assertSame(0, $this->rowCountOf('tkt_ticket'));
     }
 

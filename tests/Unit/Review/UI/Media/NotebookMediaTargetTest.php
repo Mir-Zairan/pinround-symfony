@@ -118,7 +118,7 @@ final class NotebookMediaTargetTest extends TestCase
                 throw new \LogicException('Not asked by NotebookMediaTarget.');
             }
 
-            public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void
+            public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int
             {
                 throw new \LogicException('Not asked by NotebookMediaTarget.');
             }

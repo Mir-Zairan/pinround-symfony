@@ -145,6 +145,7 @@ paths:
                 pins: { type: array, maxItems: 100, items: { type: object } }
       responses:
         '200': { description: '{screenshot_id, round_id, status: added | added_before, pin_count}, or {status: processing} while the picture is processed: send again in a few seconds' }
+        '403': { $ref: '#/components/responses/Refused' }
         '404': { $ref: '#/components/responses/Refused' }
         '409': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
@@ -238,5 +239,6 @@ components:
       description: No live token. The body is empty or a plain error.
     Refused:
       description: >-
-        {error, outcome}: outcome not_found (404; also for what you may not see), missing_scope (403), read_only
-        (409), invalid_input or refused (422). Nothing was saved.
+        {error, outcome}: outcome not_found (404; also for what you may not see, and for an id or key in the path
+        that is malformed or over 64 characters), missing_scope (403, checked first), read_only (409), invalid_input
+        or refused (422). Nothing was saved.

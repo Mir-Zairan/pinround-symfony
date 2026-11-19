@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\Application\ReportDraft;
 
+use App\Review\Api\AddedReportDraftScreenshot;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftCursor;
@@ -106,13 +107,13 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         }
     }
 
-    public function addScreenshot(string $draftId, UserId $owner, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void
+    public function addScreenshot(string $draftId, UserId $owner, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedReportDraftScreenshot
     {
         $draft = $this->rows->ofOwner($draftId, $owner, lock: true) ?? throw ReportDraftRefused::notFound();
         $checked = ReportDraftContentRules::checkedScreenshot($screenshot);
         foreach ($draft->screenshots as $saved) {
             if ($saved->mediaId === $checked->mediaId) {
-                return;
+                return new AddedReportDraftScreenshot(true, \count($draft->screenshots));
             }
         }
         if (\count($draft->screenshots) >= self::MAX_SCREENSHOTS) {
@@ -123,6 +124,8 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         if (!$this->rows->update($draft->id, $owner, $draft->version, $content, $at)) {
             throw ReportDraftRefused::because(ReportDraftRefused::DRAFT_CHANGED);
         }
+
+        return new AddedReportDraftScreenshot(false, \count($content->screenshots));
     }
 
     public function delete(string $draftId, UserId $owner): void
