@@ -244,16 +244,19 @@ final class DbalNotebooksTest extends KernelTestCase
     public function markingUsedMovesOnlyTheLastUseTimeAndOnlyForTheOwner(): void
     {
         $this->insertCommitted(self::notebook(self::ACME_FOODS, self::LENAS_FIRST, self::LENA, self::LATER));
+        $this->insertCommitted(self::notebook(self::BETA_BAKERY, self::BETA_LENAS, self::LENA, self::LATER));
         $read = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
         self::assertNotNull($read);
 
         $marked = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => [
             'Omar' => $this->notebooks()->markUsed(new NotebookId(self::LENAS_FIRST), new UserId(self::OMAR), new \DateTimeImmutable('2027-03-20 10:00:00+01:00')),
             'unknown' => $this->notebooks()->markUsed(new NotebookId(self::LENAS_SECOND), new UserId(self::LENA), new \DateTimeImmutable('2027-03-20 10:00:00+01:00')),
+            'another organization' => $this->notebooks()->markUsed(new NotebookId(self::BETA_LENAS), new UserId(self::LENA), new \DateTimeImmutable('2027-03-20 10:00:00+01:00')),
             'Lena' => $this->notebooks()->markUsed(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA), new \DateTimeImmutable(self::LATEST)),
         ]);
 
-        self::assertSame(['Omar' => false, 'unknown' => false, 'Lena' => true], $marked);
+        self::assertSame(['Omar' => false, 'unknown' => false, 'another organization' => false, 'Lena' => true], $marked);
+        self::assertEquals(new \DateTimeImmutable(self::LATER), $this->storedTimesOf(self::BETA_LENAS, self::BETA_BAKERY)['last_used_at'], 'Beta Bakery\'s notebook keeps its last use time.');
         $used = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?Notebook => $this->notebooks()->ofOwner(new NotebookId(self::LENAS_FIRST), new UserId(self::LENA)));
         self::assertNotNull($used);
         self::assertSame([1, 'Notebook '.self::LENAS_FIRST], [$used->version(), $used->title()], 'Marking used is no save.');
@@ -427,10 +430,10 @@ final class DbalNotebooksTest extends KernelTestCase
     /**
      * @return array{created_at: \DateTimeImmutable, updated_at: \DateTimeImmutable, last_used_at: \DateTimeImmutable}
      */
-    private function storedTimesOf(string $id): array
+    private function storedTimesOf(string $id, string $organizationId = self::ACME_FOODS): array
     {
         $connection = self::getContainer()->get('doctrine.dbal.default_connection');
-        $row = $this->transactions()->rolledBackAs(self::ACME_FOODS, static fn (): array|false => $connection->fetchAssociative('SELECT created_at, updated_at, last_used_at FROM rvw_notebook WHERE id = ?', [$id]));
+        $row = $this->transactions()->rolledBackAs($organizationId, static fn (): array|false => $connection->fetchAssociative('SELECT created_at, updated_at, last_used_at FROM rvw_notebook WHERE id = ?', [$id]));
         self::assertIsArray($row);
         self::assertIsString($row['created_at']);
         self::assertIsString($row['updated_at']);

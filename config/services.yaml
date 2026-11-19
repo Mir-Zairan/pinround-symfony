@@ -469,6 +469,10 @@ when@test:
         test.review_checklist_queries:
             alias: App\Review\Api\ChecklistQueries
             public: true
+        # No tool or page uses notebooks before the MCP tools (P13.T8); NotebookLeakTest gets the Api as they will.
+        test.review_notebooks:
+            alias: App\Review\Api\Notebooks
+            public: true
         # No page saves a report before the new ticket form takes a screenshot; ScreenshotReportOnNewTicketTest gets
         # Ticketing's port as that form will.
         test.ticketing_new_ticket_report:

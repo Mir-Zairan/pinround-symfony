@@ -10,10 +10,15 @@ namespace App\Review\Domain\Scenario;
 final readonly class Scenarios
 {
     /**
-     * @param list<Scenario> $scenarios
+     * @param list<Scenario> $scenarios at most ScenarioRules::MAX_SCENARIOS; none is an empty notebook's
+     *
+     * @throws ScenarioRefused TOO_MANY_SCENARIOS when there are more, so no notebook holds more than rvw_notebook allows
      */
     public function __construct(private array $scenarios)
     {
+        if (\count($scenarios) > ScenarioRules::MAX_SCENARIOS) {
+            throw ScenarioRefused::because(ScenarioRefused::TOO_MANY_SCENARIOS);
+        }
     }
 
     /**

@@ -66,6 +66,7 @@ final class ScenarioRules
         if (!\is_array($decoded) || !array_is_list($decoded)) {
             throw ScenarioRefused::because(ScenarioRefused::NOT_A_LIST);
         }
+        // Scenarios refuses the same; counting first keeps a long list from being read through before the refusal.
         if (\count($decoded) > self::MAX_SCENARIOS) {
             throw ScenarioRefused::because(ScenarioRefused::TOO_MANY_SCENARIOS);
         }
