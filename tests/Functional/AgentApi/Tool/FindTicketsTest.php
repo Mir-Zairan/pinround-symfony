@@ -135,21 +135,45 @@ final class FindTicketsTest extends WebTestCase
     }
 
     /**
-     * The exact key is the strongest match, ahead of a title that merely holds the same words.
+     * The exact key is the strongest match, ahead of titles that are nothing but the searched words: by text alone
+     * SHOP-1 and SHOP-3 rank above SHOP-2, whose title does not hold them, and SHOP-3 has the higher id.
      */
     #[Test]
     public function aTicketKeyFindsThatTicketFirst(): void
     {
         $omar = $this->people['Omar'];
-        $this->addTicket('SHOP', 'Cart total shows the wrong sum', $this->doingStep, $omar, null);
-        $this->addTicket('SHOP', 'Shop 2 cart total', $this->doingStep, $omar, null);
+        $this->addTicket('SHOP', 'Shop-2 shop-2', $this->doingStep, $omar, null);
+        $this->addTicket('SHOP', 'Coupon field takes any text', $this->doingStep, $omar, null);
+        $this->addTicket('SHOP', 'Shop-2 shop-2', $this->doingStep, $omar, null);
         [, $token] = $this->issueApiToken($omar, $this->acmeFoods);
         $sessionId = $this->startSession($token);
 
-        $this->callTool($token, $sessionId, FindTickets::NAME, ['text' => ' shop-1 ']);
+        $this->callTool($token, $sessionId, FindTickets::NAME, ['text' => ' shop-2 ']);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1', array_key_first($this->foundTicketsByKey()));
+        $foundKeys = $this->foundKeysInResponseOrder();
+        self::assertSame('SHOP-2', $foundKeys[0]);
+        self::assertEqualsCanonicalizing(['SHOP-1', 'SHOP-2', 'SHOP-3'], $foundKeys);
+    }
+
+    /**
+     * Exactly ten match: all ten come back, and there is no more.
+     */
+    #[Test]
+    public function exactlyTenMatchesComeBackWithNoMore(): void
+    {
+        for ($ticket = 0; $ticket < 10; ++$ticket) {
+            $this->addTicket('SHOP', 'Cart total shows the wrong sum', $this->doingStep, $this->people['Lena'], null);
+        }
+        $this->addTicket('SHOP', 'Coupon field takes any text', $this->doingStep, $this->people['Lena'], null);
+        [, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $sessionId = $this->startSession($token);
+
+        $this->callTool($token, $sessionId, FindTickets::NAME, ['text' => 'cart']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertEqualsCanonicalizing(array_map(static fn (int $number): string => 'SHOP-'.$number, range(1, 10)), $this->foundKeysInResponseOrder());
+        self::assertFalse($this->responseValueAt('result', 'structuredContent', 'has_more'));
     }
 
     /**
@@ -259,7 +283,8 @@ final class FindTicketsTest extends WebTestCase
     }
 
     /**
-     * Omar works in both; the token is Acme Foods', and Beta Bakery's matching ticket is assigned to him there.
+     * Omar works in both; the token is Acme Foods', and Beta Bakery's matching ticket is assigned to him there, in a
+     * step with the id of Acme Foods' In progress, so only the organization boundary can hide it.
      */
     #[Test]
     public function anotherOrganizationsTicketsAreNeverFound(): void
@@ -281,24 +306,51 @@ final class FindTicketsTest extends WebTestCase
     }
 
     /**
-     * @return array<string, array<mixed>> each found ticket's fields by key, in the order returned; fails when the
-     *                                     call was refused or found none
+     * @return array<string, array<mixed>> each found ticket's fields by key, sorted by key, so the search's order does
+     *                                     not count; fails when the call was refused or found none
      */
     private function foundTicketsByKey(): array
     {
-        self::assertFalse($this->responseValueAt('result', 'isError'));
-        $tickets = $this->responseValueAt('result', 'structuredContent', 'tickets');
-        self::assertIsArray($tickets);
-        self::assertNotSame([], $tickets);
         $byKey = [];
-        foreach ($tickets as $ticket) {
-            self::assertIsArray($ticket);
+        foreach ($this->foundTicketsInResponseOrder() as $ticket) {
             self::assertIsString($ticket['key'] ?? null);
+            self::assertArrayNotHasKey($ticket['key'], $byKey, 'A ticket was found twice.');
             $byKey[$ticket['key']] = $ticket;
         }
         ksort($byKey);
 
         return $byKey;
+    }
+
+    /**
+     * @return list<string> the found tickets' keys in the order returned; fails when the call was refused or found none
+     */
+    private function foundKeysInResponseOrder(): array
+    {
+        return array_map(static function (array $ticket): string {
+            self::assertIsString($ticket['key'] ?? null);
+
+            return $ticket['key'];
+        }, $this->foundTicketsInResponseOrder());
+    }
+
+    /**
+     * @return list<array<mixed>> fails when the call was refused or found none
+     */
+    private function foundTicketsInResponseOrder(): array
+    {
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        $tickets = $this->responseValueAt('result', 'structuredContent', 'tickets');
+        self::assertIsArray($tickets);
+        self::assertNotSame([], $tickets);
+        self::assertTrue(array_is_list($tickets));
+        $found = [];
+        foreach ($tickets as $ticket) {
+            self::assertIsArray($ticket);
+            $found[] = $ticket;
+        }
+
+        return $found;
     }
 
     /**
@@ -316,9 +368,9 @@ final class FindTicketsTest extends WebTestCase
         return self::sqlOf($debugData);
     }
 
-    private function addStep(OrganizationId $organizationId, string $name, string $group, string $coreCode, int $position): string
+    private function addStep(OrganizationId $organizationId, string $name, string $group, string $coreCode, int $position, ?string $stepId = null): string
     {
-        $stepId = Uuid::v7()->toRfc4122();
+        $stepId ??= Uuid::v7()->toRfc4122();
         $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, ?, ?, ?, 'core', ?)",
             [$organizationId->toString(), $stepId, $name, $group, $coreCode, $position],
@@ -359,7 +411,7 @@ final class FindTicketsTest extends WebTestCase
     private function addBetaBakeryTicketAssignedTo(User $assignee, OrganizationId $betaBakery): void
     {
         $projectId = $this->addProject(null, 'SHOP', 'Shop', $betaBakery);
-        $stepId = $this->addStep($betaBakery, 'In progress', 'doing', 'progress', 0);
+        $stepId = $this->addStep($betaBakery, 'In progress', 'doing', 'progress', 0, $this->doingStep);
         $row = [$betaBakery->toString(), Uuid::v7()->toRfc4122(), $projectId, null, 2, 'SHOP-2', self::HIDDEN_TITLE, $stepId, $assignee->id()->toString(), $assignee->id()->toString(), 'all', null];
         $this->committedAs($betaBakery, static fn (Connection $migrator): int => self::insertTicket($migrator, $row));
     }
