@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Review;
 use App\Identity\Domain\User;
 use App\Media\UI\Controller\UploadIntentController;
 use App\Media\UI\Controller\UploadStatusController;
+use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\RoundRefused;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
@@ -117,6 +118,7 @@ final class DraftRoundControllerTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM med_upload_intent WHERE organization_id = ?', [$organizationId]));
+            $this->committedAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM rvw_report_draft WHERE organization_id = ?', [$organizationId]));
         }
         $this->removeSeededRounds();
         $this->removeCommittedProjects();
@@ -277,7 +279,7 @@ final class DraftRoundControllerTest extends WebTestCase
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $before = $this->roundRowsOf($ticketId);
 
-        foreach ([self::START, $this->shareUrl($draft), $this->deleteUrl($draft)] as $url) {
+        foreach ([self::START, $this->shareUrl($draft), $this->deleteUrl($draft), $this->newTicketUrl($draft)] as $url) {
             $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => 'any']);
 
             self::assertResponseStatusCodeSame(302);
@@ -305,7 +307,7 @@ final class DraftRoundControllerTest extends WebTestCase
             self::assertStringNotContainsString($draft, $content, $person);
             self::assertCount(0, $this->client->getCrawler()->filter('.draft-round-editor, .draft-round-editor__add, .round-card'), $person.' sees no draft card and no editor.');
 
-            foreach ([$this->shareUrl($draft), $this->deleteUrl($draft)] as $url) {
+            foreach ([$this->shareUrl($draft), $this->deleteUrl($draft), $this->newTicketUrl($draft)] as $url) {
                 $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
 
                 self::assertResponseStatusCodeSame(404, $person.' '.$url);
@@ -315,7 +317,7 @@ final class DraftRoundControllerTest extends WebTestCase
         }
 
         $this->logIn($this->client, $ben);
-        foreach ([$this->shareUrl($draft), $this->deleteUrl($draft)] as $url) {
+        foreach ([$this->shareUrl($draft), $this->deleteUrl($draft), $this->newTicketUrl($draft)] as $url) {
             $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
             self::assertResponseStatusCodeSame(404);
             self::assertSame($before, $this->roundRowsOf($ticketId));
@@ -332,7 +334,7 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertCount(1, $before);
         $this->logIn($this->client, $this->people['Raj']);
 
-        foreach ([$this->shareUrl($rajsRound), $this->deleteUrl($rajsRound)] as $url) {
+        foreach ([$this->shareUrl($rajsRound), $this->deleteUrl($rajsRound), $this->newTicketUrl($rajsRound)] as $url) {
             $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))], [], self::TURBO_FORM_HEADERS);
 
             self::assertResponseStatusCodeSame(404, $url);
@@ -352,7 +354,7 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach (self::OTHERS as $person) {
             $this->logIn($this->client, $this->people[$person]);
             foreach ([$draft, Uuid::v7()->toRfc4122()] as $roundId) {
-                foreach ([$this->shareUrl($roundId), $this->deleteUrl($roundId)] as $url) {
+                foreach ([$this->shareUrl($roundId), $this->deleteUrl($roundId), $this->newTicketUrl($roundId)] as $url) {
                     foreach ([[], [DraftRoundController::CSRF_FIELD => 'not-the-token']] as $form) {
                         $this->client->request('POST', $url, $form, [], self::TURBO_FORM_HEADERS);
 
@@ -369,7 +371,7 @@ final class DraftRoundControllerTest extends WebTestCase
 
     /**
      * ADR-0044, P13.T1: Mia's draft on SHOP-1 in Testing, opened by its own URLs as someone else would type them. The
-     * round page it would get once shared, share, delete, the editor's live actions with the props Mia's page signed,
+     * round page it would get once shared, share, delete, "Make it a new ticket", the editor's live actions with the props Mia's page signed,
      * an upload to it and its picture's upload state all answer as for a round that does not exist, and nothing is
      * stored. Mia's shared report stays readable for each of them, so the refusals are about the draft, not the ticket.
      */
@@ -418,7 +420,7 @@ final class DraftRoundControllerTest extends WebTestCase
                 $this->assertHoldsNothingOfMiasDraft($person.' '.$roundPage, $draft);
             }
 
-            foreach ([$this->shareUrl($draft), $this->deleteUrl($draft)] as $url) {
+            foreach ([$this->shareUrl($draft), $this->deleteUrl($draft), $this->newTicketUrl($draft)] as $url) {
                 $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
                 self::assertResponseStatusCodeSame(404, $person.' '.$url);
                 self::assertStringContainsString($draftRefusal, (string) $this->client->getResponse()->getContent(), $person.' '.$url);
@@ -550,7 +552,133 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheRefusal());
         $this->client->request('POST', $this->deleteUrl($draft), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, 'another_form')]);
         self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastAfterTheRedirect());
+        $this->client->request('POST', $this->newTicketUrl($draft), [DraftRoundController::CSRF_FIELD => 'not-the-token'], [], self::TURBO_FORM_HEADERS);
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheRefusal());
         self::assertSame($before, $this->roundRowsOf($ticketId));
+        self::assertSame([], $this->reportDraftRows());
+    }
+
+    /**
+     * ADR-0044, P13.T2 step 3: Mia's draft on SHOP-1 in Testing, with its pictures and pins seeded out of order, and
+     * Omar's own draft beside it, which must stay as it is.
+     */
+    #[Test]
+    public function makeItANewTicketMovesTheTestersDraftIntoHerReportDraftInOrderAndMakesNoTicket(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->putInTestingWithMiasTurn($ticketId);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Mia', null);
+        $secondPicture = $this->addMedia('ready', 'Mia');
+        $firstPicture = $this->addMedia('ready', 'Mia');
+        $second = $this->addScreenshot($draft, $secondPicture, 1, 'Cart total', null, 'not_right');
+        $first = $this->addScreenshot($draft, $firstPicture, 0, null, self::MIA_DRAFT_SUMMARY, 'looks_right');
+        $this->addPin($first, 2, '40.25', '60.50', 'Second pin note', 'Mia');
+        $this->addPin($first, 1, '12.50', '20.75', self::MIA_DRAFT_NOTE, 'Mia');
+        $this->addPin($second, 1, '80.00', '5.25', 'Total doubled', 'Mia');
+        $omarsDraft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($omarsDraft, $this->addMedia('ready', 'Omar'), 0, self::OMAR_DRAFT_SHOT, null);
+        $omarsDraftBefore = [$this->roundRow($ticketId, $omarsDraft), $this->screenshotRowsOf($omarsDraft)];
+        $ticketsBefore = $this->ticketCount();
+        self::assertSame(1, $ticketsBefore);
+        self::assertSame([], $this->reportDraftRows());
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $button = $this->frame()->filter('#round-'.$draft.' form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Make it a new ticket' === $form->filter('button')->text());
+        self::assertCount(1, $button);
+        self::assertSame($this->newTicketUrl($draft), $button->attr('action'));
+        self::assertSame('_top', $button->attr('data-turbo-frame'));
+        $form = $button->form();
+        $this->client->submit($form);
+
+        self::assertResponseStatusCodeSame(303);
+        $reportDrafts = $this->reportDraftRows();
+        self::assertCount(1, $reportDrafts);
+        $reportDraft = $reportDrafts[0];
+        self::assertIsString($reportDraft['id']);
+        self::assertSame('/report-drafts/'.$reportDraft['id'], $this->client->getResponse()->headers->get('Location'));
+        self::assertSame(
+            [$this->people['Mia']->id()->toString(), 'SHOP', 'Cart total', 'Found while testing SHOP-1', 1, self::NOW_AS_STORED, self::NOW_AS_STORED],
+            [$reportDraft['owner_id'], $reportDraft['project_key'], $reportDraft['title'], $reportDraft['detail'], $reportDraft['version'], $reportDraft['created_at'], $reportDraft['updated_at']],
+            'The first title among the pictures is the report\'s; the detail names the ticket it was found on.',
+        );
+        self::assertSame(
+            [
+                [$firstPicture, null, self::MIA_DRAFT_SUMMARY, [[12.5, 20.75, self::MIA_DRAFT_NOTE], [40.25, 60.5, 'Second pin note']]],
+                [$secondPicture, 'Cart total', null, [[80.0, 5.25, 'Total doubled']]],
+            ],
+            self::picturesOf($reportDraft['screenshots']),
+            'The same pictures, by position, each with its pins by number.',
+        );
+
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(DraftRoundController::MOVED_TO_REPORT_DRAFT, $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        $content = (string) $this->client->getResponse()->getContent();
+        foreach ([self::MIA_DRAFT_NOTE, 'Second pin note', 'Total doubled', self::MIA_DRAFT_SUMMARY] as $moved) {
+            self::assertStringContainsString($moved, $content, 'The report draft page shows what moved.');
+        }
+
+        $closed = $this->roundRow($ticketId, $draft);
+        self::assertSame(['closed', self::NOW_AS_STORED, null], [$closed['state'], $closed['deleted_at'], $closed['shared_at']]);
+        self::assertSame($ticketsBefore, $this->ticketCount(), 'No ticket until Send.');
+        self::assertSame($omarsDraftBefore, [$this->roundRow($ticketId, $omarsDraft), $this->screenshotRowsOf($omarsDraft)]);
+        $frame = $this->frame();
+        self::assertCount(0, $frame->filter('#round-'.$draft), 'The round draft is closed.');
+        self::assertCount(1, $frame->filter(self::ROUNDS.' form.rounds__start'), 'Mia may start a new draft while it is her turn.');
+
+        $this->client->submit($form);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+        self::assertSame($reportDrafts, $this->reportDraftRows(), 'A second click makes no second report draft.');
+        self::assertSame($closed, $this->roundRow($ticketId, $draft));
+        self::assertSame($ticketsBefore, $this->ticketCount());
+    }
+
+    #[Test]
+    public function makeItANewTicketOnADraftOfElevenScreenshotsIsRefusedAndNothingChanges(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        for ($position = 0; $position < 11; ++$position) {
+            $shot = $this->addScreenshot($draft, $this->addMedia('ready', 'Omar'), $position, 'Picture '.($position + 1), null);
+            $this->addPin($shot, 1, '10.00', '20.00', 'Pin on picture '.($position + 1), 'Omar');
+        }
+        $before = $this->draftState($ticketId, $report, $draft);
+        self::assertCount(11, $before['screenshots']);
+        $this->logIn($this->client, $this->people['Omar']);
+        $token = $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'));
+
+        $this->client->request('POST', $this->newTicketUrl($draft), [DraftRoundController::CSRF_FIELD => $token], [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame('A report holds at most 10 screenshots.', $this->toastOfTheRefusal());
+        self::assertSame($before, $this->draftState($ticketId, $report, $draft));
+
+        $this->client->request('POST', $this->newTicketUrl($draft), [DraftRoundController::CSRF_FIELD => $token]);
+
+        self::assertSame(ReportDraftRefused::TOO_MANY_SCREENSHOTS, $this->toastAfterTheRedirect());
+        self::assertSame($before, $this->draftState($ticketId, $report, $draft));
+    }
+
+    /**
+     * Without the voter, the command would answer its "shared already" refusal as a toast here, not NOT_FOUND.
+     */
+    #[Test]
+    public function makeItANewTicketOnTheOwnersSharedDraftIsNotFoundAndNothingChanges(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $shared = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $this->addScreenshot($shared, $this->addMedia('ready', 'Omar'), 0, self::OMAR_DRAFT_SHOT, null);
+        $before = $this->roundRowsOf($ticketId);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->newTicketUrl($shared), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))], [], self::TURBO_FORM_HEADERS);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+        self::assertSame($before, $this->roundRowsOf($ticketId));
+        self::assertSame([], $this->reportDraftRows());
     }
 
     #[Test]
@@ -564,7 +692,7 @@ final class DraftRoundControllerTest extends WebTestCase
         $token = $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'));
 
         foreach (['not-a-uuid', Uuid::v7()->toRfc4122(), strtoupper(Uuid::v7()->toRfc4122()), $otherTicketsDraft] as $roundId) {
-            foreach ([$this->shareUrl($roundId), $this->deleteUrl($roundId)] as $url) {
+            foreach ([$this->shareUrl($roundId), $this->deleteUrl($roundId), $this->newTicketUrl($roundId)] as $url) {
                 $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $token]);
 
                 self::assertResponseStatusCodeSame(404, $url);
@@ -609,7 +737,7 @@ final class DraftRoundControllerTest extends WebTestCase
         $tokensLink = $boxes->filter('.claude-code-box__tokens a');
         self::assertSame(['API tokens', '/me/tokens', '_top'], [$tokensLink->text(), $tokensLink->attr('href'), $tokensLink->attr('data-turbo-frame')], 'The link leaves the rounds frame for the whole page.');
         self::assertSame(
-            ['Add screenshot', 'Share with the team now', 'Delete draft', 'Copy line'],
+            ['Add screenshot', 'Share with the team now', 'Make it a new ticket', 'Delete draft', 'Copy line'],
             $frame->filter(self::ROUNDS.' button')->each(static fn (Crawler $button): string => $button->text()),
             'Only the private draft has buttons; the start button is gone beside it.',
         );
@@ -692,9 +820,9 @@ final class DraftRoundControllerTest extends WebTestCase
 
     /**
      * What a stray write would change: the ticket's rounds, the report's and the draft's screenshots, the draft's pins,
-     * and the organization's upload intents.
+     * the organization's upload intents and report drafts, and how many tickets there are.
      *
-     * @return array{rounds: list<array<string, mixed>>, screenshots: list<array<string, mixed>>, pins: list<array<string, mixed>>, intents: list<array<string, mixed>>}
+     * @return array{rounds: list<array<string, mixed>>, screenshots: list<array<string, mixed>>, pins: list<array<string, mixed>>, intents: list<array<string, mixed>>, reportDrafts: list<array<string, mixed>>, tickets: int}
      */
     private function draftState(string $ticketId, string $report, string $draft): array
     {
@@ -711,7 +839,64 @@ final class DraftRoundControllerTest extends WebTestCase
             'screenshots' => [...$this->screenshotRowsOf($report), ...$this->screenshotRowsOf($draft)],
             'pins' => $this->pinRowsOf($draft),
             'intents' => $intents,
+            'reportDrafts' => $this->reportDraftRows(),
+            'tickets' => $this->ticketCount(),
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>> the organization's report drafts as stored, oldest first
+     */
+    private function reportDraftRows(): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$rows): int {
+            $rows = $migrator->fetchAllAssociative('SELECT id, owner_id, project_key, title, detail, screenshots::text AS screenshots, version, created_at, updated_at FROM rvw_report_draft WHERE organization_id = ? ORDER BY id', [$organizationId]);
+
+            return \count($rows);
+        });
+
+        return $rows;
+    }
+
+    /**
+     * A report draft's screenshots column, read field by field, as jsonb keeps its keys in an order of its own.
+     *
+     * @return list<array{mixed, mixed, mixed, list<array{mixed, mixed, mixed}>}> each picture's media id, title, summary
+     *                                                                            and pins (x, y, note)
+     */
+    private static function picturesOf(mixed $screenshotsColumn): array
+    {
+        self::assertIsString($screenshotsColumn);
+        $stored = json_decode($screenshotsColumn, true, 8, \JSON_THROW_ON_ERROR);
+        self::assertIsList($stored);
+        $pictures = [];
+        foreach ($stored as $picture) {
+            self::assertIsArray($picture);
+            self::assertIsList($picture['pins']);
+            $pins = [];
+            foreach ($picture['pins'] as $pin) {
+                self::assertIsArray($pin);
+                $pins[] = [$pin['x_pct'], $pin['y_pct'], $pin['note']];
+            }
+            $pictures[] = [$picture['media_id'], $picture['title'], $picture['summary'], $pins];
+        }
+
+        return $pictures;
+    }
+
+    private function ticketCount(): int
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $count = 0;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$count): int {
+            $count = (int) $migrator->fetchOne('SELECT count(*) FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
+
+            return $count;
+        });
+
+        return $count;
     }
 
     private function frame(): Crawler
@@ -730,6 +915,11 @@ final class DraftRoundControllerTest extends WebTestCase
     private function deleteUrl(string $roundId): string
     {
         return '/t/SHOP-1/rounds/'.$roundId.'/delete';
+    }
+
+    private function newTicketUrl(string $roundId): string
+    {
+        return '/t/SHOP-1/rounds/'.$roundId.'/new-ticket';
     }
 
     private function toastAfterTheRedirect(): string

@@ -95,6 +95,7 @@ final class RoundVoterTest extends TestCase
 
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::EDIT]));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::MOVE_TO_REPORT_DRAFT]));
         self::assertSame([], $this->ticketTurnQueries->askedTicketIds);
     }
 
@@ -116,7 +117,7 @@ final class RoundVoterTest extends TestCase
             'the Beta Bakery admin' => self::BETA_ADMIN,
         ];
         foreach ($others as $case => $userId) {
-            foreach ([RoundPermission::VIEW, RoundPermission::EDIT] as $attribute) {
+            foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT] as $attribute) {
                 yield $case.' '.$attribute => [$userId, $attribute];
             }
         }
@@ -137,7 +138,7 @@ final class RoundVoterTest extends TestCase
         $deletedDraft = self::round(self::ACME_FOODS, self::SHOP_1, self::OMAR, true, true);
         $deletedSharedRound = self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, true);
 
-        foreach ([RoundPermission::VIEW, RoundPermission::EDIT] as $attribute) {
+        foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT] as $attribute) {
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $deletedDraft, [$attribute]), $attribute);
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::LENA), $deletedSharedRound, [$attribute]), $attribute);
         }
@@ -174,6 +175,20 @@ final class RoundVoterTest extends TestCase
 
         self::assertSame($mayView ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf($userId), $sharedRound, [RoundPermission::VIEW]));
         self::assertSame($mayEdit ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf($userId), $sharedRound, [RoundPermission::EDIT]));
+    }
+
+    /**
+     * Lena may see and edit the round she shared on SHOP-1, so only the "unshared" rule denies moving it.
+     */
+    #[Test]
+    public function nobodyMayMoveASharedRoundToAReportDraftNotEvenItsOwner(): void
+    {
+        $voter = $this->voterUnder(self::ACME_FOODS);
+        $lenasSharedRound = self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, false);
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::LENA), $lenasSharedRound, [RoundPermission::EDIT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::LENA), $lenasSharedRound, [RoundPermission::MOVE_TO_REPORT_DRAFT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::SARA), $lenasSharedRound, [RoundPermission::MOVE_TO_REPORT_DRAFT]));
     }
 
     #[Test]
@@ -228,6 +243,7 @@ final class RoundVoterTest extends TestCase
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $betaBakerysDraft, [RoundPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $betaBakerysDraft, [RoundPermission::EDIT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $betaBakerysDraft, [RoundPermission::MOVE_TO_REPORT_DRAFT]));
     }
 
     #[Test]
@@ -237,6 +253,7 @@ final class RoundVoterTest extends TestCase
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::EDIT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::MOVE_TO_REPORT_DRAFT]));
     }
 
     #[Test]
@@ -245,6 +262,7 @@ final class RoundVoterTest extends TestCase
         $voter = $this->voterUnder(null);
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::VIEW]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::MOVE_TO_REPORT_DRAFT]));
     }
 
     #[Test]
@@ -254,6 +272,7 @@ final class RoundVoterTest extends TestCase
         $sharedRound = self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, false);
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), self::omarsDraft(), [RoundPermission::VIEW]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), self::omarsDraft(), [RoundPermission::MOVE_TO_REPORT_DRAFT]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), $sharedRound, [RoundPermission::VIEW]));
         self::assertSame([], $this->ticketTurnQueries->askedTicketIds);
     }
@@ -268,6 +287,7 @@ final class RoundVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, self::omarsDraft(), [TicketPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new TicketId(self::SHOP_1), [RoundPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, null, [RoundPermission::EDIT]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($token, new TicketId(self::SHOP_1), [RoundPermission::MOVE_TO_REPORT_DRAFT]));
     }
 
     private static function omarsDraft(): RoundAccessFacts

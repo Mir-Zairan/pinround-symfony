@@ -47,6 +47,10 @@
                             <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
                             <twig:Button type="submit" size="sm" class="round-card__share">Share with the team now</twig:Button>
                         </form>
+                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::NEW_TICKET_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top">
+                            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
+                            <twig:Button type="submit" variant="outline" size="sm" class="round-card__new-ticket">Make it a new ticket</twig:Button>
+                        </form>
                         <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::DELETE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top" data-turbo-confirm="{{ constant('App\\Review\\UI\\RoundCards::DELETE_DRAFT_CONFIRM') }}">
                             <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
                             <twig:Button type="submit" variant="text" size="sm" class="round-card__delete">Delete draft</twig:Button>

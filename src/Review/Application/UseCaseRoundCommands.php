@@ -33,10 +33,10 @@ use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketTurnQueries;
 
 /**
- * RoundCommands and DraftScreenshotCommands on the Round aggregate; the contracts are on {@see RoundCommands} and
- * {@see DraftScreenshotCommands}.
+ * RoundCommands, DraftScreenshotCommands and DraftRoundContents on the Round aggregate; the contracts are on
+ * {@see RoundCommands}, {@see DraftScreenshotCommands} and {@see DraftRoundContents}.
  */
-final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands
+final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands, DraftRoundContents
 {
     public function __construct(
         private Rounds $rounds,
@@ -220,6 +220,24 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         $draft = $this->ownDraft($roundId, $ownerId);
 
         $this->changeAndSave($draft, $deletedAt, static fn (Round $round) => $round->delete($ownerId, $deletedAt));
+    }
+
+    public function take(string $roundId, UserId $ownerId, \DateTimeImmutable $takenAt): TakenDraftRound
+    {
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $screenshots = array_map(
+            static fn (Screenshot $screenshot): ScreenshotWithPins => new ScreenshotWithPins(
+                $screenshot->mediaId(),
+                $screenshot->title(),
+                $screenshot->summary(),
+                array_map(static fn (Pin $pin): PlacedPin => new PlacedPin($pin->xPercent(), $pin->yPercent(), $pin->note()), $screenshot->pins()),
+            ),
+            $draft->screenshots(),
+        );
+
+        $this->changeAndSave($draft, $takenAt, static fn (Round $round) => $round->delete($ownerId, $takenAt));
+
+        return new TakenDraftRound($draft->ticketId(), $screenshots);
     }
 
     /**

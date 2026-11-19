@@ -16,6 +16,7 @@ use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\DraftRoundContents;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -45,6 +46,7 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         private RoundCommands $roundCommands,
         private UploadedMedia $uploadedMedia,
         private TenantContext $tenantContext,
+        private DraftRoundContents $draftRoundContents,
     ) {
     }
 
@@ -58,6 +60,23 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         $this->rows->insert($organizationId, $id, $owner, $project->key(), $checked, $at);
 
         return $id;
+    }
+
+    public function createFromDraftRound(string $roundId, UserId $owner, \DateTimeImmutable $at): string
+    {
+        $organizationId = $this->tenantContext->require();
+        $taken = $this->draftRoundContents->take($roundId, $owner, $at);
+        $ticketKey = $this->ticketKeyQueries->keyOf($taken->ticketId) ?? throw new \LogicException('The ticket of a draft round the tenant has is the tenant\'s.');
+        $foundWhileTesting = \sprintf(self::FOUND_WHILE_TESTING, $ticketKey);
+        $title = $foundWhileTesting;
+        foreach ($taken->screenshots as $screenshot) {
+            if (null !== $screenshot->title && '' !== trim($screenshot->title)) {
+                $title = $screenshot->title;
+                break;
+            }
+        }
+
+        return $this->create($organizationId, $owner, self::projectKeyOf($ticketKey), new ReportDraftContent($title, $foundWhileTesting, $taken->screenshots), $at);
     }
 
     public function forOwner(UserId $owner, ?ReportDraftCursor $after = null): ReportDraftsPage
@@ -183,6 +202,17 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
                 throw ReportDraftRefused::because($refusal);
             }
         }
+    }
+
+    /**
+     * A ticket key is its project's key, a dash and a number (Ticketing's TicketKey), so the project key is all before
+     * the last dash.
+     */
+    private static function projectKeyOf(string $ticketKey): string
+    {
+        $dash = strrpos($ticketKey, '-');
+
+        return false === $dash ? $ticketKey : substr($ticketKey, 0, $dash);
     }
 
     /**
