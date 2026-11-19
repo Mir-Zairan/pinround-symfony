@@ -204,7 +204,7 @@ final class IssueApiTokenTest extends TestCase
         yield 'a known name with a capital' => [['Read']];
         yield 'a known name with a space' => [[' read']];
         yield 'an empty name' => [['']];
-        yield 'more names than there are scopes, all known' => [['read', 'read', 'read', 'read', 'read', 'read']];
+        yield 'more names than there are scopes, all known' => [array_fill(0, \count(ApiTokenScope::cases()) + 1, 'read')];
     }
 
     /**

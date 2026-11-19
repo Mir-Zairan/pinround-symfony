@@ -40,6 +40,7 @@ final class TokenController extends AbstractController
         'comments:write' => 'Write comments on tickets.',
         'tickets:move' => 'Move tickets to another step.',
         'reports:write' => 'Let Claude Code prepare report drafts for you. You still check and send them.',
+        'notebooks:write' => 'Let Claude Code and the extension write to your notebooks.',
     ];
 
     /** The lifetimes the form offers, in days. */

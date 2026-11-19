@@ -128,7 +128,7 @@ final class ShowApiTokensTest extends TestCase
     {
         $show = new ShowApiTokens(new InMemoryApiTokens(null, new \DateTimeImmutable(self::NOW)));
 
-        self::assertSame(['read', 'rounds:write', 'comments:write', 'tickets:move', 'reports:write'], $show->scopeNames());
+        self::assertSame(['read', 'rounds:write', 'comments:write', 'tickets:move', 'reports:write', 'notebooks:write'], $show->scopeNames());
         self::assertSame(['read', 'rounds:write'], $show->defaultScopeNames());
     }
 

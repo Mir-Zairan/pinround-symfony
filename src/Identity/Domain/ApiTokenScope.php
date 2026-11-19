@@ -15,9 +15,11 @@ enum ApiTokenScope: string
     case CommentsWrite = 'comments:write';
     case TicketsMove = 'tickets:move';
     case ReportsWrite = 'reports:write';
+    case NotebooksWrite = 'notebooks:write';
 
     /**
-     * The scopes a token made for Claude Code starts with; reports:write is ticked by the user only (ADR-0039).
+     * The scopes a token made for Claude Code starts with; reports:write (ADR-0039) and notebooks:write (ADR-0046) are
+     * ticked by the user only.
      *
      * @return list<self>
      */
