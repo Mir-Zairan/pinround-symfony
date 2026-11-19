@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Scenario v1",
+  "description": "One scenario that the pinround browser extension plays step by step on a host the person allowed (ADR-0046, FR-EXP-04). It is data only: a step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. Lengths count characters. The server also checks one rule this schema cannot: every go_to url stays on the scheme, host and port of start_url. A notebook holds the list in #/$defs/scenarios.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "why", "setup", "start_url", "steps"],
+  "properties": {
+    "title": {
+      "description": "What the case shows, in one line.",
+      "type": "string",
+      "maxLength": 120,
+      "pattern": "\\S"
+    },
+    "why": {
+      "description": "What in the code makes the case happen.",
+      "type": "string",
+      "maxLength": 600,
+      "pattern": "\\S"
+    },
+    "setup": {
+      "description": "What data the case needs, in plain words. Claude Code prepares it in the person's app before the person plays the scenario. May be empty.",
+      "type": "string",
+      "maxLength": 600
+    },
+    "start_url": {
+      "description": "The page the scenario starts on.",
+      "$ref": "#/$defs/url"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "scenarios": {
+      "description": "A notebook's scenarios, in order.",
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#" }
+    },
+    "url": {
+      "description": "A full http or https address. The host takes no user name, so no \"@\" and no \"\\\".",
+      "type": "string",
+      "maxLength": 1000,
+      "pattern": "^(https?)://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(?::([0-9]{1,5}))?(?:[/?#][^\\s\\\\\\x00-\\x1f\\x7f]*)?$"
+    },
+    "say": {
+      "description": "The line the player shows while the step runs.",
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "textValue": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "filledTextValue": {
+      "type": "string",
+      "maxLength": 1000,
+      "pattern": "\\S"
+    },
+    "target": {
+      "description": "How the step finds its element: exactly one of these.",
+      "oneOf": [
+        {
+          "description": "By accessible role, and by accessible name when given.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role"],
+          "properties": {
+            "role": {
+              "description": "An ARIA role in lowercase, like button or alert.",
+              "type": "string",
+              "maxLength": 1000,
+              "pattern": "^[a-z]+(?:-[a-z]+)*$"
+            },
+            "name": { "$ref": "#/$defs/filledTextValue" }
+          }
+        },
+        {
+          "description": "By visible text.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "text": { "$ref": "#/$defs/filledTextValue" }
+          }
+        },
+        {
+          "description": "By the label of a form field.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label"],
+          "properties": {
+            "label": { "$ref": "#/$defs/filledTextValue" }
+          }
+        }
+      ]
+    },
+    "step": {
+      "oneOf": [
+        {
+          "description": "Open a page on the scheme, host and port of start_url.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "url"],
+          "properties": {
+            "type": { "const": "go_to" },
+            "say": { "$ref": "#/$defs/say" },
+            "url": { "$ref": "#/$defs/url" }
+          }
+        },
+        {
+          "description": "Click the element.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "target"],
+          "properties": {
+            "type": { "const": "click" },
+            "say": { "$ref": "#/$defs/say" },
+            "target": { "$ref": "#/$defs/target" }
+          }
+        },
+        {
+          "description": "Type text into the element. Empty text clears it. The player refuses a password field.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "target", "text"],
+          "properties": {
+            "type": { "const": "type" },
+            "say": { "$ref": "#/$defs/say" },
+            "target": { "$ref": "#/$defs/target" },
+            "text": { "$ref": "#/$defs/textValue" }
+          }
+        },
+        {
+          "description": "Choose the option with this visible text.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "target", "option"],
+          "properties": {
+            "type": { "const": "select" },
+            "say": { "$ref": "#/$defs/say" },
+            "target": { "$ref": "#/$defs/target" },
+            "option": { "$ref": "#/$defs/filledTextValue" }
+          }
+        },
+        {
+          "description": "Wait until the element shows.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "target"],
+          "properties": {
+            "type": { "const": "wait_for" },
+            "say": { "$ref": "#/$defs/say" },
+            "target": { "$ref": "#/$defs/target" }
+          }
+        },
+        {
+          "description": "Expect this text in the element, or on the page when no target is given. A failure stops the run.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "text"],
+          "properties": {
+            "type": { "const": "expect_text" },
+            "say": { "$ref": "#/$defs/say" },
+            "text": { "$ref": "#/$defs/filledTextValue" },
+            "target": { "$ref": "#/$defs/target" }
+          }
+        },
+        {
+          "description": "Expect the element to be visible. A failure stops the run.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say", "target"],
+          "properties": {
+            "type": { "const": "expect_visible" },
+            "say": { "$ref": "#/$defs/say" },
+            "target": { "$ref": "#/$defs/target" }
+          }
+        },
+        {
+          "description": "Wait for the person; the say line tells them what for.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say"],
+          "properties": {
+            "type": { "const": "pause" },
+            "say": { "$ref": "#/$defs/say" }
+          }
+        },
+        {
+          "description": "Add a screenshot of the page to the notebook.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "say"],
+          "properties": {
+            "type": { "const": "capture" },
+            "say": { "$ref": "#/$defs/say" }
+          }
+        }
+      ]
+    }
+  }
+}
