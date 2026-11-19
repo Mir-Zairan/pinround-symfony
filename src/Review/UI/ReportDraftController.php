@@ -97,8 +97,11 @@ final class ReportDraftController extends AbstractController
             if ($refused->isNotFound()) {
                 throw $this->createNotFoundException(ReportDraftRefused::NOT_FOUND);
             }
+            // The posted fields match pictures by position and carry the old version's text; shown over the fresh
+            // draft, a second Save would overwrite the other tab's change.
+            $postedForm = ReportDraftRefused::DRAFT_CHANGED === $refused->getMessage() ? null : $request;
 
-            return $this->transactions->run(fn (): Response => $this->renderPage($this->ownDraft($id, ReportDraftPermission::VIEW), $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY, $request));
+            return $this->transactions->run(fn (): Response => $this->renderPage($this->ownDraft($id, ReportDraftPermission::VIEW), $refused->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY, $postedForm));
         }
         $this->addFlash(self::TOAST, self::SAVED);
 
@@ -248,7 +251,7 @@ final class ReportDraftController extends AbstractController
                     $screenshot->title,
                     $screenshot->summary,
                     array_map(static fn (int $number, PlacedPin $pin): PinView => new PinView($number + 1, $pin->xPercent, $pin->yPercent, $pin->note), array_keys($screenshot->pins), $screenshot->pins),
-                    null === $image ? MediaImageStatus::Pending : $image->status,
+                    $image->status ?? MediaImageStatus::Pending,
                 ),
             ];
         }
@@ -257,9 +260,9 @@ final class ReportDraftController extends AbstractController
             'draft' => $draft,
             'pictures' => $pictures,
             'error' => $error,
-            'title' => null === $postedForm ? $draft->title : $postedForm->request->getString('title'),
-            'detail' => null === $postedForm ? $draft->detail : $postedForm->request->getString('detail'),
-            'postedScreenshots' => null === $postedForm ? null : $postedForm->request->all('screenshots'),
+            'title' => $postedForm?->request->getString('title') ?? $draft->title,
+            'detail' => $postedForm?->request->getString('detail') ?? $draft->detail,
+            'postedScreenshots' => $postedForm?->request->all('screenshots'),
             'csrfId' => self::csrfIdOf($draft->id),
         ], new Response(null, $status));
     }

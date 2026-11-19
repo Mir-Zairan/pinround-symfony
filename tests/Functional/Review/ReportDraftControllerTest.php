@@ -216,6 +216,77 @@ final class ReportDraftControllerTest extends WebTestCase
         self::assertSame(['Total is doubled on the cart', 1], array_values($this->rowOf('SELECT title, version FROM rvw_report_draft WHERE id = ?', [$draft])));
     }
 
+    /**
+     * One tab saves version 1 to 2 and removes the first picture; a tab still on version 1 then saves. Its posted text
+     * and Remove tick, matched by position, would land on the second picture, so the form shows the fresh draft only.
+     */
+    #[Test]
+    public function aStaleSaveShowsTheFreshDraftWithoutThePostedValues(): void
+    {
+        $first = $this->addMedia('ready');
+        $second = $this->addMedia('ready');
+        $draft = $this->addDraft('Mia', 'Total is doubled on the cart', [
+            ['media_id' => $first, 'title' => 'Cart', 'summary' => 'The cart page.', 'pins' => []],
+            ['media_id' => $second, 'title' => 'Sum', 'summary' => 'The sum line.', 'pins' => []],
+        ]);
+        $this->logIn($this->client, $this->people['Mia']);
+        $this->client->request('POST', self::LIST.'/'.$draft, [...$this->formFields($draft, 1), 'title' => 'Total is doubled at checkout', 'detail' => 'Seen twice.', 'screenshots' => [['remove' => '1']]]);
+        self::assertResponseStatusCodeSame(303);
+        $fresh = $this->rowOf('SELECT title, detail, screenshots::text AS screenshots, version FROM rvw_report_draft WHERE id = ?', [$draft]);
+        self::assertSame(2, $fresh['version']);
+
+        $page = $this->client->request('POST', self::LIST.'/'.$draft, [...$this->formFields($draft, 1), 'title' => 'From an older tab', 'detail' => 'Older detail', 'screenshots' => [['summary' => 'About the cart page', 'remove' => '1']]]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(ReportDraftRefused::DRAFT_CHANGED, $page->filter('#report-draft-error')->text());
+        self::assertSame('2', $page->filter('form.login__form input[name=version]')->attr('value'));
+        self::assertSame('Total is doubled at checkout', $page->filter('input[name=title]')->attr('value'));
+        self::assertSame('Seen twice.', $page->filter('textarea[name=detail]')->text());
+        self::assertSame('The sum line.', $page->filter('textarea[name="screenshots[0][summary]"]')->text());
+        self::assertSame(0, $page->filter('input[name="screenshots[0][remove]"][checked]')->count());
+        self::assertSame($fresh, $this->rowOf('SELECT title, detail, screenshots::text AS screenshots, version FROM rvw_report_draft WHERE id = ?', [$draft]));
+    }
+
+    #[Test]
+    public function sendFromAnOlderPageOrAnExpiredFormMakesNoTicketAndKeepsTheDraft(): void
+    {
+        $draft = $this->addDraft('Mia', 'Total is doubled on the cart', []);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $refusals = [
+            ReportDraftRefused::DRAFT_CHANGED => $this->formFields($draft, 2),
+            ReportDraftController::FORM_EXPIRED => [ReportDraftController::CSRF_FIELD => 'expired', ReportDraftController::VERSION_FIELD => '1'],
+        ];
+        foreach ($refusals as $reason => $fields) {
+            $this->client->request('POST', self::LIST.'/'.$draft.'/send', $fields);
+            self::assertResponseStatusCodeSame(303, $reason);
+            self::assertSame(self::LIST.'/'.$draft, $this->client->getResponse()->headers->get('Location'), $reason);
+            $page = $this->client->followRedirect();
+            self::assertResponseStatusCodeSame(200, $reason);
+            self::assertSame($reason, $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+            self::assertSame(['Total is doubled on the cart', 1], array_values($this->rowOf('SELECT title, version FROM rvw_report_draft WHERE id = ?', [$draft])), $reason);
+            self::assertSame(0, $this->rowCountOf('SELECT count(*) FROM tkt_ticket'), $reason);
+        }
+    }
+
+    #[Test]
+    public function aSecondSendOfTheSameDraftIsNotFoundAndMakesNoSecondTicket(): void
+    {
+        $draft = $this->addDraft('Mia', 'Total is doubled on the cart', []);
+        $this->logIn($this->client, $this->people['Mia']);
+        $fields = $this->formFields($draft, 1);
+
+        $this->client->request('POST', self::LIST.'/'.$draft.'/send', $fields);
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1', $this->client->getResponse()->headers->get('Location'));
+
+        $this->client->request('POST', self::LIST.'/'.$draft.'/send', $fields);
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(ReportDraftRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent());
+        self::assertSame(1, $this->rowCountOf('SELECT count(*) FROM tkt_ticket'));
+        self::assertSame(0, $this->draftCount());
+    }
+
     #[Test]
     public function theOwnerSavesThenDeletesTheirDraft(): void
     {

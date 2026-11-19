@@ -4,8 +4,8 @@
 import { ApiError, PinroundApi } from '../shared/api.js';
 import { loadSettings } from '../shared/settings.js';
 import { MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH, addToDraftRound, captureTexts, pngOf, upload } from '../capture/capture.js';
+import { NEW_REPORT, fillReportInputs, showCaptures } from './report-captures.js';
 
-const NEW_REPORT = 'new-report';
 const SESSION_KEY = 'pinroundReportCaptures';
 
 const element = (id) => document.getElementById(id);
@@ -26,20 +26,9 @@ async function saveCaptures(captures) {
     await chrome.storage.session.set({ [SESSION_KEY]: captures });
 }
 
-function showCaptures(captures) {
-    const isNewReport = NEW_REPORT === element('target').value;
-    element('report-fields').hidden = !isNewReport;
-    element('project').value = captures.project;
-    element('project').disabled = captures.items.length > 0;
-    element('report-title').value = captures.reportTitle;
-    element('report-captures').hidden = !isNewReport || 0 === captures.items.length;
-    element('captures-count').textContent = `${captures.items.length} of ${MAX_SCREENSHOTS} screenshots for this report.`;
-    element('captures-list').replaceChildren(...captures.items.map((item, index) => {
-        const entry = document.createElement('li');
-        entry.textContent = item.title ?? `Screenshot ${index + 1}`;
-
-        return entry;
-    }));
+function showSavedCaptures(captures) {
+    fillReportInputs(element, captures);
+    showCaptures(element, captures);
 }
 
 async function fillTargets(api) {
@@ -80,7 +69,7 @@ async function capture(api) {
     const uploadId = await upload(api, { project }, file);
     const updated = { ...captures, project, reportTitle: element('report-title').value, items: [...captures.items, { upload_id: uploadId, ...texts }] };
     await saveCaptures(updated);
-    showCaptures(updated);
+    showSavedCaptures(updated);
     showStatus(`Screenshot ${updated.items.length} saved for the report. Capture more pages, or make the report draft.`);
 }
 
@@ -92,7 +81,7 @@ async function makeDraft(api, origin) {
     }
     const answer = await api.call('POST', '/api/v1/reports', { project: captures.project, title, screenshots: captures.items }, captures.idempotencyKey);
     await chrome.storage.session.remove(SESSION_KEY);
-    showCaptures(await loadCaptures());
+    showSavedCaptures(await loadCaptures());
     if ('string' === typeof answer.url && new URL(answer.url).origin === origin) {
         await chrome.tabs.create({ url: answer.url });
     }
@@ -121,9 +110,9 @@ async function start() {
     const api = new PinroundApi(settings.origin, settings.token);
     element('capture-form').hidden = false;
     await fillTargets(api);
-    showCaptures(await loadCaptures());
+    showSavedCaptures(await loadCaptures());
 
-    element('target').addEventListener('change', async () => showCaptures(await loadCaptures()));
+    element('target').addEventListener('change', async () => showCaptures(element, await loadCaptures()));
     element('report-title').addEventListener('change', async () => saveCaptures({ ...(await loadCaptures()), reportTitle: element('report-title').value }));
     element('capture-form').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -136,7 +125,7 @@ async function start() {
     element('make-draft').addEventListener('click', () => run(element('make-draft'), () => makeDraft(api, settings.origin)));
     element('clear-captures').addEventListener('click', async () => {
         await chrome.storage.session.remove(SESSION_KEY);
-        showCaptures(await loadCaptures());
+        showSavedCaptures(await loadCaptures());
         showStatus('Started over. The screenshots already uploaded are not in any report.');
     });
 }
