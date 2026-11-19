@@ -517,13 +517,13 @@ Every screenshot in every round kind (report, checklist, review, draft) has an o
 - Accept: a review round's before picture shows the earlier after picture's title and summary, read-only.
 
 **FR-RND-17 — Findings draft for the person whose turn it is** · Should · Prototype: none (product owner's decision, 2026-11-19)
-On an open ticket, the person whose turn it is (for example the tester in Testing, the reviewer in Code review) may start a draft round, as the assignee may ([FR-RND-09](#rnd--screenshots-pins-and-rounds)). The owner keeps it after the turn passes on. The hand-off dialog ([FR-RND-11](#rnd--screenshots-pins-and-rounds)) asks on the owner's move with any verb. Shared, it reads "Round N · findings by Mia", and each pin becomes an `open` checklist item ([FR-RND-04](#rnd--screenshots-pins-and-rounds)). "Make it a new ticket" moves the draft's content into a new report draft of the same person ([FR-MCP-12](#mcp--mcp-server-and-agent-api)); nothing becomes a ticket until Send ([ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md), Proposed).
+On an open ticket, the person whose turn it is (for example the tester in Testing, the reviewer in Code review) may start a draft round, as the assignee may ([FR-RND-09](#rnd--screenshots-pins-and-rounds)). The owner keeps it after the turn passes on. The hand-off dialog ([FR-RND-11](#rnd--screenshots-pins-and-rounds)) asks on the owner's move with any verb. Shared, it reads "Round N · findings by Mia", and each pin becomes an `open` checklist item ([FR-RND-04](#rnd--screenshots-pins-and-rounds)). "Make it a new ticket" moves the draft's content into a new report draft of the same person ([FR-MCP-12](#mcp--mcp-server-and-agent-api)); nothing becomes a ticket until Send ([ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md)).
 - Accept: someone whose turn it is not, and who is not the assignee, cannot start a draft; nothing is created.
 - Accept: a shared findings round has one `open` checklist item per pin; a self-check round has none.
 - Accept: "Make it a new ticket" on a draft of more than 10 screenshots is refused and nothing changes.
 
 **FR-RND-18 — Pins on the live page** · Should · Prototype: none (product owner's decision, 2026-11-19)
-The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)) has "Pin this page": the person drops numbered pins with notes on the live page, then captures it; each pin is stored as x/y percent of the captured image ([FR-RND-02](#rnd--screenshots-pins-and-rounds)). The person picks one target per session: "New report" (a report draft), their draft round on a ticket, or a notebook ([FR-EXP-01](#exp--explore-notebooks-and-scenarios)). Every capture goes to that target until changed ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md), Proposed).
+The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)) has "Pin this page": the person drops numbered pins with notes on the live page, then captures it; each pin is stored as x/y percent of the captured image ([FR-RND-02](#rnd--screenshots-pins-and-rounds)). The person picks one target per session: "New report" (a report draft), their draft round on a ticket, or a notebook ([FR-EXP-01](#exp--explore-notebooks-and-scenarios)). Every capture goes to that target until changed ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md)).
 - Accept: a pin lands at the same percent (± 0.5) on the captured image.
 - Accept: captures on several pages end in one report draft, in order, up to 10.
 - Accept: with no title and no summary nothing extra is shown and nothing is required.
@@ -738,10 +738,10 @@ An MCP server over Streamable HTTP at `/mcp`, authenticated with a personal acce
 - Accept: the report draft is invisible to everyone but its owner (not admins, not the team), and a project of another organization is "not found".
 - Accept: no ticket exists until a person clicks Send in the app.
 
-**FR-MCP-13 — find_tickets** · Should — `find_tickets {project?, text}` returns at most 10 open tickets the caller may see, with key, title, step, whose turn, and whether the caller may start a draft on it now ([FR-RND-17](#rnd--screenshots-pins-and-rounds)). Scope `read`. Text comes back inside delimiters ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md), Proposed).
+**FR-MCP-13 — find_tickets** · Should — `find_tickets {project?, text}` returns at most 10 open tickets the caller may see, with key, title, step, whose turn, and whether the caller may start a draft on it now ([FR-RND-17](#rnd--screenshots-pins-and-rounds)). Scope `read`. Text comes back inside delimiters ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md)).
 - Accept: a ticket the caller may not see never appears; `text` over 200 characters is refused.
 
-**FR-MCP-14 — Prompt: report while investigating** · Should — the MCP server offers the prompt `report_while_investigating`. It tells any MCP client to keep an evidence log while it checks a problem (each case: a before picture, title, summary, pins), to upload nothing until the person decides, and at the end to offer "New report", "Add to <key>" or "Check more", then to file with `create_upload`, `create_report` or `add_screenshot` ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md), Proposed).
+**FR-MCP-14 — Prompt: report while investigating** · Should — the MCP server offers the prompt `report_while_investigating`. It tells any MCP client to keep an evidence log while it checks a problem (each case: a before picture, title, summary, pins), to upload nothing until the person decides, and at the end to offer "New report", "Add to <key>" or "Check more", then to file with `create_upload`, `create_report` or `add_screenshot` ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md)).
 - Accept: `prompts/list` shows it and `prompts/get` returns its versioned text.
 - Accept: a check that finds no bug leaves nothing in pinround.
 
@@ -749,7 +749,7 @@ An MCP server over Streamable HTTP at `/mcp`, authenticated with a personal acce
 
 ## EXP — Explore: notebooks and scenarios
 
-*Story:* Lena takes over the order page. She pins three spots she does not understand into a notebook and asks her Claude Code to explain them. Then she asks for every warning on the page. Claude Code saves six scenarios, and she plays them one by one on her local app with the extension ([ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md), Proposed).
+*Story:* Lena takes over the order page. She pins three spots she does not understand into a notebook and asks her Claude Code to explain them. Then she asks for every warning on the page. Claude Code saves six scenarios, and she plays them one by one on her local app with the extension ([ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md)).
 
 **FR-EXP-01 — Notebook** · Should · Prototype: none (product owner's decision, 2026-11-19)
 A private space of one person, not linked to a ticket: a name, an optional project, up to 10 screenshots with titles, summaries and pins, and up to 20 scenarios. "My notebooks" lists them; the owner can rename and delete.
