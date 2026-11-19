@@ -41,7 +41,7 @@ final class ReportDraftCursorTest extends TestCase
     public function aDraftIdThatIsNotACanonicalLowercaseUuidIsRefused(string $draftId): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A report draft cursor\'s draft id must be a canonical lowercase uuid.');
+        $this->expectExceptionMessageIsOrContains('A report draft cursor\'s draft id must be a canonical lowercase uuid.');
 
         new ReportDraftCursor(new \DateTimeImmutable('2026-03-02 10:00:00+00:00'), $draftId);
     }

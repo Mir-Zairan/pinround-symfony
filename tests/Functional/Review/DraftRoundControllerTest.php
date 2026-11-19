@@ -938,7 +938,9 @@ final class DraftRoundControllerTest extends WebTestCase
         $organizationId = $this->acmeFoods->toString();
         $count = 0;
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$count): int {
-            $count = (int) $migrator->fetchOne('SELECT count(*) FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
+            $ticketCount = $migrator->fetchOne('SELECT count(*) FROM tkt_ticket WHERE organization_id = ?', [$organizationId]);
+            self::assertIsInt($ticketCount);
+            $count = $ticketCount;
 
             return $count;
         });

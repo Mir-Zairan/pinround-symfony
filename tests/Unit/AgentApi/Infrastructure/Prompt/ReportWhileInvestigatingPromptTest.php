@@ -59,7 +59,7 @@ final class ReportWhileInvestigatingPromptTest extends TestCase
         $prompt = new ReportWhileInvestigatingPrompt(__DIR__.'/no-such-folder');
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('The prompt file report_while_investigating.v1.md is missing or empty.');
+        $this->expectExceptionMessageIsOrContains('The prompt file report_while_investigating.v1.md is missing or empty.');
 
         $prompt->text();
     }

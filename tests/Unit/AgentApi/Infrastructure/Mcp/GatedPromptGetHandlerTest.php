@@ -108,7 +108,7 @@ final class GatedPromptGetHandlerTest extends TestCase
         $handler = new GatedPromptGetHandler(new ReportWhileInvestigatingPrompt(), self::omarsToken(true), self::omar(true), new ToolCallAuditor($failingAuditLog), $this->logger);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('the audit table is gone');
+        $this->expectExceptionMessageIsOrContains('the audit table is gone');
 
         $handler->handle(self::getOf(ReportWhileInvestigatingPrompt::NAME), self::createStub(SessionInterface::class));
     }
