@@ -53,6 +53,21 @@ final class ToolCallAuditorTest extends TestCase
         self::assertSame(['tool' => 'whoami', 'outcome' => 'ok'], $auditLog->entries[0]->data);
     }
 
+    #[Test]
+    public function aPromptReadRowHasThePromptTargetTypeNoIdAndOnlyThePromptsNameAndTheOutcome(): void
+    {
+        $auditLog = new RecordingAuditLog(new OrganizationId(GateFixture::ACME_FOODS));
+
+        new ToolCallAuditor($auditLog)->recordPromptRead($this->omarsAccess(), new UserId(GateFixture::OMAR), 'report_while_investigating', ToolCallOutcome::InvalidInput);
+
+        self::assertCount(1, $auditLog->entries);
+        $entry = $auditLog->entries[0];
+        self::assertSame([ActorKind::Token, GateFixture::OMAR, GateFixture::OMARS_TOKEN], [$entry->actorKind, $entry->actorUserId, $entry->actorTokenId]);
+        self::assertSame('mcp.tool_called', $entry->action);
+        self::assertSame(['mcp_prompt', null], [$entry->targetType, $entry->targetId]);
+        self::assertSame(['tool' => 'report_while_investigating', 'outcome' => 'invalid_input'], $entry->data);
+    }
+
     private function omarsAccess(): ApiTokenAccess
     {
         return new ApiTokenAccess(GateFixture::OMARS_TOKEN, new OrganizationId(GateFixture::ACME_FOODS), ['read'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC'));
