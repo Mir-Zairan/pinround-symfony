@@ -1,0 +1,69 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- One of the person's notebooks (NotebookController::page): rename it, see its pictures with their pins and notes and
+    its scenarios by title, or delete it. Pictures and scenarios come from Claude Code or the browser extension and are
+    read-only here. -#}
+
+{% block title %}{{ notebook.title }} · Notebook · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/report-drafts.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security report-draft">
+        <twig:Button variant="text" href="{{ path('review_notebooks') }}"><span aria-hidden="true">&lt;</span> My notebooks</twig:Button>
+        <h1 class="security__title">{{ notebook.title }}</h1>
+        <p class="login__hint">Only you see this notebook.</p>
+        {% if error %}
+            <p class="login__error" role="alert" id="notebook-error">{{ error }}</p>
+        {% endif %}
+
+        <form class="login__form" method="post" action="{{ path('review_notebook_rename', {id: notebook.id}) }}" {% if error %}aria-describedby="notebook-error"{% endif %}>
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
+            <label class="login__field">
+                Notebook title
+                <input class="login__input" type="text" name="title" value="{{ title }}" maxlength="120" required>
+            </label>
+            <p class="report-draft__actions">
+                <twig:Button type="submit" variant="outline">Rename</twig:Button>
+            </p>
+        </form>
+
+        <twig:Card tag="section" class="security__section report-draft__picture" aria-labelledby="notebook-screenshots-heading">
+            <h2 class="security__heading" id="notebook-screenshots-heading">Screenshots</h2>
+            {% for screenshot in screenshots %}
+                <section class="report-draft__picture" aria-labelledby="notebook-shot-{{ loop.index }}-heading">
+                    <h3 class="security__heading" id="notebook-shot-{{ loop.index }}-heading">Screenshot {{ loop.index }}</h3>
+                    <twig:Screenshot :view="screenshot" :headingLevel="4" loading="lazy" />
+                    <twig:PinList :view="screenshot" />
+                </section>
+            {% else %}
+                <twig:EmptyState message="No screenshots yet." />
+            {% endfor %}
+        </twig:Card>
+
+        <twig:Card tag="section" class="security__section report-draft__picture" aria-labelledby="notebook-scenarios-heading">
+            <h2 class="security__heading" id="notebook-scenarios-heading">Scenarios</h2>
+            {% if notebook.scenarios is empty %}
+                <twig:EmptyState message="No scenarios yet." />
+            {% else %}
+                <ol>
+                    {% for scenario in notebook.scenarios %}
+                        <li>{{ scenario.title }}</li>
+                    {% endfor %}
+                </ol>
+            {% endif %}
+        </twig:Card>
+
+        <div class="report-draft__actions">
+            <form method="post" action="{{ path('review_notebook_delete', {id: notebook.id}) }}" data-turbo-confirm="Delete this notebook? This cannot be undone.">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
+                <twig:Button type="submit" variant="text">Delete notebook</twig:Button>
+            </form>
+        </div>
+    </div>
+{% endblock %}
