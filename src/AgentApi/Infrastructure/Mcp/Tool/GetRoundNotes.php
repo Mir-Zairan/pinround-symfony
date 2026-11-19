@@ -238,9 +238,11 @@ final readonly class GetRoundNotes implements AgentTool
     }
 
     /**
+     * The checklist as both get_round_notes and get_ticket answer it, each pin note wrapped as UntrustedText.
+     *
      * @return array<string, mixed>
      */
-    private static function checklistFieldsOf(ChecklistView $checklist): array
+    public static function checklistFieldsOf(ChecklistView $checklist): array
     {
         return [
             'round_id' => $checklist->roundId,
