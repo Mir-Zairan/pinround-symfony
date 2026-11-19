@@ -6,6 +6,7 @@ namespace App\Review\Application\ReportDraft;
 
 use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadedMedia;
+use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
@@ -16,15 +17,17 @@ use App\Review\Api\ScreenshotWithPins;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\ProblemReport;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketKeyQueries;
 
 /**
- * ReportDrafts on rvw_report_draft (ADR-0039, ADR-0040). Send makes the ticket through Ticketing's TicketCommands, as
- * the person reporting it, with the default type and priority of Report a problem (Bug, Normal) and no assignee, so
- * it starts in Backlog for the team to plan; then Round 0 through RoundCommands::createReport; then removes the draft.
+ * ReportDrafts on rvw_report_draft (ADR-0039, ADR-0040). Send makes the ticket through Ticketing's TicketCommands::report,
+ * as the person reporting it, in the project's team, with the default type and priority of Report a problem (Bug,
+ * Normal) and no assignee, so it starts in Backlog with the check reasons and visibility its words give; then Round 0
+ * through RoundCommands::createReport; then removes the draft.
  * Holds no state (ADR-0008).
  */
 final readonly class UseCaseReportDrafts implements ReportDrafts
@@ -110,7 +113,22 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         }
         $project = $this->reportableProject($draft->projectKey);
 
-        $key = $this->ticketCommands->create($organizationId, $owner, $project->id(), $draft->title, $draft->detail, self::DEFAULT_TYPE, self::DEFAULT_PRIORITY, null, $at);
+        $pinNotes = array_merge([], ...array_map(static fn (ScreenshotWithPins $screenshot): array => array_map(static fn (PlacedPin $pin): string => $pin->note, $screenshot->pins), $draft->screenshots));
+        // Through report, as Report a problem makes a ticket: Ticketing works out the check reasons and team-only
+        // visibility from the words, so a draft an agent filed is checked like any report.
+        $key = $this->ticketCommands->report(new ProblemReport(
+            $organizationId,
+            $owner,
+            $project->id(),
+            $project->teamId(),
+            $draft->title,
+            $draft->detail,
+            self::DEFAULT_TYPE,
+            self::DEFAULT_PRIORITY,
+            null,
+            $pinNotes,
+            $at,
+        ))->key;
         if ([] !== $draft->screenshots) {
             $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new \LogicException('The ticket Send just made is not found by its key.');
             try {

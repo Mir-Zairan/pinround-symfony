@@ -133,6 +133,23 @@ final class ReportDraftControllerTest extends WebTestCase
         self::assertSame(0, $this->draftCount());
     }
 
+    /**
+     * Send makes the ticket as Report a problem does (TicketCommands::report): a security word makes it team-only and
+     * risky, and an empty detail with no pin is little info, so Shop's lead, Lena, gets the check.
+     */
+    #[Test]
+    public function aSentDraftGetsItsCheckReasonsAndTeamOnlyVisibilityFromItsWords(): void
+    {
+        $draft = $this->addDraft('Mia', 'Password shown in the address bar', []);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', self::LIST.'/'.$draft.'/send', $this->formFields($draft, 1));
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(['team', '{info,risk}', $this->shop->toString()], array_values($this->rowOf('SELECT visibility, check_reasons::text AS reasons, team_id FROM tkt_ticket WHERE key = ?', ['SHOP-1'])));
+        self::assertSame([$this->people['Lena']->id()->toString(), 'check'], array_values($this->rowOf('SELECT turn.turn_user_id, turn.kind FROM ins_ticket_turn turn JOIN tkt_ticket t ON t.organization_id = turn.organization_id AND t.id = turn.ticket_id WHERE t.key = ?', ['SHOP-1'])));
+    }
+
     #[Test]
     public function nobodyButTheOwnerCanSendDeleteOrSaveAndNothingChanges(): void
     {
