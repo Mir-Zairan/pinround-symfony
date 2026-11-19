@@ -35,7 +35,7 @@ use Symfony\Component\Routing\Attribute\Route;
  * Six queries beyond the request's own when the steps, rules and team's people are cached, seven for a lead whose move
  * list offers Needs input (performance-and-scale.md: ten at most for the page): the settings (step policy and
  * triager, one query), the ticket with its project and parent, the names of everyone the page shows in one batch, the
- * saved turn with the waiting turns of {@see NowNextSentences} in one, the latest moves of What happened in one
+ * saved turn with the waiting turns of {@see \App\Ticketing\Application\SavedTicketPageTurns} in one, the latest moves of What happened in one
  * ({@see TicketPageParts}), and the position in one; the lead's Needs input dialog adds its membership read, and a miss
  * of the team's people adds two. A list's project adds its lookup; a list the ticket is not in adds the plain list's
  * position. The thread and the Rounds section load in lazy frames of their own requests (ThreadController,

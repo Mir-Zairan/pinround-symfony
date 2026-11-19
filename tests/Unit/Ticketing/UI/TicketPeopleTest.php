@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Ticketing\UI;
 
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Workflow\Application\Transition\GuardFixtures;
+use App\Ticketing\Application\TicketPeopleRoles;
 use App\Ticketing\UI\TicketPeople;
 use App\Ticketing\UI\TicketPerson;
 use App\Workflow\Api\NeedsYouKind;
@@ -167,7 +168,7 @@ final class TicketPeopleTest extends TestCase
     {
         $ticket = GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA, hasTeam: false, reporter: GuardFixtures::LENA);
 
-        $people = new TicketPeople(self::turnPeopleChoice())->of($ticket, self::NAMES, null, null, new UserId(GuardFixtures::OMAR));
+        $people = new TicketPeople(new TicketPeopleRoles(self::turnPeopleChoice()))->of($ticket, self::NAMES, null, null, new UserId(GuardFixtures::OMAR));
 
         self::assertSame([
             ['Omar', 'Assignee', true],
@@ -181,7 +182,7 @@ final class TicketPeopleTest extends TestCase
      */
     private static function peopleOf(TicketState $ticket, Turn $turn, ?TeamFacts $team = null, string $viewerId = GuardFixtures::VIEWER): array
     {
-        return new TicketPeople(self::turnPeopleChoice())->of($ticket, self::NAMES, $team ?? GuardFixtures::team(), $turn, new UserId($viewerId));
+        return new TicketPeople(new TicketPeopleRoles(self::turnPeopleChoice()))->of($ticket, self::NAMES, $team ?? GuardFixtures::team(), $turn, new UserId($viewerId));
     }
 
     private static function turnPeopleChoice(): LoadBasedTurnPeopleChoice
