@@ -6,6 +6,7 @@ namespace App\Tests\Functional\AgentApi\Rest;
 
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -15,6 +16,7 @@ use App\AgentApi\Infrastructure\Rest\StoredAnswer;
 use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Domain\User;
+use App\Review\Api\ReportDraftRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -298,7 +300,7 @@ final class RestApiTest extends WebTestCase
         self::assertSame(['screenshot_id' => $screenshots[0]['id'], 'round_id' => $miasDraft, 'status' => AddScreenshot::ADDED, 'pin_count' => 0], $this->json());
         self::assertSame([0, 'Cart total'], [$screenshots[0]['position'], $screenshots[0]['title']]);
         // Both calls share the frozen clock's time, so their rows tie on `at` and their order is not defined.
-        self::assertEqualsCanonicalizing([[$tokenId, 'not_found'], [$tokenId, 'ok']], $this->addScreenshotAuditRows());
+        self::assertEqualsCanonicalizing([[$tokenId, 'not_found'], [$tokenId, 'ok']], $this->toolAuditRowsOf(AddScreenshot::NAME));
     }
 
     /**
@@ -376,6 +378,105 @@ final class RestApiTest extends WebTestCase
         self::assertSame(0, $this->rowCountOf('tkt_ticket'));
     }
 
+    /**
+     * Lena's extension makes a report draft with one picture, then adds a second one twice with one Idempotency-Key:
+     * the draft holds both in order, the second answer is the first replayed, and no ticket is made.
+     */
+    #[Test]
+    public function theOwnerAddsASecondPictureToHerReportDraftOnceForOneIdempotencyKeyWithoutATicket(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $firstPicture = $this->addReadyUpload('Lena', 'new_report', 'SHOP');
+        $this->request($token, 'POST', '/api/v1/reports', ['project' => 'SHOP', 'title' => 'Total is doubled', 'screenshots' => [['upload_id' => $firstPicture]]]);
+        self::assertResponseStatusCodeSame(201);
+        $draftId = $this->json()['draft_id'] ?? null;
+        self::assertIsString($draftId);
+        $secondPicture = $this->addReadyUpload('Lena', 'new_report', 'SHOP');
+        $body = ['upload_id' => $secondPicture, 'title' => 'Cart total', 'pins' => [['x_pct' => 10, 'y_pct' => 20, 'note' => 'Doubled']]];
+
+        $this->request($token, 'POST', '/api/v1/reports/'.$draftId.'/screenshots', $body, ['HTTP_IDEMPOTENCY_KEY' => 'shot-2']);
+        self::assertResponseStatusCodeSame(200);
+        $first = $this->json();
+        self::assertSame(['draft_id' => $draftId, 'media_id' => $secondPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 2], $first);
+        $this->request($token, 'POST', '/api/v1/reports/'.$draftId.'/screenshots', $body, ['HTTP_IDEMPOTENCY_KEY' => 'shot-2']);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($first, $this->json());
+        self::assertSame('true', $this->client->getResponse()->headers->get(RestToolController::REPLAYED_HEADER));
+
+        self::assertSame([[$draftId, $firstPicture, $secondPicture, 'Cart total', 2]], $this->rowsOf(
+            "SELECT id, screenshots->0->>'media_id', screenshots->1->>'media_id', screenshots->1->>'title', version FROM rvw_report_draft",
+        ));
+        self::assertSame([[$tokenId, 'ok']], $this->toolAuditRowsOf(AddReportScreenshot::NAME), 'The replay runs no tool.');
+        self::assertSame(0, $this->rowCountOf('tkt_ticket'));
+    }
+
+    /**
+     * The draft holds the ten pictures create_report allows; the eleventh is Review's plain refusal, 422.
+     */
+    #[Test]
+    public function anEleventhPictureForAReportDraftIsRefusedAndTheDraftKeepsTen(): void
+    {
+        [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $screenshots = array_map(fn (int $number): array => ['upload_id' => $this->addReadyUpload('Lena', 'new_report', 'SHOP')], range(1, 10));
+        $this->request($token, 'POST', '/api/v1/reports', ['project' => 'SHOP', 'title' => 'Total is doubled', 'screenshots' => $screenshots]);
+        self::assertResponseStatusCodeSame(201);
+        $draftId = $this->json()['draft_id'] ?? null;
+        self::assertIsString($draftId);
+        $eleventh = $this->addReadyUpload('Lena', 'new_report', 'SHOP');
+        $draftsBefore = $this->rowsOf('SELECT id, screenshots::text, version FROM rvw_report_draft');
+
+        $this->request($token, 'POST', '/api/v1/reports/'.$draftId.'/screenshots', ['upload_id' => $eleventh]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(['error' => ReportDraftRefused::TOO_MANY_SCREENSHOTS, 'outcome' => 'refused'], $this->json());
+        self::assertSame($draftsBefore, $this->rowsOf('SELECT id, screenshots::text, version FROM rvw_report_draft'));
+        self::assertSame([[10]], $this->rowsOf('SELECT jsonb_array_length(screenshots) FROM rvw_report_draft'));
+    }
+
+    /**
+     * Omar and Sara hold reports:write, each with an upload of their own for SHOP, so only the owner rule can refuse
+     * them, and Lena's Beta Bakery token only the tenant; an unknown and a malformed id are 404 too, never 500. Lena's
+     * token without reports:write is 403. Nothing changes and no ticket is made.
+     */
+    #[Test]
+    public function anotherPersonsReportDraftAnotherOrganizationAnUnknownIdAndATokenWithoutReportsWriteAreRefusedAndNothingChanges(): void
+    {
+        [, $lenasToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $this->request($lenasToken, 'POST', '/api/v1/reports', ['project' => 'SHOP', 'title' => 'Total is doubled']);
+        self::assertResponseStatusCodeSame(201);
+        $lenasDraft = $this->json()['draft_id'] ?? null;
+        self::assertIsString($lenasDraft);
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($this->people['Lena'], $betaBakery);
+        $lenasUpload = $this->addReadyUpload('Lena', 'new_report', 'SHOP');
+        $draftsBefore = $this->rowsOf('SELECT id, owner_id, screenshots::text, version FROM rvw_report_draft');
+        self::assertCount(1, $draftsBefore);
+
+        $callers = [
+            [$this->issueApiToken($this->people['Omar'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite])[1], $this->addReadyUpload('Omar', 'new_report', 'SHOP')],
+            [$this->issueApiToken($this->people['Sara'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite])[1], $this->addReadyUpload('Sara', 'new_report', 'SHOP')],
+            [$this->issueApiToken($this->people['Lena'], $betaBakery, scopes: [ApiTokenScope::ReportsWrite])[1], $lenasUpload],
+        ];
+        foreach ($callers as [$token, $uploadId]) {
+            $this->request($token, 'POST', '/api/v1/reports/'.$lenasDraft.'/screenshots', ['upload_id' => $uploadId]);
+            self::assertResponseStatusCodeSame(404);
+            self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+        }
+        foreach (['0197a3c0-0000-7000-8000-0000000f9999', 'not-a-uuid'] as $draftId) {
+            $this->request($lenasToken, 'POST', '/api/v1/reports/'.$draftId.'/screenshots', ['upload_id' => $lenasUpload]);
+            self::assertResponseStatusCodeSame(404, $draftId);
+            self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+        }
+
+        [, $readToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::RoundsWrite, ApiTokenScope::NotebooksWrite]);
+        $this->request($readToken, 'POST', '/api/v1/reports/'.$lenasDraft.'/screenshots', ['upload_id' => $lenasUpload]);
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['error' => \sprintf(ToolRefusal::MISSING_SCOPE, 'reports:write'), 'outcome' => 'missing_scope'], $this->json());
+
+        self::assertSame($draftsBefore, $this->rowsOf('SELECT id, owner_id, screenshots::text, version FROM rvw_report_draft'));
+        self::assertSame(0, $this->rowCountOf('tkt_ticket'));
+    }
+
     private function addTodoStep(): string
     {
         $stepId = Uuid::v7()->toRfc4122();
@@ -419,9 +520,9 @@ final class RestApiTest extends WebTestCase
     }
 
     /**
-     * @return list<list<mixed>> each add_screenshot call's token and outcome, oldest first
+     * @return list<list<mixed>> each call's token and outcome of the tool named $toolName, oldest first
      */
-    private function addScreenshotAuditRows(): array
+    private function toolAuditRowsOf(string $toolName): array
     {
         return array_map(static function (array $row): array {
             self::assertIsString($row[1]);
@@ -429,7 +530,7 @@ final class RestApiTest extends WebTestCase
             self::assertIsArray($data);
 
             return [$row[0], $data['outcome'] ?? null];
-        }, $this->rowsOf(\sprintf("SELECT actor_token_id, data::text FROM aud_event WHERE data->>'tool' = '%s' ORDER BY at, id", AddScreenshot::NAME)));
+        }, $this->rowsOf(\sprintf("SELECT actor_token_id, data::text FROM aud_event WHERE data->>'tool' = '%s' ORDER BY at, id", $toolName)));
     }
 
     /**
