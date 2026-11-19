@@ -6,6 +6,7 @@ namespace App\AgentApi\Infrastructure\Rest;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebook;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
@@ -92,6 +93,16 @@ final readonly class RestToolController
     public function reports(Request $request): Response
     {
         return $this->idempotent($request, fn (array $body): Response => $this->run(CreateReport::NAME, $body, Response::HTTP_CREATED));
+    }
+
+    /**
+     * One more picture at the end of the caller's own report draft (add_report_screenshot, reports:write), uploaded
+     * through /api/v1/uploads with the draft's project, as for /api/v1/reports.
+     */
+    #[Route('/api/v1/reports/{id}/screenshots', name: 'api_v1_report_screenshots', methods: ['POST'])]
+    public function reportScreenshots(string $id, Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->run(AddReportScreenshot::NAME, [...$body, 'report' => $id], Response::HTTP_OK));
     }
 
     #[Route('/api/v1/tickets/{key}/draft/screenshots', name: 'api_v1_draft_screenshots', methods: ['POST'])]

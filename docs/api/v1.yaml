@@ -97,6 +97,34 @@ paths:
         '403': { $ref: '#/components/responses/Refused' }
         '404': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/reports/{id}/screenshots:
+    post:
+      summary: Add a picture at the end of my own report draft (add_report_screenshot, scope reports:write). Never a ticket.
+      description: >-
+        Begin the upload with `POST /api/v1/uploads` and `project` set to the draft's project, as for
+        `POST /api/v1/reports`, then PUT the file. At most 10 pictures; the 11th is 422. A picture in the draft
+        already is not added again (`status: already_in_draft`). Another person's draft, another organization's, an
+        unknown or malformed id, and an upload begun by anyone else or for another project are 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [upload_id]
+              properties:
+                upload_id: { type: string }
+                title: { type: string, maxLength: 120 }
+                summary: { type: string, maxLength: 600 }
+                pins: { type: array, maxItems: 100, items: { type: object } }
+      responses:
+        '200': { description: '{draft_id, media_id, status: added | already_in_draft, screenshot_count}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
   /api/v1/tickets/{key}/draft/screenshots:
     post:
       summary: Add an uploaded picture to my own draft round on the ticket (add_screenshot, scope rounds:write).
