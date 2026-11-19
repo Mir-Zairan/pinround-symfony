@@ -339,8 +339,8 @@ final class RestApiTest extends WebTestCase
     }
 
     /**
-     * Omar and Sara hold notebooks:write, so only the owner rule can refuse them; an unknown and a malformed id are
-     * 404 too, never 500. Lena's token without notebooks:write is 403 on each route. Nothing changes.
+     * Omar and Sara hold notebooks:write, so only the owner rule can refuse them, and Lena's Beta Bakery token only the
+     * tenant; an unknown and a malformed id are 404 too, never 500. Lena's token without notebooks:write is 403 on each route. Nothing changes.
      */
     #[Test]
     public function anotherPersonsNotebookAnUnknownIdAndATokenWithoutNotebooksWriteAreRefusedAndNothingChanges(): void
@@ -352,11 +352,18 @@ final class RestApiTest extends WebTestCase
         self::assertIsString($lenasNotebook);
         $lenasUpload = $this->addReadyUpload('Lena', 'notebook', $lenasNotebook);
         $file = ['mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256];
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($this->people['Lena'], $betaBakery);
         $notebooksBefore = $this->rowsOf('SELECT id, owner_id, title, screenshots::text, version FROM rvw_notebook');
+        self::assertCount(1, $notebooksBefore);
         $intentsBefore = $this->rowsOf('SELECT id, used_at FROM med_upload_intent ORDER BY id');
 
-        foreach (['Omar', 'Sara'] as $person) {
-            [, $token] = $this->issueApiToken($this->people[$person], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        $callers = [
+            'Omar' => $this->issueApiToken($this->people['Omar'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite])[1],
+            'Sara' => $this->issueApiToken($this->people['Sara'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite])[1],
+            'Lena of Beta Bakery' => $this->issueApiToken($this->people['Lena'], $betaBakery, scopes: [ApiTokenScope::NotebooksWrite])[1],
+        ];
+        foreach ($callers as $person => $token) {
             foreach ([$lenasNotebook, '0197a3c0-0000-7000-8000-0000000b9999', 'not-a-notebook'] as $notebookId) {
                 $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/uploads', $file);
                 self::assertResponseStatusCodeSame(404, $person.' '.$notebookId);
