@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
@@ -86,20 +87,7 @@ final readonly class CreateReport implements AgentTool
                                 'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_UPLOAD_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
                                 'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                                 'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                                'pins' => [
-                                    'type' => 'array',
-                                    'maxItems' => RoundCommands::MAX_PINS_PER_SCREENSHOT,
-                                    'items' => [
-                                        'type' => 'object',
-                                        'properties' => [
-                                            'x_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the left edge, in percent of the width.'],
-                                            'y_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the top edge, in percent of the height.'],
-                                            'note' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_PIN_NOTE_LENGTH, 'description' => 'What is at the pin.'],
-                                        ],
-                                        'required' => ['x_pct', 'y_pct', 'note'],
-                                        'additionalProperties' => false,
-                                    ],
-                                ],
+                                'pins' => PlacedPinArguments::schema(),
                             ],
                             'required' => ['upload_id'],
                             'additionalProperties' => false,
@@ -223,25 +211,15 @@ final readonly class CreateReport implements AgentTool
             }
             $title = $screenshot['title'] ?? null;
             $summary = $screenshot['summary'] ?? null;
-            $pins = $screenshot['pins'] ?? [];
-            if ((null !== $title && !\is_string($title)) || (null !== $summary && !\is_string($summary)) || !\is_array($pins)) {
-                throw new \LogicException('The input schema lets create_report run only with a text title, summary and a list of pins.');
+            if ((null !== $title && !\is_string($title)) || (null !== $summary && !\is_string($summary))) {
+                throw new \LogicException('The input schema lets create_report run only with a text title and summary.');
             }
 
             return [
                 'upload_id' => $screenshot['upload_id'],
                 'title' => $title,
                 'summary' => $summary,
-                'pins' => array_values(array_map(static function (mixed $pin): PlacedPin {
-                    $xPercent = \is_array($pin) ? ($pin['x_pct'] ?? null) : null;
-                    $yPercent = \is_array($pin) ? ($pin['y_pct'] ?? null) : null;
-                    $note = \is_array($pin) ? ($pin['note'] ?? null) : null;
-                    if (!(\is_int($xPercent) || \is_float($xPercent)) || !(\is_int($yPercent) || \is_float($yPercent)) || !\is_string($note)) {
-                        throw new \LogicException('The input schema lets create_report run only with pins of {x_pct, y_pct, note}.');
-                    }
-
-                    return new PlacedPin((float) $xPercent, (float) $yPercent, $note);
-                }, $pins)),
+                'pins' => PlacedPinArguments::of($screenshot['pins'] ?? null, self::NAME),
             ];
         }, $screenshots));
     }

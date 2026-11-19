@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
@@ -16,7 +17,6 @@ use App\Media\Api\UploadIntentNotFound;
 use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\DraftScreenshotCommands;
-use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
@@ -79,21 +79,7 @@ final readonly class AddScreenshot implements AgentTool
                     'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => 'The upload_id create_upload gave, after the file was PUT to its put_url.'],
                     'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                     'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                    'pins' => [
-                        'type' => 'array',
-                        'maxItems' => RoundCommands::MAX_PINS_PER_SCREENSHOT,
-                        'description' => 'Pins on the picture, numbered 1, 2, … in this order.',
-                        'items' => [
-                            'type' => 'object',
-                            'properties' => [
-                                'x_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the left edge, in percent of the width.'],
-                                'y_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the top edge, in percent of the height.'],
-                                'note' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_PIN_NOTE_LENGTH, 'description' => \sprintf('What is at the pin, at most %s characters.', number_format(RoundCommands::MAX_PIN_NOTE_LENGTH))],
-                            ],
-                            'required' => ['x_pct', 'y_pct', 'note'],
-                            'additionalProperties' => false,
-                        ],
-                    ],
+                    'pins' => PlacedPinArguments::schema(),
                 ],
                 'required' => ['key', 'upload_id'],
                 'additionalProperties' => false,
@@ -190,7 +176,7 @@ final readonly class AddScreenshot implements AgentTool
      */
     private function addOnce(array $arguments, string $roundId, string $mediaId): CallToolResult
     {
-        $screenshot = new ScreenshotWithPins($mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), self::placedPinsOf($arguments));
+        $screenshot = new ScreenshotWithPins($mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
         try {
             $added = $this->draftScreenshotCommands->addDraftScreenshotOnce($roundId, $this->callerId(), $screenshot, $this->clock->now());
         } catch (RoundRefused $refused) {
@@ -217,30 +203,6 @@ final readonly class AddScreenshot implements AgentTool
             $refused->isInvalidContent() => ToolRefusal::invalidInput($refused->getMessage()),
             default => ToolRefusal::refused($refused->getMessage()),
         };
-    }
-
-    /**
-     * @param array<string, mixed> $arguments valid against the input schema
-     *
-     * @return list<PlacedPin>
-     */
-    private static function placedPinsOf(array $arguments): array
-    {
-        $pins = $arguments['pins'] ?? [];
-        if (!\is_array($pins)) {
-            throw new \LogicException('The input schema lets add_screenshot run only with "pins" as a list.');
-        }
-
-        return array_values(array_map(static function (mixed $pin): PlacedPin {
-            $xPercent = \is_array($pin) ? ($pin['x_pct'] ?? null) : null;
-            $yPercent = \is_array($pin) ? ($pin['y_pct'] ?? null) : null;
-            $note = \is_array($pin) ? ($pin['note'] ?? null) : null;
-            if (!(\is_int($xPercent) || \is_float($xPercent)) || !(\is_int($yPercent) || \is_float($yPercent)) || !\is_string($note)) {
-                throw new \LogicException('The input schema lets add_screenshot run only with pins of {x_pct, y_pct, note}.');
-            }
-
-            return new PlacedPin((float) $xPercent, (float) $yPercent, $note);
-        }, $pins));
     }
 
     /**
