@@ -37,11 +37,6 @@ final class RecordingChecklistMarks implements ChecklistCommands
         throw new \LogicException('set_verdict never creates a checklist.');
     }
 
-    public function createFromFindings(string $roundId, \DateTimeImmutable $at): int
-    {
-        throw new \LogicException('set_verdict never creates a checklist.');
-    }
-
     public function markOk(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
     {
         throw new \LogicException('set_verdict never checks an item OK.');

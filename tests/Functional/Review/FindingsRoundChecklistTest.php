@@ -271,17 +271,44 @@ final class FindingsRoundChecklistTest extends WebTestCase
     }
 
     /**
+     * Pin numbers start at 1 on each picture, so a second picture with its own pin 1 gives two rows with badge 1: each
+     * row's label names its picture, and each button is described by its own row's label and note.
+     */
+    #[Test]
+    public function twoFindingsWithPinOneOnDifferentPicturesAreToldApartByTheirPicture(): void
+    {
+        $secondShot = $this->addScreenshot($this->miasDraftId, $this->addMedia('ready'), 1, null, null, 'not_right');
+        $this->addPin($secondShot, 1, '50.00', '50.00', 'Badge overlaps the price', 'Mia');
+        $this->shareThroughTheForm();
+        $itemIds = $this->itemIdsInPictureAndPinOrder();
+        self::assertCount(3, $itemIds, 'The share made no item per pin, so nothing below is proven.');
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $rows = $this->roundsFrame()->filter('div#checklist-'.$this->miasDraftId.' .checklist__row');
+
+        self::assertSame(
+            [
+                ['1', 'Screenshot 1 · Small screen · pin 1', self::CUT_OFF_NOTE],
+                ['2', 'Screenshot 1 · Small screen · pin 2', self::DOUBLE_WARNING_NOTE],
+                ['1', 'Screenshot 2 · pin 1', 'Badge overlaps the price'],
+            ],
+            $rows->each(static fn (Crawler $row): array => [$row->filter('.checklist__number')->text(), $row->filter('.checklist__pin')->text(), $row->filter('.checklist__note')->text()]),
+        );
+        foreach ($rows->each(static fn (Crawler $row): Crawler => $row) as $index => $row) {
+            $pinId = 'checklist-'.$this->miasDraftId.'-pin-'.$itemIds[$index];
+            self::assertSame($pinId, $row->filter('.checklist__pin')->attr('id'));
+            $buttons = $row->filter('button');
+            self::assertCount(1, $buttons, 'Omar may mark each finding fixed.');
+            self::assertSame($pinId.' checklist-'.$this->miasDraftId.'-note-'.$itemIds[$index], $buttons->attr('aria-describedby'));
+        }
+    }
+
+    /**
      * Mia shares her draft through its Share form, and the items it made are read by pin number.
      */
     private function shareMiasDraft(): void
     {
-        $this->logIn($this->client, $this->people['Mia']);
-        $this->client->request(
-            'POST',
-            '/t/SHOP-1/rounds/'.$this->miasDraftId.'/share',
-            [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))],
-        );
-        self::assertSame('Shared with the team as round 2.', $this->toastAfterTheRedirect());
+        $this->shareThroughTheForm();
 
         $roundId = $this->miasDraftId;
         $items = [];
@@ -299,6 +326,39 @@ final class FindingsRoundChecklistTest extends WebTestCase
         });
         self::assertSame([1, 2], array_keys($items), 'The share made no item per pin, so nothing below is proven.');
         $this->items = $items;
+    }
+
+    private function shareThroughTheForm(): void
+    {
+        $this->logIn($this->client, $this->people['Mia']);
+        $this->client->request(
+            'POST',
+            '/t/SHOP-1/rounds/'.$this->miasDraftId.'/share',
+            [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))],
+        );
+        self::assertSame('Shared with the team as round 2.', $this->toastAfterTheRedirect());
+    }
+
+    /**
+     * @return list<string> the findings round's item ids by picture position and pin number, as the checklist lists them
+     */
+    private function itemIdsInPictureAndPinOrder(): array
+    {
+        $roundId = $this->miasDraftId;
+        $itemIds = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($roundId, &$itemIds): int {
+            /** @var list<string> $ids */
+            $ids = $migrator->fetchFirstColumn(
+                'SELECT item.id FROM rvw_check_item AS item JOIN rvw_pin AS pin ON pin.id = item.pin_id'
+                .' JOIN rvw_screenshot AS screenshot ON screenshot.id = pin.screenshot_id WHERE item.round_id = ? ORDER BY screenshot.position, pin.number',
+                [$roundId],
+            );
+            $itemIds = $ids;
+
+            return 0;
+        });
+
+        return $itemIds;
     }
 
     private function roundsFrame(): Crawler

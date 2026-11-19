@@ -27,7 +27,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  * ChecklistQueries and RoundChecklistQueries as the container wires them, under row-level security. Lena reported
  * SHOP-1 of Acme Foods with three pins on two pictures, given out of order, and SHOP-2 with one; Beta Bakery reported a
  * ticket with SHOP-1's id. Every checklist has one item confirmed OK, so a count that took in another ticket's or
- * organization's items would be off. SHOP-1 also has Mia's findings round with two items and Lena's review round.
+ * organization's items would be off. SHOP-1 also has Mia's findings round with two items and Lena's review round with
+ * one, which no checklist may show.
  */
 final class DbalChecklistQueriesTest extends KernelTestCase
 {
@@ -58,6 +59,9 @@ final class DbalChecklistQueriesTest extends KernelTestCase
     private const string CUT_TEXT_PIN = '0197a3c0-0000-7000-8000-0000000f8d37';
     private const string BADGE_ITEM = '0197a3c0-0000-7000-8000-0000000f8d41';
     private const string CUT_TEXT_ITEM = '0197a3c0-0000-7000-8000-0000000f8d42';
+    private const string REVIEW_PICTURE = '0197a3c0-0000-7000-8000-0000000f8d26';
+    private const string REVIEW_PIN = '0197a3c0-0000-7000-8000-0000000f8d38';
+    private const string REVIEW_ITEM = '0197a3c0-0000-7000-8000-0000000f8d43';
     private const string MEDIA = '0197a3c0-0000-7000-8000-0000000f8d51';
     private const string CREATED_AT = '2027-03-16 08:30:00+00:00';
     private const string NOW = '2027-03-16 09:30:00+00:00';
@@ -93,15 +97,18 @@ final class DbalChecklistQueriesTest extends KernelTestCase
             });
         }
         // After the checklist round took number 1: Mia's findings round 2, with pin 2 before pin 1, one fixed, and Lena's
-        // review round 3 with no item.
+        // review round 3, whose item no command makes but only the round's kind keeps out of forRounds.
         $this->roundRows()->addAllOf(self::ACME_FOODS, [
             self::sharedRound(self::FINDINGS, 2, 'draft', self::MIA),
             self::sharedRound(self::REVIEW, 3, 'review', self::LENA),
             self::picture(self::ACME_FOODS, self::FINDINGS_PICTURE, self::FINDINGS, 0),
+            self::picture(self::ACME_FOODS, self::REVIEW_PICTURE, self::REVIEW, 0),
             self::pin(self::ACME_FOODS, self::BADGE_PIN, self::FINDINGS_PICTURE, 2, 'Badge overlaps.'),
             self::pin(self::ACME_FOODS, self::CUT_TEXT_PIN, self::FINDINGS_PICTURE, 1, 'Text cut off.'),
+            self::pin(self::ACME_FOODS, self::REVIEW_PIN, self::REVIEW_PICTURE, 1, 'Menu is hidden.'),
             self::item(self::BADGE_ITEM, self::FINDINGS, self::BADGE_PIN, ChecklistCommands::STATE_FIXED),
             self::item(self::CUT_TEXT_ITEM, self::FINDINGS, self::CUT_TEXT_PIN, ChecklistCommands::STATE_OPEN),
+            self::item(self::REVIEW_ITEM, self::REVIEW, self::REVIEW_PIN, ChecklistCommands::STATE_OPEN),
         ]);
     }
 
@@ -191,9 +198,9 @@ final class DbalChecklistQueriesTest extends KernelTestCase
     }
 
     /**
-     * The findings round is asked first, in upper case and twice, beside the report and the review round, which have no
-     * items, another ticket's checklist round and an unknown round: only the ticket's two rounds with items come back,
-     * by round number, each with its own items by picture position and pin number.
+     * The findings round is asked first, in upper case and twice, beside the report, which has no items, the review
+     * round, whose item its kind keeps out, another ticket's checklist round and an unknown round: only the ticket's
+     * checklist and findings rounds come back, by round number, each with its own items by picture position and pin number.
      */
     #[Test]
     public function theRoundsAskedHaveTheirOwnItemsByRoundNumberAndOnlyTheFindingsRoundIsFindings(): void
@@ -242,6 +249,35 @@ final class DbalChecklistQueriesTest extends KernelTestCase
             self::BETA_BAKERY,
             fn (): array => $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), [self::FINDINGS]),
         ));
+    }
+
+    /**
+     * forRounds' join with its organization conditions taken out, run as pinround_app: under Acme Foods as tenant,
+     * row-level security alone hides Beta Bakery's checklist round on the same ticket id, whose items Beta's own tenant
+     * gets.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsChecklistItemsOnTheTicketId(): void
+    {
+        [$betaChecklistRoundId, $betaItemIds] = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => [
+            $this->checklistRoundOf(self::TICKET),
+            [$this->itemIdOf(self::BETA_PIN)],
+        ]);
+        $itemIdsAs = fn (string $organizationId): array => $this->transactions()->rolledBackAs($organizationId, fn (): array => [
+            $this->connection()->fetchOne('SELECT current_user'),
+            $this->connection()->fetchFirstColumn(
+                'SELECT item.id FROM rvw_round AS round'
+                .' JOIN rvw_check_item AS item ON item.round_id = round.id'
+                .' JOIN rvw_pin AS pin ON pin.id = item.pin_id'
+                .' JOIN rvw_screenshot AS screenshot ON screenshot.id = pin.screenshot_id'
+                .' WHERE round.ticket_id = CAST(:ticket AS uuid) AND round.id = ANY(CAST(:rounds AS uuid[])) AND round.kind IN (:checklist, :findings)'
+                .' ORDER BY round.number, screenshot.position, pin.number',
+                ['ticket' => self::TICKET, 'rounds' => '{'.$betaChecklistRoundId.'}', 'checklist' => 'checklist', 'findings' => 'draft'],
+            ),
+        ]);
+
+        self::assertSame(['pinround_app', []], $itemIdsAs(self::ACME_FOODS));
+        self::assertSame(['pinround_app', $betaItemIds], $itemIdsAs(self::BETA_BAKERY));
     }
 
     #[Test]
