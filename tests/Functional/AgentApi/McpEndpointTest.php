@@ -10,6 +10,7 @@ use App\AgentApi\Infrastructure\Mcp\McpSessionBinding;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetTicket;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
 use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
@@ -134,8 +135,8 @@ final class McpEndpointTest extends WebTestCase
         $tools = $this->responseValueAt('result', 'tools');
         self::assertIsArray($tools);
         $toolsByName = array_column($tools, null, 'name');
-        self::assertEqualsCanonicalizing([WhoAmI::NAME, ListMyTickets::NAME, GetRoundNotes::NAME, SetVerdict::NAME, CreateUpload::NAME, AddScreenshot::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
-        self::assertCount(7, $tools);
+        self::assertEqualsCanonicalizing([WhoAmI::NAME, ListMyTickets::NAME, GetTicket::NAME, GetRoundNotes::NAME, SetVerdict::NAME, CreateUpload::NAME, AddScreenshot::NAME, WriteProbeTool::NAME], array_keys($toolsByName));
+        self::assertCount(8, $tools);
         $whoAmI = $toolsByName[WhoAmI::NAME];
         self::assertIsArray($whoAmI);
         self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
