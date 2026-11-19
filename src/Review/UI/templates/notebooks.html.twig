@@ -1,0 +1,36 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- The person's own notebooks (NotebookController::list), last used first, a page at a time; "Show more" opens the next
+    page. Nobody else ever sees this list. It follows the report drafts list. -#}
+
+{% block title %}My notebooks · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/report-drafts.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security report-drafts">
+        <h1 class="security__title">My notebooks</h1>
+        <p class="login__hint">Screenshots and scenarios your Claude Code or the browser extension saved for you. Only you see them.</p>
+        {% if notebooks is empty %}
+            <twig:EmptyState message="{{ isLaterPage ? 'No more notebooks.' : 'You have no notebooks.' }}" />
+        {% else %}
+            <ul class="report-drafts__list">
+                {% for notebook in notebooks %}
+                    <li class="report-drafts__item">
+                        <twig:Card tag="article" class="report-drafts__card" aria-labelledby="notebook-{{ loop.index }}">
+                            <h2 class="security__heading" id="notebook-{{ loop.index }}"><a href="{{ path('review_notebook', {id: notebook.id}) }}">{{ notebook.title }}</a></h2>
+                            <p class="login__hint">{{ notebook.screenshotCount }} {{ notebook.screenshotCount == 1 ? 'screenshot' : 'screenshots' }} · {{ notebook.scenarioCount }} {{ notebook.scenarioCount == 1 ? 'scenario' : 'scenarios' }} · Last used <time datetime="{{ notebook.lastUsedAt }}">{{ notebook.lastUsed }}</time></p>
+                        </twig:Card>
+                    </li>
+                {% endfor %}
+            </ul>
+            {% if nextAfter %}
+                <p><twig:Button variant="outline" href="{{ path('review_notebooks', {after: nextAfter}) }}" rel="next">Show more</twig:Button></p>
+            {% endif %}
+        {% endif %}
+    </div>
+{% endblock %}

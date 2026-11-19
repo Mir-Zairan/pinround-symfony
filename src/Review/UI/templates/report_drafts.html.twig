@@ -15,6 +15,7 @@
     <div class="security report-drafts">
         <h1 class="security__title">Report drafts</h1>
         <p class="login__hint">Reports your Claude Code or the browser extension prepared for you. Only you see them. Check one, then send it to make the ticket.</p>
+        <p><twig:Button variant="text" href="{{ path('review_notebooks') }}">Your notebooks</twig:Button></p>
         {% if drafts is empty %}
             <twig:EmptyState message="{{ isLaterPage ? 'No more report drafts.' : 'You have no report drafts.' }}" />
         {% else %}
