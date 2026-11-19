@@ -1,0 +1,31 @@
+/* The "Report drafts" list and one draft's page (ReportDraftController). */
+.report-drafts__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-12);
+}
+
+.report-draft__detail {
+    min-height: 8rem;
+    resize: vertical;
+}
+
+.report-draft__picture {
+    display: grid;
+    gap: var(--space-12);
+}
+
+.report-draft__remove {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-8);
+}
+
+.report-draft__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-12);
+    align-items: center;
+}

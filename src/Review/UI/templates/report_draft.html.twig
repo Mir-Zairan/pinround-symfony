@@ -1,0 +1,80 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- One of the person's report drafts (ReportDraftController::page): edit the text, each picture's title, summary and pin
+    notes, remove a picture, then Send (makes the ticket with Round 0) or Delete. Pins keep their spots here. -#}
+
+{% block title %}{{ draft.title }} · Report draft · pinround{% endblock %}
+
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/report-drafts.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security report-draft">
+        <twig:Button variant="text" href="{{ path('review_report_drafts') }}"><span aria-hidden="true">&lt;</span> Report drafts</twig:Button>
+        <h1 class="security__title">Report draft for {{ draft.projectKey }}</h1>
+        <p class="login__hint">Only you see this draft. Nothing reaches the team until you press Send.</p>
+        {% if error %}
+            <p class="login__error" role="alert" id="report-draft-error">{{ error }}</p>
+        {% endif %}
+
+        <form class="login__form" method="post" action="{{ path('review_report_draft_save', {id: draft.id}) }}" {% if error %}aria-describedby="report-draft-error"{% endif %}>
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
+            <input type="hidden" name="version" value="{{ draft.version }}">
+            <label class="login__field">
+                What is wrong, in one line
+                <input class="login__input" type="text" name="title" value="{{ title }}" maxlength="200" required>
+            </label>
+            <label class="login__field">
+                More detail · optional
+                <textarea class="login__input report-draft__detail" name="detail" rows="6">{{ detail }}</textarea>
+            </label>
+
+            {% for picture in pictures %}
+                {% set posted = postedScreenshots[picture.index] ?? {} %}
+                <twig:Card tag="section" class="security__section report-draft__picture" aria-labelledby="draft-shot-{{ picture.index + 1 }}-heading">
+                    <h2 class="security__heading" id="draft-shot-{{ picture.index + 1 }}-heading">Screenshot {{ picture.index + 1 }}</h2>
+                    <twig:Screenshot :view="picture.view" :headingLevel="3" loading="lazy" />
+                    <label class="login__field">
+                        Title · optional
+                        <input class="login__input" type="text" name="screenshots[{{ picture.index }}][title]" value="{{ posted.title ?? picture.screenshot.title }}" maxlength="120">
+                    </label>
+                    <label class="login__field">
+                        What this picture shows · optional
+                        <textarea class="login__input" name="screenshots[{{ picture.index }}][summary]" rows="3" maxlength="600">{{ posted.summary ?? picture.screenshot.summary }}</textarea>
+                    </label>
+                    {% for pin in picture.screenshot.pins %}
+                        <label class="login__field">
+                            Pin {{ loop.index }} note
+                            <input class="login__input" type="text" name="screenshots[{{ picture.index }}][pins][{{ loop.index0 }}]" value="{{ (posted.pins ?? {})[loop.index0] ?? pin.note }}" maxlength="1000">
+                        </label>
+                    {% endfor %}
+                    <label class="report-draft__remove">
+                        <input type="checkbox" name="screenshots[{{ picture.index }}][remove]" value="1" {% if (posted.remove ?? null) == '1' %}checked{% endif %}>
+                        Remove this screenshot
+                    </label>
+                </twig:Card>
+            {% endfor %}
+
+            <p class="report-draft__actions">
+                <twig:Button type="submit" variant="outline">Save changes</twig:Button>
+            </p>
+        </form>
+
+        <div class="report-draft__actions">
+            <form method="post" action="{{ path('review_report_draft_send', {id: draft.id}) }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
+                <input type="hidden" name="version" value="{{ draft.version }}">
+                <twig:Button type="submit">Send</twig:Button>
+            </form>
+            <form method="post" action="{{ path('review_report_draft_delete', {id: draft.id}) }}" data-turbo-confirm="Delete this report draft? This cannot be undone.">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
+                <twig:Button type="submit" variant="text">Delete draft</twig:Button>
+            </form>
+        </div>
+        <p class="login__hint">Send saves nothing you typed above: press Save changes first.</p>
+    </div>
+{% endblock %}

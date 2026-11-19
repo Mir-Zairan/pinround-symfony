@@ -125,6 +125,7 @@ Legend: ✅ allowed · ⚠️ allowed with a condition (see note) · — not all
 | Keep / dismiss AI suggestion pin | — | — | ✅ | ⚠️ the round's reviewer | — | — |
 | Start / edit / share a draft round | — | — | ⚠️ if assignee or it is their turn ⁸ | ⚠️ if assignee or it is their turn ⁸ | — | — |
 | See a draft round | ⚠️ only after shared (never unshared) | ⚠️ only after shared | ⚠️ owner, or after shared (a lead never sees others' unshared drafts) | ⚠️ owner, or after shared | ⚠️ after shared | — |
+| See, edit and send my report drafts ⁹ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |
 | Summarize with AI (shared summary) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | — | — |
 | Explain it to me (private) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy |
 | Share my explanation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -146,6 +147,7 @@ Notes:
 6. Creating any token asks for the password and MFA again if the last check is older than 10 minutes. Admin pages and admin actions never accept a token: `ADMIN_*` voters deny every token-authenticated request, so a token cannot be used to skip admin MFA.
 7. The simple "New ticket" form files a ticket straight onto the team's board, so it needs a Lead, Member or Viewer role on that team; everyone can still report a problem through the intake ([ADR-0038](../03-adr/0038-create-ticket-team-form-needs-team-role.md)).
 8. "Their turn" is the turn read model's person, for example the tester in Testing or the reviewer in Code review, and only on a ticket they may see and not in Done ([ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md)). The owner keeps editing and sharing their draft after the turn passes on.
+9. A report draft is its owner's alone: no admin or lead sees it ([ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)). A personal access token may make and change one (`reports:write`), but only the person's click in the browser sends it.
 
 ## Special visibility rules
 

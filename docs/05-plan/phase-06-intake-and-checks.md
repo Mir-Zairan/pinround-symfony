@@ -63,7 +63,7 @@ FR-INT-01, FR-INT-02, FR-INT-03, FR-INT-04, FR-INT-05, FR-INT-06, FR-INT-07, FR-
 - [ ] "Give it to" appears only after a team is chosen.
 - [ ] The whole form works with keyboard only.
 - [ ] A summary over 600 characters or a title over 120 is refused with a plain message and the form keeps its text.
-- [ ] A report draft is visible only to its owner; Send creates the ticket with Round 0 and the draft is gone; nobody else can open or send it.
+- [x] A report draft is visible only to its owner; Send creates the ticket with Round 0 and the draft is gone; nobody else can open or send it. (`ReportDraftControllerTest`: `sendMakesTheTicketWithRoundZeroAndTheDraftIsGone`, `theListShowsOnlyTheOwnersDraftsAndNobodyElseOpensOne`, `nobodyButTheOwnerCanSendDeleteOrSaveAndNothingChanges`.)
 **Tests:** functional create (with and without screenshot, with title and summary, report draft open and send, other user's draft → not found), Playwright journey with a stopwatch check (< 2 minutes scripted), axe.
 **Prototype check:** [fields and copy](../04-prototype/screens/report-a-problem.md#fields-and-copy), [where it goes](../04-prototype/screens/report-a-problem.md#where-it-goes): labels, placeholders, order, defaults.
 **Size:** L
@@ -176,3 +176,4 @@ FR-INT-01, FR-INT-02, FR-INT-03, FR-INT-04, FR-INT-05, FR-INT-06, FR-INT-07, FR-
 - P09 must apply the visibility scope in every MCP tool.
 - 2026-11-15: step 3 ("ticket + Round 0 in one transaction") must not have Ticketing's `ReportForm` or `CreateTicket` call Review's Api; Ticketing_UI and Ticketing_Application may not see Review_Api (`deptrac.yaml`). How Round 0 is created at ticket creation without a Ticketing to Review call is settled in P05.T5 (phase 5); step 3 must follow that decision.
 - (add dated notes here)
+- 2026-11-19 (P06.T1 step 5 only): the report drafts are built in Review (`rvw_report_draft`, `Version20261119190000`; `Review\Api\ReportDrafts`; `ReportDraftController` at `/report-drafts`). Send makes the ticket as Bug, Normal, no assignee, so it starts in Backlog; a picture still processing refuses Send with RoundRefused's text and keeps the draft. The edit page changes the text, picture titles, summaries and pin notes and removes pictures; it does not move pins or add pictures (an upload field is still to come). Steps 1 to 4 (the Report a problem page) are not built; its link to the drafts list comes with them.
