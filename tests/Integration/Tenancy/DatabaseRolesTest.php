@@ -615,6 +615,38 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * The stored answers of idempotent /api/v1 requests (Version20261119200000): the app reads, reserves and answers
+     * them and never removes one (the purge comes with the retention job); support reads under the tenant policy; every
+     * index starts with the organization.
+     */
+    #[Test]
+    public function theIdempotencyKeyTableGrantsTheAppReadAddAndChangeAndSupportOnlyRead(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'api_idempotency_key'),
+        );
+        self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.api_idempotency_key')"));
+        self::assertSame(
+            [true, true],
+            $connection->fetchNumeric("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass('public.api_idempotency_key')"),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX api_idempotency_key_pkey ON public.api_idempotency_key USING btree (organization_id, token_id, key)',
+                'CREATE INDEX api_idempotency_key_created_at_idx ON public.api_idempotency_key USING btree (organization_id, created_at)',
+            ],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'api_idempotency_key'"),
+        );
+        self::assertEqualsCanonicalizing(
+            ['api_idempotency_key_answer_check', 'api_idempotency_key_key_check', 'api_idempotency_key_pkey', 'api_idempotency_key_request_hash_check', 'api_idempotency_key_response_check', 'api_idempotency_key_status_check'],
+            $connection->fetchFirstColumn("SELECT conname FROM pg_constraint WHERE conrelid = 'public.api_idempotency_key'::regclass AND contype IN ('c', 'p', 'u', 'f')"),
+        );
+    }
+
+    /**
      * The report drafts (Version20261119190000): the app reads, adds, changes and removes them (Send and "Delete draft"
      * remove one), support reads under the tenant policy, and every index starts with the organization.
      */
@@ -964,8 +996,8 @@ final class DatabaseRolesTest extends KernelTestCase
     #[Test]
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
-        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'rvw_report_draft', 'public.rvw_report_draft', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912', 'ast_suggestion', 'public.ast_suggestion', 'ast_local_package', 'public.ast_local_package'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'idn_api_token', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_drafts', 'rvw_report_draft_note', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
+        $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'rvw_report_draft', 'public.rvw_report_draft', 'api_idempotency_key', 'public.api_idempotency_key', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912', 'ast_suggestion', 'public.ast_suggestion', 'ast_local_package', 'public.ast_local_package'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'idn_api_token', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_drafts', 'api_idempotency_keys', 'rvw_report_draft_note', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);

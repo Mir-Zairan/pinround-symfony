@@ -1,0 +1,144 @@
+# The REST API of pinround for the browser extension and scripts (P09.T7, FR-MCP-10). Each endpoint runs the MCP tool of
+# the same action through ToolCallGate (src/AgentApi/Infrastructure/Rest/RestToolController.php), so scopes, input
+# rules, permissions and the audit row are the tool's. Keep this file in step with that class.
+openapi: 3.1.0
+info:
+  title: pinround API
+  version: '1'
+  description: >-
+    Every request needs a personal access token: `Authorization: Bearer pr_…`. A token does only what its user may do,
+    and only what its scopes allow. From a browser, only the pinround extension's origin may call (CORS). Limits: 60
+    calls a minute and 600 an hour per token, 600 a minute per organization; past them 429 with `Retry-After`. A body
+    over 1 MB is refused with 413. Screenshots never go in a request body: begin an upload, then PUT the file to its
+    `put_url`.
+servers:
+  - url: https://pinround.acme-foods.example
+security:
+  - token: []
+paths:
+  /api/v1/me/tickets:
+    get:
+      summary: My open tickets where it is my turn or I am the assignee (list_my_tickets, scope read).
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': { description: '{tickets: [{key, title, step, now, is_your_turn, is_assignee, updated_at}], has_more}' }
+        '401': { $ref: '#/components/responses/NoToken' }
+  /api/v1/uploads:
+    post:
+      summary: Begin one screenshot upload, for my draft round on a ticket or for a new report in a project.
+      description: >-
+        Name exactly one target. `ticket` runs create_upload (scope rounds:write): your own draft round on the ticket,
+        started when you are its assignee or it is your turn. `project` runs create_report_upload (scope reports:write).
+        Then PUT the file to `put_url` with the `headers` given, before `expires_at`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mime, bytes, sha256]
+              properties:
+                ticket: { type: string, example: SHOP-12 }
+                project: { type: string, example: SHOP }
+                mime: { type: string, enum: [image/png, image/jpeg, image/webp] }
+                bytes: { type: integer, maximum: 15728640 }
+                sha256: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+      responses:
+        '201': { description: '{upload_id, put_url, headers, expires_at}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/reports:
+    post:
+      summary: Make a private report draft (create_report, scope reports:write). Never a ticket.
+      description: >-
+        The person opens the answered `url`, checks the draft and presses Send in pinround; no token can send it
+        (ADR-0039). Each screenshot is an upload begun with `project` for the same project.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, title]
+              properties:
+                project: { type: string, example: SHOP }
+                title: { type: string, maxLength: 200 }
+                detail: { type: string, maxLength: 50000 }
+                screenshots:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [upload_id]
+                    properties:
+                      upload_id: { type: string }
+                      title: { type: string, maxLength: 120 }
+                      summary: { type: string, maxLength: 600 }
+                      pins:
+                        type: array
+                        maxItems: 100
+                        items:
+                          type: object
+                          required: [x_pct, y_pct, note]
+                          properties:
+                            x_pct: { type: number, minimum: 0, maximum: 100 }
+                            y_pct: { type: number, minimum: 0, maximum: 100 }
+                            note: { type: string, maxLength: 1000 }
+      responses:
+        '201': { description: '{draft_id, url, screenshot_count, status: "draft", message}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/tickets/{key}/draft/screenshots:
+    post:
+      summary: Add an uploaded picture to my own draft round on the ticket (add_screenshot, scope rounds:write).
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string }, example: SHOP-12 }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [upload_id]
+              properties:
+                upload_id: { type: string }
+                title: { type: string, maxLength: 120 }
+                summary: { type: string, maxLength: 600 }
+                pins: { type: array, maxItems: 100, items: { type: object } }
+      responses:
+        '200': { description: '{screenshot_id, round_id, status: added | added_before, pin_count}, or {status: processing} while the picture is processed: send again in a few seconds' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '409': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+components:
+  securitySchemes:
+    token:
+      type: http
+      scheme: bearer
+      description: A personal access token from the API tokens page, `pr_…`.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        1 to 100 letters, digits, dots, colons, dashes or underscores. The first answer is replayed for the same request
+        with `Idempotent-Replayed: true`; the same key for another request is refused with 422.
+      schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,100}$' }
+  responses:
+    NoToken:
+      description: No live token. The body is empty or a plain error.
+    Refused:
+      description: >-
+        {error, outcome}: outcome not_found (404; also for what you may not see), missing_scope (403), read_only
+        (409), invalid_input or refused (422). Nothing was saved.
