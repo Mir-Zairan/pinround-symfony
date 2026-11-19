@@ -32,6 +32,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
+use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
@@ -58,6 +59,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     private const string NOW_AS_STORED = '2026-11-06 12:00:00+00';
     private const string KEY = 'SHOP-1';
     private const string START_WORK = '/t/SHOP-1/move/start_work';
+    private const string NEEDS_CHANGES = '/t/SHOP-1/move/needs_changes';
     private const string TICKET_PAGE = '/t/SHOP-1';
     /** The version SHOP-1 is seeded at (SeedsTicketRounds). */
     private const int VERSION = 3;
@@ -193,6 +195,80 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             $after['rounds'][$miasDraft],
         );
         self::assertSame(array_diff_key($before['rounds'], [$miasDraft => true]), array_diff_key($after['rounds'], [$miasDraft => true]), 'Omar\'s and Lena\'s drafts and Mia\'s first round stay as they were.');
+    }
+
+    /**
+     * ADR-0044, P13.T1: Omar's and Lena's drafts also hold screenshots, yet Mia's "Needs changes" opens one dialog, about
+     * her own draft. Cancel only closes the dialog and sends nothing, so the ticket, her draft and the others stay put.
+     */
+    #[Test]
+    public function aTestersNeedsChangesAsksOnceAboutOnlyHerDraftAndCancelMovesAndSharesNothing(): void
+    {
+        $this->addOmarsScreenshots(2);
+        $miasDraft = $this->putShop1InTestingWithAMiasDraftOfOneScreenshot();
+        $before = $this->stateOf();
+        self::assertSame($this->steps['test'], $before['ticket']['step_id']);
+        self::assertNull($before['rounds'][$miasDraft]['decision']);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $this->client->request('POST', self::NEEDS_CHANGES, $this->moveFields(), [], ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html']);
+
+        self::assertResponseStatusCodeSame(409);
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertSame(1, substr_count($content, '<dialog id="share-draft-dialog"'), 'One dialog for one move.');
+        self::assertSame(1, substr_count($content, 'Your draft round has '), 'One question, about one draft.');
+        $this->assertTheQuestion($content, 1, 2, 'In progress', self::NEEDS_CHANGES);
+        $cancelButtons = preg_match_all('/<button([^>]*)>\s*Cancel\s*<\/button>/', $content, $cancel);
+        self::assertSame(1, $cancelButtons);
+        self::assertStringContainsString('type="button"', $cancel[1][0], 'Cancel submits no form.');
+        self::assertStringContainsString('data-action="dialog#close"', $cancel[1][0]);
+        self::assertStringNotContainsString('name=', $cancel[1][0], 'Cancel sends no draft choice.');
+        self::assertStringNotContainsString('form=', $cancel[1][0], 'Cancel belongs to no form.');
+        self::assertSame($before, $this->stateOf());
+
+        $this->client->request('POST', self::NEEDS_CHANGES, $this->moveFields());
+
+        self::assertResponseStatusCodeSame(409);
+        $cancelLink = $this->client->getCrawler()->filter('a')->reduce(static fn (Crawler $link): bool => 'Cancel' === trim($link->text()));
+        self::assertCount(1, $cancelLink, 'Without script, Cancel is a link back to the ticket.');
+        self::assertSame(self::TICKET_PAGE, $cancelLink->attr('href'));
+        $this->client->click($cancelLink->link());
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($before, $this->stateOf(), 'Neither Cancel moved the ticket or shared or decided a draft.');
+    }
+
+    /**
+     * Once Mia has chosen, her draft is no longer undecided: when the ticket comes back to Testing through code review,
+     * her next "Needs changes" moves it with no question and leaves every round as it was.
+     */
+    #[Test]
+    #[DataProvider('choices')]
+    public function aTestersNextNeedsChangesAfterSheChoseAsksNothingMore(string $choice): void
+    {
+        $miasDraft = $this->putShop1InTestingWithAMiasDraftOfOneScreenshot();
+        $this->logIn($this->client, $this->people['Mia']);
+        $this->client->request('POST', self::NEEDS_CHANGES, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => $choice]));
+        self::assertStringEndsWith('share' === $choice ? 'Your draft is now round 2 for the team.' : MoveToasts::DRAFT_KEPT_PRIVATE, $this->toastAfterTheRedirect());
+        self::assertSame('share' === $choice ? 'shared' : 'kept_private', $this->stateOf()['rounds'][$miasDraft]['decision']);
+
+        $this->removeLenasScreenshots();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', '/t/SHOP-1/move/send_to_code_review', $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 1)]));
+        self::assertSame('Sent to code review. Lena’s turn now.', $this->toastAfterTheRedirect(), 'Omar\'s draft has no screenshot, so he is not asked.');
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->client->request('POST', '/t/SHOP-1/move/approve_code', $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 2)]));
+        self::assertSame('Code approved. Mia’s turn to test.', $this->toastAfterTheRedirect(), 'Lena\'s draft has no screenshot either.');
+        $backInTesting = $this->stateOf();
+        self::assertSame($this->steps['test'], $backInTesting['ticket']['step_id']);
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $this->client->request('POST', self::NEEDS_CHANGES, $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 3)]));
+
+        self::assertSame('Sent back to Omar with your notes.', $this->toastAfterTheRedirect());
+        $after = $this->stateOf();
+        self::assertSame($this->steps['progress'], $after['ticket']['step_id']);
+        self::assertSame(self::VERSION + 4, $after['ticket']['version']);
+        self::assertSame($backInTesting['rounds'], $after['rounds'], 'Her decided draft and the other rounds stay as they were.');
     }
 
     #[Test]
