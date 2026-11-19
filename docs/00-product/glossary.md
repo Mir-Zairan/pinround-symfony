@@ -50,7 +50,11 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Draft round** — A private round that the assignee makes to check their own work: screenshots, pins, notes and a verdict per screenshot. Only the owner (and their Claude Code, with their token) can see it until they share it.
 
+**Evidence log** — The list of screenshots, titles, summaries and pins that Claude Code (or another MCP client) keeps while it checks a problem. It is filed in one step when the person says so. Proposed in [ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md).
+
 **Explain it to me** — A private AI answer about a ticket, only for the person who asked. They can share it; then it shows under the summary for everyone.
+
+**Findings round** — A shared draft round of someone other than the assignee, for example the tester: "Round 3 · findings by Mia". Each of its pins becomes a checklist item. Proposed in [ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md).
 
 **Five groups** — To do, Doing, Checking, Waiting, Done. Fixed for every organization, with fixed colors. Every step belongs to exactly one group. Managers compare teams by these groups.
 
@@ -83,6 +87,8 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 **Needs-you score** — The number that orders "Needs you now". It adds a base for the kind of task, a weight for priority, a bonus for releases, and half a point per day of waiting (max 60 days). See [FR-HOME-03](../01-requirements/functional-requirements.md#home--home-page).
 
 **Next** — The line on a ticket that says what happens after the current step: "Lena reviews the code, then Mia tests it."
+
+**Notebook** — A private place for pins and screenshots that is not a ticket. You use it to ask about a screen. It also holds scenarios. Only its owner sees it. Proposed in [ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md).
 
 **Now** — The line on a ticket that says who does what at this moment: "Omar builds it."
 
@@ -121,6 +127,8 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 **Rules (team rules)** — Guards on actions: *only the tester moves a ticket to Done*, *nobody approves their own code review*, *code review must happen before testing*.
 
 **Same problem · close this one** — The checker's action to close a new ticket as a duplicate of an older one. Both tickets get a comment.
+
+**Scenario** — A short list of steps that shows one case happening live, for example "the stock warning shows". Claude Code writes it, and the browser extension plays it. Proposed in [ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md).
 
 **Step** — A named place in the workflow, for example "Code review". Steps are core, company or team steps. Each step belongs to one group.
 

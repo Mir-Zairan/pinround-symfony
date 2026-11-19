@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0043.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0046.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 and ADR-0043 on 2026-11-18) (deciders: Zairan Mir, lead, with the team).
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 and ADR-0043 on 2026-11-18) (deciders: Zairan Mir, lead, with the team), except ADR-0044 to ADR-0046, which are **Proposed** on 2026-11-19.
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -112,3 +112,6 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0041](0041-sign-page-images-at-render-time.md) | Sign page images at render time | A page signs view and thumb URLs while it renders, in one batched read, after its own visibility check; signing times are rounded to the minute and URLs ask for `Cache-Control: private, max-age=240, immutable`. Supersedes the reading rules of ADR-0011 in part. |
 | [0042](0042-laptop-result-refusal-status-codes.md) | Laptop result refusals: 404 for an unknown package, 410 for a used or expired one | An unknown, another person's or another organization's laptop package answers 404, a used or expired one 410, a rejected text or model 422, a policy refusal 403; every refusal writes the `local_ai.result_refused` audit entry. Supersedes ADR-0019's 409 sentence in part. |
 | [0043](0043-api-token-hash-is-hmac-sha256.md) | The personal access token hash is HMAC-SHA256 keyed by API_TOKEN_PEPPER | `token_hash` is `hash_hmac('sha256', token, pepper, true)`; the pepper is the plain environment variable `API_TOKEN_PEPPER`, at least 32 bytes, and prod refuses to start without a real one. Supersedes in part the token storage line of ADR-0021, ADR-0012 and ADR-0027. |
+| [0044](0044-whose-turn-it-is-may-keep-a-draft-round.md) | The person whose turn it is may keep a draft round (Proposed) | The assignee, or the person whose turn it is, may start a private draft round; shared at hand-off with any verb it becomes "Round N · findings by Mia" with one checklist item per pin; "Make it a new ticket" turns it into a report draft. Would supersede the "who may start" rule of ADR-0017. |
+| [0045](0045-evidence-is-captured-where-the-person-works.md) | Evidence is captured where the person works (Proposed) | Claude Code or the extension keeps an evidence log while checking and files it in one step at the end, as a report draft or into the person's draft round; new tool `find_tickets` and MCP prompt `report_while_investigating`; extension pin overlay and session target. |
+| [0046](0046-notebooks-and-scenarios-for-understanding-an-app.md) | Notebooks and scenarios (Proposed) | An owner-only notebook (`rvw_notebook`) holds pins for questions; Claude Code saves data-only scenarios (fixed step types, `save_scenarios`, scope `notebooks:write`) that the extension plays live on allowed hosts and never as code. |

@@ -71,7 +71,7 @@ Where every document is, what it holds, and the order to read it in.
 [04-prototype/prototype-guide.md](04-prototype/prototype-guide.md) explains how to open the prototype and links one file per screen in [04-prototype/screens](04-prototype/screens).
 
 ## 05 Plan
-[05-plan/README.md](05-plan/README.md) lists phases P00–P12, their order, the hackathon slice, and how to run one task per session.
+[05-plan/README.md](05-plan/README.md) lists phases P00–P13, their order, the hackathon slice, and how to run one task per session.
 
 ## Conventions
 - **IDs:** requirements `FR-<AREA>-NN`, `NFR-<CAT>-NN`, constraints `C-NN`, decisions `ADR-NNNN`, tasks `PNN.Tn`.

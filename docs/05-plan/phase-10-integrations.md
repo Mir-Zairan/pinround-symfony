@@ -199,3 +199,4 @@ NFR-SEC-01, NFR-SEC-05, NFR-SEC-10, NFR-SEC-14, NFR-AVL-05, NFR-PERF-09, NFR-OPS
 ## Hand-off notes
 - Phase 11 builds the remaining admin pages; Connections from this phase stays as is.
 - Record the chosen OIDC library, Jira API version and extension pairing choice here.
+- 2026-11-19 (plan change): [phase 13](phase-13-capture-explore-and-scenarios.md) builds on P10.T7 and P10.T8 (pin overlay, session target, notebooks, scenario player). If [ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md) is accepted before P10.T7 starts, give the pairing page optional `reports:write` and `notebooks:write` scopes instead of `rounds:write` only, and request `activeTab` and `chrome.scripting` so P13.T5 needs no permission change.

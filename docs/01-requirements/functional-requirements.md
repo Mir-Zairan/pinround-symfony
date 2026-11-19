@@ -12,12 +12,13 @@ The contract of what pinround shall do. Phase plans cite these IDs; tests prove 
 - [INT — Intake and checks](#int--intake-and-checks): report a problem, duplicates, check reasons, checker, visibility (FR-INT-01…15).
 - [CNV — Conversation](#cnv--conversation): comments, questions, answers, replies, resolve (FR-CNV-01…08).
 - [PNG — Pings and notifications](#png--pings-and-notifications): ping, limits, grouping, bell, auto-clear, quiet hours, live updates (FR-PNG-01…11).
-- [RND — Screenshots, pins and rounds](#rnd--screenshots-pins-and-rounds): uploads, pins, Round 0/1, review rounds, draft rounds (FR-RND-01…16).
+- [RND — Screenshots, pins and rounds](#rnd--screenshots-pins-and-rounds): uploads, pins, Round 0/1, review rounds, draft rounds, findings, live pins (FR-RND-01…18).
 - [HOME — Home page](#home--home-page): headline, needs-you score, groups, pings, focus chips, admin card (FR-HOME-01…11).
 - [MINE — My reports](#mine--my-reports): parcel tracking, groups, inline answer, menu (FR-MINE-01…08).
 - [MGR — Manager overview](#mgr--manager-overview): teams at a glance (FR-MGR-01…04).
 - [AI — AI assist](#ai--ai-assist): policy, providers, summaries, explanations, suggestions, laptop AI (FR-AI-01…18).
-- [MCP — MCP server and agent API](#mcp--mcp-server-and-agent-api): tools for Claude Code, REST API (FR-MCP-01…12).
+- [MCP — MCP server and agent API](#mcp--mcp-server-and-agent-api): tools and prompts for Claude Code, REST API (FR-MCP-01…14).
+- [EXP — Explore: notebooks and scenarios](#exp--explore-notebooks-and-scenarios): private pins for questions, scenarios played live (FR-EXP-01…06).
 - [JIRA — Jira integration](#jira--jira-integration): connect, import, sync, mapping (FR-JIRA-01…09).
 - [ADM — Admin](#adm--admin): admin pages (FR-ADM-01…11).
 - [AUD — Audit and data](#aud--audit-and-data): audit log, retention, export (FR-AUD-01…05).
@@ -514,6 +515,17 @@ Every screenshot in every round kind (report, checklist, review, draft) has an o
 - Carry-forward: a review round's "before" is the earlier round's "after" screenshot row, so its title and summary show there read-only.
 - Accept: a title over 120 characters or a summary over 600 characters is refused with a plain message ("Keep the summary to 600 characters or fewer."; likewise "Keep the title to 120 characters or fewer." and "Keep the pin note to 1,000 characters or fewer."), and nothing is saved.
 - Accept: a review round's before picture shows the earlier after picture's title and summary, read-only.
+
+**FR-RND-17 — Findings draft for the person whose turn it is** · Should · Prototype: none (product owner's decision, 2026-11-19)
+On an open ticket, the person whose turn it is (for example the tester in Testing, the reviewer in Code review) may start a draft round, as the assignee may ([FR-RND-09](#rnd--screenshots-pins-and-rounds)). The owner keeps it after the turn passes on. The hand-off dialog ([FR-RND-11](#rnd--screenshots-pins-and-rounds)) asks on the owner's move with any verb. Shared, it reads "Round N · findings by Mia", and each pin becomes an `open` checklist item ([FR-RND-04](#rnd--screenshots-pins-and-rounds)). "Make it a new ticket" moves the draft's content into a new report draft of the same person ([FR-MCP-12](#mcp--mcp-server-and-agent-api)); nothing becomes a ticket until Send ([ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md), Proposed).
+- Accept: someone whose turn it is not, and who is not the assignee, cannot start a draft; nothing is created.
+- Accept: a shared findings round has one `open` checklist item per pin; a self-check round has none.
+- Accept: "Make it a new ticket" on a draft of more than 10 screenshots is refused and nothing changes.
+
+**FR-RND-18 — Pins on the live page** · Should · Prototype: none (product owner's decision, 2026-11-19)
+The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)) has "Pin this page": the person drops numbered pins with notes on the live page, then captures it; each pin is stored as x/y percent of the captured image ([FR-RND-02](#rnd--screenshots-pins-and-rounds)). The person picks one target per session: "New report" (a report draft), their draft round on a ticket, or a notebook ([FR-EXP-01](#exp--explore-notebooks-and-scenarios)). Every capture goes to that target until changed ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md), Proposed).
+- Accept: a pin lands at the same percent (± 0.5) on the captured image.
+- Accept: captures on several pages end in one report draft, in order, up to 10.
 - Accept: with no title and no summary nothing extra is shown and nothing is required.
 
 ---
@@ -725,6 +737,38 @@ An MCP server over Streamable HTTP at `/mcp`, authenticated with a personal acce
 - Accept: a token without `reports:write` gets an MCP error and nothing is created.
 - Accept: the report draft is invisible to everyone but its owner (not admins, not the team), and a project of another organization is "not found".
 - Accept: no ticket exists until a person clicks Send in the app.
+
+**FR-MCP-13 — find_tickets** · Should — `find_tickets {project?, text}` returns at most 10 open tickets the caller may see, with key, title, step, whose turn, and whether the caller may start a draft on it now ([FR-RND-17](#rnd--screenshots-pins-and-rounds)). Scope `read`. Text comes back inside delimiters ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md), Proposed).
+- Accept: a ticket the caller may not see never appears; `text` over 200 characters is refused.
+
+**FR-MCP-14 — Prompt: report while investigating** · Should — the MCP server offers the prompt `report_while_investigating`. It tells any MCP client to keep an evidence log while it checks a problem (each case: a before picture, title, summary, pins), to upload nothing until the person decides, and at the end to offer "New report", "Add to <key>" or "Check more", then to file with `create_upload`, `create_report` or `add_screenshot` ([ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md), Proposed).
+- Accept: `prompts/list` shows it and `prompts/get` returns its versioned text.
+- Accept: a check that finds no bug leaves nothing in pinround.
+
+---
+
+## EXP — Explore: notebooks and scenarios
+
+*Story:* Lena takes over the order page. She pins three spots she does not understand into a notebook and asks her Claude Code to explain them. Then she asks for every warning on the page. Claude Code saves six scenarios, and she plays them one by one on her local app with the extension ([ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md), Proposed).
+
+**FR-EXP-01 — Notebook** · Should · Prototype: none (product owner's decision, 2026-11-19)
+A private space of one person, not linked to a ticket: a name, an optional project, up to 10 screenshots with titles, summaries and pins, and up to 20 scenarios. "My notebooks" lists them; the owner can rename and delete.
+- Accept: an 11th screenshot or a 21st scenario is refused with a plain message and nothing changes.
+
+**FR-EXP-02 — Notebook privacy** · Should — only the owner sees a notebook: not admins, not the team. Everyone else gets "not found" in pages, REST and MCP.
+- Accept: another person, an admin and another organization get "not found" on the page, a direct URL, REST and MCP.
+
+**FR-EXP-03 — Read a notebook through MCP** · Should — `list_my_notebooks` and `get_notebook` (scope `read`) return the owner's notebooks, pictures (signed URLs), pins and scenarios; text comes back inside delimiters. Pinround stores no AI answer.
+
+**FR-EXP-04 — Scenario format** · Should — a scenario has a title (≤ 120), `why` (≤ 600), `setup` (≤ 600), a `start_url` and at most 30 steps. Step types: `go_to`, `click`, `type`, `select`, `wait_for`, `expect_text`, `expect_visible`, `pause`, `capture`; a step finds its element by role and name, visible text or label, never by a CSS or XPath string, and has a `say` line (≤ 200).
+- Accept: an unknown step type, a CSS or XPath target, a `go_to` to another host, or an over-cap value is refused and nothing is saved.
+
+**FR-EXP-05 — save_scenarios** · Should — `save_scenarios {notebook, scenarios}` replaces a notebook's scenarios after validation. Scope `notebooks:write`, off by default on the token page.
+- Accept: without the scope, the tool errors and nothing changes.
+
+**FR-EXP-06 — Scenario player** · Should — the extension lists a notebook's scenarios and plays one step at a time or all steps, with "Next" and "Back" between scenarios; each step shows its `say` line. A failed `expect_*` stops and shows expected and found. `capture` adds a screenshot to the notebook. It plays only on hosts the person allowed, never on the pinround host, asks once per host before the first run, never types into a password field, and runs no code from a scenario.
+- Accept: a host that is not allowed, the pinround host and a password field are each refused before any step runs.
+- Accept: the extension source has no `eval(` or `new Function` (CI check).
 
 ---
 
