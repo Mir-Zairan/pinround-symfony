@@ -28,6 +28,8 @@
         {%- set personPicked = input.personPickedFields %}
         <form class="report__form" method="post" action="{{ path('ticketing_report') }}" novalidate
             data-controller="report-form"
+            data-report-form-preview-url-value="{{ path('ticketing_report_preview') }}"
+            data-action="input->report-form#schedulePreview change->report-form#schedulePreview"
             {%- if personPicked is not empty %} data-intake-check-person-picked="{{ personPicked|join(' ') }}"{% endif %}>
             <div class="report__field">
                 <label class="login__field">
@@ -40,6 +42,8 @@
                     <p class="profile__error" id="report-title-error">{{ errors.title }}</p>
                 {% endif %}
             </div>
+
+            <div data-report-form-target="duplicates">{{ duplicatesHtml|raw }}</div>
 
             <div class="report__field">
                 <label class="login__field">
@@ -146,7 +150,7 @@
 
             <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
             <div class="report__footer">
-                <p class="report__preview" id="report-preview" role="status" aria-live="polite" data-report-form-target="preview"></p>
+                <p class="report__preview" role="status" aria-live="polite"{% if preview == '' %} hidden{% endif %} data-report-form-target="previewLine"><strong>When you send:</strong> <span data-report-form-target="preview">{{ preview }}</span></p>
                 <div class="report__buttons">
                     <twig:Button variant="text" href="{{ path('web_home') }}">Cancel</twig:Button>
                     <twig:Button type="submit" data-report-form-target="submit">Create ticket</twig:Button>

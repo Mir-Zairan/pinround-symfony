@@ -138,7 +138,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     public function rowLevelSecurityAloneHidesAnotherOrganizationsCandidates(bool $includeTeamOnly): void
     {
         $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
-        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext())
+        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext(), self::getContainer()->get(\App\Workflow\Api\StepQueries::class))
             ->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(true), $includeTeamOnly);
 
         $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $candidatesOn);
@@ -322,7 +322,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     public function byKeyRowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
     {
         $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
-        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext())
+        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext(), self::getContainer()->get(\App\Workflow\Api\StepQueries::class))
             ->openCandidatesByKeys(self::miaVisibility(true), ['SHOP-1', 'SHOP-88']);
 
         $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $candidatesOn);

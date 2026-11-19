@@ -50,6 +50,7 @@ final class ReportControllerTest extends WebTestCase
     private array $people;
     private string $shopProject;
     private string $appProject;
+    private string $backlogStepId;
 
     protected function setUp(): void
     {
@@ -64,12 +65,14 @@ final class ReportControllerTest extends WebTestCase
         $omarId = $this->people['Omar']->id()->toString();
         $miaId = $this->people['Mia']->id()->toString();
         $saraId = $this->people['Sara']->id()->toString();
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $shopId, $omarId, $miaId, $saraId): int {
+        $backlogStepId = Uuid::v7()->toRfc4122();
+        $this->backlogStepId = $backlogStepId;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $shopId, $omarId, $miaId, $saraId, $backlogStepId): int {
             $migrator->executeStatement("UPDATE org_team_member SET job = 'developer' WHERE team_id = ? AND user_id = ?", [$shopId, $omarId]);
             $migrator->executeStatement("UPDATE org_team_member SET job = 'tester' WHERE team_id = ? AND user_id = ?", [$shopId, $miaId]);
             $migrator->executeStatement("INSERT INTO org_settings (organization_id, data, created_at) VALUES (?, jsonb_build_object('triager_id', ?::text), '2026-11-01 10:00:00+00')", [$organizationId, $saraId]);
-            foreach ([['Backlog', 'backlog', 0], ['To do', 'todo', 1]] as [$name, $coreCode, $position]) {
-                $migrator->executeStatement("INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, ?, 'todo', ?, 'core', ?)", [$organizationId, Uuid::v7()->toRfc4122(), $name, $coreCode, $position]);
+            foreach ([[$backlogStepId, 'Backlog', 'backlog', 0], [Uuid::v7()->toRfc4122(), 'To do', 'todo', 1]] as [$stepId, $name, $coreCode, $position]) {
+                $migrator->executeStatement("INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, ?, 'todo', ?, 'core', ?)", [$organizationId, $stepId, $name, $coreCode, $position]);
             }
 
             return 0;
@@ -191,6 +194,80 @@ final class ReportControllerTest extends WebTestCase
     }
 
     /**
+     * @return iterable<string, array{string, array<string, mixed>, string}>
+     */
+    public static function previewSentences(): iterable
+    {
+        yield 'the team decides, nothing to check' => ['Omar', [], 'It becomes ticket SHOP-1 right away. Lena plans it like any other ticket. Nobody needs to check it.'];
+        yield 'a person picked' => ['Lena', ['assignee_id' => 'Omar'], 'It becomes ticket SHOP-1 right away and goes straight to Omar. Nobody needs to check it.'];
+        yield 'the reporter picks themselves' => ['Omar', ['assignee_id' => 'Omar'], 'It becomes ticket SHOP-1 right away and goes straight to you. Nobody needs to check it.'];
+        yield 'little detail, the lead checks' => ['Omar', ['description' => 'Short.'], 'It becomes ticket SHOP-1 right away. Lena takes a quick look, because little detail and no pins.'];
+        yield 'the lead reports with little detail and checks it' => ['Lena', ['description' => 'Short.', 'assignee_id' => 'Omar'], 'It becomes ticket SHOP-1 right away. You take a quick look, because little detail and no pins. Omar can start already.'];
+        yield 'Not sure and a security word' => ['Raj', ['team_id' => 'none', 'project_id' => 'APP', 'title' => 'Password shown in the address bar'], 'It becomes ticket APP-1 right away. Sara takes a quick look, because no team was picked, it sounds risky. It mentions security, so only the team and admins can see it.'];
+    }
+
+    /**
+     * @param array<string, mixed> $overrides as refusedReports() reads them
+     */
+    #[Test]
+    #[DataProvider('previewSentences')]
+    public function thePreviewSaysWhatTheCreateWillDo(string $person, array $overrides, string $sentence): void
+    {
+        $this->logIn($this->client, $this->people[$person]);
+
+        $this->client->request('POST', '/report/preview', $this->reportFields($this->resolved($overrides)));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['duplicates' => '', 'preview' => $sentence], $this->jsonAnswer());
+    }
+
+    /**
+     * FR-INT-15: three shared words that are at least 30 % of the old title. NFR-SEC-13: a team-only Mobile ticket is
+     * never shown to Omar, who is not in Mobile, while Lena, who leads it, sees it.
+     */
+    #[Test]
+    public function aSimilarOpenTicketIsSuggestedOnlyToWhoMaySeeItAndMakesTheReportADupe(): void
+    {
+        $this->addOpenTicket($this->shopProject, 'SHOP-41', 'Cart total counted twice at checkout', 'all', $this->shop->toString());
+        $this->addOpenTicket($this->appProject, 'APP-7', 'Cart total counted twice in the app', 'team', $this->mobile->toString());
+        $this->addOpenTicket($this->shopProject, 'SHOP-42', 'Cart colours look wrong', 'all', $this->shop->toString());
+        $fields = ['title' => 'Cart total counted twice'];
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', '/report/preview', $this->reportFields($fields));
+        self::assertResponseStatusCodeSame(200);
+        $omarSees = new Crawler($this->answerText('duplicates'));
+        self::assertSame(['SHOP-41'], $omarSees->filter('.report-duplicates__key')->each(static fn (Crawler $key): string => $key->text()));
+        self::assertSame('Maybe already reported (found by matching words)', $omarSees->filter('h2')->text());
+        self::assertStringContainsString('Lena takes a quick look, because maybe the same as an older ticket.', $this->answerText('preview'));
+
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->client->request('POST', '/report/preview', $this->reportFields($fields));
+        // Both share four words; the search ranks the closer title first on the tie.
+        self::assertSame(['APP-7', 'SHOP-41'], new Crawler($this->answerText('duplicates'))->filter('.report-duplicates__key')->each(static fn (Crawler $key): string => $key->text()));
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->postReport($fields);
+        self::assertSame(\sprintf(ReportController::CREATED_CHECKED, 'SHOP-43', 'Lena'), $this->toastAfterTheRedirect('/t/SHOP-43'));
+        self::assertSame('{dupe}', $this->ticketRow('SHOP-43')[3]);
+    }
+
+    #[Test]
+    public function aShortTitleGetsNoSuggestionsAndNobodyOutsideTheOrganizationGetsAPreview(): void
+    {
+        $this->addOpenTicket($this->shopProject, 'SHOP-41', 'Cart total counted twice at checkout', 'all', $this->shop->toString());
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', '/report/preview', $this->reportFields(['title' => 'Cart to']));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('', $this->jsonAnswer()['duplicates'] ?? null, 'Under 8 characters.');
+        $this->client->getCookieJar()->clear();
+        $this->client->request('POST', '/report/preview', $this->reportFields(['title' => 'Cart total counted twice']));
+        self::assertResponseRedirects();
+    }
+
+    /**
      * @return iterable<string, array{array<string, mixed>, string, string}>
      */
     public static function refusedReports(): iterable
@@ -212,19 +289,29 @@ final class ReportControllerTest extends WebTestCase
     public function aRefusedReportShowsWhyKeepsTheTextAndMakesNoTicket(array $overrides, string $field, string $message): void
     {
         $this->logIn($this->client, $this->people['Omar']);
-        $overrides = array_map(fn (mixed $value): mixed => match (true) {
-            'APP' === $value => $this->appProject,
-            'ready' === $value => $this->addReadyPicture('Omar'),
-            \is_string($value) && isset($this->people[$value]) => $this->people[$value]->id()->toString(),
-            default => $value,
-        }, $overrides);
 
-        $page = $this->postReport(['description' => 'Kept as typed', ...$overrides]);
+        $page = $this->postReport(['description' => 'Kept as typed', ...$this->resolved($overrides)]);
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame($message, $page->filter('#report-'.$field.'-error, #screenshot-error')->text());
         self::assertSame('Kept as typed', $page->filter('textarea[name="description"]')->text());
         self::assertSame(0, $this->ticketCount());
+    }
+
+    /**
+     * @param array<string, mixed> $overrides "APP" stands for the APP project's id, a first name for that person's id,
+     *                                        "ready" for a ready picture of Omar's
+     *
+     * @return array<string, mixed>
+     */
+    private function resolved(array $overrides): array
+    {
+        return array_map(fn (mixed $value): mixed => match (true) {
+            'APP' === $value => $this->appProject,
+            'ready' === $value => $this->addReadyPicture('Omar'),
+            \is_string($value) && isset($this->people[$value]) => $this->people[$value]->id()->toString(),
+            default => $value,
+        }, $overrides);
     }
 
     /**
@@ -234,6 +321,18 @@ final class ReportControllerTest extends WebTestCase
     {
         return $this->client->request('POST', self::REPORT, [
             ReportController::CSRF_FIELD => $this->csrfTokenFor($this->client, ReportController::CSRF_ID),
+            ...$this->reportFields($overrides),
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     *
+     * @return array<string, mixed>
+     */
+    private function reportFields(array $overrides = []): array
+    {
+        return [
             'title' => 'Total is counted twice',
             'description' => self::ENOUGH_DETAIL,
             'team_id' => $this->shop->toString(),
@@ -243,7 +342,42 @@ final class ReportControllerTest extends WebTestCase
             'priority' => 'normal',
             'screenshot_media_id' => '',
             ...$overrides,
-        ]);
+        ];
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private function jsonAnswer(): array
+    {
+        $answer = json_decode((string) $this->client->getResponse()->getContent(), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertIsArray($answer);
+
+        return $answer;
+    }
+
+    private function answerText(string $key): string
+    {
+        $text = $this->jsonAnswer()[$key] ?? null;
+        self::assertIsString($text);
+
+        return $text;
+    }
+
+    private function addOpenTicket(string $projectId, string $key, string $title, string $visibility, string $teamId): void
+    {
+        [$projectKey, $number] = explode('-', $key);
+        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $projectId, $teamId, (int) $number, $key, $title, $this->backlogStepId, $this->people['Lena']->id()->toString(), $visibility];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($parameters, $projectId, $number): int {
+            $migrator->executeStatement(
+                "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank, step_id, reporter_id, visibility, version, components, check_reasons, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, '', 'bug', 'normal', 3, ?, ?, ?, 1, '{}', '{}', '2026-11-05 10:00:00+00', '2026-11-05 10:00:00+00')",
+                $parameters,
+            );
+            $migrator->executeStatement('UPDATE tkt_project SET next_number = GREATEST(next_number, ?) WHERE id = ?', [(int) $number + 1, $projectId]);
+
+            return 0;
+        });
     }
 
     private function toastAfterTheRedirect(string $location): string

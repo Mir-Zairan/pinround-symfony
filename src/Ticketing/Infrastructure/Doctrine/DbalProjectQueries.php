@@ -8,6 +8,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\ListFilter;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
@@ -56,6 +57,20 @@ final readonly class DbalProjectQueries implements ProjectQueries
                 [$this->tenantContext->require()->toString(), $limit],
             ),
         );
+    }
+
+    public function nextTicketKeyOf(string $projectId): ?string
+    {
+        $organizationId = $this->tenantContext->require();
+        if (!ListFilter::isCanonicalUuid($projectId)) {
+            return null;
+        }
+        $nextKey = $this->connection->fetchOne(
+            "SELECT key || '-' || next_number FROM tkt_project WHERE organization_id = ? AND id = ?",
+            [$organizationId->toString(), $projectId],
+        );
+
+        return \is_string($nextKey) ? $nextKey : null;
     }
 
     public function projectByKey(string $key): ?ProjectChoice

@@ -66,4 +66,14 @@ interface ProjectQueries
      * @throws \LogicException when no tenant is set, before any query
      */
     public function projectByKey(string $key): ?ProjectChoice;
+
+    /**
+     * The key the project's next ticket gets, for the "When you send:" line of Report a problem, for example SHOP-12.
+     * One query; it reads without locking, so two reporters at once may both see the same next key.
+     *
+     * @param string $projectId a project's uuid; a malformed or unknown one, or one of another organization, has none
+     *
+     * @throws \LogicException when no tenant is set, before any query
+     */
+    public function nextTicketKeyOf(string $projectId): ?string;
 }

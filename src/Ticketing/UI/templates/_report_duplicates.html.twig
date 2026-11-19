@@ -1,0 +1,16 @@
+{#- The possible duplicates of the report being typed (ReportController, P06.T2, report-a-problem.md): empty when there
+    are none. The keys and titles are of open tickets the reporter may see. -#}
+{% if duplicates is not empty %}
+    <section class="report-duplicates" aria-labelledby="report-duplicates-heading">
+        <h2 class="report-duplicates__heading" id="report-duplicates-heading">Maybe already reported (found by matching words)</h2>
+        <p class="report-duplicates__hint">If it is the same problem, open it and add what you see there. If yours is different, just go on.</p>
+        <ul class="report-duplicates__list">
+            {% for duplicate in duplicates %}
+                <li class="report-duplicates__item">
+                    <span class="report-duplicates__key">{{ duplicate.key }}</span>
+                    <a href="{{ path('ticket_show', {key: duplicate.key}) }}" target="_blank" rel="noopener">{{ duplicate.title }}</a>
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+{% endif %}

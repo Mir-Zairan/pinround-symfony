@@ -59,6 +59,27 @@ final class ListedIntakeCandidates implements IntakeCandidateQueries
         return \array_slice($candidates, 0, self::CANDIDATE_LIMIT);
     }
 
+    /**
+     * The search's twin: the open tickets the reporter may see whose title shares a word of three or more letters with
+     * $text, in the order added, at most SIMILAR_LIMIT; team-only ones too, as the real query's predicate allows them.
+     */
+    public function similarOpenTickets(TicketVisibility $reporter, string $text): array
+    {
+        if (!$reporter->organizationId()->equals($this->organizationId)) {
+            throw new \LogicException('Intake candidates are read under the reporter\'s own organization as tenant.');
+        }
+        $words = array_filter(self::wordsOf($text), static fn (string $word): bool => mb_strlen($word) >= 3);
+        $similar = [];
+        foreach ($this->tickets as $ticket) {
+            $titleWords = self::wordsOf($ticket['candidate']->title);
+            if ([] !== array_intersect($words, $titleWords) && $reporter->isVisible($ticket['facts'])) {
+                $similar[] = $ticket['candidate'];
+            }
+        }
+
+        return \array_slice($similar, 0, self::SIMILAR_LIMIT);
+    }
+
     public function openCandidatesByKeys(TicketVisibility $reporter, array $keys): array
     {
         if (\count($keys) > self::CANDIDATE_LIMIT) {
@@ -78,5 +99,15 @@ final class ListedIntakeCandidates implements IntakeCandidateQueries
         }
 
         return $candidates;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function wordsOf(string $text): array
+    {
+        $words = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($text), -1, \PREG_SPLIT_NO_EMPTY);
+
+        return false === $words ? [] : $words;
     }
 }

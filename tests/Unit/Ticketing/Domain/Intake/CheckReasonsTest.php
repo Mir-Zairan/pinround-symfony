@@ -169,6 +169,7 @@ final class CheckReasonsTest extends TestCase
         yield 'spaces do not count as detail' => [new DraftReport('Total is doubled', '   '.str_repeat('a', 38).'   ', []), $teamWithNoPins, [CheckReason::LittleInfo]];
         yield 'Not sure: no team' => [new DraftReport('Total is doubled', $fortyCharacters, []), new ReportContext(hasTeam: false, pinCount: 0), [CheckReason::NoTeam]];
         yield 'the whole word down: risky' => [new DraftReport('The shop is down', $fortyCharacters, []), $teamWithNoPins, [CheckReason::Risky]];
+        yield 'dropdown is not down' => [new DraftReport('The dropdown closes too early', str_repeat('é', 40), []), new ReportContext(hasTeam: true, pinCount: 0), []];
         yield 'download is not down' => [new DraftReport('The download button is grey', $fortyCharacters, []), $teamWithNoPins, []];
         yield 'cannot log in, in a pin note' => [new DraftReport('Front page', $fortyCharacters, ['I cannot log in here']), new ReportContext(hasTeam: true, pinCount: 1), [CheckReason::Risky]];
         yield 'can’t login with a curly apostrophe' => [new DraftReport('Can’t login after reset', $fortyCharacters, []), $teamWithNoPins, [CheckReason::Risky]];
