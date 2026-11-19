@@ -82,10 +82,6 @@
   gap: var(--space-12);
 }
 
-.report__preview:empty {
-  display: none;
-}
-
 .report__buttons {
   display: flex;
   justify-content: flex-end;
@@ -114,9 +110,9 @@
 
 /* The possible duplicates (report-a-problem.md, Duplicate suggestions): an amber box. */
 .report-duplicates {
-  border: 1px solid var(--warning);
-  background: var(--warning-container);
-  color: var(--on-warning-container);
+  border: 1px solid var(--waiting);
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
   border-radius: var(--radius-card, 12px);
   padding: var(--space-12) var(--space-16);
   display: grid;

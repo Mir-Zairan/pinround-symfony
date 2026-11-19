@@ -19,11 +19,6 @@ final readonly class CheckReasons
      */
     private const string INVISIBLE_CHARACTERS = '/[\p{Cf}\p{DI}\x{2800}\x{16FE4}\x{1D159}]+/u';
 
-    /**
-     * True when the security word list matches the title, the detail or any pin note. Each text is NFKC-normalized
-     * first, so full-width and other compatibility letters read as the plain ones. A text that is not valid UTF-8
-     * cannot be checked, so it counts as sensitive: the check fails closed.
-     */
     /** The detail is short below this many characters, once trimmed. */
     public const int SHORT_DETAIL_LENGTH = 40;
 
@@ -54,6 +49,11 @@ final readonly class CheckReasons
         return $reasons;
     }
 
+    /**
+     * True when the security word list matches the title, the detail or any pin note. Each text is NFKC-normalized
+     * first, so full-width and other compatibility letters read as the plain ones. A text that is not valid UTF-8
+     * cannot be checked, so it counts as sensitive: the check fails closed.
+     */
     public function isSecuritySensitive(DraftReport $draft): bool
     {
         return $this->matches($draft, WordLists::SECURITY);
