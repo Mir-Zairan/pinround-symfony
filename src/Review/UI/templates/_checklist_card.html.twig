@@ -1,5 +1,5 @@
-{#- The checklist round's card body (ChecklistCard): its header, the rule, and one row per pin of the report with the
-    buttons the viewer may use. Each button posts a form of its own out of the frame (_top), so ChecklistController's
+{#- A round's check items (ChecklistCard): the checklist round's card body, or the part of a findings round's card
+    under its pictures, with its own h4. Its header, the rule, and one row per pin with the buttons the viewer may use. Each button posts a form of its own out of the frame (_top), so ChecklistController's
     stream reaches the page; data-failed-toast tells assets/app.js the form expects that stream, and is its toast when
     the answer is none. -#}
 {% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
@@ -10,10 +10,10 @@
 {% set focusedControlId = focusedControlId|default(null) %}
 <div id="{{ checklist.id }}" class="checklist">
     <header class="round-card__header">
-        <h3 id="{{ checklist.headingId }}" class="round-card__headline" tabindex="-1"{% if checklist.headingId is same as(focusedControlId) %} autofocus{% endif %}>{{ checklist.headline }}</h3>
+        <h{{ checklist.headingLevel }} id="{{ checklist.headingId }}" class="round-card__headline" tabindex="-1"{% if checklist.headingId is same as(focusedControlId) %} autofocus{% endif %}>{{ checklist.headline }}</h{{ checklist.headingLevel }}>
         <p class="round-card__status">{{ checklist.status }}</p>
     </header>
-    <p class="round-card__description">{{ constant('App\\Review\\UI\\Checklist\\ChecklistCard::DESCRIPTION') }}</p>
+    <p class="round-card__description">{{ checklist.description }}</p>
     <ol class="checklist__rows">
         {% for row in checklist.rows %}
             {% set noteId = checklist.id ~ '-note-' ~ row.itemId %}

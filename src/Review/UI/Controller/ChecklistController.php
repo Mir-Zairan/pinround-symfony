@@ -31,12 +31,11 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\UX\Turbo\TurboBundle;
 
 /**
- * The buttons of the checklist card in the ticket's Rounds section (P05.T6, ticket-page.md, Rounds): "Mark fixed" for
- * the ticket's assignee, "OK" and "Not fixed" for its tester. A change answers a Turbo form with a stream that replaces
- * the card, with focus on the button that took the clicked one's place, and the toast; any other form, and a change of a
- * findings round's item (FR-RND-17), which no checklist card shows, with a redirect to the ticket's Rounds section with
- * the toast flashed. A refusal changes nothing and answers with its toast the same
- * two ways, as a 403 or 422 stream.
+ * The buttons of the checklist cards in the ticket's Rounds section, the checklist round's (P05.T6, ticket-page.md,
+ * Rounds) and a findings round's (FR-RND-17): "Mark fixed" for the ticket's assignee, "OK" and "Not fixed" for its
+ * tester. A change answers a Turbo form with a stream that replaces the changed item's card, with focus on the button
+ * that took the clicked one's place, and the toast; any other form with a redirect to the ticket's Rounds section with
+ * the toast flashed. A refusal changes nothing and answers with its toast the same two ways, as a 403 or 422 stream.
  *
  * Without the request transaction, as VerdictController: each action runs in a transaction of its own, so a refused
  * command leaves nothing. In that order: a ticket the person may not see is the ticket page's 404; an item id
@@ -174,11 +173,12 @@ final class ChecklistController extends AbstractController
                     throw new RefusedWithToast($refused->getMessage());
                 }
 
-                $checklist = $this->checklistCards->forTicket($visible->actor->organizationId(), $visible->ticket->id);
+                $checklist = $this->checklistCards->forRounds($visible->actor->organizationId(), $visible->ticket->id, [$item->roundId])[$item->roundId]
+                    ?? throw new \LogicException(\sprintf('Round %s of a changed check item has no items.', $item->roundId));
 
                 return [
                     'toast' => PingsClearedToast::withClearedPings($toastOf($changed, $visible->ticket), $changed->clearedPingCount),
-                    'checklist' => null !== $checklist && $checklist->roundId === $item->roundId ? $checklist : null,
+                    'checklist' => $checklist,
                     'itemId' => $item->itemId,
                 ];
             });
@@ -191,9 +191,9 @@ final class ChecklistController extends AbstractController
         return $this->respondToChanged($request, $key, $answer['toast'], $answer['checklist'], $answer['itemId']);
     }
 
-    private function respondToChanged(Request $request, string $key, string $toast, ?ChecklistCard $checklist, string $itemId): Response
+    private function respondToChanged(Request $request, string $key, string $toast, ChecklistCard $checklist, string $itemId): Response
     {
-        if (null === $checklist || TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
+        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
             return $this->redirectToRounds($key, $toast);
         }
 

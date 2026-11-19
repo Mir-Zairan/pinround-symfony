@@ -23,9 +23,10 @@ use App\Ticketing\Api\TicketVisibility;
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
  * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
  * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a review round
- * is a row that opens its own page, and the checklist round shows its rows through ChecklistCards, read only when the
- * ticket has one. The viewer's own unshared draft is the exception: its card shows every picture (the domain caps them),
- * so its editor can reach each one. forDraft builds that one card alone.
+ * is a row that opens its own page. The checklist round shows its rows, and a findings round its check items under its
+ * pictures, through ChecklistCards, read only when the ticket has a checklist round or a shared draft. The viewer's own
+ * unshared draft is the exception: its card shows every picture (the domain caps them), so its editor can reach each
+ * one. forDraft builds that one card alone.
  */
 final readonly class RoundCards
 {
@@ -86,10 +87,10 @@ final readonly class RoundCards
 
         $ownerNames = $this->memberNameQueries->displayNamesOf($organizationId, self::ownersOf($rounds));
         $images = $this->imagesOf($organizationId, $rounds, $now);
-        $checklist = self::hasChecklist($rounds) ? $this->checklistCards->forTicket($organizationId, $ticketId) : null;
+        $checklists = $this->checklistCards->forRounds($organizationId, $ticketId, self::idsOfRoundsWithItems($rounds));
 
         return new RoundsSectionView(
-            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $assigneeId, $images, $checklist), $rounds),
+            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $assigneeId, $images, $checklists[$round->id] ?? null), $rounds),
             $ticketRounds->olderRoundsNotShown,
         );
     }
@@ -115,7 +116,7 @@ final readonly class RoundCards
 
     /**
      * @param array<string, MediaImage> $images    by media id
-     * @param ChecklistCard|null        $checklist the ticket's checklist card, which its checklist round shows
+     * @param ChecklistCard|null        $checklist the round's own check items: the checklist round's, or a findings round's
      */
     private function cardOf(RoundView $round, string $ownerName, ?UserId $assigneeId, array $images, ?ChecklistCard $checklist = null): RoundCard
     {
@@ -123,7 +124,7 @@ final readonly class RoundCards
         if (self::CHECKLIST === $round->kind) {
             // Checklist::fromReport makes none without pins, DbalChecklists stores the round with its items in one
             // savepoint, and no command removes a report's pins: a round without items is broken data, not an empty card.
-            if (null === $checklist || $checklist->roundId !== $round->id) {
+            if (null === $checklist) {
                 throw new \LogicException(\sprintf('Checklist round %s has no items.', $round->id));
             }
 
@@ -159,7 +160,8 @@ final readonly class RoundCards
             return new RoundCard($round->id, $domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
         }
 
-        // FindingsChecklist's rule, read against today's assignee: a later reassignment changes the label, not the items.
+        // FindingsChecklist's rule, read against today's assignee: a later reassignment changes the label, not the items,
+        // so the items made on share show under either label.
         $isSelfCheck = null !== $assigneeId && $round->ownerId->equals($assigneeId);
 
         return new RoundCard(
@@ -173,6 +175,7 @@ final readonly class RoundCards
             $moreNote,
             \sprintf($isSelfCheck ? self::SELF_CHECK_DESCRIPTION : self::FINDINGS_DESCRIPTION, $ownerName),
             $emptyNote,
+            findingsChecklist: $checklist,
         );
     }
 
@@ -250,10 +253,19 @@ final readonly class RoundCards
 
     /**
      * @param list<RoundView> $rounds
+     *
+     * @return list<string> the checklist round's id and the shared drafts', whose pins may be check items (ADR-0044)
      */
-    private static function hasChecklist(array $rounds): bool
+    private static function idsOfRoundsWithItems(array $rounds): array
     {
-        return array_any($rounds, static fn ($round) => self::CHECKLIST === $round->kind);
+        $roundIds = [];
+        foreach ($rounds as $round) {
+            if (self::CHECKLIST === $round->kind || (RoundView::DRAFT === $round->kind && !$round->isUnsharedDraft())) {
+                $roundIds[] = $round->id;
+            }
+        }
+
+        return $roundIds;
     }
 
     private function showsPictures(RoundView $round): bool

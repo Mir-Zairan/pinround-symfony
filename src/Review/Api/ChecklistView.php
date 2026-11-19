@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Review\Api;
 
 /**
- * A ticket's checklist round for the checklist card, with the counts of its "k of n checked OK" summary.
+ * A round's check items for the checklist card, the ticket's checklist round's or a findings round's, with the counts of
+ * its "k of n checked OK" summary.
  */
 final readonly class ChecklistView
 {
@@ -16,9 +17,9 @@ final readonly class ChecklistView
     public int $total;
 
     /**
-     * @param string                        $roundId the checklist round's id, lowercase
+     * @param string                        $roundId the round's id, lowercase
      * @param int                           $number  its round number on the ticket, from 1
-     * @param non-empty-list<CheckItemView> $items   by Round 0 screenshot position, then pin number
+     * @param non-empty-list<CheckItemView> $items   by the position of the pin's screenshot, then pin number
      */
     public function __construct(
         public string $roundId,

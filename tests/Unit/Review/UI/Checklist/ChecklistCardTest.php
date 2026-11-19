@@ -45,6 +45,48 @@ final class ChecklistCardTest extends TestCase
     }
 
     /**
+     * The checklist round's card is the round's own card: its heading labels the article RoundCards names after the round.
+     */
+    #[Test]
+    public function theChecklistRoundsCardHasTheRoundsHeadingAtLevelThreeAndTheReportsRule(): void
+    {
+        $card = ChecklistCard::of(self::checklistOf([1 => ChecklistCommands::STATE_OPEN]), true, false);
+
+        self::assertSame(
+            ['checklist-'.self::ROUND, 'round-'.self::ROUND.'-heading', 3, 'Round 1 · Checklist from the report', ChecklistCard::DESCRIPTION, false],
+            [$card->id, $card->headingId, $card->headingLevel, $card->headline, $card->description, $card->isFindings],
+        );
+    }
+
+    /**
+     * A findings round's items sit under the round's own h3, so they get a heading of their own one level down, with an
+     * id that is not the round's.
+     */
+    #[Test]
+    public function aFindingsCardIsAChecklistUnderTheRoundsHeadingWithTheFindingsRuleAndTheSameRows(): void
+    {
+        $checklist = self::checklistOf([1 => ChecklistCommands::STATE_FIXED, 2 => ChecklistCommands::STATE_OK, 3 => ChecklistCommands::STATE_OPEN]);
+
+        $card = ChecklistCard::ofFindings($checklist, false, true);
+
+        self::assertSame(
+            ['checklist-'.self::ROUND, 'checklist-'.self::ROUND.'-heading', 4, 'Checklist', ChecklistCard::FINDINGS_DESCRIPTION, true],
+            [$card->id, $card->headingId, $card->headingLevel, $card->headline, $card->description, $card->isFindings],
+        );
+        self::assertSame('1 of 3 checked OK', $card->status);
+        self::assertEquals(ChecklistCard::of($checklist, false, true)->rows, $card->rows);
+        self::assertSame([true, false, false], array_map(static fn (ChecklistRow $row): bool => $row->mayCheck, $card->rows));
+    }
+
+    #[Test]
+    public function focusGoesToTheFindingsHeadingWhenItsCardHasNoButtonLeft(): void
+    {
+        $card = ChecklistCard::ofFindings(self::checklistOf([1 => ChecklistCommands::STATE_OK, 2 => ChecklistCommands::STATE_NOT_FIXED]), false, true);
+
+        self::assertSame('checklist-'.self::ROUND.'-heading', $card->focusedControlIdAfterChangeOf(self::itemId(1)));
+    }
+
+    /**
      * A person who is both the ticket's assignee and its tester marks pin 2 fixed: the row now offers its own OK, and
      * focus stays on it, not on pin 1's or pin 3's Mark fixed.
      */

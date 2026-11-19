@@ -274,6 +274,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private'));
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private .draft-round-editor'), 'The editor is in the private card only.');
         self::assertCount(1, $page->filter(self::ROUNDS.' .draft-round-editor'));
+        self::assertCount(0, $page->filter(self::ROUNDS.' .checklist'), 'A self-check round has no items, so no checklist.');
         self::assertStringNotContainsString(self::LENA_DRAFT_TITLE, (string) $this->client->getResponse()->getContent());
 
         foreach (['Mia', 'Sara'] as $person) {
@@ -474,9 +475,10 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     /**
-     * The section's own reads do not grow with the rounds: one report with one picture and pin, then the same ticket with the
-     * report, 5 more rounds by different people with 3 pictures each, a shared draft and the viewer's draft read the same
-     * number of queries.
+     * The section's own reads do not grow with the rounds: one report with one picture and pin and one findings round
+     * with one item, then the same ticket with those, 5 more rounds by different people with 3 pictures each, three of
+     * them findings rounds with an item per pin, and the viewer's draft read the same number of queries. The findings
+     * round of the first read is there because a shared draft adds the items query and the ticket's facts, once.
      */
     #[Test]
     public function theSectionReadsTheSameNumberOfQueriesWhateverTheNumberOfRounds(): void
@@ -484,24 +486,33 @@ final class RoundsFrameTest extends WebTestCase
         $ticketId = $this->addTicket('SHOP-1');
         $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $this->addPin($this->addScreenshot($report, $this->addMedia('ready'), 0, 'First', null), 1, '10.00', '10.00', 'A note', 'Mia');
+        $findings = $this->addRound($ticketId, 6, 'draft', 'Mia', self::SHARED_AT);
+        $this->addCheckItem($findings, $this->addPin($this->addScreenshot($findings, $this->addMedia('ready'), 0, null, null), 1, '10.00', '10.00', 'A finding', 'Mia'), 'open');
         $this->logIn($this->client, $this->people['Omar']);
         $this->queryCountOf(self::ROUNDS_PAGE);
-        $oneRoundQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+        $twoRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+        self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
 
         foreach (['Lena', 'Omar', 'Raj', 'Sara', 'Mia'] as $number => $owner) {
-            $round = $this->addRound($ticketId, $number + 1, 0 === $number % 2 ? 'draft' : 'review', $owner, self::SHARED_AT);
+            $isDraft = 0 === $number % 2;
+            $round = $this->addRound($ticketId, $number + 1, $isDraft ? 'draft' : 'review', $owner, self::SHARED_AT);
             foreach ([0, 1, 2] as $position) {
                 $screenshot = $this->addScreenshot($round, $this->addMedia('ready'), $position, null, null);
-                $this->addPin($screenshot, 1, '10.00', '10.00', 'A note', $owner);
+                $pinId = $this->addPin($screenshot, 1, '10.00', '10.00', 'A note', $owner);
+                if ($isDraft) {
+                    $this->addCheckItem($round, $pinId, 'open');
+                }
             }
         }
         $own = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addScreenshot($own, $this->addMedia('pending'), 0, null, null);
         $manyRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
-        self::assertCount(7, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
-        self::assertCount(11, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'));
-        self::assertSame($oneRoundQueryCount, $manyRoundsQueryCount);
+        self::assertCount(8, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
+        self::assertCount(12, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'));
+        self::assertCount(4, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
+        self::assertCount(10, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row button'), 'Omar may mark each finding fixed.');
+        self::assertSame($twoRoundsQueryCount, $manyRoundsQueryCount);
     }
 
     #[Test]
