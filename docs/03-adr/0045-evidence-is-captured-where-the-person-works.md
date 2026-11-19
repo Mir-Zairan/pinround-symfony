@@ -5,7 +5,7 @@ person says "file it", everything goes to pinround in one step, as a report draf
 
 ## Index
 
-- [Status](#status) — Proposed, date, deciders, what it adds to.
+- [Status](#status) — Accepted, date, deciders, what it adds to.
 - [Context and problem statement](#context-and-problem-statement) — Raj asks Claude Code whether something is a bug.
 - [Decision drivers](#decision-drivers) — no second screenshot loop, a person decides, one upload path.
 - [Considered options](#considered-options) — client-side evidence log, server-side capture session, server screenshots.
@@ -16,14 +16,14 @@ person says "file it", everything goes to pinround in one step, as a report draf
 
 ## Status
 
-Proposed
+Accepted
 
 - Date: 2026-11-19
 - Deciders: Zairan Mir (lead, product owner)
 
 It adds to [ADR-0039](0039-agents-file-report-drafts-a-person-sends-them.md) and
 [ADR-0040](0040-report-drafts-live-in-review.md). Their rule stands: no token creates a ticket, and a person clicks
-Send. When accepted, it supersedes part of [ADR-0021](0021-mcp-server.md)'s tool list (adds `find_tickets` and the
+Send. It supersedes part of [ADR-0021](0021-mcp-server.md)'s tool list (adds `find_tickets` and the
 MCP prompt `report_while_investigating`). It also changes the plan of P10.T7: the extension's token may hold
 `reports:write`.
 

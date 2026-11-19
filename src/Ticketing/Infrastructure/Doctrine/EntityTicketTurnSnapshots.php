@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
+use App\Organization\Api\SettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
@@ -21,6 +22,7 @@ final readonly class EntityTicketTurnSnapshots implements TicketTurnSnapshots
         private Connection $connection,
         private TenantContext $tenantContext,
         private TicketTeamLookup $teamLookup,
+        private SettingsQueries $settingsQueries,
     ) {
     }
 
@@ -33,6 +35,8 @@ final readonly class EntityTicketTurnSnapshots implements TicketTurnSnapshots
             $ticket,
             $this->teamLookup->groupAndCoreCodeOf($ticket->stepId(), $teamId),
             null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId),
+            // The organization's triager checks a ticket with no team; read only when that is the case.
+            null === $teamId && $ticket->isCheckNeeded() ? $this->settingsQueries->triagerOf($ticket->organizationId()) : null,
         );
     }
 
@@ -65,8 +69,9 @@ final readonly class EntityTicketTurnSnapshots implements TicketTurnSnapshots
      * @param array{string, string|null}                                  $groupAndCoreCode
      * @param array{UserId|null, string|null, list<UserId>, list<UserId>} $people           the lead, their name, the
      *                                                                                      developers and the testers
+     * @param UserId|null                                                 $triagerId        who checks a ticket with no team
      */
-    private static function snapshotOf(Ticket $ticket, array $groupAndCoreCode, array $people): TicketTurnSnapshot
+    private static function snapshotOf(Ticket $ticket, array $groupAndCoreCode, array $people, ?UserId $triagerId = null): TicketTurnSnapshot
     {
         [$groupCode, $coreCode] = $groupAndCoreCode;
         [$leadId, $leadDisplayName, $developerIds, $testerIds] = $people;
@@ -96,6 +101,8 @@ final readonly class EntityTicketTurnSnapshots implements TicketTurnSnapshots
             $ticket->isRiskCheck(),
             $ticket->askedUser(),
             $ticket->asker(),
+            $ticket->isCheckNeeded(),
+            $ticket->isCheckNeeded() ? (null === $ticket->team() ? $triagerId : $leadId) : null,
         );
     }
 }

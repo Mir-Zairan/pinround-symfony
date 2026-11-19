@@ -3,14 +3,18 @@
 declare(strict_types=1);
 
 use App\Conversation\Api\ConversationPermission;
+use App\Identity\Application\AccountPermission;
 use App\Identity\UI\Voter\AdminNeedsBrowserSessionVoter;
+use App\Identity\UI\Voter\CurrentApiTokenVoter;
 use App\Media\Api\MediaPermission;
 use App\Notification\Api\MutePermission;
 use App\Notification\Api\PingPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
+use App\Review\Api\ReportDraftPermission;
 use App\Review\Api\RoundPermission;
+use App\Review\UI\Voter\ReportDraftVoter;
 use App\Ticketing\Api\ProjectPermission;
 use App\Ticketing\Api\TicketPermission;
 use App\Workflow\Api\WorkflowPermission;
@@ -57,7 +61,10 @@ use App\Workflow\Api\WorkflowPermission;
  * Or a round (RoundPermission VIEW, EDIT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
  *            "Shared round of Omar on a team-only Shop ticket" or "… Support ticket", "… on a ticket nobody has", or
  *            "Shared round of another organization" or "Unshared draft round of Omar in another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
- *            assigned to Omar", "Done Shop ticket assigned to Omar", "Ticket nobody has, for a draft round".
+ *            assigned to Omar", "Done Shop ticket assigned to Omar", "Shop ticket in Testing, Mia's turn" (assigned to Omar),
+ *            "Ticket nobody has, for a draft round".
+ * Or "Report draft of Mia" (ReportDraftPermission), or "No subject" for an attribute whose voter takes none
+ *            (REVOKE_CURRENT_TOKEN).
  *
  * The roles doc has no mute row: whoever may see a ticket may mute it for themselves (MuteVoter), so the
  * NOTIFICATION_MUTE rows cite the visibility text.
@@ -97,6 +104,11 @@ $adminNeedsABrowserSession = 'Admin pages and admin actions never accept a token
 
 $seeADraftRound = '| See a draft round |';
 $editADraftRound = '| Start / edit / share a draft round |';
+
+$reportAProblem = '| Report a problem (create ticket through the intake) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
+$ownReportDrafts = '| See, edit and send my report drafts ⁹ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |';
+$noAdminOrLeadSeesAReportDraft = 'A report draft is its owner\'s alone: no admin or lead sees it';
+$onlyAClickSendsAReportDraft = 'but only the person\'s click in the browser sends it.';
 
 return [
     ['source' => $isAUser, 'attribute' => OrganizationPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted'],
@@ -469,4 +481,45 @@ return [
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Done Shop ticket assigned to Omar', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Unassigned Shop ticket', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Ticket nobody has, for a draft round', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Mia', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'granted'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Lena', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Raj', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Sara', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Noor', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+    ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Ben', 'subject' => 'Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
+
+    // Report a problem: every role of the organization, nobody of another.
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Omar', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Mia', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Raj', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Sara', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Noor', 'subject' => 'Acme Foods', 'expected' => 'granted'],
+    ['source' => $reportAProblem, 'attribute' => TicketPermission::REPORT, 'actor' => 'Ben', 'subject' => 'Beta Bakery', 'expected' => 'granted'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::REPORT, 'actor' => 'Ben', 'subject' => 'Acme Foods', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::REPORT, 'actor' => 'Lena', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => TicketPermission::REPORT, 'actor' => 'Omar', 'subject' => 'Beta Bakery', 'expected' => 'denied'],
+
+    // Report drafts: Mia's draft is hers alone; a token may see and change it, never send it.
+    ['source' => $ownReportDrafts, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted'],
+    ['source' => $ownReportDrafts, 'attribute' => ReportDraftPermission::EDIT, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted'],
+    ['source' => $ownReportDrafts, 'attribute' => ReportDraftPermission::SEND, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted'],
+    ['source' => $ownReportDrafts, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $ownReportDrafts, 'attribute' => ReportDraftPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $ownReportDrafts, 'attribute' => ReportDraftPermission::SEND, 'actor' => 'Omar', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $noAdminOrLeadSeesAReportDraft, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $noAdminOrLeadSeesAReportDraft, 'attribute' => ReportDraftPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $noAdminOrLeadSeesAReportDraft, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $noAdminOrLeadSeesAReportDraft, 'attribute' => ReportDraftPermission::EDIT, 'actor' => 'Sara', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $noAdminOrLeadSeesAReportDraft, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $noAdminOrLeadSeesAReportDraft, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Noor', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Ben', 'subject' => 'Report draft of Mia', 'expected' => 'denied'],
+    ['source' => $onlyAClickSendsAReportDraft, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted', 'login' => 'personal access token'],
+    ['source' => $onlyAClickSendsAReportDraft, 'attribute' => ReportDraftPermission::EDIT, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted', 'login' => 'personal access token'],
+    ['source' => $onlyAClickSendsAReportDraft, 'attribute' => ReportDraftPermission::SEND, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'denied', 'login' => 'personal access token', 'refusalReason' => ReportDraftVoter::TOKEN_REFUSAL_REASON],
+
+    // Revoking the current token: only a request made with that token has one, so a browser session is denied.
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AccountPermission::REVOKE_CURRENT_TOKEN, 'actor' => 'Omar', 'subject' => 'No subject', 'expected' => 'denied', 'refusalReason' => CurrentApiTokenVoter::SESSION_REFUSAL_REASON],
+    ['source' => $deniedUnlessARuleAllows, 'attribute' => AccountPermission::REVOKE_CURRENT_TOKEN, 'actor' => 'Sara', 'subject' => 'No subject', 'expected' => 'denied', 'refusalReason' => CurrentApiTokenVoter::SESSION_REFUSAL_REASON],
 ];

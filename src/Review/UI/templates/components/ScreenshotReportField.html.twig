@@ -13,6 +13,13 @@
         <p class="screenshot-report__error" id="{{ this.errorId }}">{{ this.error }}</p>
     {% endif %}
     <div class="screenshot-report__actions">
+        {% if this.offersCapture %}
+            {#- A page cannot tell whether the extension is installed, so the button always explains it; no script needed. -#}
+            <details class="screenshot-report__capture">
+                <summary class="btn btn-filled">Capture with pinround</summary>
+                <p class="screenshot-report__capture-help">{{ constant('App\\Review\\UI\\Component\\ScreenshotReportField::CAPTURE_HELP') }}</p>
+            </details>
+        {% endif %}
         <input class="visually-hidden screenshot-report__file" id="{{ this.fieldId }}-file" type="file" accept="image/png,image/jpeg,image/webp"
             data-presigned-upload-target="input" data-screenshot-report-target="file" data-action="change->presigned-upload#choose"{% if this.error is not null %} aria-describedby="{{ this.errorId }}"{% endif %}>
         <label class="btn btn-outline screenshot-report__pick" for="{{ this.fieldId }}-file">Upload a file</label>

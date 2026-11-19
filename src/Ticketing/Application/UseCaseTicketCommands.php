@@ -8,6 +8,8 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\DraftChoice;
 use App\Ticketing\Api\MoveResult;
+use App\Ticketing\Api\ProblemReport;
+use App\Ticketing\Api\ReportedTicket;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
@@ -33,6 +35,11 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         \DateTimeImmutable $reportedAt,
     ): string {
         return $this->createTicket->create($organizationId, $reporter, $projectId, $title, $description, $type, $priority, $assignee, $reportedAt);
+    }
+
+    public function report(ProblemReport $report): ReportedTicket
+    {
+        return $this->createTicket->report($report);
     }
 
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult

@@ -181,6 +181,7 @@ final class VisibleTicketIdsLeakTest extends VisibilityLeakCast
             new DbalTurnUserQueries($connection, self::tenantContext()),
             new DbalUserQueries($connection),
             new TicketTeamLookup($stepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
+            self::getContainer()->get(\App\Organization\Api\SettingsQueries::class),
         );
     }
 

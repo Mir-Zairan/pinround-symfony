@@ -17,7 +17,7 @@ doctrine:
         # tkt_summary (filled in P08), ntf_mute and ntf_delivery, rvw_round, rvw_screenshot and rvw_pin (DbalRounds), rvw_area (DbalAreas), rvw_check_item (DbalChecklists), ast_suggestion (DbalSuggestions), and aud_event, tkt_ticket_event, ntf_notification and ast_usage (DbalMetering) with their monthly partitions
         # aud_event_YYYYMM, tkt_ticket_event_YYYYMM, ntf_notification_YYYYMM and ast_usage_YYYYMM (data-model.md, Partitions and retention).
         # The Messenger tables stay visible: Messenger adds them to the expected schema, so diff checks them.
-        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|ins_ticket_turn|ins_project_counts|ins_project_count_ticket|tkt_summary|ntf_mute|ntf_delivery|rvw_round|rvw_screenshot|rvw_pin|rvw_area|rvw_check_item|ast_suggestion|ast_local_package|aud_event(?:_\d{6})?|tkt_ticket_event(?:_\d{6})?|ntf_notification(?:_\d{6})?|ast_usage(?:_\d{6})?)$)~'
+        schema_filter: &schema_filter '~^(?!(?:public\.)?(?:processed_message|idn_login_attempt|web_home_focus|wf_rule_set|ins_ticket_turn|ins_project_counts|ins_project_count_ticket|tkt_summary|ntf_mute|ntf_delivery|rvw_round|rvw_screenshot|rvw_pin|rvw_area|rvw_check_item|rvw_report_draft|api_idempotency_key|ast_suggestion|ast_local_package|aud_event(?:_\d{6})?|tkt_ticket_event(?:_\d{6})?|ntf_notification(?:_\d{6})?|ast_usage(?:_\d{6})?)$)~'
 
         profiling_collect_backtrace: '%kernel.debug%'
         types:

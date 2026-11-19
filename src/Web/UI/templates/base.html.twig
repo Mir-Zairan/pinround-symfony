@@ -73,8 +73,7 @@
                 <div class="site-header__spacer"></div>
                 {% set canReportProblems = can_report_problems() %}
                 {% if canReportProblems %}
-                    {# TODO(P03/P06): open the report form once its route exists. #}
-                    <button type="button" class="btn btn-tonal btn-sm">Report a problem</button>
+                    <a class="btn btn-tonal btn-sm" href="{{ path('ticketing_report') }}">Report a problem</a>
                 {% endif %}
                 {% set localAiPolicy = local_ai_chip() %}
                 {% if localAiPolicy %}{{ include('@Web/ai/_local_ai_sheet.html.twig', {policy: localAiPolicy}) }}{% endif %}

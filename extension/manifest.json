@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "pinround",
+  "description": "Capture the page you are on into a pinround report draft or your draft round.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "action": {
+    "default_title": "Capture with pinround",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "permissions": ["activeTab", "storage"]
+}

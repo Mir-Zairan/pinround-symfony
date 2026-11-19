@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Capture with pinround</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="src/popup/popup.js"></script>
+</head>
+<body>
+    <h1>Capture with pinround</h1>
+
+    <section id="not-paired" hidden>
+        <p class="hint">Connect the extension to your pinround first.</p>
+        <button type="button" id="open-options">Open the extension options</button>
+    </section>
+
+    <form id="capture-form" hidden>
+        <label>
+            Put the screenshot in
+            <select id="target" required></select>
+        </label>
+
+        <fieldset id="report-fields">
+            <legend>New report</legend>
+            <label>
+                Project key
+                <input id="project" type="text" maxlength="20" autocomplete="off" placeholder="SHOP">
+            </label>
+            <label>
+                What is wrong, in one line
+                <input id="report-title" type="text" maxlength="200">
+            </label>
+        </fieldset>
+
+        <label>
+            Title · optional
+            <input id="shot-title" type="text" maxlength="120">
+        </label>
+        <label>
+            What this picture shows · optional
+            <textarea id="shot-summary" rows="3" maxlength="600"></textarea>
+        </label>
+
+        <button type="submit" id="capture">Capture this page</button>
+
+        <section id="report-captures" hidden>
+            <p class="hint" id="captures-count"></p>
+            <ol class="captures" id="captures-list"></ol>
+            <button type="button" id="make-draft">Make the report draft</button>
+            <button type="button" class="secondary" id="clear-captures">Start over</button>
+        </section>
+    </form>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+</body>
+</html>

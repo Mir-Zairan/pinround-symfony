@@ -332,7 +332,7 @@ deptrac:
     Review_Domain: [SharedKernel]
     Review_Application: [Review_Domain, Review_Api, SharedKernel, Ticketing_Api, Media_Api, Organization_Api, Identity_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
     Review_Infrastructure: [Review_Domain, Review_Application, Review_Api, SharedKernel, Vendor, Ticketing_Api, Media_Api, Organization_Api, Identity_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    Review_UI: [Review_Application, Review_Api, SharedKernel, Vendor, Ticketing_Api, Media_Api, Organization_Api, Identity_Api]
+    Review_UI: [Review_Application, Review_Api, SharedKernel, Vendor, Ticketing_Api, Media_Api, Organization_Api, Identity_Api, Insight_Api]
 
     Media_Api: [SharedKernel]
     Media_Event: [SharedKernel]

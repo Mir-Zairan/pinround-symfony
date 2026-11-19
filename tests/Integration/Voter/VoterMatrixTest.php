@@ -20,6 +20,7 @@ use App\Media\Api\UploadTarget;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Application\OpenInvitationLink;
 use App\Organization\Domain\TeamSlug;
+use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundAccessFacts;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -133,6 +134,9 @@ final class VoterMatrixTest extends KernelTestCase
     private const string DONE_STEP = '0197a3c0-0000-7000-8000-00000000f0d1';
     private const string ASSIGNED_TICKET = '0197a3c0-0000-7000-8000-0000000009f6';
     private const string DONE_TICKET = '0197a3c0-0000-7000-8000-0000000009f7';
+    private const string TESTING_STEP = '0197a3c0-0000-7000-8000-00000000f0d2';
+    /** Assigned to Omar, in Testing with Mia as its tester, and Mia's turn in the turn read model (ADR-0044). */
+    private const string TESTING_TICKET = '0197a3c0-0000-7000-8000-0000000009f9';
     private const string ROUND = '0197a3c0-0000-7000-8000-0000000009f8';
 
     /** Each ticket id subject of DRAFT_CREATE by name; Omar is the assignee of the two Shop tickets of Acme Foods that have one. */
@@ -140,6 +144,7 @@ final class VoterMatrixTest extends KernelTestCase
         'Unassigned Shop ticket' => self::SHOP_TICKET,
         'Shop ticket assigned to Omar' => self::ASSIGNED_TICKET,
         'Done Shop ticket assigned to Omar' => self::DONE_TICKET,
+        'Shop ticket in Testing, Mia\'s turn' => self::TESTING_TICKET,
         'Ticket nobody has, for a draft round' => self::NO_TICKET,
     ];
 
@@ -153,6 +158,11 @@ final class VoterMatrixTest extends KernelTestCase
         'Unshared draft round of Omar in another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, true, false],
         'Shared round of another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, false, false],
     ];
+
+    private const string REPORT_DRAFT = '0197a3c0-0000-7000-8000-0000000009fa';
+    private const string REPORT_DRAFT_OF_MIA = 'Report draft of Mia';
+    /** For an attribute whose voter takes no subject, such as REVOKE_CURRENT_TOKEN. */
+    private const string NO_SUBJECT = 'No subject';
 
     private const string PASSWORD_SESSION = 'password session';
     private const string PERSONAL_ACCESS_TOKEN = 'personal access token';
@@ -339,8 +349,16 @@ final class VoterMatrixTest extends KernelTestCase
         ));
     }
 
-    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket|TicketId|RoundAccessFacts
+    private static function subjectNamed(string $name): OrganizationId|TeamId|OpenInvitationLink|TicketVisibilityFacts|UploadTarget|MessageOnTicket|TicketId|RoundAccessFacts|ReportDraftView|null
     {
+        if (self::NO_SUBJECT === $name) {
+            return null;
+        }
+        if (self::REPORT_DRAFT_OF_MIA === $name) {
+            $at = new \DateTimeImmutable(self::NOW);
+
+            return new ReportDraftView(self::REPORT_DRAFT, new UserId(self::PEOPLE['Mia'][0]), 'SHOP', 'Refund button freezes', '', [], 1, $at, $at);
+        }
         if (isset(self::TICKET_IDS[$name])) {
             return new TicketId(self::TICKET_IDS[$name]);
         }
@@ -385,7 +403,7 @@ final class VoterMatrixTest extends KernelTestCase
                 null === $invitee ? null : new UserId(self::PEOPLE[$invitee][0]),
             );
         }
-        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation, a ticket or a comment of VoterMatrixTest.');
+        self::assertArrayHasKey($name, self::TEAMS, 'The subject is an organization, a team, an invitation, a ticket, a comment, a report draft or no subject of VoterMatrixTest.');
 
         return new TeamId(self::TEAMS[$name]);
     }
@@ -507,6 +525,10 @@ final class VoterMatrixTest extends KernelTestCase
                 "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Done', 'done', 'done', 'core', 7)",
                 [self::ACME_FOODS, self::DONE_STEP],
             ));
+            self::migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Testing', 'check', 'test', 'core', 5)",
+                [self::ACME_FOODS, self::TESTING_STEP],
+            ));
         } finally {
             $tenantContext->clear();
         }
@@ -517,6 +539,18 @@ final class VoterMatrixTest extends KernelTestCase
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::ASSIGNED_TICKET, self::PROJECT, 3, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0]]);
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::DONE_TICKET, self::PROJECT, 4, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0]]);
         $tickets->moveToStepOf(self::ACME_FOODS, self::DONE_TICKET, self::DONE_STEP);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::TESTING_TICKET, self::PROJECT, 5, 'team', self::SHOP, self::REPORTER, ['assignee_id' => self::PEOPLE['Omar'][0], 'tester_id' => self::PEOPLE['Mia'][0]]);
+        $tickets->moveToStepOf(self::ACME_FOODS, self::TESTING_TICKET, self::TESTING_STEP);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            self::migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
+                 SELECT organization_id, id, team_id, project_id, 'check', tester_id, NULL, 'test', 10, '2027-03-15 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
+                [self::TESTING_TICKET],
+            ));
+        } finally {
+            $tenantContext->clear();
+        }
     }
 
     private static function removeSeededRows(): void

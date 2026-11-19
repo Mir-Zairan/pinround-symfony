@@ -98,8 +98,9 @@ final class Ticket implements TenantOwned
     /**
      * A new ticket starts in the To do step when it has an assignee, else in the Backlog step.
      *
-     * @param string $backlogStepId the wf_step id of the Backlog step that applies to the ticket's team
-     * @param string $toDoStepId    the wf_step id of the To do step that applies to the ticket's team
+     * @param string       $backlogStepId the wf_step id of the Backlog step that applies to the ticket's team
+     * @param string       $toDoStepId    the wf_step id of the To do step that applies to the ticket's team
+     * @param list<string> $checkReasons  Intake's CheckReason values the new ticket is checked for, each once
      *
      * @throws BlankTicketTitle         when nothing is left of the title after trimming
      * @throws TicketTitleTooLong       when the trimmed title has more than 200 characters
@@ -121,8 +122,9 @@ final class Ticket implements TenantOwned
         string $backlogStepId,
         string $toDoStepId,
         \DateTimeImmutable $reportedAt,
+        array $checkReasons = [],
     ): self {
-        return new self(
+        $ticket = new self(
             $id,
             $organizationId,
             $projectId,
@@ -138,6 +140,9 @@ final class Ticket implements TenantOwned
             null === $assignee ? $backlogStepId : $toDoStepId,
             $reportedAt,
         );
+        $ticket->checkReasons = array_values(array_unique($checkReasons));
+
+        return $ticket;
     }
 
     public function id(): TicketId
@@ -277,6 +282,14 @@ final class Ticket implements TenantOwned
     public function release(): ?string
     {
         return $this->release;
+    }
+
+    /**
+     * True while the ticket has check reasons and nobody has checked it yet (FR-INT-07).
+     */
+    public function isCheckNeeded(): bool
+    {
+        return [] !== $this->checkReasons && null === $this->checkedAt;
     }
 
     /**

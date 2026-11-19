@@ -50,11 +50,11 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Draft round** — A private round that the assignee makes to check their own work: screenshots, pins, notes and a verdict per screenshot. Only the owner (and their Claude Code, with their token) can see it until they share it.
 
-**Evidence log** — The list of screenshots, titles, summaries and pins that Claude Code (or another MCP client) keeps while it checks a problem. It is filed in one step when the person says so. Proposed in [ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md).
+**Evidence log** — The list of screenshots, titles, summaries and pins that Claude Code (or another MCP client) keeps while it checks a problem. It is filed in one step when the person says so. See [ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md).
 
 **Explain it to me** — A private AI answer about a ticket, only for the person who asked. They can share it; then it shows under the summary for everyone.
 
-**Findings round** — A shared draft round of someone other than the assignee, for example the tester: "Round 3 · findings by Mia". Each of its pins becomes a checklist item. Proposed in [ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md).
+**Findings round** — A shared draft round of someone other than the assignee, for example the tester: "Round 3 · findings by Mia". Each of its pins becomes a checklist item. See [ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md).
 
 **Five groups** — To do, Doing, Checking, Waiting, Done. Fixed for every organization, with fixed colors. Every step belongs to exactly one group. Managers compare teams by these groups.
 
@@ -64,7 +64,7 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Group** — See *Five groups*.
 
-**Hand-off** — The moment a ticket leaves its assignee (for example "Send to code review"). If the assignee has an unshared draft round, pinround asks: share it, or keep it private.
+**Hand-off** — The moment a ticket leaves the person who has it (for example "Send to code review", or the tester's "Needs changes"). If that person has an unshared draft round with a screenshot, pinround asks: share it, or keep it private.
 
 **In short** — The short AI summary at the top of "The ask" on a ticket. It says who or what wrote it.
 
@@ -88,7 +88,7 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Next** — The line on a ticket that says what happens after the current step: "Lena reviews the code, then Mia tests it."
 
-**Notebook** — A private place for pins and screenshots that is not a ticket. You use it to ask about a screen. It also holds scenarios. Only its owner sees it. Proposed in [ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md).
+**Notebook** — A private place for pins and screenshots that is not a ticket. You use it to ask about a screen. It also holds scenarios. Only its owner sees it. See [ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md).
 
 **Now** — The line on a ticket that says who does what at this moment: "Omar builds it."
 
@@ -128,7 +128,7 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Same problem · close this one** — The checker's action to close a new ticket as a duplicate of an older one. Both tickets get a comment.
 
-**Scenario** — A short list of steps that shows one case happening live, for example "the stock warning shows". Claude Code writes it, and the browser extension plays it. Proposed in [ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md).
+**Scenario** — A short list of steps that shows one case happening live, for example "the stock warning shows". Claude Code writes it, and the browser extension plays it. See [ADR-0046](../03-adr/0046-notebooks-and-scenarios-for-understanding-an-app.md).
 
 **Step** — A named place in the workflow, for example "Code review". Steps are core, company or team steps. Each step belongs to one group.
 

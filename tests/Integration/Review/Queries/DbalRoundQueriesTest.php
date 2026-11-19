@@ -319,6 +319,31 @@ final class DbalRoundQueriesTest extends KernelTestCase
     }
 
     /**
+     * ADR-0044 lets someone other than the assignee own a draft, as the reviewer or tester does in their turn. Lena's
+     * unshared draft is such a draft: a developer of the team, an admin and the tester never get it.
+     */
+    #[Test]
+    #[DataProvider('viewersOfANonAssigneesDraft')]
+    public function aDraftOfSomeoneOtherThanTheAssigneeIsLeftOutForEveryoneElse(string $viewer): void
+    {
+        $roundIds = self::idsOf($this->roundsFor(self::TICKET, $viewer));
+
+        self::assertNotSame([], $roundIds);
+        self::assertContains(self::OMAR_SHARED_DRAFT, $roundIds);
+        self::assertNotContains(self::LENA_DRAFT, $roundIds, \sprintf('%s is shown Lena\'s unshared draft.', $viewer));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function viewersOfANonAssigneesDraft(): iterable
+    {
+        yield 'Omar, a developer of the team' => ['Omar'];
+        yield 'Sara, an admin' => ['Sara'];
+        yield 'Mia, the team\'s tester' => ['Mia'];
+    }
+
+    /**
      * Four queries besides the viewer's roles for a ticket with several rounds, screenshots and pins: the visibility
      * check, then rounds, screenshots and pins, one each.
      */

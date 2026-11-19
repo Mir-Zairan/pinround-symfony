@@ -46,6 +46,22 @@ interface TicketCommands
     ): string;
 
     /**
+     * Reports a problem from Report a problem (P06.T1, FR-INT-01 to FR-INT-09): the ticket is made at once. Its check
+     * reasons come from the words and the report's facts (Intake's CheckReasons), and a security word makes it
+     * team-only. It starts in To do with the picked person as assignee, else in Backlog. With no team ("Not sure") it
+     * has no team and no assignee, and takes the organization's core steps through the project's team. The project's
+     * row stays locked until the caller's transaction ends, as create does.
+     *
+     * @throws \DomainException          when the organization has no such project, no team owns it, the project is not
+     *                                   the picked team's, the assignee is not a lead or member of the team, or the
+     *                                   reporter picked a person in a team they are not in; nothing is saved
+     * @throws \InvalidArgumentException as create throws it, also for a person with no team, and for more than three
+     *                                   duplicate keys
+     * @throws \LogicException           when no transaction is open, or the team's steps lack Backlog or To do
+     */
+    public function report(ProblemReport $report): ReportedTicket;
+
+    /**
      * Moves the ticket with one of the Workflow verbs, where the team's transition policy sends it, and writes its
      * "moved" history row with the verb, its turn row and a TicketMoved event. A ticket moved into Needs input waits on
      * its reporter.

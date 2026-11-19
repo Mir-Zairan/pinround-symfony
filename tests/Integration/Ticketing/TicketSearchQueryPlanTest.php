@@ -12,20 +12,18 @@ use App\SharedKernel\Infrastructure\Doctrine\TenantSetting;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibility;
-use App\Ticketing\Api\TicketVisibilitySql;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The plans of the search and duplicate queries (data-model.md › Query patterns) over 50,000 tickets of one
- * organization, with the visibility predicate: they read tkt_ticket through the GIN indexes, never a sequential scan
- * (ADR-0022 › Confirmation). @@, % and similarity() are not LEAKPROOF, so under row-level security the planner skips
- * those indexes; the search therefore runs in search_ticket_ids, a SECURITY DEFINER function owned by
- * pinround_resolver, whose policy on tkt_ticket is USING (true). The duplicate query is still explained as
- * pinround_app under row-level security, and also without it, where the index must be used, so a skipped index under
- * it is known to be the policy's doing.
+ * The plans of search_ticket_ids (data-model.md › Query patterns) over 50,000 tickets of one organization, with the
+ * visibility predicate: it reads tkt_ticket through the GIN indexes, never a sequential scan (ADR-0022 › Confirmation).
+ *
+ * @@, % and similarity() are not LEAKPROOF, so under row-level security the planner skips those indexes; ticket search
+ * and the duplicate candidates of Report a problem therefore both run in this SECURITY DEFINER function, owned by
+ * pinround_resolver, whose policy on tkt_ticket is USING (true).
  *
  * The titles combine 17 subjects, 13 problems and 11 places, so each word sits in a few percent of the tickets, as in
  * an organization that has reported the same screens for years. 70% of the tickets are closed and were filed against
@@ -161,6 +159,24 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
         self::assertReadsTicketsThroughIndexes($plan, $scans, ['tkt_ticket_title_trgm_idx' => 'title % ']);
     }
 
+    /**
+     * Report a problem's duplicate candidates call the function as IntakeCandidateQueries::similarOpenTickets does: no
+     * project and only the open steps, so the step list must not steer the planner away from either GIN index.
+     */
+    #[Test]
+    public function duplicateCandidatesOnTheOpenStepsReadTicketsThroughBothIndexesInsideTheFunction(): void
+    {
+        [$rows, $scans, $plan] = $this->searchAs(self::OMAR, [self::SHOP_TEAM], 'Café menu crashes on Android', '{'.ShopTeamRows::TO_DO_STEP.'}');
+
+        self::assertNotSame([], $rows);
+        self::assertSame('Café menu crashes the app on Android', $rows[0][1]);
+        foreach ($rows as [$key, $title]) {
+            self::assertStringStartsWith('SHOP-', $key);
+            self::assertStringNotContainsString(self::CLOSED_MARK, $title);
+        }
+        self::assertReadsTicketsThroughIndexes($plan, $scans, ['tkt_ticket_search_idx' => 'search @@', 'tkt_ticket_title_trgm_idx' => 'title % ']);
+    }
+
     #[Test]
     public function aKeyInAnyCaseFindsItsTicketFirstThroughTheKeyIndex(): void
     {
@@ -202,35 +218,6 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
     }
 
     /**
-     * The duplicate candidates of data-model.md › Query patterns: open tickets that share words or a similar title.
-     */
-    #[Test]
-    public function duplicateCandidatesReadTicketsThroughBothIndexes(): void
-    {
-        $sql = 'SELECT t.id, t.key, t.title,
-                    ts_rank(t.search, websearch_to_tsquery(\'simple\', public.tkt_unaccent(CAST(:q AS text)))) AS rank,
-                    similarity(t.title, CAST(:title AS text)) AS sim
-             FROM tkt_ticket t
-             WHERE t.organization_id = CAST(:org AS uuid)
-               AND t.closed_at IS NULL
-               AND <visible(t)>
-               AND (t.search @@ websearch_to_tsquery(\'simple\', public.tkt_unaccent(CAST(:q AS text))) OR t.title % CAST(:title AS text))
-             ORDER BY (ts_rank(t.search, websearch_to_tsquery(\'simple\', public.tkt_unaccent(CAST(:q AS text)))) * 0.6
-                 + similarity(t.title, CAST(:title AS text)) * 0.4) DESC, t.id DESC
-             LIMIT 20';
-
-        [$plan, $rows, $planWithoutRowLevelSecurity] = $this->plansAndRowsOf($sql, ['q' => 'cafe menu android', 'title' => 'Café menu crashes on Android']);
-
-        self::assertNotSame([], $rows);
-        self::assertSame('Café menu crashes the app on Android', $rows[0][1]);
-        foreach ($rows as [$key, $title]) {
-            self::assertStringStartsWith('SHOP-', $key);
-            self::assertStringNotContainsString(self::CLOSED_MARK, $title);
-        }
-        self::assertDuplicateCandidatesReadTicketsThroughIndexes($plan, $planWithoutRowLevelSecurity, ['tkt_ticket_search_idx' => 'search @@', 'tkt_ticket_title_trgm_idx' => 'title % ']);
-    }
-
-    /**
      * Two proofs, as EXPLAIN cannot look inside a function call. The plan: the function's own body, read from pg_proc,
      * explained as pinround_resolver with its search_path and Omar's tenant, which is how the function runs. The call:
      * the scans the real call made, counted by the statistics of the transaction, so a plan the function picks at run
@@ -247,26 +234,6 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
         foreach (array_keys($operatorsByIndexName) as $indexName) {
             self::assertGreaterThan(0, $scans[$indexName] ?? 0, $indexName);
         }
-    }
-
-    /**
-     * @param array<string, string> $operatorsByIndexName the operator, as EXPLAIN prints it, that each index must serve
-     */
-    private static function assertDuplicateCandidatesReadTicketsThroughIndexes(string $plan, string $planWithoutRowLevelSecurity, array $operatorsByIndexName): void
-    {
-        self::assertSame([], self::unusedIndexNamesIn($planWithoutRowLevelSecurity, $operatorsByIndexName), $planWithoutRowLevelSecurity);
-        $unusedIndexNames = self::unusedIndexNamesIn($plan, $operatorsByIndexName);
-        if ([] !== $unusedIndexNames) {
-            // TODO(P06): the planner skips the GIN indexes under row-level security, as @@ and % are not LEAKPROOF; the
-            // duplicate candidates need a SECURITY DEFINER function like search_ticket_ids, then this becomes a failure.
-            self::markTestIncomplete(\sprintf(
-                "Under row-level security the plan does not use %s:\n%s\n\nWithout it:\n%s",
-                implode(', ', $unusedIndexNames),
-                $plan,
-                $planWithoutRowLevelSecurity,
-            ));
-        }
-        self::assertStringNotContainsString('Seq Scan on tkt_ticket', $plan, $plan);
     }
 
     /**
@@ -289,38 +256,6 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
     }
 
     /**
-     * The query with Omar's visibility predicate in place of its <visible(t)>, explained and run in one transaction as
-     * pinround_app under Acme Foods, then explained again as the table's owner without row-level security.
-     *
-     * @param array<string, string> $parameters
-     *
-     * @return array{string, list<array{string, string}>, string} the plan, the key and title of each row in the query's
-     *                                                            order, and the plan without row-level security
-     */
-    private function plansAndRowsOf(string $sqlWithoutVisibility, array $parameters): array
-    {
-        [$sql, $parameters, $plan, $rows] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($sqlWithoutVisibility, $parameters): array {
-            $visibility = TicketVisibilitySql::of(
-                $this->ticketVisibilities()->of(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR)),
-                't',
-            );
-            $sql = str_replace('<visible(t)>', $visibility->sql(), $sqlWithoutVisibility);
-            $parameters = [...$parameters, 'org' => self::ACME_FOODS, ...$visibility->parameters()];
-            $connection = $this->connection();
-
-            self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
-            $rows = array_map(
-                static fn (array $row): array => [\is_string($row['key']) ? $row['key'] : '', \is_string($row['title']) ? $row['title'] : ''],
-                $connection->fetchAllAssociative($sql, $parameters),
-            );
-
-            return [$sql, $parameters, self::planOf($connection, $sql, $parameters), $rows];
-        });
-
-        return [$plan, $rows, self::planWithoutRowLevelSecurityOf($sql, $parameters)];
-    }
-
-    /**
      * @return array{list<array{string, string}>, array<string, int>, string} as searchAs
      */
     private function searchAsOmar(string $query): array
@@ -333,14 +268,15 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
      * transaction, and the plan of its body for the same arguments.
      *
      * @param list<string> $teamIds the teams the viewer's TicketVisibility gives, in id order
+     * @param ?string      $stepIds the p_step_ids array literal, as '{<uuid>,…}', or null for every step
      *
      * @return array{list<array{string, string}>, array<string, int>, string} the key and title of each ticket found,
      *                                                                        best first, the scans of tkt_ticket the
      *                                                                        call made, and the plan
      */
-    private function searchAs(string $viewerId, array $teamIds, string $query): array
+    private function searchAs(string $viewerId, array $teamIds, string $query, ?string $stepIds = null): array
     {
-        $arguments = [...$this->searchArgumentsOf($viewerId, $teamIds), 'query' => $query];
+        $arguments = [...$this->searchArgumentsOf($viewerId, $teamIds), 'query' => $query, 'steps' => $stepIds];
         [$rows, $scans] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($arguments): array {
             $connection = $this->connection();
             self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
@@ -348,7 +284,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             $scansBefore = self::scansOfTicketTable($connection);
             $ticketIds = $connection->fetchFirstColumn(
                 'SELECT ticket_id FROM search_ticket_ids(CAST(:org AS uuid), CAST(:query AS text), CAST(:me AS uuid),
-                     CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, NULL, NULL)',
+                     CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, CAST(:steps AS uuid[]), NULL)',
                 $arguments,
             );
             $scansAfter = self::scansOfTicketTable($connection);
@@ -425,7 +361,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
      * The body of search_ticket_ids as pg_proc holds it, with the arguments in place of its p_ inputs, explained as
      * the function runs: as pinround_resolver, with the function's search_path, under Acme Foods.
      *
-     * @param array{org: string, me: string, teams: string, is_admin: string, is_triager: string, query: string} $arguments
+     * @param array{org: string, me: string, teams: string, is_admin: string, is_triager: string, query: string, steps: ?string} $arguments
      */
     private static function planOfTheSearchFunctionBody(array $arguments): string
     {
@@ -438,7 +374,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             'p_is_admin' => 'CAST('.$migrator->quote($arguments['is_admin']).' AS boolean)',
             'p_is_triager' => 'CAST('.$migrator->quote($arguments['is_triager']).' AS boolean)',
             'p_project_id' => 'CAST(NULL AS uuid)',
-            'p_step_ids' => 'CAST(NULL AS uuid[])',
+            'p_step_ids' => null === $arguments['steps'] ? 'CAST(NULL AS uuid[])' : 'CAST('.$migrator->quote($arguments['steps']).' AS uuid[])',
             'p_assignee_id' => 'CAST(NULL AS uuid)',
         ];
         $body = $migrator->fetchOne("SELECT prosrc FROM pg_proc WHERE oid = 'public.search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[], uuid)'::regprocedure");
@@ -474,26 +410,6 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
         self::assertMatchesRegularExpression('/^SHOP-\d+\z/', $key);
 
         return (int) substr($key, \strlen('SHOP-'));
-    }
-
-    /**
-     * As the migrator, which owns tkt_ticket: with FORCE turned off in a rolled-back transaction the owner skips the
-     * policies, and row_security off makes PostgreSQL refuse the query should any policy still apply.
-     *
-     * @param array<string, string> $parameters
-     */
-    private static function planWithoutRowLevelSecurityOf(string $sql, array $parameters): string
-    {
-        $migrator = self::migrator();
-        $migrator->beginTransaction();
-        try {
-            $migrator->executeStatement('ALTER TABLE tkt_ticket NO FORCE ROW LEVEL SECURITY');
-            $migrator->executeStatement('SET LOCAL row_security = off');
-
-            return self::planOf($migrator, $sql, $parameters);
-        } finally {
-            $migrator->rollBack();
-        }
     }
 
     /**

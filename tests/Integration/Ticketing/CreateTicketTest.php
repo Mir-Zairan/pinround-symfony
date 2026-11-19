@@ -8,16 +8,20 @@ use App\Insight\Api\TurnProjector;
 use App\Organization\Api\MembershipQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\OrganizationRows;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Api\Event\TicketCreated;
+use App\Ticketing\Api\ProblemReport;
+use App\Ticketing\Api\ReportedTicket;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
+use App\Ticketing\Application\CreateTicket\ProjectNotOfTeam;
 use App\Ticketing\Application\OrganizationProjects;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
@@ -55,6 +59,8 @@ final class CreateTicketTest extends KernelTestCase
     private const string BEN = '0197a3c0-0000-7000-8000-00000000c755';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-00000000c702';
     private const string OVENS_TEAM = '0197a3c0-0000-7000-8000-00000000c712';
+    /** A team of Acme Foods that owns no project here; the report check refuses before it reads the team. */
+    private const string OTHER_TEAM = '0197a3c0-0000-7000-8000-00000000c713';
     private const string TITLE = 'Cart total shows the wrong sum';
     private const string DESCRIPTION = 'The total adds the shipping twice.';
     private const int SHOP_NEXT_NUMBER = 7;
@@ -167,6 +173,39 @@ final class CreateTicketTest extends KernelTestCase
         self::assertSame(0, $this->storedTurnRows());
         self::assertSame(0, $this->outboxRows());
         self::assertSame(3, $this->storedNextNumber(self::TEAMLESS_PROJECT));
+        self::assertSame(self::SHOP_NEXT_NUMBER, $this->storedNextNumber(self::SHOP_PROJECT));
+    }
+
+    /**
+     * SHOP has a team, Shop, so ProjectHasNoTeam would be the wrong reason; the report picked another team.
+     */
+    #[Test]
+    public function aReportOfAProjectAnotherTeamOwnsIsRefusedAndWritesNothing(): void
+    {
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): ReportedTicket => $this->createTicket()->report(new ProblemReport(
+                new OrganizationId(self::ACME_FOODS),
+                new UserId(self::MIA),
+                self::SHOP_PROJECT,
+                new TeamId(self::OTHER_TEAM),
+                self::TITLE,
+                self::DESCRIPTION,
+                'bug',
+                'major',
+                null,
+                [],
+                new \DateTimeImmutable('2027-03-15 10:00:00 UTC'),
+            )));
+            self::fail('A report was made in a project of another team than the one picked.');
+        } catch (ProjectNotOfTeam $refused) {
+            self::assertSame('That project is not one of the team\'s.', $refused->getMessage());
+        }
+        self::getContainer()->get('doctrine')->resetManager();
+
+        self::assertSame([], $this->storedTickets());
+        self::assertSame([], $this->storedCreatedRows());
+        self::assertSame(0, $this->storedTurnRows());
+        self::assertSame(0, $this->outboxRows());
         self::assertSame(self::SHOP_NEXT_NUMBER, $this->storedNextNumber(self::SHOP_PROJECT));
     }
 
@@ -293,6 +332,7 @@ final class CreateTicketTest extends KernelTestCase
             new DbalTicketHistory($this->connection()),
             $turnProjector,
             new MessengerTicketEvents(self::getContainer()->get('event.bus'), $this->connection()),
+            new \App\Ticketing\Domain\Intake\CheckReasons(),
         );
     }
 

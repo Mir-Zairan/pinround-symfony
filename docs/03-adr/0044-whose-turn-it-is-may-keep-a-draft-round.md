@@ -4,7 +4,7 @@ A tester or reviewer can gather new findings on a ticket in a private draft roun
 
 ## Index
 
-- [Status](#status) — Proposed, date, deciders, what it supersedes.
+- [Status](#status) — Accepted, date, deciders, what it supersedes.
 - [Context and problem statement](#context-and-problem-statement) — Mia finds a second problem while testing.
 - [Decision drivers](#decision-drivers) — one ticket per problem thread, privacy, no new hand-off rule.
 - [Considered options](#considered-options) — tester's draft, comments, always a new ticket.
@@ -15,12 +15,12 @@ A tester or reviewer can gather new findings on a ticket in a private draft roun
 
 ## Status
 
-Proposed
+Accepted
 
 - Date: 2026-11-19
 - Deciders: Zairan Mir (lead, product owner)
 
-When accepted, it supersedes the "who may start" rule of [ADR-0017](0017-private-draft-rounds.md) and of
+It supersedes the "who may start" rule of [ADR-0017](0017-private-draft-rounds.md) and of
 [FR-RND-09](../01-requirements/functional-requirements.md#rnd--screenshots-pins-and-rounds) ("the assignee of an open
 ticket"). The rest of ADR-0017 stands: owner-only privacy, the hand-off dialog and MCP access with the owner's token.
 

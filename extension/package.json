@@ -1,0 +1,12 @@
+{
+  "name": "pinround-extension",
+  "private": true,
+  "description": "The pinround browser extension (Chrome MV3). No build step and no dependencies: the browser loads src/ as is.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}

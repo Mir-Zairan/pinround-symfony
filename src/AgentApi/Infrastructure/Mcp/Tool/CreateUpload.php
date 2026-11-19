@@ -92,7 +92,7 @@ final readonly class CreateUpload implements AgentTool
                 'additionalProperties' => false,
             ],
             description: 'Begins the upload of one screenshot to your own draft round on a ticket: {key, mime, bytes,'
-                .' sha256}. When you have no draft round there and you are the ticket\'s assignee, it starts one.'
+                .' sha256}. When you have no draft round there and you are the ticket\'s assignee or it is your turn on it, it starts one.'
                 .' Returns upload_id, put_url, headers and expires_at. Then send the file itself, never base64, with'
                 .' the headers as given, before expires_at: curl -T <file> -H "Content-Type: image/png" "<put_url>".'
                 .' Then call add_screenshot with the upload_id. Nothing is saved when the call is refused.',
@@ -108,7 +108,7 @@ final readonly class CreateUpload implements AgentTool
     /**
      * Reads the ticket's id by its key, then the caller's open unshared draft there, one query each. With a draft the
      * ticket is read for TicketPermission VIEW, and the voter is MediaPermission UPLOAD on the draft; without one,
-     * RoundPermission DRAFT_CREATE on the ticket, which grants its assignee alone.
+     * RoundPermission DRAFT_CREATE on the ticket, which grants its assignee and the person whose turn it is (ADR-0044).
      *
      * @throws ToolRefusal     not found, for a key the organization has no ticket with, or a draft on a ticket
      *                         TicketPermission VIEW denies

@@ -51,4 +51,22 @@ interface IntakeCandidateQueries
      *                                                    not the tenant, before any query
      */
     public function openCandidatesByKeys(TicketVisibility $reporter, array $keys): array;
+
+    /** The most tickets similarOpenTickets() returns, before the word rule picks the shown ones. */
+    public const int SIMILAR_LIMIT = 20;
+
+    /**
+     * The open tickets most like $text that the reporter may see, for duplicate suggestions (FR-INT-15, ADR-0022): the
+     * search's own score (full text and trigram similarity of the title), best first, at most SIMILAR_LIMIT. One query
+     * through the search function, which keeps the visibility predicate inside, then the same predicate again here.
+     *
+     * @param string $text the report's title, as typed
+     *
+     * @return list<IntakeCandidate>
+     *
+     * @throws \App\SharedKernel\Application\TenantNotSet when no tenant is set, before any query
+     * @throws \LogicException                            when no transaction is open or the reporter's organization is
+     *                                                    not the tenant, before any query
+     */
+    public function similarOpenTickets(TicketVisibility $reporter, string $text): array;
 }

@@ -8,7 +8,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
 - [Example prompts](#example-prompts) — what to say to Claude Code
-- [The tools](#the-tools) — what each of the seven tools does
+- [The tools](#the-tools) — what each of the nine tools does
 - [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
 - [Safety](#safety) — your token is your permissions
@@ -67,7 +67,9 @@ Every tool works as you, with your permissions in the app, and only inside the t
 | `get_ticket` | `read` | One ticket by key, as its page shows it to you: key, title, description, step, the "Now" and "Next" lines, the people on it with their roles (assignee, reporter, reviewer, tester), the open questions in its thread, and its checklist. A ticket you may not see is "not found", like one that does not exist. |
 | `get_round_notes` | `read` | For one ticket key: the newest shared round that has screenshots, your own private draft round, and the checklist. Each screenshot has its id, a signed image URL that works for a few minutes, title, summary, verdict ("Looks right", "Not right yet" or none) and pins (number, `x_pct`, `y_pct` from 0 to 100, note). Another person's private draft is never returned. |
 | `set_verdict` | `rounds:write` | Sets "Looks right" (`looks_right`) or "Not right yet" (`not_right_yet`) on a screenshot of your own draft round, with an optional new summary of at most 600 characters. Or, when you are the ticket's assignee, marks a checklist item fixed: `{key, check_item_id, state: "fixed"}`. |
-| `create_upload` | `rounds:write` | Begins the upload of one screenshot into your own draft round on a ticket. When you have no draft there and you are the assignee, it starts one. Answers where to send the file. |
+| `create_upload` | `rounds:write` | Begins the upload of one screenshot into your own draft round on a ticket. When you have no draft there and you are the assignee, or it is your turn (for example the tester in Testing), it starts one. Answers where to send the file. |
+| `create_report_upload` | `reports:write` | Begins the upload of one screenshot for a new report in a project (`project`, such as `SHOP`). Answers where to send the file, as `create_upload` does. |
+| `create_report` | `reports:write` | Makes a private report draft from a title, a detail and up to 10 uploaded screenshots with titles, summaries and pins. It never makes a ticket: open the `url` it answers, check the draft and press **Send**. A token gets `reports:write` only when you tick it. |
 | `add_screenshot` | `rounds:write` | Adds the uploaded picture to your draft round, with an optional title (at most 120 characters), summary (at most 600) and pins (at most 100, each note at most 1,000). |
 
 Claude Code reads each tool's own description, so you do not need to name tools in your prompts.

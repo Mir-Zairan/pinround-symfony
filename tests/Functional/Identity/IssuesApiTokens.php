@@ -25,9 +25,11 @@ trait IssuesApiTokens
     private const string LIVE_TOKEN_ISSUED_AT = '2099-03-15 10:00:00 UTC';
 
     /**
+     * @param list<ApiTokenScope>|null $scopes null for the scopes a token made for Claude Code starts with
+     *
      * @return array{string, string} the token's id and its plain text, shown once
      */
-    private function issueApiToken(User $user, OrganizationId $organizationId, string $issuedAt = self::LIVE_TOKEN_ISSUED_AT, int $lifetimeDays = ApiToken::DEFAULT_LIFETIME_DAYS): array
+    private function issueApiToken(User $user, OrganizationId $organizationId, string $issuedAt = self::LIVE_TOKEN_ISSUED_AT, int $lifetimeDays = ApiToken::DEFAULT_LIFETIME_DAYS, ?array $scopes = null): array
     {
         $hashing = self::getContainer()->get('test.identity_api_token_hashing');
         \assert($hashing instanceof ApiTokenHashing);
@@ -36,7 +38,7 @@ trait IssuesApiTokens
             $organizationId,
             $user->id(),
             'Claude Code',
-            ApiTokenScope::claudeCodeDefaults(),
+            $scopes ?? ApiTokenScope::claudeCodeDefaults(),
             $hashing,
             new \DateTimeImmutable($issuedAt),
             $lifetimeDays,

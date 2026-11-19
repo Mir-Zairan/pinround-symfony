@@ -27,6 +27,9 @@ final readonly class TicketTurnSnapshot
      * @param bool         $isRiskCheck     true while the ticket's check reasons include "risk"
      * @param UserId|null  $askedUserId     who must answer the question that pauses the ticket; null while none does
      * @param UserId|null  $askerId         who asked that question; null exactly when $askedUserId is null
+     * @param bool         $isCheckNeeded   true while a new ticket has check reasons and nobody checked it yet
+     * @param UserId|null  $checkerId       who takes that quick look: the team's lead, or the organization's triager for a
+     *                                      ticket with no team; null when no check is needed or nobody is chosen
      *
      * @throws \InvalidArgumentException when the lead does not match the team, the asker does not match the asked
      *                                   person, or the visibility is not all or team
@@ -56,6 +59,8 @@ final readonly class TicketTurnSnapshot
         public bool $isRiskCheck = false,
         public ?UserId $askedUserId = null,
         public ?UserId $askerId = null,
+        public bool $isCheckNeeded = false,
+        public ?UserId $checkerId = null,
     ) {
         if ((null === $teamId) !== (null === $leadId) || (null === $leadId) !== (null === $leadDisplayName)) {
             throw new \InvalidArgumentException('A ticket has a team lead and their name exactly when it has a team.');

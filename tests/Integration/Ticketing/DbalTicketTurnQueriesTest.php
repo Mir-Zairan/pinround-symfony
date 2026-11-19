@@ -240,7 +240,7 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
             $stepQueries = self::getContainer()->get('test.workflow_step_queries');
             self::assertInstanceOf(StepQueries::class, $stepQueries);
 
-            return new DbalTicketTurnQueries($connection, $this->tenantContext(), new TicketTeamLookup($stepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))))
+            return new DbalTicketTurnQueries($connection, $this->tenantContext(), new TicketTeamLookup($stepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))), self::getContainer()->get(\App\Organization\Api\SettingsQueries::class))
                 ->factsOf($ticketId);
         });
 

@@ -1,0 +1,16 @@
+{#- One team's project chips on Report a problem (report.html.twig): groupTeam is the team id, or "none" for Not sure.
+    A hidden group's radios are disabled, so only the shown team's project is posted. -#}
+<fieldset class="report__chips" data-report-form-target="projects" data-team="{{ groupTeam }}"{% if not isShown %} hidden{% endif %}
+    {%- if errors.project is defined %} aria-describedby="report-project-error"{% endif %}>
+    <legend class="report__label">Project</legend>
+    <div class="report__chip-row">
+        {% for project in projects %}
+            <label class="chip report__chip" title="{{ project.name }}">
+                <input class="visually-hidden" type="radio" name="project_id" value="{{ project.id }}"
+                    {%- if isShown and (project.id == input.projectId or (input.projectId not in projects|map(choice => choice.id) and loop.first)) %} checked{% endif %}
+                    {%- if not isShown %} disabled{% endif %}>
+                {{ project.key }}
+            </label>
+        {% endfor %}
+    </div>
+</fieldset>

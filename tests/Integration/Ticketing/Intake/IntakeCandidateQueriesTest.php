@@ -13,10 +13,13 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Tests\Integration\Workflow\WorkflowRows;
 use App\Ticketing\Api\IntakeCandidate;
 use App\Ticketing\Api\IntakeCandidateQueries;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Infrastructure\Doctrine\DbalIntakeCandidateQueries;
+use App\Workflow\Api\ListedStepView;
+use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -30,6 +33,11 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  * (SHOP-88), which the query gives only with team-only tickets included and only to whom may see them, and the rows it
  * always leaves out: a closed ticket for everyone, a ticket for everyone in the project OPS, and Beta Bakery's ticket in
  * its own project with SHOP's id.
+ *
+ * For the similar tickets, the project DESK holds, older than all of SHOP's, five tickets with one title: for everyone
+ * (DESK-1), team-only of Shop (DESK-2), team-only of another team (DESK-3), for everyone in a Done step (DESK-4) and
+ * closed (DESK-5), next to a ticket with another title (DESK-6) and Beta Bakery's ticket with the same title. Acme
+ * Foods has two steps: To do, which holds every ticket but DESK-4, and Done.
  */
 final class IntakeCandidateQueriesTest extends KernelTestCase
 {
@@ -45,6 +53,9 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     private const string MIA = '0197a3c0-0000-7000-8000-0000000f8a11';
     private const string OMAR = '0197a3c0-0000-7000-8000-0000000f8a12';
     private const string STEP = '0197a3c0-0000-7000-8000-0000000f8a21';
+    private const string DONE_STEP = '0197a3c0-0000-7000-8000-0000000f8a22';
+    private const string DESK_PROJECT = '0197a3c0-0000-7000-8000-0000000f8a08';
+    private const string SIMILAR_TITLE = 'Refund button freezes the checkout';
     private const int OPEN_TICKET_COUNT = 85;
     /** SHOP-51 shares its minute with SHOP-50 and has the higher id, so only the id puts it first. */
     private const int TIED_TICKET = 51;
@@ -52,14 +63,28 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->workflowRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->ticketRows()->addKeyedProjectOf(self::ACME_FOODS, self::SHOP_PROJECT, self::SHOP_TEAM, 'SHOP', 1);
         $this->ticketRows()->addKeyedProjectOf(self::ACME_FOODS, self::OPS_PROJECT, null, 'OPS', 1);
+        $this->ticketRows()->addKeyedProjectOf(self::ACME_FOODS, self::DESK_PROJECT, self::SHOP_TEAM, 'DESK', 1);
         $this->ticketRows()->addKeyedProjectOf(self::BETA_BAKERY, self::SHOP_PROJECT, null, 'SHOP', 1);
 
         $openNumbers = range(1, self::OPEN_TICKET_COUNT);
         // A fixed order that is neither the numbers' nor their reverse, so the query cannot lean on the heap order.
         usort($openNumbers, static fn (int $left, int $right): int => [$left % 7, $left] <=> [$right % 7, $right]);
         $this->asTenantMigrator(self::ACME_FOODS, static function (Connection $migrator) use ($openNumbers): void {
+            foreach ([[self::STEP, 'To do', 'todo', 'todo'], [self::DONE_STEP, 'Done', 'done', 'done']] as [$stepId, $name, $group, $coreCode]) {
+                $migrator->executeStatement(
+                    "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, ?, ?, ?, 'core', 0)",
+                    [self::ACME_FOODS, $stepId, $name, $group, $coreCode],
+                );
+            }
+            self::addTicket($migrator, self::ACME_FOODS, self::DESK_PROJECT, 'DESK', 1, 'all', self::SHOP_TEAM, self::OMAR, 0, title: self::SIMILAR_TITLE);
+            self::addTicket($migrator, self::ACME_FOODS, self::DESK_PROJECT, 'DESK', 2, 'team', self::SHOP_TEAM, self::OMAR, 0, title: self::SIMILAR_TITLE);
+            self::addTicket($migrator, self::ACME_FOODS, self::DESK_PROJECT, 'DESK', 3, 'team', self::OTHER_TEAM, self::OMAR, 0, title: self::SIMILAR_TITLE);
+            self::addTicket($migrator, self::ACME_FOODS, self::DESK_PROJECT, 'DESK', 4, 'all', self::SHOP_TEAM, self::OMAR, 0, title: self::SIMILAR_TITLE, stepId: self::DONE_STEP);
+            self::addTicket($migrator, self::ACME_FOODS, self::DESK_PROJECT, 'DESK', 5, 'all', self::SHOP_TEAM, self::OMAR, 0, closed: true, title: self::SIMILAR_TITLE);
+            self::addTicket($migrator, self::ACME_FOODS, self::DESK_PROJECT, 'DESK', 6, 'all', self::SHOP_TEAM, self::OMAR, 0);
             foreach ($openNumbers as $number) {
                 $minute = self::TIED_TICKET === $number ? self::TIED_TICKET - 1 : $number;
                 self::addTicket($migrator, self::ACME_FOODS, self::SHOP_PROJECT, 'SHOP', $number, 'all', self::SHOP_TEAM, self::OMAR, $minute);
@@ -72,6 +97,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         });
         $this->asTenantMigrator(self::BETA_BAKERY, static function (Connection $migrator): void {
             self::addTicket($migrator, self::BETA_BAKERY, self::SHOP_PROJECT, 'SHOP', 90, 'all', null, self::OMAR, 125);
+            self::addTicket($migrator, self::BETA_BAKERY, self::SHOP_PROJECT, 'SHOP', 91, 'all', null, self::OMAR, 0, title: self::SIMILAR_TITLE);
         });
     }
 
@@ -80,6 +106,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         self::getContainer()->get('doctrine')->resetManager();
         $this->tenantContext()->reset();
         $this->ticketRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->workflowRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         parent::tearDown();
     }
 
@@ -138,7 +165,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     public function rowLevelSecurityAloneHidesAnotherOrganizationsCandidates(bool $includeTeamOnly): void
     {
         $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
-        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext())
+        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext(), self::getContainer()->get(StepQueries::class))
             ->openCandidatesIn(self::SHOP_PROJECT, self::miaVisibility(true), $includeTeamOnly);
 
         $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $candidatesOn);
@@ -322,7 +349,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     public function byKeyRowLevelSecurityAloneHidesAnotherOrganizationsTickets(): void
     {
         $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
-        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext())
+        $candidatesOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext(), self::getContainer()->get(StepQueries::class))
             ->openCandidatesByKeys(self::miaVisibility(true), ['SHOP-1', 'SHOP-88']);
 
         $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $candidatesOn);
@@ -343,6 +370,78 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
                 return [$refusal->getMessage(), self::queryCountOf($this->debugData())];
             }
             self::fail('Mia\'s candidates were read under Beta Bakery.');
+        });
+
+        self::assertSame('Intake candidates are read under the reporter\'s own organization as tenant.', $refusal);
+        self::assertSame(0, $queryCount);
+    }
+
+    /**
+     * DESK-3 is another team's team-only ticket Mia may not see, DESK-4 is in a Done step, DESK-5 is closed, DESK-6 has
+     * another title and Beta Bakery's SHOP-91 is of another organization; the same title gives a tie, broken by the
+     * higher id first.
+     */
+    #[Test]
+    public function similarTicketsAreTheOpenOnesNotDoneThatTheReporterMaySee(): void
+    {
+        $candidates = $this->transactions()->committedAs(
+            self::ACME_FOODS,
+            fn (): array => $this->queries()->similarOpenTickets(self::miaVisibility(false), 'Refund button freezes'),
+        );
+
+        self::assertNotSame([], $candidates);
+        self::assertSame(
+            [['DESK-2', self::SIMILAR_TITLE], ['DESK-1', self::SIMILAR_TITLE]],
+            array_map(static fn (IntakeCandidate $candidate): array => [$candidate->key, $candidate->title], $candidates),
+        );
+    }
+
+    #[Test]
+    public function similarTicketsGiveAnAdminAnotherTeamsTeamOnlyTicketButNoDoneOrClosedOne(): void
+    {
+        $candidates = $this->transactions()->committedAs(
+            self::ACME_FOODS,
+            fn (): array => $this->queries()->similarOpenTickets(self::miaVisibility(true), 'Refund button freezes'),
+        );
+
+        self::assertSame(['DESK-3', 'DESK-2', 'DESK-1'], self::keysOf($candidates));
+    }
+
+    /**
+     * The SQL and the search function name Acme Foods both times and only the transaction's tenant differs. The steps
+     * come from a double that lists Acme Foods' steps, as the real StepQueries under Beta Bakery's tenant would list
+     * none and end the read before the ticket query runs.
+     */
+    #[Test]
+    public function similarTicketsOfAnotherOrganizationThanTheTenantStayHidden(): void
+    {
+        $acmeSteps = $this->transactions()->committedAs(
+            self::ACME_FOODS,
+            static fn (): array => self::getContainer()->get(StepQueries::class)->listedSteps(),
+        );
+        self::assertSame([self::STEP, self::DONE_STEP], array_map(static fn (ListedStepView $step): string => $step->id, $acmeSteps));
+        $ownConnectionTransactions = new OwnConnectionTransactions($this->connection(), $this->tenantContext());
+        $similarOn = fn (Connection $connection): array => new DbalIntakeCandidateQueries($connection, $this->tenantContext(), self::listing($acmeSteps))
+            ->similarOpenTickets(self::miaVisibility(true), 'Refund button freezes');
+
+        $underAcmeFoods = $ownConnectionTransactions->rolledBackAs(self::ACME_FOODS, $similarOn);
+        $underBetaBakery = $ownConnectionTransactions->rolledBackUnderAnotherContext(self::BETA_BAKERY, self::ACME_FOODS, $similarOn);
+
+        self::assertSame(['DESK-3', 'DESK-2', 'DESK-1'], self::keysOf($underAcmeFoods));
+        self::assertSame([], $underBetaBakery);
+    }
+
+    #[Test]
+    public function similarTicketsForAReporterOfAnotherOrganizationThanTheTenantAreRefusedBeforeAnyQuery(): void
+    {
+        [$refusal, $queryCount] = $this->transactions()->committedAs(self::BETA_BAKERY, function (): array {
+            $this->debugData()->reset();
+            try {
+                $this->queries()->similarOpenTickets(self::miaVisibility(false), 'Refund button freezes');
+            } catch (\LogicException $refusal) {
+                return [$refusal->getMessage(), self::queryCountOf($this->debugData())];
+            }
+            self::fail('Mia\'s similar tickets were read under Beta Bakery.');
         });
 
         self::assertSame('Intake candidates are read under the reporter\'s own organization as tenant.', $refusal);
@@ -383,7 +482,10 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         return TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [new TeamId(self::SHOP_TEAM)], $isAdmin, null);
     }
 
-    private static function addTicket(Connection $migrator, string $organizationId, string $projectId, string $projectKey, int $number, string $visibility, ?string $teamId, string $reporterId, int $minute, bool $closed = false): void
+    /**
+     * @param int $minute of updated_at, from 09:00, at least 0
+     */
+    private static function addTicket(Connection $migrator, string $organizationId, string $projectId, string $projectKey, int $number, string $visibility, ?string $teamId, string $reporterId, int $minute, bool $closed = false, ?string $title = null, string $stepId = self::STEP): void
     {
         $updatedAt = \sprintf('2027-03-01 %02d:%02d:00+00', 9 + intdiv($minute, 60), $minute % 60);
         $migrator->executeStatement(
@@ -396,8 +498,8 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
                 $projectId,
                 $number,
                 $projectKey.'-'.$number,
-                self::titleOf($projectKey, $number),
-                self::STEP,
+                $title ?? self::titleOf($projectKey, $number),
+                $stepId,
                 $reporterId,
                 $teamId,
                 $visibility,
@@ -415,6 +517,7 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
         $space = match (true) {
             self::BETA_BAKERY === $organizationId => 'b',
             'OPS' === $projectKey => 'c',
+            'DESK' === $projectKey => 'd',
             default => 'a',
         };
 
@@ -470,5 +573,47 @@ final class IntakeCandidateQueriesTest extends KernelTestCase
     private function ticketRows(): TicketRows
     {
         return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), $this->tenantContext());
+    }
+
+    private function workflowRows(): WorkflowRows
+    {
+        return new WorkflowRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), $this->tenantContext());
+    }
+
+    /**
+     * Steps read before, listed as they were whatever the tenant; it reads nothing else.
+     *
+     * @param list<ListedStepView> $steps
+     */
+    private static function listing(array $steps): StepQueries
+    {
+        return new readonly class($steps) implements StepQueries {
+            /**
+             * @param list<ListedStepView> $steps
+             */
+            public function __construct(private array $steps)
+            {
+            }
+
+            public function stepsFor(TeamId $teamId): array
+            {
+                throw new \LogicException('Similar tickets read no team\'s steps.');
+            }
+
+            public function moveTargetsFor(TeamId $teamId): array
+            {
+                throw new \LogicException('Similar tickets read no move targets.');
+            }
+
+            public function listedSteps(): array
+            {
+                return $this->steps;
+            }
+
+            public function groupOf(string $stepId): ?string
+            {
+                throw new \LogicException('Similar tickets read no step group.');
+            }
+        };
     }
 }

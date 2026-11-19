@@ -5,7 +5,7 @@ the browser extension plays live on the person's app, one by one.
 
 ## Index
 
-- [Status](#status) — Proposed, date, deciders.
+- [Status](#status) — Accepted, date, deciders.
 - [Context and problem statement](#context-and-problem-statement) — Lena wants to see every warning of a page.
 - [Decision drivers](#decision-drivers) — privacy, no code from AI runs in the page, a person starts each run.
 - [Considered options](#considered-options) — notebook + step list, generated test scripts, Claude Code drives alone.
@@ -16,12 +16,12 @@ the browser extension plays live on the person's app, one by one.
 
 ## Status
 
-Proposed
+Accepted
 
 - Date: 2026-11-19
 - Deciders: Zairan Mir (lead, product owner)
 
-When accepted, it supersedes part of the scope and tool lists of [ADR-0021](0021-mcp-server.md), as already changed by
+It supersedes part of the scope and tool lists of [ADR-0021](0021-mcp-server.md), as already changed by
 [ADR-0039](0039-agents-file-report-drafts-a-person-sends-them.md): it adds the scope `notebooks:write` and the tools
 `list_my_notebooks`, `get_notebook` and `save_scenarios`.
 

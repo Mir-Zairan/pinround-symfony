@@ -14,6 +14,7 @@ use App\SharedKernel\Infrastructure\Doctrine\TenantFilter;
 use App\SharedKernel\Infrastructure\Doctrine\TenantMiddleware;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
+use App\Ticketing\Api\NextTicketKey;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
@@ -376,6 +377,36 @@ final class DbalProjectQueriesTest extends KernelTestCase
         self::assertSame([self::SHOP, 'SHOP', 'Web shop', self::SHOP_TEAM], $this->foundByKey(self::ACME_FOODS, 'SHOP'));
     }
 
+    #[Test]
+    public function nextTicketKeyOfGivesTheProjectsNextKeyWithTheTeamThatOwnsIt(): void
+    {
+        $nextKeys = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $this->connection()->executeStatement('UPDATE tkt_project SET next_number = 7 WHERE organization_id = ? AND id = ?', [self::ACME_FOODS, self::SHOP]);
+            $queries = $this->queries(new RecordedOpenTicketCounts(self::OPEN_TICKETS));
+
+            return array_map(
+                static fn (?NextTicketKey $nextKey): ?array => null === $nextKey ? null : [$nextKey->key, $nextKey->teamId?->toString()],
+                [$queries->nextTicketKeyOf(self::SHOP), $queries->nextTicketKeyOf(self::OPS), $queries->nextTicketKeyOf(self::BETA_BREAD), $queries->nextTicketKeyOf('0197a3c0-0000-7000-8000-00000000dead')],
+            );
+        });
+
+        self::assertSame([['SHOP-7', self::SHOP_TEAM], ['OPS-1', null], null, null], $nextKeys);
+    }
+
+    #[Test]
+    public function nextTicketKeyOfAMalformedIdIsNoneWithoutAnyQuery(): void
+    {
+        $recordedSql = new RecordedSql();
+
+        $nextKey = $this->onRecordedConnection(
+            self::ACME_FOODS,
+            $recordedSql,
+            fn (Connection $connection): ?NextTicketKey => new DbalProjectQueries($connection, new RecordedOpenTicketCounts(self::OPEN_TICKETS), self::ticketVisibilities(), $this->tenantContext())->nextTicketKeyOf(strtoupper(self::SHOP)),
+        );
+
+        self::assertSame([null, []], [$nextKey, $recordedSql->statements]);
+    }
+
     /**
      * The SQL names the organization of TenantContext, while the transaction's tenant, which row-level security uses,
      * is another one: what still hides Acme Foods' projects from Beta Bakery's transaction is row-level security alone.
@@ -394,11 +425,12 @@ final class DbalProjectQueriesTest extends KernelTestCase
                 $queries->unlinkedProjectChoices(10),
                 $queries->projectChoicesOfTeams([new TeamId(self::SHOP_TEAM), new TeamId(self::MOBILE_TEAM)]),
                 $queries->projectByKey('SHOP'),
+                $queries->nextTicketKeyOf(self::SHOP),
             ];
         });
 
         self::assertFalse($this->entityManager()->getFilters()->isEnabled(TenantFilter::NAME));
-        self::assertSame([[], [], [], null], $listsUnderAcmeContext);
+        self::assertSame([[], [], [], null, null], $listsUnderAcmeContext);
     }
 
     #[Test]

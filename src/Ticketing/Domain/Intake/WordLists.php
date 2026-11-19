@@ -11,7 +11,7 @@ namespace App\Ticketing\Domain\Intake;
  */
 final class WordLists
 {
-    public const int VERSION = 2;
+    public const int VERSION = 3;
 
     /**
      * FR-INT-09: a match makes the report team-only and keeps it from cloud AI. The spec's stems are prefixes
@@ -30,5 +30,22 @@ final class WordLists
         'token', 'tokens',
         'permission\p{L}*',
         'other\s+tenants?', 'another\s+tenant',
+    ];
+
+    /**
+     * FR-INT-08: a match adds the check reason "risk" and nothing else; it never changes who may see the ticket. Every
+     * security word counts, and the prototype's risk words besides: tenant, data loss and lost data, deleted, crash,
+     * the whole word "down", cannot or can't log in (any apostrophe, "login" too), all customers and everyone.
+     */
+    public const array RISK = [
+        ...self::SECURITY,
+        'tenants?',
+        'data\s+loss', 'lost\s+data',
+        'deleted',
+        'crash\p{L}*',
+        'down',
+        'can(?:not|\s+not|[\'’]t)\s+log\s*in',
+        'all\s+customers',
+        'everyone',
     ];
 }

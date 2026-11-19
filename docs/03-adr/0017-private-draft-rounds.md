@@ -17,7 +17,7 @@ The assignee can check their own work in a private round. Nobody else sees it un
 
 ## Status and people
 
-- Status: Accepted
+- Status: Accepted. Superseded in part by [ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md): who may start a draft round (the assignee, or the person whose turn it is). Everything else here still stands.
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 

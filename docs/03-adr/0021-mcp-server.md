@@ -17,7 +17,7 @@ Claude Code connects to pinround with a personal token. It can do only what that
 
 ## Status and people
 
-- Status: Accepted. Superseded in part by [ADR-0039](0039-agents-file-report-drafts-a-person-sends-them.md) (scope `reports:write`, tool `create_report`) and by [ADR-0043](0043-api-token-hash-is-hmac-sha256.md) (the "Stored as SHA-256 of (token + server-side pepper from secrets)" line: the hash is HMAC-SHA256 keyed by the `API_TOKEN_PEPPER` environment variable)
+- Status: Accepted. Superseded in part by [ADR-0039](0039-agents-file-report-drafts-a-person-sends-them.md) (scope `reports:write`, tool `create_report`) by [ADR-0045](0045-evidence-is-captured-where-the-person-works.md) (tool `find_tickets` and the prompt `report_while_investigating`), by [ADR-0046](0046-notebooks-and-scenarios-for-understanding-an-app.md) (scope `notebooks:write`, tools `list_my_notebooks`, `get_notebook`, `save_scenarios`), by [ADR-0047](0047-a-sent-report-draft-is-a-report-and-its-pictures-upload-by-project.md) (tool `create_report_upload`, scope `reports:write`) and by [ADR-0043](0043-api-token-hash-is-hmac-sha256.md) (the "Stored as SHA-256 of (token + server-side pepper from secrets)" line: the hash is HMAC-SHA256 keyed by the `API_TOKEN_PEPPER` environment variable)
 - Date: 2026-11-06
 - Deciders: Zairan (lead), Toyib (developer), Anka (tester)
 

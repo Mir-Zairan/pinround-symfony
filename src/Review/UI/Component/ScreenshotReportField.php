@@ -35,6 +35,7 @@ final class ScreenshotReportField
     public const string VARIANT = 'view';
     public const string ALT_TEXT = 'The screenshot you added';
     public const string NOTE_PLACEHOLDER = 'What is wrong here?';
+    public const string CAPTURE_HELP = 'Open the page with the problem and click the pinround extension’s icon. It takes the screenshot and makes a report draft with it, which you check and send. To get the extension, ask your admin.';
 
     /** A media id is a UUID; anything longer is malformed and is never looked up. */
     private const int MEDIA_ID_MAX_LENGTH = 36;
@@ -51,6 +52,9 @@ final class ScreenshotReportField
 
     /** Gives the section's elements unique ids; lowercase letters, digits and dashes. */
     public string $fieldId = 'screenshot';
+
+    /** Report a problem offers "Capture with pinround", which explains the browser extension (P10.T8 step 3). */
+    public bool $offersCapture = false;
 
     public string $title = '';
     public string $summary = '';

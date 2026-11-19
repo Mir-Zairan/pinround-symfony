@@ -39,7 +39,7 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
     {
         $this->requireTransaction();
         if (null === $snapshot->leadId || null === $snapshot->leadDisplayName) {
-            return null;
+            return $this->noTeamCheckFactsOf($snapshot);
         }
 
         $team = TurnInputs::teamFacts(
@@ -50,8 +50,23 @@ final readonly class DbalTicketTurnSource implements TicketTurnSource
             $waitingTurns ?? $this->teamLoadQueries->waitingTurnsOf([...$snapshot->developerIds, ...$snapshot->testerIds], $snapshot->ticketId),
         );
 
-        // No organization has a current release yet, and the quick check comes later. An open question arrives through
-        // the snapshot's askedUserId, which ticketStateOf passes on.
+        // No organization has a current release yet. The quick check and an open question arrive through the snapshot
+        // (isCheckNeeded and checkerId, askedUserId), which ticketStateOf passes on.
+        return new TicketTurnFacts($snapshot->ticketId, $snapshot->projectId, TurnInputs::ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
+    }
+
+    /**
+     * A ticket with no team ("Not sure", P06) waits only on its quick check by the organization's triager (turn rule 2,
+     * workflow-engine.md, Whose turn). That rule decides before it reads the team, so the triager stands in as the lead
+     * of a team of nobody else; a no-team ticket that needs no check, or has no triager, has no turn row.
+     */
+    private function noTeamCheckFactsOf(TicketTurnSnapshot $snapshot): ?TicketTurnFacts
+    {
+        if (null !== $snapshot->teamId || !$snapshot->isCheckNeeded || null === $snapshot->checkerId) {
+            return null;
+        }
+        $team = TurnInputs::teamFacts($snapshot->checkerId, '', [], [], []);
+
         return new TicketTurnFacts($snapshot->ticketId, $snapshot->projectId, TurnInputs::ticketStateOf($snapshot), $team, $snapshot->visibility, isRiskCheck: $snapshot->isRiskCheck);
     }
 

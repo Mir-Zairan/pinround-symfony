@@ -81,6 +81,31 @@ final class DraftRoundControllerTest extends WebTestCase
         ));
     }
 
+    /**
+     * Mia becomes SHOP-1's tester, the ticket goes to a Testing step, and the turn read model says it is her turn, as
+     * the move to Testing would leave it.
+     */
+    private function putInTestingWithMiasTurn(string $ticketId): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $testingStepId = Uuid::v7()->toRfc4122();
+        $miaId = $this->people['Mia']->id()->toString();
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $testingStepId, $miaId, $ticketId): int {
+            $migrator->executeStatement(
+                "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Testing', 'check', 'test', 'core', 5)",
+                [$organizationId, $testingStepId],
+            );
+            $migrator->executeStatement('UPDATE tkt_ticket SET step_id = ?, tester_id = ? WHERE id = ?', [$testingStepId, $miaId, $ticketId]);
+            $migrator->executeStatement(
+                "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
+                 SELECT organization_id, id, team_id, project_id, 'check', tester_id, NULL, 'test', 10, '2026-11-06 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
+                [$ticketId],
+            );
+
+            return 0;
+        });
+    }
+
     protected function tearDown(): void
     {
         $this->removeSeededRounds();
@@ -174,8 +199,41 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame(['Share with the team now', 'Delete draft'], $frame->filter('#round-'.$draft.' form button')->each(static fn (Crawler $button): string => $button->text()), 'Share and Delete stay.');
     }
 
+    /**
+     * ADR-0044: in Testing it is Mia's turn, so the tester may start her own private draft; the lead may not, as it is
+     * not hers.
+     */
     #[Test]
-    public function noOneButTheAssigneeSeesTheStartButtonOrMayStartADraft(): void
+    public function theTesterWhoseTurnItIsStartsHerOwnDraftAndTheLeadIsStillRefused(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->putInTestingWithMiasTurn($ticketId);
+
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertCount(0, $this->frame()->filter(self::ROUNDS.' form.rounds__start'), 'Not Lena\'s turn.');
+        $this->client->request('POST', self::START, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
+        self::assertSame(DraftRoundController::ONLY_THE_ASSIGNEE_OR_TURN_STARTS, $this->toastAfterTheRedirect());
+        self::assertSame([], $this->roundRowsOf($ticketId));
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $start = $this->frame()->filter(self::ROUNDS.' form.rounds__start');
+        self::assertSame('Start a draft round', $start->filter('button[type=submit]')->text());
+
+        $this->client->submit($start->form());
+
+        self::assertSame(DraftRoundController::DRAFT_STARTED, $this->toastAfterTheRedirect());
+        $drafts = $this->roundRowsOf($ticketId);
+        self::assertCount(1, $drafts);
+        self::assertSame(['draft', $this->people['Mia']->id()->toString(), null, null, 'open'], [$drafts[0]['kind'], $drafts[0]['owner_id'], $drafts[0]['number'], $drafts[0]['shared_at'], $drafts[0]['state']]);
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $frame = $this->frame();
+        self::assertSame([], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), 'Omar does not see Mia\'s unshared draft.');
+        self::assertCount(1, $frame->filter(self::ROUNDS.' form.rounds__start'), 'The assignee may still start his own.');
+    }
+
+    #[Test]
+    public function noOneButTheAssigneeSeesTheStartButtonOrMayStartADraftWhileItIsNobodyElsesTurn(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $ben = $this->otherOrganizationsAdmin();
@@ -186,12 +244,12 @@ final class DraftRoundControllerTest extends WebTestCase
 
             $this->client->request('POST', self::START, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
 
-            self::assertSame("Only the ticket's assignee can start a draft round.", $this->toastAfterTheRedirect(), $person.' may see the ticket, so the denial is a toast, not a 404.');
+            self::assertSame(DraftRoundController::ONLY_THE_ASSIGNEE_OR_TURN_STARTS, $this->toastAfterTheRedirect(), $person.' may see the ticket, so the denial is a toast, not a 404.');
             self::assertSame([], $this->roundRowsOf($ticketId), $person);
 
             $this->client->request('POST', self::START, [], [], self::TURBO_FORM_HEADERS);
 
-            self::assertSame("Only the ticket's assignee can start a draft round.", $this->toastOfTheRefusal(), $person.': the voter runs before the form token is read.');
+            self::assertSame(DraftRoundController::ONLY_THE_ASSIGNEE_OR_TURN_STARTS, $this->toastOfTheRefusal(), $person.': the voter runs before the form token is read.');
             self::assertSame([], $this->roundRowsOf($ticketId), $person);
         }
 

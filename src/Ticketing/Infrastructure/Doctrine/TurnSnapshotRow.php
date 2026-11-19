@@ -19,7 +19,7 @@ final class TurnSnapshotRow
     public const string COLUMNS = "ticket.project_id, ticket.step_id, ticket.previous_step_id, ticket.team_id, ticket.visibility, ticket.priority,
         ticket.release, ticket.reporter_id, ticket.assignee_id, ticket.pending_assignee_id, ticket.reviewer_id, ticket.tester_id,
         ticket.waiting_on_user_id, ticket.waiting_on_label, 'risk' = ANY (ticket.check_reasons) AS is_risk_check, ticket.asked_user_id,
-        ticket.asker_id";
+        ticket.asker_id, (cardinality(ticket.check_reasons) > 0 AND ticket.checked_at IS NULL) AS is_check_needed";
 
     private function __construct()
     {
@@ -29,6 +29,7 @@ final class TurnSnapshotRow
      * @param array<string, mixed> $row          the COLUMNS of one ticket
      * @param list<UserId>         $developerIds
      * @param list<UserId>         $testerIds
+     * @param UserId|null          $triagerId    the organization's triager, who checks a ticket with no team
      *
      * @throws \LogicException when a column has the wrong type
      */
@@ -41,7 +42,10 @@ final class TurnSnapshotRow
         ?string $leadDisplayName,
         array $developerIds,
         array $testerIds,
+        ?UserId $triagerId = null,
     ): TicketTurnSnapshot {
+        $isCheckNeeded = true === $row['is_check_needed'];
+
         return new TicketTurnSnapshot(
             $ticketId,
             self::text($row['project_id'], 'project_id'),
@@ -67,6 +71,8 @@ final class TurnSnapshotRow
             true === $row['is_risk_check'],
             self::userIdOrNull($row['asked_user_id'], 'asked_user_id'),
             self::userIdOrNull($row['asker_id'], 'asker_id'),
+            $isCheckNeeded,
+            $isCheckNeeded ? (null === self::teamIdOf($row) ? $triagerId : $leadId) : null,
         );
     }
 
@@ -91,5 +97,16 @@ final class TurnSnapshotRow
     private static function userIdOrNull(mixed $value, string $column): ?UserId
     {
         return null === $value ? null : new UserId(self::text($value, $column));
+    }
+
+    /**
+     * Whether the row's ticket needs a check and has no team, so its checker is the organization's triager, whom the
+     * caller then reads (SettingsQueries::triagerOf) and passes to snapshotOf.
+     *
+     * @param array<string, mixed> $row the COLUMNS of one ticket
+     */
+    public static function needsTheTriager(array $row): bool
+    {
+        return true === $row['is_check_needed'] && null === $row['team_id'];
     }
 }

@@ -26,6 +26,10 @@ Superseded in part by [ADR-0040](0040-report-drafts-live-in-review.md): where th
 runs, the `ReportDrafts` signatures, and how a draft stores its screenshots (the "Owning module", Api and Send bullets
 below). Everything else here still stands.
 
+Superseded in part by [ADR-0047](0047-a-sent-report-draft-is-a-report-and-its-pictures-upload-by-project.md): the
+upload line ("Screenshots use the same upload path: `create_upload` …"). A report's pictures are begun with the tool
+`create_report_upload` (scope `reports:write`) on the upload target kind `new_report`, keyed by the project.
+
 ## Context and problem statement
 
 Mia, a tester at Acme Foods, gets a customer complaint about project SHOP. She asks her own Claude Code to reproduce
