@@ -37,7 +37,7 @@ The prompt's text is in [report_while_investigating.v1.md](../../src/AgentApi/In
 A token without `reports:write` can still check and add to a ticket, but "New report" is refused. Untick `rounds:write` if you only want reports.
 
 ## Start a check
-Claude Code shows each MCP prompt as a slash command. Type `/` and pick the pinround prompt; with the server named `pinround` it is:
+Claude Code shows each MCP prompt as a slash command. Type `/` and pick pinround's `report_while_investigating` prompt; with the server named `pinround` it is:
 
 ```text
 /mcp__pinround__report_while_investigating

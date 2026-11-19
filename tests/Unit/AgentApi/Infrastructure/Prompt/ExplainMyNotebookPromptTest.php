@@ -64,6 +64,32 @@ final class ExplainMyNotebookPromptTest extends TestCase
     }
 
     #[Test]
+    public function everyArgumentTheTextGivesANotebookToolIsAnInputOfThatTool(): void
+    {
+        $notebooks = self::createStub(Notebooks::class);
+        $clock = new MockClock('2026-03-02 10:00:00 UTC');
+        $notebookTools = [];
+        foreach ([
+            new ListMyNotebooks($notebooks),
+            new GetNotebook(self::createStub(CurrentApiToken::class), $notebooks, self::createStub(SignedUrls::class), $clock),
+            new SaveScenarios($notebooks, $clock),
+        ] as $tool) {
+            $notebookTools[$tool->definition()->name] = $tool;
+        }
+        $flowingText = (string) preg_replace('/\s+/', ' ', new ExplainMyNotebookPrompt()->text());
+        $toolNamePattern = implode('|', array_map(static fn (string $toolName): string => preg_quote($toolName, '/'), array_keys($notebookTools)));
+        // "with its `x`" and "with the `x`" are caught too, so an answer field written as an argument fails.
+        preg_match_all('/`('.$toolNamePattern.')` with (?:its |the )?`([a-z_]+)`/', $flowingText, $toolArguments, \PREG_SET_ORDER);
+        self::assertNotSame([], $toolArguments, 'the text names no argument of a notebook tool');
+
+        foreach ($toolArguments as [, $toolName, $argument]) {
+            $properties = $notebookTools[$toolName]->definition()->inputSchema['properties'] ?? null;
+            self::assertIsArray($properties);
+            self::assertArrayHasKey($argument, $properties, \sprintf('%s takes no argument %s', $toolName, $argument));
+        }
+    }
+
+    #[Test]
     public function theTextNamesTheScopesTheNotebookToolsAsk(): void
     {
         $text = new ExplainMyNotebookPrompt()->text();

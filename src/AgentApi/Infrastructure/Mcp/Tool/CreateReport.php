@@ -52,7 +52,7 @@ final readonly class CreateReport implements AgentTool
 
     private const int MAX_PROJECT_KEY_LENGTH = 20;
     private const int MAX_UPLOAD_ID_LENGTH = 64;
-    private const int MAX_TITLE_LENGTH = 200;
+    private const int MAX_REPORT_TITLE_LENGTH = 200;
     private const int MAX_DETAIL_LENGTH = 50000;
 
     public function __construct(
@@ -75,7 +75,7 @@ final readonly class CreateReport implements AgentTool
                 'type' => 'object',
                 'properties' => [
                     'project' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_PROJECT_KEY_LENGTH, 'description' => 'The project key, such as SHOP.'],
-                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_TITLE_LENGTH, 'description' => 'What is wrong, in one line.'],
+                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_REPORT_TITLE_LENGTH, 'description' => 'What is wrong, in one line.'],
                     'detail' => ['type' => 'string', 'maxLength' => self::MAX_DETAIL_LENGTH, 'description' => 'More detail: the steps to see it, what you expected and what happened.'],
                     'screenshots' => [
                         'type' => 'array',

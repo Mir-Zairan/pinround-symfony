@@ -31,7 +31,7 @@ final readonly class CreateNotebook implements AgentTool
     public const string AUDIT_TARGET_TYPE = 'user';
 
     /** The title rule allows far fewer characters and says so; the cap only keeps a check from reading megabytes. */
-    private const int MAX_TITLE_LENGTH = 1000;
+    private const int MAX_TITLE_INPUT_LENGTH = 1000;
 
     public function __construct(
         private CurrentApiToken $currentApiToken,
@@ -49,7 +49,7 @@ final readonly class CreateNotebook implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_TITLE_LENGTH, 'description' => \sprintf('What the notebook is about, at most %d characters.', Notebooks::MAX_TITLE_LENGTH)],
+                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_TITLE_INPUT_LENGTH, 'description' => \sprintf('What the notebook is about, at most %d characters.', Notebooks::MAX_TITLE_LENGTH)],
                 ],
                 'required' => ['title'],
                 'additionalProperties' => false,
