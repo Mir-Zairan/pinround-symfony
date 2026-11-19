@@ -222,7 +222,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         $this->changeAndSave($draft, $deletedAt, static fn (Round $round) => $round->delete($ownerId, $deletedAt));
     }
 
-    public function take(string $roundId, UserId $ownerId, \DateTimeImmutable $takenAt): TakenDraftRound
+    public function contentsOf(string $roundId, UserId $ownerId): DraftRoundAsRead
     {
         $draft = $this->ownDraft($roundId, $ownerId);
         $screenshots = array_map(
@@ -235,9 +235,17 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
             $draft->screenshots(),
         );
 
-        $this->changeAndSave($draft, $takenAt, static fn (Round $round) => $round->delete($ownerId, $takenAt));
+        return new DraftRoundAsRead($draft->id()->toString(), $draft->ticketId(), $draft->version(), $screenshots);
+    }
 
-        return new TakenDraftRound($draft->ticketId(), $screenshots);
+    public function deleteAsRead(DraftRoundAsRead $read, UserId $ownerId, \DateTimeImmutable $deletedAt): void
+    {
+        $draft = $this->ownDraft($read->roundId, $ownerId);
+        if ($draft->version() !== $read->version) {
+            throw new RoundRefused(RoundRefused::DRAFT_CHANGED);
+        }
+
+        $this->changeAndSave($draft, $deletedAt, static fn (Round $round) => $round->delete($ownerId, $deletedAt));
     }
 
     /**

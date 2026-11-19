@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const NODE_SPECS = ['pin-count.spec.ts', 'pin-position.spec.ts', 'submit-hold.spec.ts', 'upload-checks.spec.ts', 'upload-status.spec.ts'];
-const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts', 'review-journey.spec.ts', 'mcp-upload.spec.ts', 'mcp-report.spec.ts'];
+const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts', 'review-journey.spec.ts', 'mcp-upload.spec.ts', 'mcp-report.spec.ts', 'draft-to-report-draft.spec.ts'];
 const AI_SETTINGS_SPECS = ['check-with-ai.spec.ts', 'summary-poll.spec.ts', 'local-ai.spec.ts', 'laptop-summary.spec.ts'];
 
 export default defineConfig({
