@@ -19,11 +19,13 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
+use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Conversation\Application\InMemoryPingClearing;
 use App\Tests\Unit\Review\Application\InMemoryChecklists;
 use App\Tests\Unit\Review\Application\InMemoryRounds;
 use App\Tests\Unit\Review\Application\RecordingReviewEvents;
+use App\Tests\Unit\Review\UI\Media\InMemoryTicketTurnQueries;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -45,6 +47,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     private const string TICKET_WITHOUT_PINS = '0197a3c0-0000-7000-8000-000000007a13';
     private const string TICKET_WITHOUT_REPORT = '0197a3c0-0000-7000-8000-000000007a14';
     private const string BETA_TICKET = '0197a3c0-0000-7000-8000-000000007a15';
+    private const string BROKEN_TICKET = '0197a3c0-0000-7000-8000-000000007a16';
     private const string LENA = '0197a3c0-0000-7000-8000-000000007a21';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000007a22';
     private const string MIA = '0197a3c0-0000-7000-8000-000000007a23';
@@ -75,6 +78,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
             $this->events,
             $this->pingClearing,
             $this->tenantContext,
+            new InMemoryTicketTurnQueries([self::ticketAssignedTo(self::TICKET, self::OMAR), self::ticketAssignedTo(self::OTHER_TICKET, null)], new TicketId(self::BROKEN_TICKET)),
         );
 
         $this->tenantContext->set(new OrganizationId(self::BETA_BAKERY));
@@ -332,6 +336,137 @@ final class UseCaseChecklistCommandsTest extends TestCase
         self::assertSame([[], [], []], [$this->checklists->lockedItemIds, $this->events->published(), $this->pingClearing->calls()]);
     }
 
+    #[Test]
+    public function miasSharedFindingsGetAnOpenItemPerPinOnTheirOwnRoundInPictureAndPinOrder(): void
+    {
+        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, true);
+        $roundsBefore = $this->rounds->stored;
+
+        $made = $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(3, $made);
+        $items = $this->acmeItems();
+        self::assertSame(
+            [[$roundId, 'Cut off', CheckItemState::Open], [$roundId, 'Shown twice', CheckItemState::Open], [$roundId, 'Wrong colour', CheckItemState::Open]],
+            array_map(fn (CheckItem $item): array => [$item->roundId()->toString(), $this->noteOfPin($roundId, $item), $item->state()], $items),
+        );
+        foreach ($items as $item) {
+            self::assertSame([self::TICKET, null, null], [$item->ticketId()->toString(), $item->changedBy(), $item->changedAt()]);
+        }
+        self::assertEquals($roundsBefore, $this->rounds->stored, 'Findings add no round of their own.');
+        self::assertSame([[], []], [$this->rounds->numberedTicketIds, $this->events->published()]);
+    }
+
+    #[Test]
+    public function omarsSharedDraftIsASelfCheckAndGetsNoItems(): void
+    {
+        $roundId = $this->addSharedDraft(self::OMAR, self::TICKET, true);
+
+        self::assertSame(0, $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW)));
+
+        self::assertSame([], $this->acmeItems());
+    }
+
+    #[Test]
+    public function onATicketWithNoAssigneeEvenOmarsSharedDraftIsFindings(): void
+    {
+        $roundId = $this->addSharedDraft(self::OMAR, self::OTHER_TICKET, true);
+
+        self::assertSame(3, $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW)));
+
+        self::assertCount(3, $this->acmeItems());
+    }
+
+    #[Test]
+    public function sharedFindingsWithoutPinsGetNoItems(): void
+    {
+        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, false);
+
+        self::assertSame(0, $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW)));
+
+        self::assertSame([], $this->acmeItems());
+    }
+
+    #[Test]
+    public function aSecondCallForTheSameFindingsIsABugAndWritesNothing(): void
+    {
+        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, true);
+        $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+        $itemsBefore = $this->checklists->storedItems;
+
+        try {
+            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            self::fail('A second call made items again.');
+        } catch (\LogicException $refused) {
+            self::assertSame(InMemoryChecklists::ITEM_REFUSED, $refused->getMessage());
+        }
+
+        self::assertEquals($itemsBefore, $this->checklists->storedItems);
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(self): string, string}>
+     */
+    public static function roundsThatAreNotSharedFindings(): iterable
+    {
+        yield 'an unshared draft' => [static fn (self $test): string => $test->addUnsharedDraft(), 'Only a shared draft round has findings to check.'];
+        yield 'Round 0' => [static fn (self $test): string => $test->reportRoundId(), 'Only a shared draft round has findings to check.'];
+        yield 'an unknown round' => [static fn (): string => self::UNKNOWN_ITEM, \sprintf('Round %s is not the tenant\'s.', self::UNKNOWN_ITEM)];
+        yield 'a malformed id' => [static fn (): string => 'not-a-round', 'Round id "not-a-round" is not one RoundCommands gives.'];
+        yield 'a round of a ticket that cannot be read' => [static fn (self $test): string => $test->addSharedDraft(self::MIA, self::BROKEN_TICKET, true), 'A ticket is in a step its organization does not have.'];
+    }
+
+    /**
+     * @param \Closure(self): string $roundIdOf
+     */
+    #[Test]
+    #[DataProvider('roundsThatAreNotSharedFindings')]
+    public function aRoundThatIsNotSharedFindingsIsABugAndGetsNoItems(\Closure $roundIdOf, string $reason): void
+    {
+        $roundId = $roundIdOf($this);
+
+        try {
+            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            self::fail('Items were made for a round that is not shared findings.');
+        } catch (\LogicException $refused) {
+            self::assertSame($reason, $refused->getMessage());
+        }
+
+        self::assertSame([], $this->acmeItems());
+    }
+
+    #[Test]
+    public function findingsOfATicketWhoseFactsAreMissingFailClosedAndGetNoItems(): void
+    {
+        $roundId = $this->addSharedDraft(self::MIA, self::TICKET_WITHOUT_PINS, true);
+
+        try {
+            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            self::fail('Findings were made without knowing the ticket\'s assignee.');
+        } catch (\LogicException $refused) {
+            self::assertSame(\sprintf('The ticket of round %s cannot be read.', $roundId), $refused->getMessage());
+        }
+
+        self::assertSame([], $this->acmeItems());
+    }
+
+    #[Test]
+    public function anotherOrganizationsSharedFindingsAreNotTheTenants(): void
+    {
+        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, true);
+        $this->tenantContext->set(new OrganizationId(self::BETA_BAKERY));
+        $betaItemsBefore = $this->checklists->storedItems;
+
+        try {
+            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            self::fail('Beta Bakery made items on Acme Foods\' round.');
+        } catch (\LogicException $refused) {
+            self::assertSame(\sprintf('Round %s is not the tenant\'s.', $roundId), $refused->getMessage());
+        }
+
+        self::assertEquals($betaItemsBefore, $this->checklists->storedItems);
+    }
+
     /**
      * Runs the command and proves the refusal left the items, events and pings as they were.
      */
@@ -430,5 +565,88 @@ final class UseCaseChecklistCommandsTest extends TestCase
         $move($read);
         $this->checklists->saveItem($read);
         $this->checklists->lockedItemIds = [];
+    }
+
+    /**
+     * The owner's draft of the ticket in Acme Foods, shared as Round 2: with $hasPins, pins 2 and 1 on its first
+     * picture, given out of order, and pin 1 on its second; else one picture without pins.
+     */
+    private function addSharedDraft(string $ownerId, string $ticketId, bool $hasPins): string
+    {
+        $owner = new UserId($ownerId);
+        $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId($ticketId), $owner, new \DateTimeImmutable(self::CREATED_AT));
+        $first = $this->rounds->nextScreenshotIdentity();
+        $draft->addScreenshot($owner, $first, self::MEDIA);
+        if ($hasPins) {
+            $second = $this->rounds->nextScreenshotIdentity();
+            $draft->addScreenshot($owner, $second, self::MEDIA);
+            $draft->replacePins($owner, $second, [Pin::placedBy($this->rounds->nextPinIdentity(), 1, 50.0, 50.0, 'Wrong colour', $owner)]);
+            $draft->replacePins($owner, $first, [
+                Pin::placedBy($this->rounds->nextPinIdentity(), 2, 20.0, 20.0, 'Shown twice', $owner),
+                Pin::placedBy($this->rounds->nextPinIdentity(), 1, 10.0, 10.0, 'Cut off', $owner),
+            ]);
+        }
+        $draft->share($owner, 2, new \DateTimeImmutable(self::CREATED_AT));
+        $this->rounds->add($draft);
+
+        return $draft->id()->toString();
+    }
+
+    private function addUnsharedDraft(): string
+    {
+        $mia = new UserId(self::MIA);
+        $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), $mia, new \DateTimeImmutable(self::CREATED_AT));
+        $screenshotId = $this->rounds->nextScreenshotIdentity();
+        $draft->addScreenshot($mia, $screenshotId, self::MEDIA);
+        $draft->replacePins($mia, $screenshotId, [Pin::placedBy($this->rounds->nextPinIdentity(), 1, 10.0, 10.0, 'Cut off', $mia)]);
+        $this->rounds->add($draft);
+
+        return $draft->id()->toString();
+    }
+
+    private function reportRoundId(): string
+    {
+        foreach ($this->rounds->stored as $round) {
+            if (Round::REPORT_NUMBER === $round->number() && self::TICKET === $round->ticketId()->toString()) {
+                return $round->id()->toString();
+            }
+        }
+
+        self::fail('SHOP-1 has no Round 0.');
+    }
+
+    private function noteOfPin(string $roundId, CheckItem $item): string
+    {
+        foreach ($this->storedRound($roundId)->screenshots() as $screenshot) {
+            foreach ($screenshot->pins() as $pin) {
+                if ($pin->id()->equals($item->pinId())) {
+                    return $pin->note();
+                }
+            }
+        }
+
+        self::fail('The item names a pin its round does not have.');
+    }
+
+    private static function ticketAssignedTo(string $ticketId, ?string $assigneeId): TicketTurnSnapshot
+    {
+        return new TicketTurnSnapshot(
+            new TicketId($ticketId),
+            '0197a3c0-0000-7000-8000-000000007a41',
+            '0197a3c0-0000-7000-8000-000000007a42',
+            'test',
+            'check',
+            null,
+            null,
+            null,
+            [],
+            [],
+            'all',
+            'normal',
+            null,
+            new UserId(self::LENA),
+            null === $assigneeId ? null : new UserId($assigneeId),
+            testerId: new UserId(self::MIA),
+        );
     }
 }

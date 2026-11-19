@@ -134,12 +134,15 @@ interface RoundCommands
 
     /**
      * Shows the draft to everyone who may see the ticket as the ticket's next round number. Holds the ticket's round
-     * numbers until the caller's transaction ends, so two shares on one ticket get two numbers.
+     * numbers until the caller's transaction ends, so two shares on one ticket get two numbers. When the owner is not
+     * the ticket's assignee, each pin becomes an open checklist item in the same transaction
+     * (ChecklistCommands::createFromFindings).
      *
      * @return int the round's number, from 1
      *
      * @throws RoundRefused    NOT_FOUND, DRAFT_CHANGED, NUMBER_TAKEN, or when the draft is shared already; nothing is saved
-     * @throws \LogicException when no transaction is open or no tenant is set
+     * @throws \LogicException when no transaction is open or no tenant is set, or the findings' items cannot be written,
+     *                         and then the share is saved: the caller's transaction must roll back
      */
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int;
 
@@ -151,7 +154,7 @@ interface RoundCommands
      *
      * @throws RoundRefused    NOT_FOUND, DRAFT_CHANGED, NUMBER_TAKEN, or when the draft is shared or decided already;
      *                         nothing is saved
-     * @throws \LogicException when no transaction is open or no tenant is set
+     * @throws \LogicException as shareDraft says
      */
     public function shareDraftAtHandOff(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int;
 

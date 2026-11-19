@@ -9,6 +9,7 @@ use App\Review\Domain\CheckItemId;
 use App\Review\Domain\CheckItemState;
 use App\Review\Domain\Checklist;
 use App\Review\Domain\Checklists;
+use App\Review\Domain\FindingsChecklist;
 use App\Review\Domain\PinId;
 use App\Review\Domain\ReportPins;
 use App\Review\Domain\RoundId;
@@ -26,9 +27,9 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * Checklists on rvw_round and rvw_check_item through DBAL; no entity maps them (doctrine.yaml schema_filter). Adding
- * one takes two statements whatever its size: the round, then all its items. Round 0 holds at most
- * Round::MAX_SCREENSHOTS times Screenshot::MAX_PINS pins, so the items bind at most 40,000 values, under PostgreSQL's
- * 65,535. Reads name organization_id as well as row-level security, so each one uses an index that starts with it.
+ * one takes two statements whatever its size: the round, then all its items; the items of a findings round take one.
+ * A round holds at most Round::MAX_SCREENSHOTS times Screenshot::MAX_PINS pins, so the items bind at most 40,000
+ * values, under PostgreSQL's 65,535. Reads name organization_id as well as row-level security, so each one uses an index that starts with it.
  */
 final readonly class DbalChecklists implements Checklists
 {
@@ -81,28 +82,58 @@ final readonly class DbalChecklists implements Checklists
                 throw new RoundSlotTaken('The ticket has this round already.');
             }
 
-            $itemRows = array_map(static fn (CheckItem $item): array => [
-                $organizationId,
-                $item->id()->toString(),
-                $roundId,
-                $item->pinId()->toString(),
-                $item->state()->value,
-                $item->changedBy()?->toString(),
-                $item->changedAt()?->format(self::TIMESTAMP),
-                $createdAt,
-            ], $checklist->items());
-            $rowPlaceholders = '('.implode(', ', array_fill(0, \count(self::ITEM_COLUMNS), '?')).')';
-            try {
-                $this->connection->executeStatement(
-                    \sprintf('INSERT INTO rvw_check_item (%s) VALUES %s', implode(', ', self::ITEM_COLUMNS), implode(', ', array_fill(0, \count($itemRows), $rowPlaceholders))),
-                    array_merge(...$itemRows),
-                );
-            } catch (ForeignKeyConstraintViolationException|UniqueConstraintViolationException $refusal) {
-                // Item ids come from nextItemIdentity, the pins from reportPinsOf, and the ticket's checklist slot is
-                // taken above, so this is a bug.
-                throw new \LogicException('A checklist item has an id added before, or names a pin that is not stored or is in a checklist already.', 0, $refusal);
-            }
+            // Item ids come from nextItemIdentity, the pins from reportPinsOf, and the ticket's checklist slot is taken
+            // above, so a refused item is a bug.
+            $this->insertItems($organizationId, $roundId, $createdAt, $checklist->items());
         });
+    }
+
+    public function addFindings(FindingsChecklist $checklist): void
+    {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Findings are added in a transaction under their organization as tenant; none is open.');
+        }
+
+        // A savepoint, as in add(). The share saved before stays until the caller's transaction rolls back.
+        $this->connection->transactional(function () use ($checklist): void {
+            // The pins are the shared round's own, so a refused item is a second call for the round.
+            $this->insertItems(
+                $checklist->organizationId()->toString(),
+                $checklist->roundId()->toString(),
+                $checklist->createdAt()->format(self::TIMESTAMP),
+                $checklist->items(),
+            );
+        });
+    }
+
+    /**
+     * All the items in one statement, which a round's caps keep under PostgreSQL's 65,535 bound values.
+     *
+     * @param non-empty-list<CheckItem> $items
+     *
+     * @throws \LogicException when an item's id was added before, or its pin is not stored or is in a checklist already
+     */
+    private function insertItems(string $organizationId, string $roundId, string $createdAt, array $items): void
+    {
+        $itemRows = array_map(static fn (CheckItem $item): array => [
+            $organizationId,
+            $item->id()->toString(),
+            $roundId,
+            $item->pinId()->toString(),
+            $item->state()->value,
+            $item->changedBy()?->toString(),
+            $item->changedAt()?->format(self::TIMESTAMP),
+            $createdAt,
+        ], $items);
+        $rowPlaceholders = '('.implode(', ', array_fill(0, \count(self::ITEM_COLUMNS), '?')).')';
+        try {
+            $this->connection->executeStatement(
+                \sprintf('INSERT INTO rvw_check_item (%s) VALUES %s', implode(', ', self::ITEM_COLUMNS), implode(', ', array_fill(0, \count($itemRows), $rowPlaceholders))),
+                array_merge(...$itemRows),
+            );
+        } catch (ForeignKeyConstraintViolationException|UniqueConstraintViolationException $refusal) {
+            throw new \LogicException('A checklist item has an id added before, or names a pin that is not stored or is in a checklist already.', 0, $refusal);
+        }
     }
 
     public function reportPinsOf(TicketId $ticketId): ?ReportPins

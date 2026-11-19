@@ -50,7 +50,7 @@ final class RoundsController extends AbstractController
 
         // The voter runs whether or not the viewer has a draft, so the frame reads the same queries either way.
         $mayStartDraft = $this->isGranted(RoundPermission::DRAFT_CREATE, $ticket->id);
-        $section = $this->roundCards->forTicket($ticket->id, $visible->visibility, $this->clock->now());
+        $section = $this->roundCards->forTicket($ticket->id, $visible->visibility, $ticket->turnSnapshot->assigneeId, $this->clock->now());
 
         $response = $this->render(
             $request->headers->has(self::TURBO_FRAME_HEADER) ? '@Review/rounds_frame.html.twig' : '@Review/rounds.html.twig',

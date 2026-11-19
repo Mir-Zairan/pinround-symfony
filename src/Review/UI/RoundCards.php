@@ -55,6 +55,13 @@ final readonly class RoundCards
     private const string PRIVATE_DRAFT_DESCRIPTION = 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.';
     private const string EMPTY_DRAFT_NOTE = 'No screenshots yet.';
 
+    /** A shared draft of the ticket's assignee, with its number and owner's name. */
+    private const string SELF_CHECK_HEADLINE = 'Round %d · self-check by %s';
+    private const string SELF_CHECK_DESCRIPTION = 'What %s checked before passing the ticket on.';
+    /** A shared draft of anyone else (ADR-0044): a tester's or reviewer's new findings, each pin a check item. */
+    private const string FINDINGS_HEADLINE = 'Round %d · findings by %s';
+    private const string FINDINGS_DESCRIPTION = 'What %s found while checking the ticket.';
+
     public function __construct(
         private RoundsVisibleTo $roundsVisibleTo,
         private MemberNameQueries $memberNameQueries,
@@ -65,8 +72,10 @@ final readonly class RoundCards
 
     /**
      * Runs inside the request transaction whose tenant is the viewer's organization.
+     *
+     * @param UserId|null $assigneeId the ticket's assignee now; a shared draft of anyone else is findings (ADR-0044)
      */
-    public function forTicket(TicketId $ticketId, TicketVisibility $viewer, \DateTimeImmutable $now): RoundsSectionView
+    public function forTicket(TicketId $ticketId, TicketVisibility $viewer, ?UserId $assigneeId, \DateTimeImmutable $now): RoundsSectionView
     {
         $organizationId = $viewer->organizationId();
         $ticketRounds = $this->roundsVisibleTo->forVisibleTo($ticketId, $viewer);
@@ -80,7 +89,7 @@ final readonly class RoundCards
         $checklist = self::hasChecklist($rounds) ? $this->checklistCards->forTicket($organizationId, $ticketId) : null;
 
         return new RoundsSectionView(
-            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $images, $checklist), $rounds),
+            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $assigneeId, $images, $checklist), $rounds),
             $ticketRounds->olderRoundsNotShown,
         );
     }
@@ -89,8 +98,10 @@ final readonly class RoundCards
      * The card of one draft round of its owner, reading and signing nothing of any other round: every picture of an
      * unshared draft, and the owner's name in one query only once the draft was shared (its headline names them). Runs
      * inside the request transaction like forTicket.
+     *
+     * @param UserId|null $assigneeId as forTicket takes it
      */
-    public function forDraft(OrganizationId $organizationId, RoundView $draft, \DateTimeImmutable $now): RoundCard
+    public function forDraft(OrganizationId $organizationId, RoundView $draft, ?UserId $assigneeId, \DateTimeImmutable $now): RoundCard
     {
         if (RoundView::DRAFT !== $draft->kind) {
             throw new \InvalidArgumentException('Only a draft round has a card of its own.');
@@ -99,14 +110,14 @@ final readonly class RoundCards
             ? self::UNKNOWN_OWNER
             : ($this->memberNameQueries->displayNamesOf($organizationId, [$draft->ownerId])[$draft->ownerId->toString()] ?? self::UNKNOWN_OWNER);
 
-        return $this->cardOf($draft, $ownerName, $this->imagesOf($organizationId, [$draft], $now));
+        return $this->cardOf($draft, $ownerName, $assigneeId, $this->imagesOf($organizationId, [$draft], $now));
     }
 
     /**
      * @param array<string, MediaImage> $images    by media id
      * @param ChecklistCard|null        $checklist the ticket's checklist card, which its checklist round shows
      */
-    private function cardOf(RoundView $round, string $ownerName, array $images, ?ChecklistCard $checklist = null): RoundCard
+    private function cardOf(RoundView $round, string $ownerName, ?UserId $assigneeId, array $images, ?ChecklistCard $checklist = null): RoundCard
     {
         $domId = 'round-'.$round->id;
         if (self::CHECKLIST === $round->kind) {
@@ -148,16 +159,19 @@ final readonly class RoundCards
             return new RoundCard($round->id, $domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
         }
 
+        // FindingsChecklist's rule, read against today's assignee: a later reassignment changes the label, not the items.
+        $isSelfCheck = null !== $assigneeId && $round->ownerId->equals($assigneeId);
+
         return new RoundCard(
             $round->id,
             $domId,
-            \sprintf('Round %d · self-check by %s', $round->number ?? 0, $ownerName),
+            \sprintf($isSelfCheck ? self::SELF_CHECK_HEADLINE : self::FINDINGS_HEADLINE, $round->number ?? 0, $ownerName),
             $status,
             false,
             $screenshots,
             false,
             $moreNote,
-            \sprintf('What %s checked before passing the ticket on.', $ownerName),
+            \sprintf($isSelfCheck ? self::SELF_CHECK_DESCRIPTION : self::FINDINGS_DESCRIPTION, $ownerName),
             $emptyNote,
         );
     }

@@ -14,12 +14,15 @@ use App\Review\Domain\CheckItem;
 use App\Review\Domain\CheckItemId;
 use App\Review\Domain\Checklist;
 use App\Review\Domain\Checklists;
+use App\Review\Domain\FindingsChecklist;
+use App\Review\Domain\RoundId;
 use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
 use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\TicketTurnQueries;
 
 /**
  * ChecklistCommands on Checklists; the contract is on {@see ChecklistCommands}. Every change locks its item before it
@@ -34,6 +37,7 @@ final readonly class UseCaseChecklistCommands implements ChecklistCommands
         private ReviewEvents $reviewEvents,
         private PingClearing $pingClearing,
         private TenantContext $tenantContext,
+        private TicketTurnQueries $ticketTurnQueries,
     ) {
     }
 
@@ -64,6 +68,30 @@ final readonly class UseCaseChecklistCommands implements ChecklistCommands
         }
 
         return $checklist->id()->toString();
+    }
+
+    public function createFromFindings(string $roundId, \DateTimeImmutable $at): int
+    {
+        $this->tenantContext->require();
+        try {
+            $id = new RoundId($roundId);
+        } catch (\InvalidArgumentException $malformed) {
+            throw new \LogicException(\sprintf('Round id "%s" is not one RoundCommands gives.', $roundId), 0, $malformed);
+        }
+        $round = $this->rounds->get($id) ?? throw new \LogicException(\sprintf('Round %s is not the tenant\'s.', $id->toString()));
+        $ticket = $this->ticketTurnQueries->factsOf($round->ticketId())
+            ?? throw new \LogicException(\sprintf('The ticket of round %s cannot be read.', $id->toString()));
+        try {
+            $checklist = FindingsChecklist::ofSharedDraft($round, $ticket->assigneeId, $this->checklists->nextItemIdentity(...), $at);
+        } catch (\InvalidArgumentException $notShared) {
+            throw new \LogicException($notShared->getMessage(), 0, $notShared);
+        }
+        if (null === $checklist) {
+            return 0;
+        }
+        $this->checklists->addFindings($checklist);
+
+        return \count($checklist->items());
     }
 
     public function markFixed(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange

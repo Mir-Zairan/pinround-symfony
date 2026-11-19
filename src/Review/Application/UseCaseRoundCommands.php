@@ -223,7 +223,9 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
     }
 
     /**
-     * @throws RoundRefused as shareDraft and shareDraftAtHandOff say; nothing is saved
+     * @throws RoundRefused    as shareDraft and shareDraftAtHandOff say; nothing is saved
+     * @throws \LogicException when the findings' items cannot be written; the share is saved, so the caller's
+     *                         transaction must roll back
      */
     private function shareOwnDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt, bool $isHandOffChoice): int
     {
@@ -240,6 +242,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         } catch (RoundSlotTaken $taken) {
             throw new RoundRefused(RoundRefused::NUMBER_TAKEN, 0, $taken);
         }
+        $this->checklistCommands->createFromFindings($draft->id()->toString(), $sharedAt);
 
         return $number;
     }
