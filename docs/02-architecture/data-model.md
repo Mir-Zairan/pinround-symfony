@@ -538,26 +538,23 @@ LIMIT 5;
 
 The "Also waiting on you" groups come from a **separate count query** (`SELECT kind, count(*) … GROUP BY kind`, same filters), so no limit can cut the counts. A group's items are loaded when it is opened (keyset, 20 at a time). If a ticket comes from both parts (my turn and my check), the app keeps it once, with the higher score. Titles are loaded in one batch (`WHERE id = ANY(:ids)`), never one by one. (`<visible(tt)>` uses the people and visibility columns copied into `ins_ticket_turn`.)
 
-**Duplicate candidates** while typing — take 20 candidates by rank, apply the word rule of FR-INT-15 in PHP, then keep the top 3. Taking only 3 first could return none after the rule:
+**Duplicate candidates** while typing — take 20 candidates by rank, apply the word rule of FR-INT-15 in PHP, then keep the top 3. Taking only 3 first could return none after the rule. They come from `search_ticket_ids` (below), with no project, the open steps only and the reporter's visibility inputs, joined back to `tkt_ticket` under RLS and `<visible(t)>` with `closed_at IS NULL` (`IntakeCandidateQueries::similarOpenTickets`, `IntakeCandidateQueriesTest`):
 
 ```sql
-SELECT id, key, title,
-       ts_rank(search, websearch_to_tsquery('simple', :q)) AS rank,
-       similarity(title, :title) AS sim
-FROM tkt_ticket t
-WHERE t.organization_id = :org
-  AND t.closed_at IS NULL
-  AND <visible(t)>
-  AND (t.search @@ websearch_to_tsquery('simple', :q) OR t.title % :title)
-ORDER BY (rank * 0.6 + sim * 0.4) DESC
+SELECT t.key, t.title
+FROM search_ticket_ids(:org, :text, :me, :team_ids, :is_admin, :is_triager, NULL, :open_step_ids, NULL)
+     WITH ORDINALITY AS found(ticket_id, found_position)
+JOIN tkt_ticket t ON t.id = found.ticket_id
+WHERE t.organization_id = :org AND t.closed_at IS NULL AND <visible(t)>
+ORDER BY found.found_position
 LIMIT 20;
 ```
 
 **RLS and these indexes (important).** The text-search operator `@@`, the trigram operator `%` and `similarity()`, and the pgvector distance operators are **not `LEAKPROOF`**. Under row-level security PostgreSQL may then refuse to use the GIN or HNSW index before the policy is applied, and scan the whole organization instead. So:
 
-1. A CI test runs `EXPLAIN` on the search, duplicate and embedding queries **as `pinround_app` with the tenant set**, on a seeded database, and fails if the plan does not use the GIN/HNSW index. For search and duplicates this is `TicketSearchQueryPlanTest` (50,000 tickets, the visibility predicate applied). It also explains each query as the table owner without RLS, where both GIN indexes must be used. Its first run (2026-11-12) showed that under RLS the planner skips both GIN indexes and reads the organization by sequential or B-tree scan, while without RLS it uses them, so the policy is the cause; the RLS case is marked incomplete until the fallback below lands.
+1. A CI test runs `EXPLAIN` on the search, duplicate and embedding queries **as `pinround_app` with the tenant set**, on a seeded database, and fails if the plan does not use the GIN/HNSW index. For search and duplicates this is `TicketSearchQueryPlanTest` (50,000 tickets, the visibility predicate applied). Its first run (2026-11-12) showed that under RLS the planner skips both GIN indexes and reads the organization by sequential or B-tree scan, while without RLS it uses them, so the policy is the cause; both now run in the fallback below.
 2. If it does not, the query moves into a `SECURITY DEFINER` function (owner `pinround_resolver`, fixed `search_path`) that takes the organization id and the visibility inputs as explicit `p_`-prefixed arguments (`p_organization_id`, never `organization_id`), filters on them first, and returns ticket ids only. It is listed with the resolver functions in [Row-level security](#row-level-security).
-3. Search uses this fallback (2026-11-12): `search_ticket_ids` (`Version20261112120000`) matches `search @@ websearch_to_tsquery('simple', tkt_unaccent(p_query))`, `title % p_query` or the exact key (`upper(btrim(p_query))`), applies the visibility predicate written out in SQL and the list's project and steps, then keeps the best 1,000 and one more (exact key, then `ts_rank × 0.6 + similarity × 0.4`, then id). It reads tkt_ticket through `resolver_read` with `SELECT` on the matched, filter (`project_id`, `step_id`) and predicate columns only, `title` and `search` included as match columns, never returned. `TicketSearchQueryPlanTest` proves the GIN and key indexes are used (the body explained as `pinround_resolver`, and the real call's scan counts from `pg_stat_get_xact_numscans`); `TicketSearchFunctionLeakTest` proves it finds what `TicketVisibilitySql` shows for each viewer of the cast. Duplicate candidates still run as `pinround_app` (incomplete in the test, P06).
+3. Search uses this fallback (2026-11-12): `search_ticket_ids` (`Version20261112120000`) matches `search @@ websearch_to_tsquery('simple', tkt_unaccent(p_query))`, `title % p_query` or the exact key (`upper(btrim(p_query))`), applies the visibility predicate written out in SQL and the list's project and steps, then keeps the best 1,000 and one more (exact key, then `ts_rank × 0.6 + similarity × 0.4`, then id). It reads tkt_ticket through `resolver_read` with `SELECT` on the matched, filter (`project_id`, `step_id`) and predicate columns only, `title` and `search` included as match columns, never returned. `TicketSearchQueryPlanTest` proves the GIN and key indexes are used (the body explained as `pinround_resolver`, and the real call's scan counts from `pg_stat_get_xact_numscans`); `TicketSearchFunctionLeakTest` proves it finds what `TicketVisibilitySql` shows for each viewer of the cast. Duplicate candidates use the same function since 2026-11-19 (P06.T2), so the same proofs cover them.
 
 The thresholds are tuned in phase 6. The text-search configuration ('simple' or a language) is chosen per org ([ADR-0022](../03-adr/0022-search-and-duplicates.md)).
 

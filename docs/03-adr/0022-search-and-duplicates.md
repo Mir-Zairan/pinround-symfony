@@ -14,6 +14,7 @@ We find tickets and likely duplicates inside PostgreSQL. There is no separate se
 - [Pros and cons of the options](#pros-and-cons-of-the-options): details per option.
 - [Clarifications (2026-11-06)](#clarifications-2026-11-06): indexes under RLS, candidate count, visibility.
 - [Clarifications (2026-11-12)](#clarifications-2026-11-12): index shape, the search function in use.
+- [Clarifications (2026-11-19)](#clarifications-2026-11-19): duplicates use the search function too.
 - [More information](#more-information): links and when to revisit.
 
 ## Status and people
@@ -98,6 +99,10 @@ Chosen option: **1**.
 
 - **Index shape.** The GIN indexes lead with `organization_id`, as every index does, through the `btree_gin` extension: `(organization_id, search)` and `(organization_id, title gin_trgm_ops)` (see data-model.md's [index catalogue](../02-architecture/data-model.md#index-catalogue)).
 - **The fallback is in use for search.** `TicketSearchQueryPlanTest` showed the planner skips both GIN indexes under RLS and uses them without it. Search therefore runs in `search_ticket_ids`, the `SECURITY DEFINER` function the 2026-11-06 clarification describes ([data-model.md › Query patterns](../02-architecture/data-model.md#query-patterns)). It returns at most 1,000 ticket ids, best first, after the visibility filter. Duplicate candidates still run as `pinround_app` and still skip the indexes; P06 decides their function.
+
+## Clarifications (2026-11-19)
+
+- **The fallback is in use for duplicates too.** The duplicate candidates of Report a problem come from `search_ticket_ids` with the open steps only and no project, joined back under RLS and the visibility predicate (`IntakeCandidateQueries::similarOpenTickets`). No query reads the GIN indexes as `pinround_app` any more, so `TicketSearchQueryPlanTest` explains the function only.
 
 ## More information
 
