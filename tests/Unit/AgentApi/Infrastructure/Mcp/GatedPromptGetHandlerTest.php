@@ -6,6 +6,8 @@ namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp;
 
 use App\AgentApi\Infrastructure\Mcp\GatedPromptGetHandler;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
+use App\AgentApi\Infrastructure\Prompt\AgentPrompt;
+use App\AgentApi\Infrastructure\Prompt\ExplainMyNotebookPrompt;
 use App\AgentApi\Infrastructure\Prompt\ReportWhileInvestigatingPrompt;
 use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\CurrentApiToken;
@@ -21,8 +23,8 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * GatedPromptGetHandler on doubles: each way a prompts/get ends, its audit row, and that a failure is logged by its
- * class alone. tests/Functional/AgentApi/Prompt proves the same through POST /mcp.
+ * GatedPromptGetHandler on doubles: each way a prompts/get ends, its audit row, that each name gets its own prompt, and
+ * that a failure is logged by its class alone. tests/Functional/AgentApi/Prompt proves the same through POST /mcp.
  */
 final class GatedPromptGetHandlerTest extends TestCase
 {
@@ -59,6 +61,42 @@ final class GatedPromptGetHandlerTest extends TestCase
         $this->assertOneRow('ok');
     }
 
+    /**
+     * The handler holds both prompts in each order, so answering the first or the last one listed is told apart.
+     */
+    #[Test]
+    public function eachNameGetsItsOwnPromptsTextAndDescriptionAndARowWithItsName(): void
+    {
+        $prompts = [new ReportWhileInvestigatingPrompt(), new ExplainMyNotebookPrompt()];
+        self::assertNotSame($prompts[0]->text(), $prompts[1]->text());
+
+        foreach ([$prompts, array_reverse($prompts)] as $heldPrompts) {
+            foreach ($prompts as $prompt) {
+                $this->auditLog = new RecordingAuditLog(new OrganizationId(GateFixture::ACME_FOODS));
+                $definition = $prompt->definition();
+
+                $answer = $this->handler($heldPrompts)->handle(self::getOf($definition->name), self::createStub(SessionInterface::class));
+
+                self::assertInstanceOf(Response::class, $answer);
+                $sent = json_decode(json_encode($answer->result, \JSON_THROW_ON_ERROR), true, flags: \JSON_THROW_ON_ERROR);
+                self::assertIsArray($sent);
+                self::assertSame([['role' => 'user', 'content' => ['type' => 'text', 'text' => $prompt->text()]]], $sent['messages'] ?? null, $definition->name);
+                self::assertSame($definition->description, $sent['description'] ?? null, $definition->name);
+                $this->assertOneRow('ok', $definition->name);
+            }
+        }
+    }
+
+    #[Test]
+    public function aNameInAnotherCaseIsUnknown(): void
+    {
+        $answer = $this->handler()->handle(self::getOf('Explain_My_Notebook'), self::createStub(SessionInterface::class));
+
+        self::assertInstanceOf(Error::class, $answer);
+        self::assertSame([Error::INVALID_PARAMS, GatedPromptGetHandler::UNKNOWN_PROMPT], [$answer->code, $answer->message]);
+        self::assertSame([], $this->auditLog->entries);
+    }
+
     #[Test]
     public function anUnknownNameGetsAnInvalidParamsErrorAndNoRow(): void
     {
@@ -91,7 +129,7 @@ final class GatedPromptGetHandlerTest extends TestCase
     #[Test]
     public function aPromptFileThatCannotBeReadGetsTheGenericErrorOneErrorRowAndALogLineWithTheClassOnly(): void
     {
-        $handler = $this->handler(new ReportWhileInvestigatingPrompt(__DIR__.'/no-such-folder'));
+        $handler = $this->handler([new ReportWhileInvestigatingPrompt(__DIR__.'/no-such-folder'), new ExplainMyNotebookPrompt()]);
 
         $answer = $handler->handle(self::getOf(ReportWhileInvestigatingPrompt::NAME), self::createStub(SessionInterface::class));
 
@@ -105,7 +143,7 @@ final class GatedPromptGetHandlerTest extends TestCase
     public function anAuditRowThatCannotBeWrittenKeepsThePromptFromTheClient(): void
     {
         $failingAuditLog = new RecordingAuditLog(new OrganizationId(GateFixture::ACME_FOODS), new \RuntimeException('the audit table is gone'));
-        $handler = new GatedPromptGetHandler(new ReportWhileInvestigatingPrompt(), self::omarsToken(true), self::omar(true), new ToolCallAuditor($failingAuditLog), $this->logger);
+        $handler = new GatedPromptGetHandler([new ReportWhileInvestigatingPrompt()], self::omarsToken(true), self::omar(true), new ToolCallAuditor($failingAuditLog), $this->logger);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessageIsOrContains('the audit table is gone');
@@ -116,7 +154,7 @@ final class GatedPromptGetHandlerTest extends TestCase
     #[Test]
     public function aRequestWithoutATokenIsALogicErrorWithNoRow(): void
     {
-        $handler = new GatedPromptGetHandler(new ReportWhileInvestigatingPrompt(), self::omarsToken(false), self::omar(true), new ToolCallAuditor($this->auditLog), $this->logger);
+        $handler = new GatedPromptGetHandler([new ReportWhileInvestigatingPrompt()], self::omarsToken(false), self::omar(true), new ToolCallAuditor($this->auditLog), $this->logger);
 
         try {
             $handler->handle(self::getOf(ReportWhileInvestigatingPrompt::NAME), self::createStub(SessionInterface::class));
@@ -130,7 +168,7 @@ final class GatedPromptGetHandlerTest extends TestCase
     #[Test]
     public function aRequestWithoutAUserIsALogicErrorWithNoRow(): void
     {
-        $handler = new GatedPromptGetHandler(new ReportWhileInvestigatingPrompt(), self::omarsToken(true), self::omar(false), new ToolCallAuditor($this->auditLog), $this->logger);
+        $handler = new GatedPromptGetHandler([new ReportWhileInvestigatingPrompt()], self::omarsToken(true), self::omar(false), new ToolCallAuditor($this->auditLog), $this->logger);
 
         try {
             $handler->handle(self::getOf(ReportWhileInvestigatingPrompt::NAME), self::createStub(SessionInterface::class));
@@ -141,17 +179,20 @@ final class GatedPromptGetHandlerTest extends TestCase
         self::assertSame([], $this->auditLog->entries);
     }
 
-    private function handler(?ReportWhileInvestigatingPrompt $prompt = null): GatedPromptGetHandler
+    /**
+     * @param ?list<AgentPrompt> $prompts both prompts when null
+     */
+    private function handler(?array $prompts = null): GatedPromptGetHandler
     {
-        return new GatedPromptGetHandler($prompt ?? new ReportWhileInvestigatingPrompt(), self::omarsToken(true), self::omar(true), new ToolCallAuditor($this->auditLog), $this->logger);
+        return new GatedPromptGetHandler($prompts ?? [new ReportWhileInvestigatingPrompt(), new ExplainMyNotebookPrompt()], self::omarsToken(true), self::omar(true), new ToolCallAuditor($this->auditLog), $this->logger);
     }
 
-    private function assertOneRow(string $outcome): void
+    private function assertOneRow(string $outcome, string $promptName = ReportWhileInvestigatingPrompt::NAME): void
     {
         self::assertCount(1, $this->auditLog->entries);
         $entry = $this->auditLog->entries[0];
         self::assertSame([ToolCallAuditor::ACTION, ToolCallAuditor::PROMPT_TARGET_TYPE, null], [$entry->action, $entry->targetType, $entry->targetId]);
-        self::assertSame(['tool' => ReportWhileInvestigatingPrompt::NAME, 'outcome' => $outcome], $entry->data);
+        self::assertSame(['tool' => $promptName, 'outcome' => $outcome], $entry->data);
     }
 
     /**

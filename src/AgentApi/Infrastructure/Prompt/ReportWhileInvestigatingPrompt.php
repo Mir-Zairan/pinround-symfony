@@ -11,7 +11,7 @@ use Mcp\Schema\Prompt;
  * checks an app and files it in one step at the end. Its text is the versioned file VERSION names, beside this class;
  * a change of wording is a new file and a new VERSION. Holds no state (ADR-0008): the file is read on each call.
  */
-final readonly class ReportWhileInvestigatingPrompt
+final readonly class ReportWhileInvestigatingPrompt implements AgentPrompt
 {
     public const string NAME = 'report_while_investigating';
     public const string VERSION = 'report_while_investigating.v1';
@@ -34,19 +34,8 @@ final readonly class ReportWhileInvestigatingPrompt
         );
     }
 
-    /**
-     * @return string the file's text, byte for byte
-     *
-     * @throws \RuntimeException when the file cannot be read, so the prompt is refused rather than answered empty
-     */
     public function text(): string
     {
-        $path = $this->promptDirectory.'/'.self::VERSION.'.md';
-        $text = is_readable($path) ? file_get_contents($path) : false;
-        if (false === $text || '' === $text) {
-            throw new \RuntimeException(\sprintf('The prompt file %s.md is missing or empty.', self::VERSION));
-        }
-
-        return $text;
+        return VersionedPromptFile::read($this->promptDirectory, self::VERSION);
     }
 }
