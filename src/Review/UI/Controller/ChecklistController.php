@@ -33,8 +33,9 @@ use Symfony\UX\Turbo\TurboBundle;
 /**
  * The buttons of the checklist card in the ticket's Rounds section (P05.T6, ticket-page.md, Rounds): "Mark fixed" for
  * the ticket's assignee, "OK" and "Not fixed" for its tester. A change answers a Turbo form with a stream that replaces
- * the card, with focus on the button that took the clicked one's place, and the toast; any other form with a redirect
- * to the ticket's Rounds section with the toast flashed. A refusal changes nothing and answers with its toast the same
+ * the card, with focus on the button that took the clicked one's place, and the toast; any other form, and a change of a
+ * findings round's item (FR-RND-17), which no checklist card shows, with a redirect to the ticket's Rounds section with
+ * the toast flashed. A refusal changes nothing and answers with its toast the same
  * two ways, as a 403 or 422 stream.
  *
  * Without the request transaction, as VerdictController: each action runs in a transaction of its own, so a refused
@@ -173,10 +174,11 @@ final class ChecklistController extends AbstractController
                     throw new RefusedWithToast($refused->getMessage());
                 }
 
+                $checklist = $this->checklistCards->forTicket($visible->actor->organizationId(), $visible->ticket->id);
+
                 return [
                     'toast' => PingsClearedToast::withClearedPings($toastOf($changed, $visible->ticket), $changed->clearedPingCount),
-                    'checklist' => $this->checklistCards->forTicket($visible->actor->organizationId(), $visible->ticket->id)
-                        ?? throw new \LogicException('The checklist of a changed item could not be read again.'),
+                    'checklist' => null !== $checklist && $checklist->roundId === $item->roundId ? $checklist : null,
                     'itemId' => $item->itemId,
                 ];
             });
@@ -189,9 +191,9 @@ final class ChecklistController extends AbstractController
         return $this->respondToChanged($request, $key, $answer['toast'], $answer['checklist'], $answer['itemId']);
     }
 
-    private function respondToChanged(Request $request, string $key, string $toast, ChecklistCard $checklist, string $itemId): Response
+    private function respondToChanged(Request $request, string $key, string $toast, ?ChecklistCard $checklist, string $itemId): Response
     {
-        if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
+        if (null === $checklist || TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
             return $this->redirectToRounds($key, $toast);
         }
 

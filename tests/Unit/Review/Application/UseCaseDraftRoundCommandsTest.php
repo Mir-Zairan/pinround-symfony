@@ -93,6 +93,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     private InMemoryUploadedMedia $uploadedMedia;
     private UseCaseRoundCommands $commands;
     private TenantContext $tenantContext;
+    private RecordingChecklistCommands $checklistCommands;
 
     protected function setUp(): void
     {
@@ -111,6 +112,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             [self::ACME_FOODS, self::FRESH_MEDIA, self::LENA, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::FRESH_MEDIA, self::MIA, MediaImageStatus::Ready],
         ]);
+        $this->checklistCommands = new RecordingChecklistCommands();
         $this->commands = $this->commandsOver($this->interfering);
         $this->seedRounds();
     }
@@ -678,6 +680,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         self::assertSame(RoundState::Open, $shared->state());
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
         self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
+        self::assertSame([[self::DRAFT, self::at()->format('Y-m-d H:i:s')]], $this->checklistCommands->findingsCreated, 'The shared round is offered as findings once, after its save.');
     }
 
     #[Test]
@@ -696,6 +699,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             $this->snapshot()[self::DRAFT],
         );
         self::assertSame($savesBefore + 1, $this->rounds->savedRounds);
+        self::assertSame([[self::DRAFT, self::at()->format('Y-m-d H:i:s')]], $this->checklistCommands->findingsCreated);
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
         self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
     }
@@ -755,6 +759,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
         self::assertInstanceOf(RoundSlotTaken::class, $refused->getPrevious());
         self::assertNull($this->storedRound(self::DRAFT)->number());
+        self::assertSame([], $this->checklistCommands->findingsCreated, 'A refused share offers no findings.');
     }
 
     #[Test]
@@ -932,7 +937,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
     private function commandsOver(Rounds $rounds): UseCaseRoundCommands
     {
-        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($this->uploadedMedia), new RecordingChecklistCommands());
+        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($this->uploadedMedia), $this->checklistCommands);
     }
 
     private function seedRounds(): void

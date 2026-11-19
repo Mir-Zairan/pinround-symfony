@@ -8,6 +8,7 @@ use App\Review\Domain\CheckItem;
 use App\Review\Domain\CheckItemId;
 use App\Review\Domain\Checklist;
 use App\Review\Domain\Checklists;
+use App\Review\Domain\FindingsChecklist;
 use App\Review\Domain\PinId;
 use App\Review\Domain\ReportPins;
 use App\Review\Domain\Round;
@@ -78,24 +79,17 @@ final class InMemoryChecklists implements Checklists
                 throw new RoundSlotTaken('The ticket has this round already.');
             }
         }
-        $storedPinIds = $this->storedPinIdsOf($checklist->organizationId());
-        $itemPinIds = [];
-        $itemIds = [];
-        foreach ($checklist->items() as $item) {
-            $pinId = $item->pinId()->toString();
-            $itemId = $item->id()->toString();
-            if (!isset($storedPinIds[$pinId]) || isset($itemPinIds[$pinId]) || $this->isChecked($checklist->organizationId(), $item->pinId())
-                || isset($itemIds[$itemId]) || isset($this->storedItems[$itemId])) {
-                throw new \LogicException(self::ITEM_REFUSED);
-            }
-            $itemPinIds[$pinId] = true;
-            $itemIds[$itemId] = true;
-        }
+        $this->refuseItemsThatCannotBeStored($checklist->organizationId(), $checklist->items());
 
         $this->rounds->add($round);
-        foreach ($checklist->items() as $item) {
-            $this->storedItems[$item->id()->toString()] = [$checklist->organizationId(), self::copyOf($item)];
-        }
+        $this->storeItems($checklist->organizationId(), $checklist->items());
+    }
+
+    public function addFindings(FindingsChecklist $checklist): void
+    {
+        $this->refuseItemsThatCannotBeStored($checklist->organizationId(), $checklist->items());
+
+        $this->storeItems($checklist->organizationId(), $checklist->items());
     }
 
     public function reportPinsOf(TicketId $ticketId): ?ReportPins
@@ -135,6 +129,38 @@ final class InMemoryChecklists implements Checklists
         }
 
         $this->storedItems[$item->id()->toString()] = [$organizationId, self::copyOf($item)];
+    }
+
+    /**
+     * @param list<CheckItem> $items
+     *
+     * @throws \LogicException ITEM_REFUSED, as the multi-row insert refuses all of them for one
+     */
+    private function refuseItemsThatCannotBeStored(OrganizationId $organizationId, array $items): void
+    {
+        $storedPinIds = $this->storedPinIdsOf($organizationId);
+        $itemPinIds = [];
+        $itemIds = [];
+        foreach ($items as $item) {
+            $pinId = $item->pinId()->toString();
+            $itemId = $item->id()->toString();
+            if (!isset($storedPinIds[$pinId]) || isset($itemPinIds[$pinId]) || $this->isChecked($organizationId, $item->pinId())
+                || isset($itemIds[$itemId]) || isset($this->storedItems[$itemId])) {
+                throw new \LogicException(self::ITEM_REFUSED);
+            }
+            $itemPinIds[$pinId] = true;
+            $itemIds[$itemId] = true;
+        }
+    }
+
+    /**
+     * @param list<CheckItem> $items
+     */
+    private function storeItems(OrganizationId $organizationId, array $items): void
+    {
+        foreach ($items as $item) {
+            $this->storedItems[$item->id()->toString()] = [$organizationId, self::copyOf($item)];
+        }
     }
 
     /**
