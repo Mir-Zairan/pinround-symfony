@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Ticketing\UI;
+namespace App\Ticketing\Application;
 
 use App\SharedKernel\Domain\TeamId;
 use App\Workflow\Api\NowNextContext;
@@ -13,7 +13,7 @@ use App\Workflow\Api\Turn;
 
 /**
  * What the ticket page read once about a ticket of a team and its turn, for the Now and Next lines
- * ({@see NowNextSentences::linesOf}) and the "Your next step" box ({@see NextStepChoices::of}).
+ * ({@see SavedTicketPageTurns::linesOf}) and the "Your next step" box (the UI's NextStepChoices).
  */
 final readonly class PageTurn
 {

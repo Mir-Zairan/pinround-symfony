@@ -19,9 +19,12 @@ use App\Review\Api\RoundQueries;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\TicketPagePerson;
+use App\Ticketing\Api\TicketPageTurns;
 use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
 use App\Ticketing\Api\TicketQueries;
+use App\Ticketing\Api\TicketRole;
 use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibilityFacts;
@@ -33,7 +36,7 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
  * get_ticket (P09.T3): one ticket as its page shows it to the caller: the key, title, description and step, the Now and
- * Next lines and the People section (TicketPageTurn), the open questions of its thread and its checklist. The ticket is
+ * Next lines and the People section (Ticketing's TicketPageTurns), the open questions of its thread and its checklist. The ticket is
  * read with TicketQueries::pageOf under the caller's own visibility predicate, as the page reads it; the open questions
  * only when ConversationPermission COMMENT grants the thread, as the thread's frame asks, and the checklist only when
  * RoundPermission VIEW grants its round, as the Rounds section asks. Titles, descriptions, question texts, checklist
@@ -55,7 +58,7 @@ final readonly class GetTicket implements AgentTool
         private TicketTurnQueries $ticketTurnQueries,
         private TicketVisibilities $ticketVisibilities,
         private TicketQueries $ticketQueries,
-        private TicketPageTurn $ticketPageTurn,
+        private TicketPageTurns $ticketPageTurns,
         private ThreadQueries $threadQueries,
         private ChecklistQueries $checklistQueries,
         private RoundQueries $roundQueries,
@@ -67,7 +70,7 @@ final readonly class GetTicket implements AgentTool
     {
         $string = ['type' => 'string'];
         $nullableString = ['type' => ['string', 'null']];
-        $roles = [TicketPageTurn::ROLE_ASSIGNEE, TicketPageTurn::ROLE_REPORTER, TicketPageTurn::ROLE_REVIEWER, TicketPageTurn::ROLE_TESTER];
+        $roles = array_map(static fn (TicketRole $role): string => $role->value, TicketRole::cases());
 
         return new Tool(
             name: self::NAME,
@@ -216,8 +219,8 @@ final readonly class GetTicket implements AgentTool
                 $questionPeopleIds[] = $question->toUserId;
             }
         }
-        $turn = $this->ticketPageTurn->answerOf($page, $questionPeopleIds);
-        $nameOf = static fn (?UserId $userId): ?string => null === $userId ? null : self::wrappedNameOf($turn['display_names'], $userId->toString());
+        $turn = $this->ticketPageTurns->of($page, $questionPeopleIds);
+        $nameOf = static fn (?UserId $userId): ?string => null === $userId ? null : self::wrappedNameOf($turn->displayNames, $userId->toString());
         $checklist = $this->checklistQueries->forTicket($page->id);
         if (null !== $checklist && !$this->mayViewRound($checklist->roundId)) {
             $checklist = null;
@@ -229,12 +232,12 @@ final readonly class GetTicket implements AgentTool
             'title' => UntrustedText::wrap($page->title),
             'description' => UntrustedText::wrap($page->description),
             'step' => $page->stepName,
-            'now' => $turn['now'],
-            'next' => $turn['next'],
-            'people' => array_map(static fn (array $person): array => [
-                'name' => self::wrappedNameOf($turn['display_names'], $person['user_id']),
-                'roles' => $person['roles'],
-            ], $turn['people']),
+            'now' => $turn->now,
+            'next' => $turn->next,
+            'people' => array_map(static fn (TicketPagePerson $person): array => [
+                'name' => $nameOf($person->userId),
+                'roles' => array_map(static fn (TicketRole $role): string => $role->value, $person->roles),
+            ], $turn->people),
             'open_questions' => null === $openQuestions ? null : array_map(static fn (MessageView $question): array => [
                 'question_id' => $question->id,
                 'text' => UntrustedText::wrap($question->body ?? ''),

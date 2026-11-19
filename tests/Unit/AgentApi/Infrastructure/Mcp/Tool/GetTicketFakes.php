@@ -6,7 +6,6 @@ namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetTicket;
-use App\AgentApi\Infrastructure\Mcp\Tool\TicketPageTurn;
 use App\Conversation\Api\ThreadQueries;
 use App\Conversation\Api\ThreadView;
 use App\Identity\Api\ApiTokenAccess;
@@ -41,6 +40,8 @@ use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Api\TicketVisibility;
 use App\Ticketing\Api\TicketVisibilityFacts;
+use App\Ticketing\Application\SavedTicketPageTurns;
+use App\Ticketing\Application\TicketPeopleRoles;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Application\Turn\LoadBasedTurnPeopleChoice;
@@ -52,7 +53,7 @@ use Symfony\Component\Security\Core\Authorization\AccessDecision;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
- * The collaborators of GetTicket and TicketPageTurn, each recording what it was asked, with Workflow's real turn rules,
+ * The collaborators of GetTicket and of the Ticketing turn read it maps (SavedTicketPageTurns), each recording what it was asked, with Workflow's real turn rules,
  * people choice and Now and Next sentences. Omar of Acme Foods calls with a read token. The ticket is the one
  * GetTicketTest::snapshot() describes; pageOf finds it only by its exact key, as the real read does, and the voter
  * grants every attribute but the denied ones. UserQueries leaves an unknown id out and sorts by id, as the real one does.
@@ -116,7 +117,7 @@ final class GetTicketFakes implements CurrentApiToken, CurrentUser, TicketTurnQu
             $this,
             $this,
             $this,
-            $this->ticketPageTurn(),
+            $this->ticketPageTurns(),
             $this,
             new readonly class($fakes) implements ChecklistQueries {
                 public function __construct(private GetTicketFakes $fakes)
@@ -174,15 +175,15 @@ final class GetTicketFakes implements CurrentApiToken, CurrentUser, TicketTurnQu
         );
     }
 
-    public function ticketPageTurn(): TicketPageTurn
+    public function ticketPageTurns(): SavedTicketPageTurns
     {
-        return new TicketPageTurn(
+        return new SavedTicketPageTurns(
             $this,
             $this,
             $this,
             new OrderedTurnRules(new ReviewerChoice(), new TesterChoice()),
-            new LoadBasedTurnPeopleChoice(new ReviewerChoice(), new TesterChoice()),
             new PlainNowNext(new ReviewerChoice(), new TesterChoice()),
+            new TicketPeopleRoles(new LoadBasedTurnPeopleChoice(new ReviewerChoice(), new TesterChoice())),
         );
     }
 
