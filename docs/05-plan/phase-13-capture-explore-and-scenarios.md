@@ -120,6 +120,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   2. The popup asks once for the target: "New report", a ticket from `GET /api/v1/me/tickets` where the person may start a draft, or a notebook (after P13.T6). Each capture goes there until changed.
   3. "New report": the first capture calls `POST /api/v1/reports`; later ones call the new `POST /api/v1/reports/{id}/screenshots` (owner only, 10-screenshot cap, idempotency key). "Done" opens the draft page in pinround.
   4. Works on `http://localhost:*` and the hosts in options; `activeTab` and `chrome.scripting` only.
+- **Note (2026-11-19):** P10.T7 left `chrome.scripting` out of `extension/manifest.json` on purpose until a feature uses it; the manifest asks only `activeTab` and `storage`. This task adds `scripting` for the overlay, with its row in the permission table of `docs/guides/browser-extension.md` and the exact permission list in `extension/tests/pairing.test.mjs` changed in the same commit ([phase-10 hand-off](phase-10-integrations.md#hand-off-notes)).
 - **Files:** `extension/src/overlay/*`, `extension/src/capture/*`, `src/AgentApi/UI/Rest/*`, `src/Review/Api/ReportDrafts.php` (add a screenshot), `docs/api/v1.yaml`, `docs/guides/browser-extension.md`.
 - **Acceptance:**
   - [ ] A pin dropped on the overlay lands at the same percent (± 0.5) on the captured image, also after a window resize.

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Tenancy;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Schema\ComparatorConfig;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Migrations\Metadata\Storage\TableMetadataStorageConfiguration;
@@ -616,16 +617,16 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * The stored answers of idempotent /api/v1 requests (Version20261119200000): the app reads, reserves and answers
-     * them and never removes one (the purge comes with the retention job); support reads under the tenant policy; every
-     * index starts with the organization.
+     * them and never removes one (the purge comes with the retention job); support gets nothing, as an answer holds
+     * presigned upload URLs (Version20261119210000); every index starts with the organization.
      */
     #[Test]
-    public function theIdempotencyKeyTableGrantsTheAppReadAddAndChangeAndSupportOnlyRead(): void
+    public function theIdempotencyKeyTableGrantsOnlyTheAppReadAddAndChange(): void
     {
         $connection = $this->connection();
 
         self::assertEqualsCanonicalizing(
-            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE', 'pinround_readonly SELECT'],
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_app UPDATE'],
             $this->grantsToOthersThanTheOwner($connection, 'api_idempotency_key'),
         );
         self::assertSame('pinround_migrator', $connection->fetchOne("SELECT relowner::regrole::text FROM pg_class WHERE oid = to_regclass('public.api_idempotency_key')"));
@@ -644,6 +645,27 @@ final class DatabaseRolesTest extends KernelTestCase
             ['api_idempotency_key_answer_check', 'api_idempotency_key_key_check', 'api_idempotency_key_pkey', 'api_idempotency_key_request_hash_check', 'api_idempotency_key_response_check', 'api_idempotency_key_status_check'],
             $connection->fetchFirstColumn("SELECT conname FROM pg_constraint WHERE conrelid = 'public.api_idempotency_key'::regclass AND contype IN ('c', 'p', 'u', 'f')"),
         );
+    }
+
+    /**
+     * A stored answer is the response word for word, presigned put_url of POST /api/v1/uploads included, so support
+     * tooling must not read it even under the tenant policy. The report drafts beside it stay readable, so the refusal
+     * is the table's, not the connection's.
+     */
+    #[Test]
+    public function theReadonlyRoleIsRefusedTheIdempotencyKeyTableButReadsTheReportDrafts(): void
+    {
+        $readonly = self::getContainer()->get('doctrine.dbal.readonly_connection');
+        self::assertInstanceOf(Connection::class, $readonly);
+        self::assertSame('pinround_readonly', $readonly->fetchOne('SELECT current_user'));
+
+        self::assertSame(0, $readonly->fetchOne('SELECT count(*) FROM rvw_report_draft'));
+        try {
+            $readonly->fetchOne('SELECT count(*) FROM api_idempotency_key');
+            self::fail('pinround_readonly could read api_idempotency_key.');
+        } catch (DriverException $exception) {
+            self::assertSame('42501', $exception->getSQLState());
+        }
     }
 
     /**

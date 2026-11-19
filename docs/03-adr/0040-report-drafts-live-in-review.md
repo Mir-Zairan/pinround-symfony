@@ -22,6 +22,9 @@ lives and how Send runs (it ran "the same path as the Report a problem form"), t
 draft stores its screenshots. Everything else in ADR-0039 stands: the `create_report` tool, the scope `reports:write`,
 owner-only privacy and the rule that no token creates a ticket.
 
+Superseded in part by [ADR-0047](0047-a-sent-report-draft-is-a-report-and-its-pictures-upload-by-project.md): the Send
+bullet's command (Send calls `TicketCommands::report`, not `TicketCommands::create`). Everything else here still stands.
+
 ## Context and problem statement
 
 Mia's Claude Code has filed a report draft for project SHOP with three screenshots. Mia opens it, fixes a title and
