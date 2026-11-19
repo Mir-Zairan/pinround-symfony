@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
+use App\Ticketing\Api\NextTicketKey;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ProjectSummary;
@@ -59,18 +60,24 @@ final readonly class DbalProjectQueries implements ProjectQueries
         );
     }
 
-    public function nextTicketKeyOf(string $projectId): ?string
+    public function nextTicketKeyOf(string $projectId): ?NextTicketKey
     {
         $organizationId = $this->tenantContext->require();
         if (!ListFilter::isCanonicalUuid($projectId)) {
             return null;
         }
-        $nextKey = $this->connection->fetchOne(
-            "SELECT key || '-' || next_number FROM tkt_project WHERE organization_id = ? AND id = ?",
+        $row = $this->connection->fetchAssociative(
+            "SELECT key || '-' || next_number AS next_key, team_id FROM tkt_project WHERE organization_id = ? AND id = ?",
             [$organizationId->toString(), $projectId],
         );
+        if (false === $row) {
+            return null;
+        }
 
-        return \is_string($nextKey) ? $nextKey : null;
+        return new NextTicketKey(
+            self::text($row['next_key'], 'next_key'),
+            null === $row['team_id'] ? null : new TeamId(self::text($row['team_id'], 'team_id')),
+        );
     }
 
     public function projectByKey(string $key): ?ProjectChoice

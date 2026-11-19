@@ -37,6 +37,11 @@ button {
   font: inherit;
 }
 
+/* The browser's own [hidden] rule loses to any class that sets display (.btn is inline-flex), so a hidden button showed. */
+[hidden] {
+  display: none !important;
+}
+
 .mono {
   font-family: var(--font-mono);
   font-feature-settings: 'zero' 1;

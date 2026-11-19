@@ -209,4 +209,33 @@ test.describe('the live preview', () => {
     await expect(report.duplicates.locator('section')).toHaveCount(0);
     await expect(report.previewLine).toBeVisible();
   });
+
+  test('picking a type or a priority asks the preview nothing, as its words do not depend on them', async ({ page }) => {
+    // The page's clock runs the 400 ms wait at once, so no test waits on the real clock.
+    await page.clock.install();
+    const report = await openReportForm(page);
+    const previewCalls: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/report/preview') {
+        previewCalls.push(request.url());
+      }
+    });
+
+    let answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/report/preview');
+    await report.detail.fill(DETAIL);
+    await page.clock.runFor(500);
+    await answered;
+    await expect(report.preview).toHaveText(/Nobody needs to check it\.$/);
+
+    await pickChip(report.form, 'Story');
+    await pickChip(report.form, 'Major');
+    await page.clock.runFor(500);
+    answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/report/preview');
+    await report.title.fill(`Password ${randomWord()} shown`);
+    await page.clock.runFor(500);
+    await answered;
+
+    await expect(report.preview).toHaveText(/It mentions security, so only the team and admins can see it\.$/);
+    expect(previewCalls, 'one call for the detail and one for the title, none for the type or the priority').toHaveLength(2);
+  });
 });

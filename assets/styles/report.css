@@ -17,6 +17,11 @@
   color: var(--on-surface-var, inherit);
 }
 
+.report__drafts-link {
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .report__form {
   display: grid;
   gap: var(--space-16);

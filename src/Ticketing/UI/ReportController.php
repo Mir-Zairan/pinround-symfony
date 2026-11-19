@@ -7,10 +7,14 @@ namespace App\Ticketing\UI;
 use App\Identity\Api\UserQueries;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
+use App\Organization\Api\MemberJob;
+use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\SettingsQueries;
+use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
+use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\IntakeCandidate;
@@ -23,7 +27,6 @@ use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketKeyQueries;
 use App\Ticketing\Api\TicketPermission;
-use App\Ticketing\Api\TicketVisibilities;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
 use App\Ticketing\Application\CreateTicket\ProjectNotOfTeam;
@@ -33,6 +36,7 @@ use App\Ticketing\Application\CreateTicket\TicketTitleOverLimit;
 use App\Ticketing\Application\Intake\ReportPreviewFacts;
 use App\Ticketing\Application\Intake\ReportPreviews;
 use App\Ticketing\Application\ProjectNotFound;
+use App\Ticketing\Application\RoleTicketVisibilities;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -86,10 +90,11 @@ final class ReportController extends AbstractController
         private readonly TicketKeyQueries $ticketKeyQueries,
         private readonly NewTicketReport $newTicketReport,
         private readonly TeamQueries $teamQueries,
+        private readonly TeamPeopleQueries $teamPeopleQueries,
         private readonly SettingsQueries $settingsQueries,
         private readonly UserQueries $userQueries,
         private readonly ReportPreviews $reportPreviews,
-        private readonly TicketVisibilities $ticketVisibilities,
+        private readonly RoleTicketVisibilities $ticketVisibilities,
         private readonly ProjectQueries $projectQueries,
         private readonly ClockInterface $clock,
     ) {
@@ -186,8 +191,7 @@ final class ReportController extends AbstractController
     public function preview(Request $request): JsonResponse
     {
         $actor = $this->reporter();
-        $teams = $this->reportFormChoices->teamsFor($actor);
-        [$duplicates, $sentence] = $this->liveParts($actor, $teams, ReportFormInput::fromRequest($request));
+        [$duplicates, $sentence] = $this->liveParts($actor, ReportFormInput::fromRequest($request));
         $duplicatesHtml = $this->renderView('@Ticketing/_report_duplicates.html.twig', ['duplicates' => $duplicates]);
 
         return new JsonResponse(['duplicates' => $duplicatesHtml, 'preview' => $sentence]);
@@ -285,30 +289,51 @@ final class ReportController extends AbstractController
 
     private function previewFactsOf(ActorContext $actor, ReportFormInput $input, bool $hasTeam): ReportPreviewFacts
     {
-        return $this->reportPreviews->of($this->ticketVisibilities->of($actor->organizationId(), $actor->userId()), trim($input->title), $input->description, $input->pinNotes(), $hasTeam);
+        return $this->reportPreviews->of($this->ticketVisibilities->ofActor($actor), trim($input->title), $input->description, $input->pinNotes(), $hasTeam);
     }
 
     /**
-     * The possible duplicates and the "When you send:" words, or empty words while no project is picked.
-     *
-     * @param list<ReportTeamChoice> $teams
+     * The possible duplicates and the "When you send:" words, or empty words while the posted project is not one of the
+     * picked team's (of any team for "Not sure"). The preview runs this on every pause in typing, so it reads the posted
+     * project and the picked team's cached people only, never the form's choices with their ticket counts; a person who
+     * is not a non-tester of the reporter's own team counts as "the team decides", as the create refuses them anyway.
      *
      * @return array{list<IntakeCandidate>, string}
      */
-    private function liveParts(ActorContext $actor, array $teams, ReportFormInput $input): array
+    private function liveParts(ActorContext $actor, ReportFormInput $input): array
     {
-        [$team, $project, $assignee] = $this->whereItGoes($teams, $input);
         $facts = $this->previewFactsOf($actor, $input, !$input->isNotSure());
-        $nextKey = null === $project ? null : $this->projectQueries->nextTicketKeyOf($project->id());
-        if (null === $nextKey || (null === $team && !$input->isNotSure())) {
+        $nextKey = $this->projectQueries->nextTicketKeyOf($input->projectId);
+        $teamId = $nextKey?->teamId;
+        if (null === $nextKey || null === $teamId || (!$input->isNotSure() && $teamId->toString() !== $input->teamId)) {
             return [$facts->duplicates, ''];
         }
-        $person = null;
-        if (null !== $team && null !== $assignee) {
-            $person = $assignee->equals($actor->userId()) ? 'you' : (array_values(array_filter($team->giveTo, static fn (array $choice): bool => $choice['id'] === $assignee->toString()))[0]['label'] ?? null);
+        if ($input->isNotSure()) {
+            return [$facts->duplicates, ReportPreviewSentence::of($nextKey->key, $facts->reasonPhrases, $this->checkerNameOf($actor, null), null, null, $facts->isTeamOnly)];
+        }
+        $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
+        $lead = array_values(array_filter($people, static fn (PossibleAssignee $person): bool => $person->isLead))[0] ?? null;
+        $checker = null === $lead ? null : ($lead->userId->equals($actor->userId()) ? 'You' : $lead->firstName);
+
+        return [$facts->duplicates, ReportPreviewSentence::of($nextKey->key, $facts->reasonPhrases, $checker, $this->pickedPersonOf($actor, $teamId, $people, $input->assigneeId), $lead?->firstName, $facts->isTeamOnly)];
+    }
+
+    /**
+     * @param list<PossibleAssignee> $people the team's
+     *
+     * @return string|null the picked person's first name, "you" for the reporter, or null for "the team decides"
+     */
+    private function pickedPersonOf(ActorContext $actor, TeamId $teamId, array $people, string $assigneeId): ?string
+    {
+        if ('' === $assigneeId || !$actor->roles()->isInTeam($teamId)) {
+            return null;
+        }
+        $picked = array_values(array_filter($people, static fn (PossibleAssignee $person): bool => MemberJob::Tester !== $person->job && $person->userId->toString() === $assigneeId))[0] ?? null;
+        if (null === $picked) {
+            return null;
         }
 
-        return [$facts->duplicates, ReportPreviewSentence::of($nextKey, $facts->reasonPhrases, $this->checkerNameOf($actor, $team), $person, null === $team ? null : ($team->leadFirstName ?? $this->leadFirstNameOf($team)), $facts->isTeamOnly)];
+        return $picked->userId->equals($actor->userId()) ? 'you' : $picked->firstName;
     }
 
     /**
@@ -326,13 +351,6 @@ final class ReportController extends AbstractController
         }
 
         return ($this->userQueries->byIds([$checkerId])[$checkerId->toString()] ?? null)?->firstName();
-    }
-
-    private function leadFirstNameOf(?ReportTeamChoice $team): ?string
-    {
-        $leadId = null === $team ? null : $this->teamQueries->leadOf($team->id);
-
-        return null === $leadId ? null : ($this->userQueries->byIds([$leadId])[$leadId->toString()] ?? null)?->firstName();
     }
 
     /**
@@ -356,7 +374,7 @@ final class ReportController extends AbstractController
      */
     private function renderReportPage(ActorContext $actor, array $teams, ReportFormInput $input, array $errors = []): Response
     {
-        [$duplicates, $preview] = $this->liveParts($actor, $teams, $input);
+        [$duplicates, $preview] = $this->liveParts($actor, $input);
         $allProjects = array_merge([], ...array_map(static fn (ReportTeamChoice $choice): array => $choice->projects, $teams));
         $uploadProject = array_values(array_filter($allProjects, static fn (TeamProjectChoice $choice): bool => $choice->id() === $input->projectId))[0] ?? $allProjects[0] ?? null;
 

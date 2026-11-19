@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Review\UI\Media;
 
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\NextTicketKey;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 
@@ -52,7 +53,7 @@ final readonly class FixedProjectQueries implements ProjectQueries
         throw new \LogicException('FixedProjectQueries answers only projectByKey.');
     }
 
-    public function nextTicketKeyOf(string $projectId): ?string
+    public function nextTicketKeyOf(string $projectId): ?NextTicketKey
     {
         throw new \LogicException('FixedProjectQueries answers only projectByKey.');
     }

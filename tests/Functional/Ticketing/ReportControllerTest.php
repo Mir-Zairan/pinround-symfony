@@ -12,6 +12,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
+use App\Tests\Integration\ReadsSentSql;
 use App\Ticketing\Api\DraftChoice;
 use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\ProblemReport;
@@ -47,12 +48,19 @@ final class ReportControllerTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use ReadsSentSql;
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string REPORT = '/report';
     /** 40 characters: no "little detail" reason. */
     private const string ENOUGH_DETAIL = 'The cart adds the coupon twice at pay.!!';
     private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => RoundsSection::FRAME_ID];
+    /**
+     * The request's own eight (the user and their password row, their organizations, the transaction's start, tenant and
+     * commit, the reporter's roles and team roles), then the triager for the visibility, the duplicate search and the
+     * project's next key; never the form's choices (every team, their projects, "Give it to"'s ticket counts).
+     */
+    private const int WARM_PREVIEW_QUERY_COUNT = 11;
 
     private KernelBrowser $client;
 
@@ -214,6 +222,11 @@ final class ReportControllerTest extends WebTestCase
         yield 'little detail, the lead checks' => ['Omar', ['description' => 'Short.'], 'It becomes ticket SHOP-1 right away. Lena takes a quick look, because little detail and no pins.'];
         yield 'the lead reports with little detail and checks it' => ['Lena', ['description' => 'Short.', 'assignee_id' => 'Omar'], 'It becomes ticket SHOP-1 right away. You take a quick look, because little detail and no pins. Omar can start already.'];
         yield 'Not sure and a security word' => ['Raj', ['team_id' => 'none', 'project_id' => 'APP', 'title' => 'Password shown in the address bar'], 'It becomes ticket APP-1 right away. Sara takes a quick look, because no team was picked, it sounds risky. It mentions security, so only the team and admins can see it.'];
+        yield 'a tester is not offered, so the team decides' => ['Omar', ['assignee_id' => 'Mia'], 'It becomes ticket SHOP-1 right away. Lena plans it like any other ticket. Nobody needs to check it.'];
+        yield 'another team, whose people are not offered' => ['Omar', ['team_id' => 'MOBILE', 'project_id' => 'APP', 'assignee_id' => 'Lena'], 'It becomes ticket APP-1 right away. Lena plans it like any other ticket. Nobody needs to check it.'];
+        yield 'a project of another team says nothing yet' => ['Omar', ['project_id' => 'APP'], ''];
+        yield 'Not sure with a project no team owns says nothing yet' => ['Raj', ['team_id' => 'none', 'project_id' => 'LOOSE'], ''];
+        yield 'an unknown project says nothing yet' => ['Omar', ['project_id' => '0197a3c0-0000-7000-8000-00000000dead'], ''];
     }
 
     /**
@@ -229,6 +242,38 @@ final class ReportControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['duplicates' => '', 'preview' => $sentence], $this->jsonAnswer());
+    }
+
+    #[Test]
+    public function aWarmPreviewReadsOnlyThePostedProjectAndTheSearchNotTheFormsChoices(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $fields = $this->reportFields($this->resolved(['assignee_id' => 'Omar']));
+        // The first request fills the team people cache and skips the user refresh every later request pays.
+        $this->client->request('POST', '/report/preview', $fields);
+        self::assertResponseStatusCodeSame(200);
+        $this->debugData()->reset();
+
+        $this->client->request('POST', '/report/preview', $fields);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('It becomes ticket SHOP-1 right away and goes straight to Omar. Nobody needs to check it.', $this->answerText('preview'));
+        $queries = self::sqlOf($this->debugData());
+        $allQueries = implode("\n", $queries);
+        self::assertSame(
+            [0, 1, 1],
+            [self::countMatching('/FROM org_team WHERE|FROM tkt_ticket\b|FROM idn_user WHERE id = ANY/', $queries), self::countMatching('/FROM org_team_member\b/', $queries), self::countMatching('/FROM tkt_project\b/', $queries)],
+            'No team list, no ticket counts and no names; the reporter\'s roles and the project once: '.$allQueries,
+        );
+        self::assertCount(self::WARM_PREVIEW_QUERY_COUNT, $queries, $allQueries);
+    }
+
+    /**
+     * @param list<string> $queries
+     */
+    private static function countMatching(string $pattern, array $queries): int
+    {
+        return \count(array_filter($queries, static fn (string $sql): bool => 1 === preg_match($pattern, $sql)));
     }
 
     /**
@@ -382,7 +427,8 @@ final class ReportControllerTest extends WebTestCase
     }
 
     /**
-     * @param array<string, mixed> $overrides "APP" stands for the APP project's id, a first name for that person's id,
+     * @param array<string, mixed> $overrides "APP" stands for the APP project's id, "MOBILE" for the Mobile team's id,
+     *                                        "LOOSE" for a new project no team owns, a first name for that person's id,
      *                                        "ready" for a ready picture of Omar's
      *
      * @return array<string, mixed>
@@ -391,6 +437,8 @@ final class ReportControllerTest extends WebTestCase
     {
         return array_map(fn (mixed $value): mixed => match (true) {
             'APP' === $value => $this->appProject,
+            'MOBILE' === $value => $this->mobile->toString(),
+            'LOOSE' === $value => $this->addProject(null, 'LOOSE', 'Loose ends'),
             'ready' === $value => $this->addReadyPicture('Omar'),
             \is_string($value) && isset($this->people[$value]) => $this->people[$value]->id()->toString(),
             default => $value,
