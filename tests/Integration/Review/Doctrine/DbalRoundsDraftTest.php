@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Review\Doctrine;
 
 use App\Media\Api\MediaImageStatus;
+use App\Review\Api\PlacedPin;
+use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\DraftDecision;
@@ -86,6 +89,8 @@ final class DbalRoundsDraftTest extends KernelTestCase
 
     private const string FIRST_MEDIA = '0197a3c0-0000-7000-8000-0000000f6151';
     private const string SECOND_MEDIA = '0197a3c0-0000-7000-8000-0000000f6152';
+    /** Ready, uploaded by Lena, and in no round. */
+    private const string THIRD_MEDIA = '0197a3c0-0000-7000-8000-0000000f6153';
 
     // An offset other than UTC, so a time written without its offset would read back hours off.
     private const string STARTED_AT = '2027-03-16 09:00:00+01:00';
@@ -533,14 +538,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
     #[Test]
     public function theDraftCommandsRefuseADeletedDraftAnotherOrganizationsAndAnotherPersonsAsNotFoundOnTheRealTables(): void
     {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        $commands = new UseCaseRoundCommands(
-            $this->rounds(),
-            new InMemoryTicketTurnQueries([], new TicketId(self::EMPTY_TICKET)),
-            $tenantContext,
-            new ReportPictures(new InMemoryUploadedMedia($tenantContext, [[self::ACME_FOODS, self::FIRST_MEDIA, self::LENA, MediaImageStatus::Ready]])),
-            new RecordingChecklistCommands(),
-        );
+        $commands = $this->draftCommands();
         $rowsBefore = [$this->rowsOfRound(self::LENAS_DELETED_DRAFT), $this->rowsOfRound(self::OTHER_ORGANIZATION_OPEN_DRAFT), $this->rowsOfRound(self::OMARS_DRAFT)];
 
         foreach ([self::LENAS_DELETED_DRAFT, self::OTHER_ORGANIZATION_OPEN_DRAFT, self::OMARS_DRAFT] as $roundId) {
@@ -558,6 +556,77 @@ final class DbalRoundsDraftTest extends KernelTestCase
             self::assertSame(RoundRefused::NOT_FOUND, $refusal->getMessage(), $roundId);
         }
         self::assertSame($rowsBefore, [$this->rowsOfRound(self::LENAS_DELETED_DRAFT), $this->rowsOfRound(self::OTHER_ORGANIZATION_OPEN_DRAFT), $this->rowsOfRound(self::OMARS_DRAFT)]);
+    }
+
+    #[Test]
+    public function aVerdictWithASummaryIsStoredInOneSaveWithTheTitleAndPinsKept(): void
+    {
+        $before = $this->rowsOfRound(self::DRAFT);
+        $otherRowsBefore = $this->rowsOfOtherRoundsThan(self::DRAFT);
+        $commands = $this->draftCommands();
+
+        $this->committed(self::ACME_FOODS, static function () use ($commands): void {
+            $commands->setDraftVerdictWithSummary(self::DRAFT, new UserId(self::LENA), self::FIRST_SCREENSHOT, RoundCommands::VERDICT_NOT_RIGHT_YET, ' Le total est faux. ', self::savedAt());
+        });
+
+        $expected = $before;
+        // One for the verdict and one for the summary, as the two changes the save holds.
+        $expected['round']['version'] = self::SEEDED_VERSION + 2;
+        $expected['screenshots'][0]['verdict'] = 'not_right';
+        $expected['screenshots'][0]['summary'] = 'Le total est faux.';
+        self::assertSame('Checkout', $before['screenshots'][0]['title']);
+        self::assertSame($expected, $this->rowsOfRound(self::DRAFT));
+        self::assertSame($otherRowsBefore, $this->rowsOfOtherRoundsThan(self::DRAFT));
+    }
+
+    #[Test]
+    public function aSummaryOverItsCapIsRefusedAsInvalidContentAndNeitherItNorTheVerdictIsWritten(): void
+    {
+        $before = $this->rowsOfRound(self::DRAFT);
+        $otherRowsBefore = $this->rowsOfOtherRoundsThan(self::DRAFT);
+        $commands = $this->draftCommands();
+
+        $refusal = $this->committed(self::ACME_FOODS, static function () use ($commands): ?RoundRefused {
+            try {
+                $commands->setDraftVerdictWithSummary(self::DRAFT, new UserId(self::LENA), self::FIRST_SCREENSHOT, RoundCommands::VERDICT_NOT_RIGHT_YET, str_repeat('é', 601), self::savedAt());
+            } catch (RoundRefused $refused) {
+                return $refused;
+            }
+
+            return null;
+        });
+
+        self::assertNotNull($refusal);
+        self::assertSame('A picture summary holds at most 600 characters.', $refusal->getMessage());
+        self::assertTrue($refusal->isInvalidContent());
+        self::assertSame($before, $this->rowsOfRound(self::DRAFT));
+        self::assertSame($otherRowsBefore, $this->rowsOfOtherRoundsThan(self::DRAFT));
+    }
+
+    /**
+     * The second call sends the same picture in upper case with other text and pins, as a retry may.
+     */
+    #[Test]
+    public function addingThePictureTwiceStoresOneScreenshotWithTheTextAndPinsOfTheFirstCall(): void
+    {
+        $before = $this->rowsOfRound(self::DRAFT);
+        $otherRowsBefore = $this->rowsOfOtherRoundsThan(self::DRAFT);
+        $commands = $this->draftCommands();
+
+        $first = $this->committed(self::ACME_FOODS, static fn () => $commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(self::THIRD_MEDIA, 'Panier', null, [new PlacedPin(50.0, 25.0, 'Le total')]), self::savedAt()));
+        $second = $this->committed(self::ACME_FOODS, static fn () => $commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(strtoupper(self::THIRD_MEDIA), 'Another title', 'Another summary', []), self::savedAt()));
+
+        self::assertFalse($first->wasAddedBefore);
+        self::assertTrue($second->wasAddedBefore);
+        self::assertSame([$first->screenshotId, 1], [$second->screenshotId, $second->pinCount]);
+        $after = $this->rowsOfRound(self::DRAFT);
+        self::assertSame([self::FIRST_MEDIA, self::SECOND_MEDIA, self::THIRD_MEDIA], array_column($after['screenshots'], 'media_id'));
+        self::assertSame([$first->screenshotId, 'Panier', null], [$after['screenshots'][2]['id'], $after['screenshots'][2]['title'], $after['screenshots'][2]['summary']]);
+        self::assertSame([$first->screenshotId, 'Le total'], [$after['pins'][2]['screenshot_id'], $after['pins'][2]['note']]);
+        self::assertCount(\count($before['pins']) + 1, $after['pins']);
+        // Three changes in the first call's one save, and none by the second.
+        self::assertSame(self::SEEDED_VERSION + 3, $after['round']['version']);
+        self::assertSame($otherRowsBefore, $this->rowsOfOtherRoundsThan(self::DRAFT));
     }
 
     /**
@@ -800,6 +869,22 @@ final class DbalRoundsDraftTest extends KernelTestCase
         self::assertNotSame([], $rows[1]);
 
         return $rows;
+    }
+
+    private function draftCommands(): UseCaseRoundCommands
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+
+        return new UseCaseRoundCommands(
+            $this->rounds(),
+            new InMemoryTicketTurnQueries([], new TicketId(self::EMPTY_TICKET)),
+            $tenantContext,
+            new ReportPictures(new InMemoryUploadedMedia($tenantContext, [
+                [self::ACME_FOODS, self::FIRST_MEDIA, self::LENA, MediaImageStatus::Ready],
+                [self::ACME_FOODS, self::THIRD_MEDIA, self::LENA, MediaImageStatus::Ready],
+            ])),
+            new RecordingChecklistCommands(),
+        );
     }
 
     private function rounds(): DbalRounds

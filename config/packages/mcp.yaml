@@ -1,0 +1,33 @@
+# The MCP server Claude Code connects to (ADR-0021): symfony/mcp-bundle, pinned to exactly 0.15.0 in composer.json,
+# on mcp/sdk 0.9. Keys checked against the bundle's config/options.php at install. POST /mcp is behind the stateless
+# api_token firewall (security.yaml); McpRequestGuard refuses a foreign Origin, an unknown Host and a body over 1 MB
+# before the firewall, and spends the per-token and per-organization limits (ToolCallLimiter) after it;
+# McpSessionBinding then refuses a session that another token started.
+mcp:
+    servers:
+        pinround:
+            name: pinround
+            version: '1.0.0'
+            # Our tools are AgentTools, which AgentToolLoader registers, not #[McpTool] services, and the bundle refuses a
+            # namespace pattern that matches no #[McpTool] service, so this stays '*'. A vendor #[McpTool] service could
+            # still appear in tools/list, but never run: GatedToolCallHandler answers every tools/call and knows only
+            # the AgentTools. McpEndpointTest pins the tools/list.
+            registry: '*'
+            http:
+                path: /mcp
+                # The SDK's own DNS rebinding check, behind McpRequestGuard's, on the same host: the public base URL's.
+                allowed_hosts: ['%env(key:host:url:DEFAULT_URI)%']
+            # On the state Valkey, which never evicts (ADR-0010) and which every app container shares; the default file
+            # store would keep a session on one container only. The Mcp-Session-Id carries protocol state only: every
+            # request still authenticates by its own Bearer token, and McpSessionBinding answers 404 to a session that
+            # another token started. Its binding lives as long as a session: keep ttl equal to its TTL_SECONDS.
+            session:
+                store: cache
+                cache_pool: agent_api.mcp_session_cache
+                ttl: 3600
+
+services:
+    # The bundle's cache store takes a PSR-16 cache; cache.mcp_sessions (cache.yaml) is a PSR-6 pool.
+    agent_api.mcp_session_cache:
+        class: Symfony\Component\Cache\Psr16Cache
+        arguments: ['@cache.mcp_sessions']

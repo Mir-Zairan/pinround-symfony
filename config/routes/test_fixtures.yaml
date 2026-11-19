@@ -86,6 +86,28 @@ when@test:
         controller: App\Tests\Fixtures\Http\AdminAreaProbeController::openAdminArea
         methods: [GET]
 
+    # Under the stateless api_token firewall: TokenAuthenticator refuses a request without a live token before the
+    # access rule of test_ routes is read.
+    test_token_probe:
+        path: /mcp/_test/token-probe
+        controller: App\Tests\Fixtures\Http\TokenProbeController::reportTokenActor
+        methods: [GET, POST]
+
+    test_token_probe_api:
+        path: /api/v1/_test/token-probe
+        controller: App\Tests\Fixtures\Http\TokenProbeController::reportTokenActor
+        methods: [GET]
+
+    test_token_admin_decisions:
+        path: /mcp/_test/admin-decisions
+        controller: App\Tests\Fixtures\Http\TokenProbeController::reportAdminDecisions
+        methods: [GET]
+
+    test_token_admin_area:
+        path: /mcp/_test/admin-area
+        controller: App\Tests\Fixtures\Http\AdminAreaProbeController::openAdminArea
+        methods: [GET]
+
     test_recent_auth:
         path: /_test/recent-auth
         controller: App\Tests\Fixtures\Http\RecentAuthProbeController::openSensitiveAction

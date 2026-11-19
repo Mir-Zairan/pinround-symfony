@@ -21,6 +21,18 @@ framework:
                 adapter: cache.adapter.redis
                 tags: true
                 default_lifetime: 60
+            # MCP sessions (mcp.yaml) on the state Valkey, which never evicts (ADR-0010): an evicted session would make
+            # Claude Code start over in the middle of its work. The test env keeps it there too (TEST_STATE_VALKEY_DSN).
+            cache.mcp_sessions:
+                adapter: cache.adapter.redis
+                provider: state_valkey.connection
+                default_lifetime: 3600
+            # Where the default schedule keeps when each job last ran (DefaultSchedule), on the state Valkey for the
+            # same reason: on a pool that loses it, every scheduler restart starts each period again. Every
+            # environment, the test env too; the scheduler sets its own five-year lifetime.
+            cache.scheduler:
+                adapter: cache.adapter.redis
+                provider: state_valkey.connection
 
 when@test:
     framework:

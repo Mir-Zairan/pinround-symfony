@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Voter;
 
 use App\Conversation\UI\Voter\MessageOnTicket;
+use App\Identity\Api\ApiTokenAccess;
+use App\Identity\Application\AccountPermission;
 use App\Identity\Application\SessionConfirmations;
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\Email;
 use App\Identity\Domain\PasswordHash;
 use App\Identity\Domain\TwoStepLogin;
 use App\Identity\Domain\User;
+use App\Identity\Infrastructure\Security\ApiTokenAuthentication;
 use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Identity\UI\Voter\OwnAccountVoter;
 use App\Media\Api\UploadTarget;
 use App\Organization\Api\TeamPermission;
 use App\Organization\Application\OpenInvitationLink;
@@ -49,10 +53,10 @@ use Symfony\Component\Security\Core\Authorization\Voter\VoterInterface;
  * logged-in person in their own organization as tenant and inside a transaction, as a request would. Each row names
  * the text of personas-and-roles.md it comes from, and the doc must still have it.
  *
- * Every token is a password session, as the login form leaves it. A row with twoStepProof also has, in its rolled-back
- * transaction, the person's user and two-step login rows, and a request whose session holds their code proof (see
- * voter_matrix_rows.php for its ages); other
- * rows have neither, so no session.
+ * Every token is a password session, as the login form leaves it, unless the row's login is a personal access token:
+ * then it is as TokenAuthenticator leaves it, for a token of the person's organization. A row with twoStepProof also
+ * has, in its rolled-back transaction, the person's user and two-step login rows, and a request whose session holds
+ * their code proof (see voter_matrix_rows.php for its ages); other rows have neither, so no session.
  *
  * Acme Foods: Lena is an Admin and leads Shop and Mobile (as the demo seed has it); Omar is a member of both; Mia is a
  * member (tester) of Shop and a viewer of Support; Raj is a Manager and a viewer of Shop; Sara is an Admin with no team
@@ -150,6 +154,10 @@ final class VoterMatrixTest extends KernelTestCase
         'Shared round of another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, false, false],
     ];
 
+    private const string PASSWORD_SESSION = 'password session';
+    private const string PERSONAL_ACCESS_TOKEN = 'personal access token';
+    private const string API_TOKEN = '0197a3c0-0000-7000-8000-0000000009e2';
+
     private const string ROLES_DOC = __DIR__.'/../../../docs/00-product/personas-and-roles.md';
 
     /** Not the wall clock's time, so a check that ignores the app clock decides differently. */
@@ -198,11 +206,11 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string}>
+     * @return iterable<string, array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string, login?: string, refusalReason?: string}>
      */
     public static function matrixRows(): iterable
     {
-        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string}> $rows */
+        /** @var list<array{source: string, attribute: string, actor: string, subject: string, expected: string, twoStepProof?: bool|int|string, login?: string, refusalReason?: string}> $rows */
         $rows = require __DIR__.'/voter_matrix_rows.php';
         foreach ($rows as $row) {
             $twoStepProof = $row['twoStepProof'] ?? false;
@@ -213,15 +221,18 @@ final class VoterMatrixTest extends KernelTestCase
                 \is_int($twoStepProof) => \sprintf(' (code proof %d seconds old)', $twoStepProof),
                 default => throw new \InvalidArgumentException(\sprintf('A row\'s twoStepProof is true, a number of seconds or "noCode", not %s.', var_export($twoStepProof, true))),
             };
-            yield \sprintf('%s %s %s%s', $row['actor'], $row['attribute'], $row['subject'], $proof) => $row;
+            $login = $row['login'] ?? self::PASSWORD_SESSION;
+            yield \sprintf('%s %s %s%s%s', $row['actor'], $row['attribute'], $row['subject'], $proof, self::PASSWORD_SESSION === $login ? '' : ' by '.$login) => $row;
         }
     }
 
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool|int|string $twoStepProof = false): void
+    public function theAppDecidesTheRowAsTheRolesDocSays(string $source, string $attribute, string $actor, string $subject, string $expected, bool|int|string $twoStepProof = false, string $login = self::PASSWORD_SESSION, ?string $refusalReason = null): void
     {
         self::assertContains($expected, ['granted', 'denied'], 'A row expects granted or denied.');
+        self::assertContains($login, [self::PASSWORD_SESSION, self::PERSONAL_ACCESS_TOKEN], 'A row\'s login is a password session or a personal access token.');
+        self::assertTrue(null === $refusalReason || 'denied' === $expected, 'Only a denied row names a refusal reason.');
         self::assertArrayHasKey($actor, self::PEOPLE, 'The actor is one of VoterMatrixTest::PEOPLE.');
         [, $organizationId] = self::PEOPLE[$actor];
 
@@ -229,7 +240,7 @@ final class VoterMatrixTest extends KernelTestCase
         $clock = new MockClock(self::NOW);
         self::getContainer()->set('clock', $clock);
         $accessDecision = new AccessDecision();
-        $isGranted = self::transactions()->rolledBackAs($organizationId, function () use ($actor, $attribute, $subject, $accessDecision, $twoStepProof, $clock): bool {
+        $isGranted = self::transactions()->rolledBackAs($organizationId, function () use ($actor, $attribute, $subject, $accessDecision, $twoStepProof, $login, $clock): bool {
             if (isset(self::UPLOAD_TARGETS[$subject]) || isset(self::TICKET_IDS[$subject]) || isset(self::ROUNDS[$subject])) {
                 self::persistUsersOfEveryone();
             }
@@ -237,7 +248,7 @@ final class VoterMatrixTest extends KernelTestCase
             // MediaTargetAuthorizer decides for the current request actor, so voters that delegate to it read TokenStorage.
             $tokenStorage = self::getContainer()->get('security.token_storage');
             $previousToken = $tokenStorage->getToken();
-            $token = self::tokenOf($actor);
+            $token = self::tokenOf($actor, $login);
             $tokenStorage->setToken($token);
             try {
                 return $this->accessDecisionManager()->decide($token, [$attribute], self::subjectNamed($subject), $accessDecision);
@@ -249,11 +260,14 @@ final class VoterMatrixTest extends KernelTestCase
 
         self::assertNotSame([], self::votersThatDecided($accessDecision), \sprintf('No voter decides %s on %s; is the attribute or subject wrong?', $attribute, $subject));
         self::assertSame($expected, $isGranted ? 'granted' : 'denied', \sprintf('%s %s %s, from "%s"', $actor, $attribute, $subject, $source));
+        if (null !== $refusalReason) {
+            self::assertStringContainsString($refusalReason, $accessDecision->getMessage(), 'The row is denied, but not for the reason it names.');
+        }
     }
 
     #[Test]
     #[DataProvider('matrixRows')]
-    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool|int|string $twoStepProof = false): void
+    public function theRolesDocHasTheTextTheRowComesFrom(string $source, string $attribute, string $actor, string $subject, string $expected, bool|int|string $twoStepProof = false, string $login = self::PASSWORD_SESSION, ?string $refusalReason = null): void
     {
         self::assertStringContainsString($source, (string) file_get_contents(self::ROLES_DOC), \sprintf('The row "%s %s %s" names text the roles doc does not have.', $actor, $attribute, $subject));
     }
@@ -271,6 +285,24 @@ final class VoterMatrixTest extends KernelTestCase
         self::assertSame('unanimous', (string) $accessDecision->strategy);
         self::assertFalse($isGranted);
         self::assertSame([], self::votersThatDecided($accessDecision));
+    }
+
+    /**
+     * Not a matrix row: the roles doc has no row for a person's own account (FR-ID-05).
+     */
+    #[Test]
+    public function anAdminsPersonalAccessTokenMayNotEditTheirAccountWhereTheirPasswordSessionMay(): void
+    {
+        $decide = fn (string $login, AccessDecision $accessDecision): bool => self::transactions()->rolledBackAs(
+            self::ACME_FOODS,
+            fn (): bool => $this->accessDecisionManager()->decide(self::tokenOf('Lena', $login), [AccountPermission::EDIT_OWN], null, $accessDecision),
+        );
+        $passwordSessionDecision = new AccessDecision();
+        $tokenDecision = new AccessDecision();
+
+        self::assertTrue($decide(self::PASSWORD_SESSION, $passwordSessionDecision));
+        self::assertFalse($decide(self::PERSONAL_ACCESS_TOKEN, $tokenDecision));
+        self::assertStringContainsString(OwnAccountVoter::TOKEN_REFUSAL_REASON, $tokenDecision->getMessage());
     }
 
     #[Test]
@@ -359,13 +391,18 @@ final class VoterMatrixTest extends KernelTestCase
     }
 
     /**
-     * A token as the login form leaves it; the person needs no idn_user row unless the row asks for a code proof.
+     * A token as the login form leaves it for a password session, or as TokenAuthenticator leaves it for a personal
+     * access token of the person's organization with Claude Code's default scopes; the person needs no idn_user row
+     * unless the row asks for a code proof.
      */
-    private static function tokenOf(string $person): TokenInterface
+    private static function tokenOf(string $person, string $login = self::PASSWORD_SESSION): TokenInterface
     {
         $user = self::userOf($person);
         $hash = new PasswordHash('$argon2id$v=19$m=65536,t=4,p=1$NUkxU2sxQlFxbXpDaUZUQQ$suVp+0jzKZuqeONGVmUghGQxxI2vd02CMokdMtaQcfA');
         $securityUser = SecurityUser::of($user, new Credential($user, $hash, new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
+        if (self::PERSONAL_ACCESS_TOKEN === $login) {
+            return new ApiTokenAuthentication($securityUser, new ApiTokenAccess(self::API_TOKEN, new OrganizationId(self::PEOPLE[$person][1]), ['read', 'rounds:write'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null);
+        }
 
         return new UsernamePasswordToken($securityUser, 'main', $securityUser->getRoles());
     }

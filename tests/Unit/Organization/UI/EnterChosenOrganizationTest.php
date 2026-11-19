@@ -4,16 +4,26 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Organization\UI;
 
+use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\CurrentUser;
+use App\Identity\Domain\Credential;
+use App\Identity\Domain\Email;
+use App\Identity\Domain\PasswordHash;
+use App\Identity\Domain\User;
+use App\Identity\Infrastructure\Security\ApiTokenAuthentication;
+use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Identity\Infrastructure\Security\SymfonyCurrentApiToken;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\Roles;
 use App\Organization\UI\EnterChosenOrganization;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchGuard;
+use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Session\Session;
@@ -22,6 +32,8 @@ use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorage;
+use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 
 final class EnterChosenOrganizationTest extends TestCase
 {
@@ -31,11 +43,24 @@ final class EnterChosenOrganizationTest extends TestCase
 
     private TenantContext $tenantContext;
 
+    /** Whether the switch guard refuses, as the real one does while entities of the tenant are loaded. */
+    private bool $isSwitchRefused = false;
+
     protected function setUp(): void
     {
-        $this->tenantContext = new TenantContext(new class implements TenantSwitchGuard {
+        $this->tenantContext = new TenantContext(new readonly class($this->isSwitchRefused(...)) implements TenantSwitchGuard {
+            /**
+             * @param \Closure(): bool $isSwitchRefused
+             */
+            public function __construct(private \Closure $isSwitchRefused)
+            {
+            }
+
             public function prepareSwitch(): void
             {
+                if (($this->isSwitchRefused)()) {
+                    throw new TenantSwitchRefused();
+                }
             }
         });
     }
@@ -97,9 +122,66 @@ final class EnterChosenOrganizationTest extends TestCase
     }
 
     /**
-     * @param list<string> $organizationIds
+     * The firewall of /mcp and /api/v1 is stateless: the session a request may still carry neither chooses the
+     * organization nor is written, and a request without one works too.
      */
-    private function handle(?string $userId, array $organizationIds, ?string $chosen = null, string $route = 'web_home', int $requestType = HttpKernelInterface::MAIN_REQUEST): RequestEvent
+    #[Test]
+    public function aTokenRequestWorksInTheTokensOrganizationAndNeverInTheSessionsChoice(): void
+    {
+        $event = $this->handle(self::LENA, [self::ACME_FOODS, self::BETA_BAKERY], chosen: self::ACME_FOODS, tokenOrganizationId: self::BETA_BAKERY);
+
+        self::assertSame(self::BETA_BAKERY, $this->tenantContext->get()?->toString());
+        self::assertNull($event->getResponse());
+        self::assertSame(self::ACME_FOODS, $event->getRequest()->getSession()->get(EnterChosenOrganization::SESSION_KEY));
+
+        $event = $this->handle(self::LENA, [self::ACME_FOODS, self::BETA_BAKERY], tokenOrganizationId: self::BETA_BAKERY, hasSession: false);
+
+        self::assertSame(self::BETA_BAKERY, $this->tenantContext->get()?->toString());
+        self::assertNull($event->getResponse());
+    }
+
+    #[Test]
+    public function aTokenWhoseUserLeftItsOrganizationIsRefusedWithoutATenantEvenWhenTheUserHasAnotherOne(): void
+    {
+        $event = $this->handle(self::LENA, [self::ACME_FOODS], tokenOrganizationId: self::BETA_BAKERY);
+
+        $response = $event->getResponse();
+        self::assertInstanceOf(JsonResponse::class, $response);
+        self::assertSame(401, $response->getStatusCode());
+        self::assertSame('Bearer', $response->headers->get('WWW-Authenticate'));
+        self::assertSame(['error' => EnterChosenOrganization::NOT_A_MEMBER_OF_THE_TOKENS_ORGANIZATION], json_decode((string) $response->getContent(), true));
+        self::assertNull($this->tenantContext->get());
+        self::assertFalse($event->getRequest()->getSession()->has(EnterChosenOrganization::SESSION_KEY));
+    }
+
+    /**
+     * Fails closed: a 401 that left the token's organization as tenant would let the rest of the request run in it.
+     */
+    #[Test]
+    public function aRefusedTokenWhoseTenantCannotBeClearedFailsTheRequestInsteadOfAnswering(): void
+    {
+        $this->isSwitchRefused = true;
+
+        try {
+            $this->handle(self::LENA, [self::ACME_FOODS], tokenOrganizationId: self::BETA_BAKERY);
+            self::fail('The refusal answered with the tenant still set.');
+        } catch (TenantSwitchRefused) {
+            self::assertSame(self::BETA_BAKERY, $this->tenantContext->get()?->toString());
+        }
+    }
+
+    private function isSwitchRefused(): bool
+    {
+        return $this->isSwitchRefused;
+    }
+
+    /**
+     * @param list<string> $organizationIds
+     * @param string|null  $tokenOrganizationId the organization of the personal access token the request authenticated
+     *                                          with, already the tenant as the authenticator sets it; null for a browser
+     *                                          session
+     */
+    private function handle(?string $userId, array $organizationIds, ?string $chosen = null, string $route = 'web_home', int $requestType = HttpKernelInterface::MAIN_REQUEST, ?string $tokenOrganizationId = null, bool $hasSession = true): RequestEvent
     {
         $currentUser = new readonly class($userId) implements CurrentUser {
             public function __construct(private ?string $userId)
@@ -160,16 +242,42 @@ final class EnterChosenOrganizationTest extends TestCase
 
         $request = Request::create('/');
         $request->attributes->set('_route', $route);
-        $session = new Session(new MockArraySessionStorage());
-        if (null !== $chosen) {
-            $session->set(EnterChosenOrganization::SESSION_KEY, $chosen);
+        if ($hasSession) {
+            $session = new Session(new MockArraySessionStorage());
+            if (null !== $chosen) {
+                $session->set(EnterChosenOrganization::SESSION_KEY, $chosen);
+            }
+            $request->setSession($session);
         }
-        $request->setSession($session);
         $event = new RequestEvent(self::createStub(HttpKernelInterface::class), $request, $requestType);
+        $tokenStorage = new TokenStorage();
+        if (null !== $userId) {
+            $tokenStorage->setToken(null === $tokenOrganizationId
+                ? new UsernamePasswordToken(self::securityUser($userId), 'main', ['ROLE_USER'])
+                : new ApiTokenAuthentication(self::securityUser($userId), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId($tokenOrganizationId), ['read'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null));
+        }
 
         $this->tenantContext->reset();
-        new EnterChosenOrganization($currentUser, $membershipQueries, $this->tenantContext, $urlGenerator, ['organization_choose', 'identity_profile'])($event);
+        if (null !== $userId && null !== $tokenOrganizationId) {
+            // As TokenAuthenticator leaves a token request.
+            $this->tenantContext->set(new OrganizationId($tokenOrganizationId));
+        }
+        new EnterChosenOrganization(
+            $currentUser,
+            $membershipQueries,
+            $this->tenantContext,
+            $urlGenerator,
+            new SymfonyCurrentApiToken($tokenStorage),
+            ['organization_choose', 'identity_profile'],
+        )($event);
 
         return $event;
+    }
+
+    private static function securityUser(string $userId): SecurityUser
+    {
+        $user = new User(new UserId($userId), new Email('lena@acme-foods.example'), 'Lena Berg', 'en', 'Europe/Berlin', new \DateTimeImmutable('2026-11-02 09:30:00 UTC'));
+
+        return SecurityUser::of($user, new Credential($user, new PasswordHash('$argon2id$v=19$m=10,t=3,p=1$stored'), new \DateTimeImmutable('2026-11-02 09:30:00 UTC')));
     }
 }

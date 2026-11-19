@@ -13,9 +13,9 @@ use Symfony\Component\Lock\PersistingStoreInterface;
 /**
  * A lock store that keeps its locks in memory and lets them expire by the given clock, as the RedisStore on the state
  * Valkey does by its key's time to live: one holder per resource name (case-sensitive, compared byte for byte), a
- * conflict while another holder's lock lives, and a lock nobody released is free once its time is up. Symfony's
- * InMemoryStore never expires a lock, so a window lock in it would never end. As the state Valkey answers PTTL, it
- * tells how long a lock has left, whoever holds it.
+ * conflict while another holder's lock lives, a conflict on renewing a lock that is gone, and a lock nobody released is
+ * free once its time is up. Symfony's InMemoryStore never expires a lock, so a window lock in it would never end. As the
+ * state Valkey answers PTTL, it tells how long a lock has left, whoever holds it.
  */
 final class ClockedLockStore implements PersistingStoreInterface, LockLifetimes
 {
@@ -34,8 +34,12 @@ final class ClockedLockStore implements PersistingStoreInterface, LockLifetimes
         $this->hold($key, self::INITIAL_TTL_MICROSECONDS);
     }
 
+    /** As RedisStore: only a holder whose lock still lives may renew it; a lapsed lock is not taken back. */
     public function putOffExpiration(Key $key, float $ttl): void
     {
+        if (!$this->exists($key)) {
+            throw new LockConflictedException();
+        }
         $this->hold($key, (int) round($ttl * 1_000_000));
     }
 
@@ -69,6 +73,8 @@ final class ClockedLockStore implements PersistingStoreInterface, LockLifetimes
             throw new LockConflictedException();
         }
         $this->locks[(string) $key] = ['token' => self::tokenOf($key), 'expiresAtMicroseconds' => $this->nowMicroseconds() + $ttlMicroseconds];
+        // As RedisStore: the key then tells its holder how long it has left, which Symfony's Scheduler Checkpoint reads.
+        $key->reduceLifetime($ttlMicroseconds / 1_000_000);
     }
 
     private function nowMicroseconds(): int

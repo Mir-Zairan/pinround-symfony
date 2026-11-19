@@ -50,7 +50,7 @@ interface Uploads
      * for its file created at $at and writes its processing to the outbox, all in one transaction of its own: they
      * commit together or not at all. The intent is used once only, even by two calls at once, and expires by $at.
      *
-     * @return string the id of the new media object, a UUIDv7
+     * @return string the id of the new media object, which is $intentId in lowercase
      *
      * @throws UploadIntentNotFound when $intentId is malformed, or the organization has no intent with that id that
      *                              $userId began; nothing changes then

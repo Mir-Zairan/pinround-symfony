@@ -211,9 +211,9 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
         self::assertSame(self::OMAR_DRAFT, $notes->roundId);
         self::assertNotSame([], $notes->screenshots);
         self::assertEquals([
-            new ScreenshotNotes(self::FIRST_SCREENSHOT, 0, 'Checkout', 'The total is off.', 'not_right', [new PinNote(1, 10.25, 7.5, 'Button hidden'), new PinNote(2, 20.25, 14.5, 'Wrong colour'), new PinNote(3, 30.25, 21.5, 'Prix affiché en €')]),
-            new ScreenshotNotes(self::SECOND_SCREENSHOT, 1, null, null, null, []),
-            new ScreenshotNotes(self::THIRD_SCREENSHOT, 2, 'Cart', 'All fine.', 'looks_right', [new PinNote(1, 10.25, 7.5, 'Fine here')]),
+            new ScreenshotNotes(self::FIRST_SCREENSHOT, 0, 'Checkout', 'The total is off.', 'not_right', [new PinNote(1, 10.25, 7.5, 'Button hidden'), new PinNote(2, 20.25, 14.5, 'Wrong colour'), new PinNote(3, 30.25, 21.5, 'Prix affiché en €')], self::MEDIA),
+            new ScreenshotNotes(self::SECOND_SCREENSHOT, 1, null, null, null, [], self::MEDIA),
+            new ScreenshotNotes(self::THIRD_SCREENSHOT, 2, 'Cart', 'All fine.', 'looks_right', [new PinNote(1, 10.25, 7.5, 'Fine here')], self::MEDIA),
         ], $notes->screenshots);
         self::assertSame([1, 2, 3], array_map(static fn (PinNote $pin): int => $pin->number, $notes->screenshots[0]->pins));
     }
@@ -238,7 +238,7 @@ final class DbalRoundNotesAndAccessFactsTest extends KernelTestCase
 
         self::assertNotNull($notes);
         self::assertSame(self::LENA_DRAFT, $notes->roundId);
-        self::assertEquals([new ScreenshotNotes(self::LENA_SCREENSHOT, 0, 'Lena only', null, null, [new PinNote(1, 10.25, 7.5, 'Lena pin')])], $notes->screenshots);
+        self::assertEquals([new ScreenshotNotes(self::LENA_SCREENSHOT, 0, 'Lena only', null, null, [new PinNote(1, 10.25, 7.5, 'Lena pin')], self::MEDIA)], $notes->screenshots);
     }
 
     #[Test]

@@ -8,6 +8,10 @@ namespace App\Review\Api;
  * The round's content breaks a rule, such as a title over 120 characters, or the ticket has that round already, so
  * nothing was saved. The message is the reason to show the person (422), except NOT_FOUND, which the caller answers as
  * a missing page (404).
+ *
+ * A caller that answers by kind rather than by text asks isNotFound, isReadOnly and isInvalidContent; RoundCommands
+ * sets the kind where it refuses, so no caller has to read the exception it wraps. A refusal of none of these kinds,
+ * such as DRAFT_CHANGED or NUMBER_TAKEN, answers false to all three.
  */
 final class RoundRefused extends \DomainException
 {
@@ -31,4 +35,54 @@ final class RoundRefused extends \DomainException
     public const string UNKNOWN_VERDICT = 'Choose "Looks right" or "Not right yet".';
     /** A round saved without RoundCommands took the number while the draft was being shared. */
     public const string NUMBER_TAKEN = 'Another round took this number just now. Try again.';
+
+    private const string KIND_READ_ONLY = 'read_only';
+    private const string KIND_INVALID_CONTENT = 'invalid_content';
+
+    private ?string $kind = null;
+
+    /**
+     * The draft no longer changes: it is shared or closed. Sending the change again cannot help.
+     *
+     * @param string $reason the text to show the person, the domain's own
+     */
+    public static function readOnly(string $reason, ?\Throwable $cause = null): self
+    {
+        $refused = new self($reason, 0, $cause);
+        $refused->kind = self::KIND_READ_ONLY;
+
+        return $refused;
+    }
+
+    /**
+     * What was sent breaks a rule of the round's content, such as a text over its cap, a pin outside the picture or an
+     * unknown verdict; other content may pass.
+     *
+     * @param string $reason the text to show the person, the domain's own
+     */
+    public static function invalidContent(string $reason, ?\Throwable $cause = null): self
+    {
+        $refused = new self($reason, 0, $cause);
+        $refused->kind = self::KIND_INVALID_CONTENT;
+
+        return $refused;
+    }
+
+    /**
+     * NOT_FOUND or SCREENSHOT_NOT_FOUND: no draft of the person with that id, or no such picture in it.
+     */
+    public function isNotFound(): bool
+    {
+        return \in_array($this->getMessage(), [self::NOT_FOUND, self::SCREENSHOT_NOT_FOUND], true);
+    }
+
+    public function isReadOnly(): bool
+    {
+        return self::KIND_READ_ONLY === $this->kind;
+    }
+
+    public function isInvalidContent(): bool
+    {
+        return self::KIND_INVALID_CONTENT === $this->kind;
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Audit;
 
+use App\Audit\Application\AuditDataAllowList;
 use App\Audit\Application\RecordOrganizationAuditEntry;
 use App\Organization\Api\Event\MemberJoined;
 use App\SharedKernel\Application\TenantContext;
@@ -86,7 +87,7 @@ final class RecordOrganizationAuditEntryTest extends KernelTestCase
         self::assertEquals(array_column($expected, 5), array_column($actual, 5));
         self::assertSame(array_fill(0, 6, '2027-03-14 08:30:00'), array_column($rows, 'at'), 'Each row keeps the time of its event, not of its handling.');
         foreach ($rows as $row) {
-            self::assertEqualsCanonicalizing(RecordOrganizationAuditEntry::DATA_KEYS[$row['action']] ?? [], array_keys($row['data']));
+            self::assertEqualsCanonicalizing(AuditDataAllowList::DATA_KEYS_BY_ACTION[$row['action']] ?? [], array_keys($row['data']));
         }
     }
 

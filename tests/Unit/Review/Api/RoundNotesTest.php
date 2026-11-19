@@ -22,8 +22,8 @@ final class RoundNotesTest extends TestCase
             new ScreenshotNotes('shot-1', 1, 'Banner', null, RoundCommands::VERDICT_NOT_RIGHT_YET, [
                 new PinNote(1, 10.0, 33.33, 'Covers the total'),
                 new PinNote(3, 99.5, 0.0, ''),
-            ]),
-            new ScreenshotNotes('shot-2', 2, null, 'Second view', null, []),
+            ], 'media-1'),
+            new ScreenshotNotes('shot-2', 2, null, 'Second view', null, [], 'media-2'),
         ]);
 
         $json = json_encode($notes, \JSON_THROW_ON_ERROR);
@@ -32,8 +32,8 @@ final class RoundNotesTest extends TestCase
             '{"roundId":"round-1","screenshots":['
             .'{"screenshotId":"shot-1","position":1,"title":"Banner","summary":null,"verdict":"not_right","pins":['
             .'{"number":1,"xPercent":10,"yPercent":33.33,"note":"Covers the total"},'
-            .'{"number":3,"xPercent":99.5,"yPercent":0,"note":""}]},'
-            .'{"screenshotId":"shot-2","position":2,"title":null,"summary":"Second view","verdict":null,"pins":[]}]}',
+            .'{"number":3,"xPercent":99.5,"yPercent":0,"note":""}],"mediaId":"media-1"},'
+            .'{"screenshotId":"shot-2","position":2,"title":null,"summary":"Second view","verdict":null,"pins":[],"mediaId":"media-2"}]}',
             $json,
         );
     }

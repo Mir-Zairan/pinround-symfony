@@ -132,6 +132,12 @@ services:
         tags:
             - { name: messenger.message_handler, bus: event.bus, handles: App\Organization\Api\Event\OrganizationEvent }
 
+    # Tagged here for the same reason; the token events reach it from async_notify on event.bus (messenger.yaml).
+    App\Audit\Application\RecordIdentityAuditEntry:
+        tags:
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Identity\Api\Event\ApiTokenIssued }
+            - { name: messenger.message_handler, bus: event.bus, handles: App\Identity\Api\Event\ApiTokenRevoked }
+
     # Tagged here for the same reason; the five events reach it from async_notify on event.bus (messenger.yaml).
     App\Notification\Application\Notify\NotifyRecipients:
         tags:
@@ -221,6 +227,7 @@ services:
     App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'
     App\Insight\Api\WaitingTurnCounts: '@App\Insight\Infrastructure\Doctrine\DbalWaitingTurnCounts'
     App\Insight\Api\HomeQueries: '@App\Insight\Application\HomeQueriesService'
+    App\Insight\Api\MyTicketQueries: '@App\Insight\Infrastructure\Doctrine\DbalMyTicketQueries'
     App\Insight\Application\WhoseTurnRows: '@App\Insight\Infrastructure\Doctrine\DbalWhoseTurnRows'
     # Server-side AI goes through Symfony AI (ADR-0018); the test env binds FakeProvider below.
     App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\SymfonyAiProvider'
@@ -366,6 +373,10 @@ when@test:
         test.insight_home_queries:
             alias: App\Insight\Api\HomeQueries
             public: true
+        # The MCP tool list_my_tickets inlines it; DbalMyTicketQueriesTest and MyTicketsLeakTest get it as the tool does.
+        test.insight_my_ticket_queries:
+            alias: App\Insight\Api\MyTicketQueries
+            public: true
         # The bell tests call the bell's ports and commands without a request, as BellController does; the test
         # container drops a private service once it is inlined, so these public aliases keep them reachable.
         test.notification_queries:
@@ -425,6 +436,17 @@ when@test:
         # UploadedMediaTest gets the Api as the status route does.
         test.media_uploaded_media:
             alias: App\Media\Api\UploadedMedia
+            public: true
+        # Nothing issues or checks a token before the P09.T1 token page and the token authenticator; ApiTokenWiringTest
+        # gets them as those will.
+        test.identity_api_token_hashing:
+            alias: App\Identity\Domain\ApiTokenHashing
+            public: true
+        test.identity_api_tokens:
+            alias: App\Identity\Domain\ApiTokens
+            public: true
+        test.identity_issue_api_token:
+            alias: App\Identity\Application\IssueApiToken
             public: true
         # The container drops a private service no test asks for; the integration tests get the Api as a page does.
         test.review_round_queries:
@@ -566,6 +588,12 @@ when@test:
 
         # Test-only handler of the Messenger span tests (tests/Integration/Tracing).
         App\Tests\Fixtures\Tracing\TracedProbeMessageHandler:
+            autowire: true
+            autoconfigure: true
+
+        # Test-only MCP tool of McpEndpointTest: it writes and then fails when told to. autoconfigure tags it
+        # agent_api.tool, so the test env lists and runs it beside the real tools.
+        App\Tests\Fixtures\AgentApi\WriteProbeTool:
             autowire: true
             autoconfigure: true
 

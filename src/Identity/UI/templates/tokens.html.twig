@@ -1,0 +1,111 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}API tokens · pinround{% endblock %}
+
+{# The form fields, errors and notices of the logged-out pages; profile.css gives the scope checkboxes their choice group;
+   security.css lays out the sections, the copy fields and the list. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="security">
+        <h1 class="security__title">API tokens</h1>
+        {% for notice in page_flashes('notice') %}
+            <p class="login__notice" role="status">{{ notice }}</p>
+        {% endfor %}
+
+        {% if newToken %}
+            <twig:Card tag="section" class="security__section" aria-labelledby="new-token-title">
+                <h2 class="security__heading" id="new-token-title">Copy your token now</h2>
+                <p class="login__hint">This is the only time pinround shows it. Keep it like a password.</p>
+                {# copy-text shows each Copy button only where the browser can copy, and copies the field's exact value. #}
+                <div class="security__copy" {{ stimulus_controller('copy-text') }}>
+                    <label class="login__field">
+                        Token
+                        <input class="login__input" type="text" name="new_token" value="{{ newToken.reveal }}" readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
+                    </label>
+                    <p class="security__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
+                        <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy token</twig:Button>
+                        <span class="login__hint" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
+                    </p>
+                </div>
+                <div class="security__copy" {{ stimulus_controller('copy-text') }}>
+                    <label class="login__field">
+                        Add it to Claude Code
+                        <input class="login__input" type="text" name="claude_mcp_add" value='claude mcp add --transport http pinround {{ mcpUrl }} --header "Authorization: Bearer {{ newToken.reveal }}"' readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
+                    </label>
+                    <p class="security__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
+                        <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy command</twig:Button>
+                        <span class="login__hint" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
+                    </p>
+                </div>
+            </twig:Card>
+        {% endif %}
+
+        <twig:Card tag="section" class="security__section" aria-labelledby="create-token-title">
+            <h2 class="security__heading" id="create-token-title">Make a token</h2>
+            {% if createError %}
+                <p class="login__error" role="alert" id="create-token-error">{{ createError }}</p>
+            {% endif %}
+            <p class="login__hint">A token can do only what you can do, and only what you tick here. Making one may ask for your password and a code again.</p>
+            <form class="login__form" method="post" action="{{ path('identity_tokens_create') }}">
+                <label class="login__field">
+                    Name
+                    <input class="login__input" type="text" name="name" value="{{ chosen.name }}" maxlength="100" required>
+                </label>
+                <fieldset class="profile__themes security__scopes">
+                    <legend class="profile__legend">What it may do</legend>
+                    {% for scopeName, explanation in scopeChoices %}
+                        <label class="profile__theme">
+                            <input type="checkbox" name="scopes[]" value="{{ scopeName }}"{% if scopeName in chosen.scopes %} checked{% endif %}>
+                            {{ explanation }}
+                        </label>
+                    {% endfor %}
+                </fieldset>
+                <label class="login__field">
+                    Works for
+                    <select class="login__input" name="lifetime_days">
+                        {% for days in lifetimeDayChoices %}
+                            <option value="{{ days }}"{% if (days ~ '') == chosen.lifetimeDays %} selected{% endif %}>{{ days }} days</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token(createCsrfTokenId) }}">
+                <div>
+                    <twig:Button type="submit">Make token</twig:Button>
+                </div>
+            </form>
+        </twig:Card>
+
+        <twig:Card tag="section" class="security__section" aria-labelledby="live-tokens-title">
+            <h2 class="security__heading" id="live-tokens-title">Your tokens</h2>
+            {% if revokeError %}
+                <p class="login__error" role="alert">{{ revokeError }}</p>
+            {% endif %}
+            {% if tokens is empty %}
+                <twig:EmptyState message="No tokens that still work." />
+            {% else %}
+                <ul class="api-tokens">
+                    {% for token in tokens %}
+                        <li class="api-tokens__row" data-token-id="{{ token.id }}">
+                            <p><strong>{{ token.name }}</strong> <code>{{ token.prefix }}…</code></p>
+                            <p class="login__hint">{{ token.scopeNames|map(scopeName => scopeChoices[scopeName])|join(' ') }}</p>
+                            <p class="login__hint">
+                                Made {{ token.createdAt|date('j M Y', app.user.timeZone) }}
+                                · Last used {{ token.lastUsedAt ? token.lastUsedAt|date('j M Y, H:i', app.user.timeZone) : 'never' }}
+                                · Works until {{ token.expiresAt|date('j M Y', app.user.timeZone) }}
+                            </p>
+                            <form class="api-tokens__revoke" method="post" action="{{ path('identity_tokens_revoke', {id: token.id}) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token(revokeCsrfTokenId) }}">
+                                <twig:Button type="submit" variant="outline">Revoke</twig:Button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </twig:Card>
+    </div>
+{% endblock %}

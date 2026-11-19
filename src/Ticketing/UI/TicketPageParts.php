@@ -8,6 +8,7 @@ use App\Identity\Api\CurrentTimeZone;
 use App\Organization\Api\ActorContext;
 use App\Ticketing\Api\TicketPageView;
 use App\Ticketing\Api\TicketPermission;
+use App\Ticketing\Application\SavedTicketPageTurns;
 use App\Ticketing\Application\TicketHistoryEntries;
 use App\Ticketing\Application\TicketHistoryEntry;
 use App\Workflow\Api\NowNextContext;
@@ -23,7 +24,7 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * _next_step.html.twig, _people.html.twig and _activity.html.twig.
  *
  * One query for the latest moves and checklist or verdict changes (TicketHistoryEntries), one for the saved turn with the waiting turns
- * (NowNextSentences::pageTurnOf), one more for the names of movers the ticket does not hold, and the organization's
+ * (SavedTicketPageTurns::pageTurnOf), one more for the names of movers the ticket does not hold, and the organization's
  * steps and a lead's move targets, which are cached.
  */
 final readonly class TicketPageParts
@@ -40,7 +41,7 @@ final readonly class TicketPageParts
     public const string PAUSED_PILL = 'Waiting · question to %s';
 
     public function __construct(
-        private NowNextSentences $nowNextSentences,
+        private SavedTicketPageTurns $savedTicketPageTurns,
         private NextStepChoices $nextStepChoices,
         private AuthorizationCheckerInterface $authorizationChecker,
         private TicketPeople $ticketPeople,
@@ -67,14 +68,14 @@ final readonly class TicketPageParts
         if (null !== $askedUserId) {
             $namedPeopleIds[] = $askedUserId;
         }
-        $pageTurn = $this->nowNextSentences->pageTurnOf($ticket, $namedPeopleIds);
-        $displayNames = $pageTurn->context->firstNames ?? $this->nowNextSentences->displayNamesWith($ticket->displayNames, $namedPeopleIds);
+        $pageTurn = $this->savedTicketPageTurns->pageTurnOf($ticket, $namedPeopleIds);
+        $displayNames = $pageTurn->context->firstNames ?? $this->savedTicketPageTurns->displayNamesWith($ticket->displayNames, $namedPeopleIds);
 
         return [
             'ticket' => $ticket,
             'pillLabel' => self::pillLabelOf($ticket, $displayNames),
             'pillGroup' => null === $askedUserId ? self::pillGroupOf($ticket->groupCode) : self::PILL_GROUPS['wait'],
-            'turnLines' => null === $pageTurn ? null : $this->nowNextSentences->linesOf($pageTurn),
+            'turnLines' => null === $pageTurn ? null : $this->savedTicketPageTurns->linesOf($pageTurn),
             'nextStep' => null === $pageTurn ? null : $this->nextStepChoices->of($pageTurn, $viewer, $this->authorizationChecker->isGranted(TicketPermission::MOVE, $ticket->visibilityFacts)),
             'people' => $this->ticketPeople->of(
                 $pageTurn->ticket ?? TurnInputs::ticketStateOf($ticket->turnSnapshot),

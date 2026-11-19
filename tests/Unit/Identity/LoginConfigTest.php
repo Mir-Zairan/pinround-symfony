@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity;
 
+use App\Identity\Infrastructure\Security\BlockedUserChecker;
 use App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter;
+use App\Identity\Infrastructure\Security\TokenAuthenticator;
 use App\Identity\Infrastructure\Security\ValkeyLimiterStorage;
 use App\SharedKernel\Infrastructure\Http\MergingSessionHandler;
 use PHPUnit\Framework\Attributes\Test;
@@ -49,8 +51,39 @@ final class LoginConfigTest extends TestCase
             ],
             self::at($security, 'security', 'access_control'),
         );
-        self::assertSame(['health', 'main'], array_keys((array) self::at($security, 'security', 'firewalls')));
+        self::assertSame(['health', 'api_token', 'main'], array_keys((array) self::at($security, 'security', 'firewalls')));
         self::assertSame(['pattern' => '^/health/', 'security' => false], self::at($security, 'security', 'firewalls', 'health'));
+    }
+
+    /**
+     * Before main, whose pattern-less config matches every path; stateless, so a session cookie is never read there.
+     */
+    #[Test]
+    public function theMcpAndApiPathsTakeOnlyAPersonalAccessTokenThroughAStatelessFirewall(): void
+    {
+        $security = self::config('packages/security.yaml');
+
+        self::assertSame(
+            [
+                'pattern' => '^/(?:mcp|api/v1)(?:/|\z)',
+                'stateless' => true,
+                'lazy' => false,
+                'provider' => 'identity_users',
+                'user_checker' => BlockedUserChecker::class,
+                'custom_authenticators' => [TokenAuthenticator::class],
+                'entry_point' => TokenAuthenticator::class,
+            ],
+            self::at($security, 'security', 'firewalls', 'api_token'),
+        );
+        $firewallPattern = self::at($security, 'security', 'firewalls', 'api_token', 'pattern');
+        self::assertIsString($firewallPattern);
+        $pattern = '{'.$firewallPattern.'}';
+        foreach (['/mcp', '/mcp/', '/api/v1', '/api/v1/screenshots'] as $tokenPath) {
+            self::assertMatchesRegularExpression($pattern, $tokenPath);
+        }
+        foreach (['/mcpx', "/mcp\n", '/api/v10', '/api/v2/x', '/me/mcp', '/'] as $otherPath) {
+            self::assertDoesNotMatchRegularExpression($pattern, $otherPath);
+        }
     }
 
     #[Test]
@@ -150,6 +183,9 @@ final class LoginConfigTest extends TestCase
                 'media_upload_status_per_user' => ['policy' => 'fixed_window', 'limit' => 120, 'interval' => '%media.upload_status_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'ai_calls_per_user' => ['policy' => 'fixed_window', 'limit' => 30, 'interval' => '60 minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'ai_laptop_per_user' => ['policy' => 'fixed_window', 'limit' => 30, 'interval' => '1 minute', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'mcp_calls_per_token_minute' => ['policy' => 'fixed_window', 'limit' => 60, 'interval' => '1 minute', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'mcp_calls_per_token_hour' => ['policy' => 'fixed_window', 'limit' => 600, 'interval' => '60 minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'mcp_calls_per_organization_minute' => ['policy' => 'fixed_window', 'limit' => 600, 'interval' => '1 minute', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
             ],
             self::at($rateLimiter, 'framework', 'rate_limiter'),
         );

@@ -25,6 +25,10 @@
   overflow-wrap: anywhere;
 }
 
+.people__token-owner {
+  overflow-wrap: anywhere;
+}
+
 .people__more {
   margin-top: 12px;
 }
@@ -32,4 +36,5 @@
 .people__sub {
   color: var(--on-surface-var);
   font-size: 14px;
+  overflow-wrap: anywhere;
 }

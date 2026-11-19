@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\Infrastructure\Doctrine;
 
+use App\Review\Api\OpenDraftQueries;
 use App\Review\Api\PinNote;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundNotes;
@@ -12,9 +13,11 @@ use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Api\ScreenshotNotes;
+use App\Review\Api\SharedRoundNotes;
 use App\Review\Api\TicketRounds;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\Domain\RoundId;
+use App\Review\Domain\ScreenshotId;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -28,12 +31,25 @@ use Doctrine\DBAL\Connection;
  * The rounds of a ticket from rvw_round, rvw_screenshot and rvw_pin through DBAL, after Ticketing's batch visibility
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
- * no screenshot or a screenshot with no pin costs no query. accessFactsOf and roundNotes send one query each and need no
- * visibility check: the first leaves the decision to RoundVoter, the second reads only the owner's own draft. draftOf
- * reads one draft of its owner with its screenshots and pins, and needs none either.
+ * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, openDraftOf, roundNotes
+ * and sharedRoundNotes send one query each and make no visibility check: the first two leave the decision to
+ * RoundVoter, the next two read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
+ * RoundVoter. draftOf reads one draft of its owner with its screenshots and pins, and needs none either.
  */
-final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
+final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries, RoundsVisibleTo
 {
+    /** The picture and pin columns of roundNotes and sharedRoundNotes, which screenshotNotesOf reads. */
+    private const string NOTE_COLUMNS = 'screenshot.id AS screenshot_id, screenshot.media_id, screenshot.position,'
+        .' screenshot.title, screenshot.summary, screenshot.verdict, pin.number AS pin_number, pin.x_pct, pin.y_pct, pin.note';
+
+    /**
+     * The pictures of the round aliased round and the pins of each that count. The pin rule is in the ON clause, so a
+     * picture whose only pins are AI suggestions still comes back, with none.
+     */
+    private const string NOTE_JOINS = ' LEFT JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
+        .' LEFT JOIN rvw_pin AS pin ON pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id'
+        .' AND '.DbalReviewRoundQueries::COUNTED_PIN;
+
     public function __construct(
         private Connection $connection,
         private TenantContext $tenantContext,
@@ -120,17 +136,65 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
         );
     }
 
+    public function draftScreenshotOf(TicketId $ticketId, string $screenshotId): ?RoundAccessFacts
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        try {
+            $id = new ScreenshotId($screenshotId);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        // Both tables by their primary key (organization_id, id); the round conditions only filter that one row.
+        $roundRow = $this->connection->fetchAssociative(
+            'SELECT round.id, round.owner_id, round.shared_at IS NULL AS is_unshared_draft, round.deleted_at IS NOT NULL AS is_deleted'
+            .' FROM rvw_screenshot AS screenshot'
+            .' JOIN rvw_round AS round ON round.organization_id = screenshot.organization_id AND round.id = screenshot.round_id'
+            .' WHERE screenshot.organization_id = CAST(:organization AS uuid) AND screenshot.id = CAST(:screenshot AS uuid)'
+            ." AND round.ticket_id = CAST(:ticket AS uuid) AND round.kind = 'draft'",
+            ['organization' => $organizationId->toString(), 'screenshot' => $id->toString(), 'ticket' => $ticketId->toString()],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+
+        return new RoundAccessFacts(
+            $organizationId,
+            self::text($roundRow['id'], 'id'),
+            $ticketId,
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            self::boolean($roundRow['is_unshared_draft'], 'is_unshared_draft'),
+            self::boolean($roundRow['is_deleted'], 'is_deleted'),
+        );
+    }
+
+    public function openDraftOf(TicketId $ticketId, UserId $owner): ?RoundAccessFacts
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // The predicate of rvw_round_ticket_id_owner_id_open_draft_key, which holds at most one such draft; a deleted
+        // draft is closed (rvw_round_deleted_check).
+        $draftId = $this->connection->fetchOne(
+            'SELECT round.id FROM rvw_round AS round'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.shared_at IS NULL AND round.state = 'open'",
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'owner' => $owner->toString()],
+        );
+        if (false === $draftId) {
+            return null;
+        }
+
+        return new RoundAccessFacts($organizationId, self::text($draftId, 'id'), $ticketId, $owner, true, false);
+    }
+
     public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes
     {
         $organizationId = $this->requireTransactionAndTenant();
-        // One row per pin, or per picture with no pin, or one for a draft with no picture; the round conditions are
+        // One row per pin that counts, or per picture with none, or one for a draft with no picture; the round conditions are
         // those of rvw_round_ticket_id_owner_id_open_draft_key, which holds at most one such draft.
         $noteRows = $this->connection->fetchAllAssociative(
-            'SELECT round.id AS round_id, screenshot.id AS screenshot_id, screenshot.position, screenshot.title, screenshot.summary,'
-            .' screenshot.verdict, pin.number AS pin_number, pin.x_pct, pin.y_pct, pin.note'
+            'SELECT round.id AS round_id, '.self::NOTE_COLUMNS
             .' FROM rvw_round AS round'
-            .' LEFT JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
-            .' LEFT JOIN rvw_pin AS pin ON pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id'
+            .self::NOTE_JOINS
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
             ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.shared_at IS NULL AND round.state = 'open'"
             .' AND round.deleted_at IS NULL'
@@ -141,7 +205,47 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
             return null;
         }
 
-        /** @var array<string, array{int, ?string, ?string, ?string, list<PinNote>}> $screenshotFields by screenshot id */
+        return new RoundNotes(self::text($noteRows[0]['round_id'], 'round_id'), self::screenshotNotesOf($noteRows));
+    }
+
+    public function sharedRoundNotes(TicketId $ticketId): ?SharedRoundNotes
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // The newest is picked on (organization_id, ticket_id, number) before any picture is joined, so the answer holds
+        // one round's rows; rvw_round_ticket_id_number_key gives each shared round of a ticket its own number.
+        $noteRows = $this->connection->fetchAllAssociative(
+            'SELECT round.id AS round_id, round.number AS round_number, round.kind, '.self::NOTE_COLUMNS
+            .' FROM ('
+            .'SELECT newest.organization_id, newest.id, newest.number, newest.kind FROM rvw_round AS newest'
+            .' WHERE newest.organization_id = CAST(:organization AS uuid) AND newest.ticket_id = CAST(:ticket AS uuid)'
+            ." AND newest.shared_at IS NOT NULL AND newest.kind IN ('report', 'draft') AND newest.deleted_at IS NULL"
+            .' ORDER BY newest.number DESC LIMIT 1'
+            .') AS round'
+            .self::NOTE_JOINS
+            .' ORDER BY screenshot.position, pin.number',
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString()],
+        );
+        if ([] === $noteRows) {
+            return null;
+        }
+
+        return new SharedRoundNotes(
+            self::text($noteRows[0]['round_id'], 'round_id'),
+            self::integer($noteRows[0]['round_number'], 'round_number'),
+            self::text($noteRows[0]['kind'], 'kind'),
+            self::screenshotNotesOf($noteRows),
+        );
+    }
+
+    /**
+     * @param list<array<string, mixed>> $noteRows one per pin, or per picture with no pin that counts, or one for a
+     *                                             round with no picture; by position, then pin number
+     *
+     * @return list<ScreenshotNotes> by position
+     */
+    private static function screenshotNotesOf(array $noteRows): array
+    {
+        /** @var array<string, array{int, ?string, ?string, ?string, list<PinNote>, string}> $screenshotFields by screenshot id */
         $screenshotFields = [];
         foreach ($noteRows as $noteRow) {
             $screenshotId = self::textOrNull($noteRow['screenshot_id'], 'screenshot_id');
@@ -154,6 +258,7 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
                 self::textOrNull($noteRow['summary'], 'summary'),
                 self::textOrNull($noteRow['verdict'], 'verdict'),
                 [],
+                self::text($noteRow['media_id'], 'media_id'),
             ];
             $pinNumber = self::integerOrNull($noteRow['pin_number'], 'pin_number');
             if (null !== $pinNumber) {
@@ -167,11 +272,11 @@ final readonly class DbalRoundQueries implements RoundQueries, RoundsVisibleTo
         }
 
         $screenshots = [];
-        foreach ($screenshotFields as $screenshotId => [$position, $title, $summary, $verdict, $pins]) {
-            $screenshots[] = new ScreenshotNotes($screenshotId, $position, $title, $summary, $verdict, $pins);
+        foreach ($screenshotFields as $screenshotId => [$position, $title, $summary, $verdict, $pins, $mediaId]) {
+            $screenshots[] = new ScreenshotNotes($screenshotId, $position, $title, $summary, $verdict, $pins, $mediaId);
         }
 
-        return new RoundNotes(self::text($noteRows[0]['round_id'], 'round_id'), $screenshots);
+        return $screenshots;
     }
 
     private function requireTransactionAndTenant(): OrganizationId

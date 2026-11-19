@@ -19,6 +19,8 @@ People sign in with email and password (with MFA) or with their company login; t
 
 Accepted · 2026-11-06 · Deciders: Zairan Mir (lead).
 
+Superseded in part by [ADR-0043](0043-api-token-hash-is-hmac-sha256.md): the personal access token hash ("stored as a SHA-256 hash (with a server pepper)") is HMAC-SHA256 keyed by the `API_TOKEN_PEPPER` environment variable. Everything else here still stands.
+
 ## Context and problem statement
 
 Sara, the admin at Acme Foods, wants everyone to use the company Microsoft login.

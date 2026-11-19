@@ -1,0 +1,4 @@
+# The HTTP route of each MCP server of mcp.yaml: _mcp_endpoint_pinround at /mcp (GET, POST, DELETE, OPTIONS).
+mcp:
+    resource: .
+    type: mcp

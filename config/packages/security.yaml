@@ -19,6 +19,19 @@ security:
         health:
             pattern: ^/health/
             security: false
+        # Claude Code and the browser plugin (ADR-0021): a personal access token in "Authorization: Bearer pr_…" on every
+        # request, nothing else. Stateless, so a session cookie is never read here and a logged-in browser cannot be
+        # used through CSRF; TokenAuthenticator answers every request without a live token with the same 401. Not lazy,
+        # for the same reason as main below.
+        api_token:
+            pattern: ^/(?:mcp|api/v1)(?:/|\z)
+            stateless: true
+            lazy: false
+            provider: identity_users
+            user_checker: App\Identity\Infrastructure\Security\BlockedUserChecker
+            custom_authenticators:
+                - App\Identity\Infrastructure\Security\TokenAuthenticator
+            entry_point: App\Identity\Infrastructure\Security\TokenAuthenticator
         main:
             # Not lazy: EnterChosenOrganization (priority 7) sets the tenant from the authenticated user before
             # RequestTransaction begins (6), so the firewall (8) must have run first.

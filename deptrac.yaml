@@ -380,9 +380,9 @@ deptrac:
     AgentApi_Api: [SharedKernel]
     AgentApi_Event: [SharedKernel]
     AgentApi_Domain: [SharedKernel]
-    AgentApi_Application: [AgentApi_Domain, AgentApi_Api, SharedKernel, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    AgentApi_Infrastructure: [AgentApi_Domain, AgentApi_Application, AgentApi_Api, SharedKernel, Vendor, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
-    AgentApi_UI: [AgentApi_Application, AgentApi_Api, SharedKernel, Vendor, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api]
+    AgentApi_Application: [AgentApi_Domain, AgentApi_Api, SharedKernel, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Audit_Api, Insight_Api, Workflow_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    AgentApi_Infrastructure: [AgentApi_Domain, AgentApi_Application, AgentApi_Api, SharedKernel, Vendor, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Audit_Api, Insight_Api, Workflow_Api, Identity_Event, Organization_Event, Workflow_Event, Ticketing_Event, Conversation_Event, Review_Event, Media_Event, Notification_Event, Insight_Event, Assist_Event, Integration_Event, Audit_Event, AgentApi_Event, Web_Event]
+    AgentApi_UI: [AgentApi_Application, AgentApi_Api, SharedKernel, Vendor, Identity_Api, Ticketing_Api, Review_Api, Conversation_Api, Media_Api, Audit_Api, Insight_Api, Workflow_Api]
 
     Web_Api: [SharedKernel]
     Web_Event: [SharedKernel]

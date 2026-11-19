@@ -10,12 +10,17 @@
 # session cannot guess the password.
 # Two-step login codes get two_step_code_per_user through SymfonyTwoStepCodeLimiter: every code typed for a user counts,
 # right or wrong, at login and wherever else a code is asked, so the 6 digits cannot be guessed.
-# Upload begins (POST /media/intents) get media_upload_begin_per_user through UploadIntentController: every begin of a
-# member with a valid form token counts, accepted or not, so one member cannot script begins against the storage.
+# Upload begins (POST /media/intents and MCP create_upload) get media_upload_begin_per_user through
+# SymfonyUploadBeginLimit (Media's UploadBeginLimit): a begin the limit accepts counts at once, before Uploads checks it,
+# so a begin Uploads then refuses counts too and one member cannot script begins against the storage. A begin past the
+# limit is not counted, so the lockout still ends with the window.
 # Status polls (GET /media/{id}/status) get media_upload_status_per_user through UploadStatusController.
 # Server-side AI calls get ai_calls_per_user through SymfonyAiCallLimit (AiCallLimit), before any provider is asked.
 # Laptop AI requests (POST /ai/laptop/package and /ai/laptop/result) get ai_laptop_per_user through
 # SymfonyLaptopRequestLimit (LaptopRequestLimit), after the form token check and before the body is read.
+# Every request to /mcp a personal access token authenticated gets mcp_calls_per_token_minute,
+# mcp_calls_per_token_hour and mcp_calls_per_organization_minute through ToolCallLimiter (ADR-0021), called by
+# McpRequestGuard after the firewall and before the MCP handler.
 parameters:
     # The windows in minutes, also the longest wait a refused try is told (ConsumeFirstLoginRateLimiter,
     # SymfonyPasswordResetRequestLimiter, SymfonyCurrentPasswordLimiter, SymfonyTwoStepCodeLimiter).
@@ -25,7 +30,7 @@ parameters:
     identity.password_reset_per_ip_minutes: 60
     identity.password_change_per_user_minutes: 15
     identity.two_step_code_per_user_minutes: 15
-    # The window in minutes, also the longest wait a refused begin is told (UploadIntentController).
+    # The window in minutes, also the longest wait a refused begin is told (SymfonyUploadBeginLimit).
     media.upload_begin_per_user_minutes: 1
     # The same for a refused status poll (UploadStatusController).
     media.upload_status_per_user_minutes: 1
@@ -105,6 +110,28 @@ framework:
         ai_laptop_per_user:
             policy: fixed_window
             limit: 30
+            interval: '1 minute'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # MCP calls (ADR-0021), keyed by the token id and the clock's minute or hour (ToolCallLimiter): 60 a minute and
+        # 600 an hour per token. The 120 a minute of NFR-SEC-14 is older than the ADR's and P09's 60.
+        mcp_calls_per_token_minute:
+            policy: fixed_window
+            limit: 60
+            interval: '1 minute'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        mcp_calls_per_token_hour:
+            policy: fixed_window
+            limit: 600
+            interval: '60 minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # Keyed by the organization and the clock's minute: ten tokens at their full rate, so one organization's
+        # scripts cannot take the server from the others while a team of people working with Claude Code never meets it.
+        mcp_calls_per_organization_minute:
+            policy: fixed_window
+            limit: 600
             interval: '1 minute'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory

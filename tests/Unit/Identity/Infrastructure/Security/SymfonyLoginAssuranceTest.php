@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity\Infrastructure\Security;
 
+use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Application\RecentAuth;
 use App\Identity\Domain\Credential;
 use App\Identity\Domain\Email;
 use App\Identity\Domain\PasswordHash;
 use App\Identity\Domain\TwoStepLogin;
 use App\Identity\Domain\User;
+use App\Identity\Infrastructure\Security\ApiTokenAuthentication;
 use App\Identity\Infrastructure\Security\SecurityUser;
 use App\Identity\Infrastructure\Security\SymfonyLoginAssurance;
 use App\Identity\Infrastructure\Security\SymfonySessionConfirmations;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Identity\Application\InMemoryTwoStepLogins;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -65,6 +68,7 @@ final class SymfonyLoginAssuranceTest extends TestCase
         $lena = self::lena();
 
         yield 'remember-me' => [new RememberMeToken($lena, 'main')];
+        yield 'a personal access token login' => [self::tokenLoginOfLena()];
         yield 'an authenticator without a token class of its own, as an access token login' => [new PostAuthenticationToken($lena, 'main', $lena->getRoles())];
         yield 'impersonation' => [new SwitchUserToken($lena, 'main', $lena->getRoles(), new UsernamePasswordToken($lena, 'main'))];
         yield 'the test browser login' => [new TestBrowserToken($lena->getRoles(), $lena, 'main')];
@@ -93,6 +97,21 @@ final class SymfonyLoginAssuranceTest extends TestCase
         self::assertFalse($assurance->isPasswordSession($token));
         self::assertFalse($assurance->isTwoStepLoginOn($token));
         self::assertFalse($assurance->hasConfirmedTwoStepLoginWithin($token, 3600));
+    }
+
+    #[Test]
+    public function onlyAPersonalAccessTokenLoginIsTokenAuthenticated(): void
+    {
+        $assurance = $this->assurance();
+
+        self::assertTrue($assurance->isTokenAuthenticated(self::tokenLoginOfLena()));
+        foreach (self::tokensThatAreNoPasswordSession() as $name => [$token]) {
+            if ($token instanceof ApiTokenAuthentication) {
+                continue;
+            }
+            self::assertFalse($assurance->isTokenAuthenticated($token), $name);
+        }
+        self::assertFalse($assurance->isTokenAuthenticated(self::passwordSessionOfLena()));
     }
 
     #[Test]
@@ -183,6 +202,11 @@ final class SymfonyLoginAssuranceTest extends TestCase
     private static function passwordSessionOfLena(): UsernamePasswordToken
     {
         return new UsernamePasswordToken(self::lena(), 'main');
+    }
+
+    private static function tokenLoginOfLena(): ApiTokenAuthentication
+    {
+        return new ApiTokenAuthentication(self::lena(), new ApiTokenAccess('0197a3c0-0000-7000-8000-0000000000f1', new OrganizationId('0197a3c0-0000-7000-8000-0000000000a1'), ['read', 'rounds:write'], new \DateTimeImmutable('2027-01-31 09:30:00 UTC')), null);
     }
 
     private static function lenaUser(): User

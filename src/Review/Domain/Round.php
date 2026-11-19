@@ -138,21 +138,47 @@ final class Round
     /**
      * Adds a picture with no title, summary, pins or verdict after the last one.
      *
-     * @throws \DomainException          when the round is not an open unshared draft of $actorId, or holds
-     *                                   MAX_SCREENSHOTS already; the round stays as it was
-     * @throws \InvalidArgumentException when the media id is not a UUIDv7; the round stays as it was
+     * @throws \DomainException          when the round is not an open unshared draft of $actorId; the round stays as it
+     *                                   was
+     * @throws \InvalidArgumentException when the round holds MAX_SCREENSHOTS already, as the constructor refuses more,
+     *                                   or the media id is not a UUIDv7; the round stays as it was
      */
     public function addScreenshot(UserId $actorId, ScreenshotId $screenshotId, string $mediaId): void
     {
         $this->requireEditableDraft($actorId);
         if (\count($this->screenshots) >= self::MAX_SCREENSHOTS) {
-            throw new \DomainException(\sprintf('A round holds at most %d screenshots.', self::MAX_SCREENSHOTS));
+            throw new \InvalidArgumentException(\sprintf('A round holds at most %d screenshots.', self::MAX_SCREENSHOTS));
         }
         // After the highest position, never in a gap a removed picture left, so no stored picture has to move.
         $position = [] === $this->screenshots ? 0 : $this->screenshots[array_key_last($this->screenshots)]->position() + 1;
 
         $this->screenshots = [...$this->screenshots, Screenshot::of($screenshotId, $mediaId, $position, null, null, [])];
         ++$this->version;
+    }
+
+    /**
+     * The round's screenshot of that picture, the first by position when it holds the picture twice, or null.
+     *
+     * @param string $mediaId in any case
+     */
+    public function screenshotOfMedia(string $mediaId): ?Screenshot
+    {
+        $lowercaseMediaId = strtolower($mediaId);
+        foreach ($this->screenshots as $screenshot) {
+            if ($screenshot->mediaId() === $lowercaseMediaId) {
+                return $screenshot;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @throws \DomainException when the round is not an open unshared draft of $actorId; the round stays as it is
+     */
+    public function refuseUnlessEditableBy(UserId $actorId): void
+    {
+        $this->requireEditableDraft($actorId);
     }
 
     /**

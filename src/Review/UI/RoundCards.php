@@ -34,10 +34,10 @@ final readonly class RoundCards
 
     /**
      * The "For Claude Code" box of the viewer's own unshared draft: the line to give Claude Code, with the ticket's key,
-     * and the tools it will use (served in P09).
+     * and the tools it uses (AgentApi's MCP server at /mcp); the API tokens line below the note says how to connect.
      */
     public const string CLAUDE_CODE_PROMPT = 'Read my pinround notes for %s and fix what is marked “Not right yet”.';
-    public const string CLAUDE_CODE_TOOLS_NOTE = 'Planned: pinround’s tool connection (built with mcp/sdk) lets Claude Code read these notes and verdicts, and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict. Not built yet.';
+    public const string CLAUDE_CODE_TOOLS_NOTE = 'Claude Code can read these notes and verdicts and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict.';
 
     /** Asked by the browser before the owner's draft is deleted; the delete form carries it as data-turbo-confirm. */
     public const string DELETE_DRAFT_CONFIRM = 'Delete this draft round? Its screenshots, pins and notes go too.';

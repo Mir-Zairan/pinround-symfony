@@ -47,6 +47,18 @@ final class RedactionProcessorTest extends TestCase
     }
 
     #[Test]
+    public function itKeepsTheNameOfAnMcpToolAndDropsTheGenericToolWordAndTheArgumentsBesideIt(): void
+    {
+        $redacted = self::redact(self::record(context: [
+            'mcp_tool' => 'get_ticket',
+            'tool' => self::MARKER,
+            'arguments' => self::MARKER,
+        ]));
+
+        self::assertSame(['mcp_tool' => 'get_ticket'], $redacted->context);
+    }
+
+    #[Test]
     public function itDropsTheSqlParamsAndTypesOfAQueryRecord(): void
     {
         $redacted = self::redact(self::record(context: ['sql' => 'SELECT ?', 'params' => [self::MARKER], 'types' => [2]]));
@@ -251,6 +263,7 @@ final class RedactionProcessorTest extends TestCase
                 'class', 'message_id', 'transport', 'retryCount', 'delay',
                 'exception', 'exception_class', 'sqlstate', 'code',
                 'check', 'summary_outcome', 'intake_outcome', 'unknown_ai_setting',
+                'mcp_tool',
             ],
             RedactionProcessor::ALLOWED_KEYS,
         );

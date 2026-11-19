@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { logInAndTurnOnTwoStepLogin, SARA_EMAIL, turnOffTwoStepLogin, twoStepCodesFile } from './auth';
@@ -7,6 +8,9 @@ import { logInAndTurnOnTwoStepLogin, SARA_EMAIL, turnOffTwoStepLogin, twoStepCod
 // As Sara, the demo admin whom no other spec logs in as: beforeAll turns her two-step login on, which also counts as
 // the code the admin pages ask for, and afterAll turns it off with a recovery code. Inviting the same address again
 // replaces the open invite, so a rerun leaves one pending row. The functional AdminPeopleTest covers the refusals.
+// Every other Acme Foods person has a session that other specs share or turn two-step login on and off in, so the live
+// token the list shows is one Sara makes on her own tokens page (her login in beforeAll is the recent proof it asks
+// for); each test that makes one revokes it from the people page.
 const SARA_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'sara-people.json');
 const INVITED_EMAIL = 'mia@acme.test';
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
@@ -38,6 +42,28 @@ async function openPeoplePage(page: Page): Promise<void> {
   await page.goto('/admin/people');
   await expect(page.getByRole('heading', { name: 'People and roles', level: 1 })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
+}
+
+// A rerun after a crash finds the earlier run's token still listed; its own name tells the two apart.
+function uniqueTokenName(): string {
+  return `Sara laptop ${randomUUID().slice(0, 8)}`;
+}
+
+async function makeToken(page: Page, tokenName: string): Promise<void> {
+  await page.goto('/me/tokens');
+  await page.getByLabel('Name', { exact: true }).fill(tokenName);
+  await page.getByRole('button', { name: 'Make token' }).click();
+  await expect(page.getByRole('heading', { name: 'Copy your token now', level: 2 })).toBeVisible();
+}
+
+function tokenRow(page: Page, tokenName: string): Locator {
+  return page.locator('li.people__token-row', { hasText: tokenName });
+}
+
+async function revokeFromPeoplePage(page: Page, tokenName: string): Promise<void> {
+  await openPeoplePage(page);
+  await tokenRow(page, tokenName).getByRole('button', { name: /^Revoke / }).click();
+  await expect(tokenRow(page, tokenName)).toHaveCount(0);
 }
 
 async function seriousViolations(page: Page): Promise<string[]> {
@@ -79,21 +105,46 @@ test('an admin invites an email address and sees the toast and the pending row',
   await expect(toast).toHaveCount(0);
 });
 
+test('an admin sees a live token, named for its owner on the Revoke button, and revokes it', async ({ page }) => {
+  const tokenName = uniqueTokenName();
+  await makeToken(page, tokenName);
+  await openPeoplePage(page);
+
+  const row = tokenRow(page, tokenName);
+  await expect(row).toBeVisible();
+  const revoke = row.getByRole('button', { name: new RegExp(`^Revoke .+’s token ${tokenName}, pr_[A-Za-z0-9_-]{8}…$`) });
+  await expect(revoke).toHaveText('Revoke');
+
+  await revoke.click();
+
+  await expect(tokenRow(page, tokenName)).toHaveCount(0);
+});
+
 for (const scheme of ['light', 'dark'] as const) {
-  test(`the people page has no serious or critical accessibility violations in ${scheme}`, async ({ page }) => {
+  test(`the people page has no serious or critical accessibility violations in ${scheme}, with a live token`, async ({ page }) => {
+    const tokenName = uniqueTokenName();
+    await makeToken(page, tokenName);
     await page.emulateMedia({ colorScheme: scheme });
     await openPeoplePage(page);
+    await expect(tokenRow(page, tokenName)).toBeVisible();
 
     expect(await seriousViolations(page)).toEqual([]);
+
+    await revokeFromPeoplePage(page, tokenName);
   });
 }
 
 test.describe('narrow viewport', () => {
   test.use({ viewport: { width: 360, height: 800 } });
 
-  test('the people page does not scroll horizontally at 360px', async ({ page }) => {
+  test('the people page does not scroll horizontally at 360px, with a live token', async ({ page }) => {
+    const tokenName = uniqueTokenName();
+    await makeToken(page, tokenName);
     await openPeoplePage(page);
+    await expect(tokenRow(page, tokenName)).toBeVisible();
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+
+    await revokeFromPeoplePage(page, tokenName);
   });
 });

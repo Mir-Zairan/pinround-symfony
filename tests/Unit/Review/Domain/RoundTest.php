@@ -270,7 +270,7 @@ final class RoundTest extends TestCase
         try {
             $draft->addScreenshot(new UserId(self::OMAR), new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA);
             self::fail('A 51st screenshot was added.');
-        } catch (\DomainException $refused) {
+        } catch (\InvalidArgumentException $refused) {
             self::assertSame('A round holds at most 50 screenshots.', $refused->getMessage());
         }
 

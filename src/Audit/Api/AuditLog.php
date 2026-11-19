@@ -18,7 +18,9 @@ interface AuditLog
      *
      * @throws TenantNotSet
      * @throws AuditEntryForAnotherTenantRefused when the entry's organization is not the one in TenantContext
-     * @throws \LogicException                   when no transaction is open
+     * @throws \LogicException                   when no transaction is open, or when Audit's per-action allow-list
+     *                                           (ADR-0026) does not list the action or the data does not hold
+     *                                           exactly its keys; nothing is written
      */
     public function record(AuditEntry $entry): void;
 }

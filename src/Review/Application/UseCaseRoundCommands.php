@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Review\Application;
 
 use App\Media\Api\UploadedMedia;
+use App\Review\Api\AddedDraftScreenshot;
 use App\Review\Api\ChecklistCommands;
+use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
@@ -19,6 +21,7 @@ use App\Review\Domain\RoundId;
 use App\Review\Domain\RoundKind;
 use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
+use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotVerdict;
@@ -30,9 +33,10 @@ use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketTurnQueries;
 
 /**
- * RoundCommands on the Round aggregate; the contract is on {@see RoundCommands}.
+ * RoundCommands and DraftScreenshotCommands on the Round aggregate; the contracts are on {@see RoundCommands} and
+ * {@see DraftScreenshotCommands}.
  */
-final readonly class UseCaseRoundCommands implements RoundCommands
+final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands
 {
     public function __construct(
         private Rounds $rounds,
@@ -48,7 +52,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         $organizationId = $this->tenantContext->require();
         // Before any query, so a list sized from outside is never walked past the cap.
         if (\count($screenshots) > Round::MAX_SCREENSHOTS) {
-            throw new RoundRefused(\sprintf('A round holds at most %d screenshots.', Round::MAX_SCREENSHOTS));
+            throw RoundRefused::invalidContent(\sprintf('A round holds at most %d screenshots.', Round::MAX_SCREENSHOTS));
         }
         $ticket = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
         if (!$ticket->reporterId->equals($reporterId)) {
@@ -70,7 +74,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands
                 $reportedAt,
             );
         } catch (\InvalidArgumentException $invalidContent) {
-            throw new RoundRefused($invalidContent->getMessage(), 0, $invalidContent);
+            throw RoundRefused::invalidContent($invalidContent->getMessage(), $invalidContent);
         }
 
         try {
@@ -122,6 +126,37 @@ final readonly class UseCaseRoundCommands implements RoundCommands
         return $screenshotId->toString();
     }
 
+    public function addDraftScreenshotOnce(string $roundId, UserId $ownerId, ScreenshotWithPins $screenshot, \DateTimeImmutable $addedAt): AddedDraftScreenshot
+    {
+        $organizationId = $this->tenantContext->require();
+        self::refuseMorePinsThanAPictureHolds($screenshot->pins);
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $heldBefore = $draft->screenshotOfMedia($screenshot->mediaId);
+        if (null !== $heldBefore) {
+            try {
+                $draft->refuseUnlessEditableBy($ownerId);
+            } catch (\DomainException $refused) {
+                // ownDraft found the owner's undeleted draft, so only a shared or closed one is refused here.
+                throw RoundRefused::readOnly($refused->getMessage(), $refused);
+            }
+
+            return new AddedDraftScreenshot($heldBefore->id()->toString(), true, \count($heldBefore->pins()));
+        }
+        $refusal = $this->reportPictures->refusalOf($organizationId, $ownerId, [$screenshot->mediaId]);
+        if (null !== $refusal) {
+            throw new RoundRefused($refusal);
+        }
+        $screenshotId = $this->rounds->nextScreenshotIdentity();
+
+        $this->changeAndSave($draft, $addedAt, function (Round $round) use ($ownerId, $screenshotId, $screenshot): void {
+            $round->addScreenshot($ownerId, $screenshotId, $screenshot->mediaId);
+            $round->editScreenshotText($ownerId, $screenshotId, $screenshot->title, $screenshot->summary);
+            $round->replacePins($ownerId, $screenshotId, $this->pinsOf($screenshot->pins, $ownerId));
+        });
+
+        return new AddedDraftScreenshot($screenshotId->toString(), false, \count($screenshot->pins));
+    }
+
     public function removeDraftScreenshot(string $roundId, UserId $ownerId, string $screenshotId, \DateTimeImmutable $at): void
     {
         $draft = $this->ownDraft($roundId, $ownerId);
@@ -140,32 +175,34 @@ final readonly class UseCaseRoundCommands implements RoundCommands
 
     public function setDraftPins(string $roundId, UserId $ownerId, string $screenshotId, array $pins, \DateTimeImmutable $at): void
     {
-        // Before any read, so a list sized from outside is never walked past the cap.
-        if (\count($pins) > Screenshot::MAX_PINS) {
-            throw new RoundRefused(\sprintf('A picture holds at most %d pins.', Screenshot::MAX_PINS));
-        }
+        self::refuseMorePinsThanAPictureHolds($pins);
         $draft = $this->ownDraft($roundId, $ownerId);
         $id = self::screenshotIdOf($screenshotId);
 
-        $this->changeAndSave($draft, $at, fn (Round $round) => $round->replacePins($ownerId, $id, array_map(
-            fn (PlacedPin $pin, int $index): Pin => Pin::placedBy($this->rounds->nextPinIdentity(), $index + 1, $pin->xPercent, $pin->yPercent, $pin->note, $ownerId),
-            $pins,
-            array_keys($pins),
-        )));
+        $this->changeAndSave($draft, $at, fn (Round $round) => $round->replacePins($ownerId, $id, $this->pinsOf($pins, $ownerId)));
     }
 
     public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void
     {
         $draft = $this->ownDraft($roundId, $ownerId);
-        $screenshotVerdict = match ($verdict) {
-            null => null,
-            self::VERDICT_LOOKS_RIGHT => ScreenshotVerdict::LooksRight,
-            self::VERDICT_NOT_RIGHT_YET => ScreenshotVerdict::NotRight,
-            default => throw new RoundRefused(RoundRefused::UNKNOWN_VERDICT),
-        };
+        $screenshotVerdict = self::screenshotVerdictOf($verdict);
         $id = self::screenshotIdOf($screenshotId);
 
         $this->changeAndSave($draft, $at, static fn (Round $round) => $round->setVerdict($ownerId, $id, $screenshotVerdict));
+    }
+
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void
+    {
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $screenshotVerdict = self::screenshotVerdictOf($verdict);
+        $id = self::screenshotIdOf($screenshotId);
+
+        $this->changeAndSave($draft, $at, static function (Round $round) use ($ownerId, $id, $screenshotVerdict, $summary): void {
+            $round->setVerdict($ownerId, $id, $screenshotVerdict);
+            if (null !== $summary) {
+                $round->editScreenshotText($ownerId, $id, self::titleOf($round, $id), $summary);
+            }
+        });
     }
 
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int
@@ -239,18 +276,52 @@ final readonly class UseCaseRoundCommands implements RoundCommands
     }
 
     /**
+     * @throws RoundRefused UNKNOWN_VERDICT, as invalid content, for anything but the two verdicts and null
+     */
+    private static function screenshotVerdictOf(?string $verdict): ?ScreenshotVerdict
+    {
+        return match ($verdict) {
+            null => null,
+            self::VERDICT_LOOKS_RIGHT => ScreenshotVerdict::LooksRight,
+            self::VERDICT_NOT_RIGHT_YET => ScreenshotVerdict::NotRight,
+            default => throw RoundRefused::invalidContent(RoundRefused::UNKNOWN_VERDICT),
+        };
+    }
+
+    /**
+     * @throws \LogicException when the round has no such picture, which a change of it refused before
+     */
+    private static function titleOf(Round $round, ScreenshotId $screenshotId): ?string
+    {
+        foreach ($round->screenshots() as $screenshot) {
+            if ($screenshot->id()->equals($screenshotId)) {
+                return $screenshot->title();
+            }
+        }
+
+        throw new \LogicException('The picture was changed a moment ago, so the round has it.');
+    }
+
+    /**
+     * ownDraft read the round as the owner's undeleted draft, so a domain refusal of a round that was shared or closed
+     * before the change is read-only; the change itself may share it, as shareDraftAtHandOff does.
+     *
      * @param \Closure(Round): void $change
      *
-     * @throws RoundRefused   with the domain's reason when it refuses the change, or DRAFT_CHANGED when another
+     * @throws RoundRefused   with the domain's reason when it refuses the change (read-only for a shared or closed
+     *                        draft, invalid content for content that breaks a rule), or DRAFT_CHANGED when another
      *                        request saved the round since it was read; nothing is saved
      * @throws RoundSlotTaken when another round has the number the change gave this one; nothing is saved
      */
     private function changeAndSave(Round $round, \DateTimeImmutable $at, \Closure $change): void
     {
+        $wasChangeable = $round->isUnsharedDraft() && RoundState::Open === $round->state();
         try {
             $change($round);
-        } catch (\DomainException|\InvalidArgumentException $refused) {
-            throw new RoundRefused($refused->getMessage(), 0, $refused);
+        } catch (\InvalidArgumentException $invalidContent) {
+            throw RoundRefused::invalidContent($invalidContent->getMessage(), $invalidContent);
+        } catch (\DomainException $refused) {
+            throw $wasChangeable ? new RoundRefused($refused->getMessage(), 0, $refused) : RoundRefused::readOnly($refused->getMessage(), $refused);
         }
         try {
             $this->rounds->save($round, $at);
@@ -293,11 +364,37 @@ final readonly class UseCaseRoundCommands implements RoundCommands
             $position,
             $screenshot->title,
             $screenshot->summary,
-            array_map(
-                fn (PlacedPin $pin, int $index): Pin => Pin::placedBy($this->rounds->nextPinIdentity(), $index + 1, $pin->xPercent, $pin->yPercent, $pin->note, $authorId),
-                $screenshot->pins,
-                array_keys($screenshot->pins),
-            ),
+            $this->pinsOf($screenshot->pins, $authorId),
         );
+    }
+
+    /**
+     * @param list<PlacedPin> $pins
+     *
+     * @return list<Pin> numbered 1, 2, … in this order, each with a new id
+     *
+     * @throws \InvalidArgumentException when a pin sits outside the picture or its note is over Pin::NOTE_MAX_LENGTH
+     */
+    private function pinsOf(array $pins, UserId $authorId): array
+    {
+        return array_map(
+            fn (PlacedPin $pin, int $index): Pin => Pin::placedBy($this->rounds->nextPinIdentity(), $index + 1, $pin->xPercent, $pin->yPercent, $pin->note, $authorId),
+            $pins,
+            array_keys($pins),
+        );
+    }
+
+    /**
+     * Before any read, so a list sized from outside is never walked past the cap.
+     *
+     * @param list<PlacedPin> $pins
+     *
+     * @throws RoundRefused as invalid content when there are more than Screenshot::MAX_PINS
+     */
+    private static function refuseMorePinsThanAPictureHolds(array $pins): void
+    {
+        if (\count($pins) > Screenshot::MAX_PINS) {
+            throw RoundRefused::invalidContent(\sprintf('A picture holds at most %d pins.', Screenshot::MAX_PINS));
+        }
     }
 }

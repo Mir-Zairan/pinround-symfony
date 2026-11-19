@@ -710,6 +710,104 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * idn_api_token (Version20261119100000, Version20261119150000, Version20261119160000), a tenant table: the app reads
+     * and adds tokens and changes only the revocation, the last use and the expiry warning, never deletes; support
+     * reads under the tenant policy; resolve_api_token and organizations_with_expiring_api_tokens read only the ids,
+     * the hash, the three dates they check and the warning, never the name, prefix or scopes. Every index starts with the organization but the
+     * token_hash key, which the resolver looks up before the organization is known.
+     */
+    #[Test]
+    public function theApiTokenTableLetsTheAppChangeOnlyRevocationLastUseAndExpiryWarning(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT', 'pinround_readonly SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'idn_api_token'),
+        );
+        self::assertSame(
+            ['pinround_migrator', true, true],
+            $connection->fetchNumeric("SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass('public.idn_api_token')"),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'pinround_app UPDATE last_used_at', 'pinround_app UPDATE revoked_at', 'pinround_app UPDATE expiry_warned_at',
+                'pinround_resolver SELECT id', 'pinround_resolver SELECT organization_id', 'pinround_resolver SELECT user_id',
+                'pinround_resolver SELECT token_hash', 'pinround_resolver SELECT expires_at', 'pinround_resolver SELECT revoked_at',
+                'pinround_resolver SELECT expiry_warned_at', 'pinround_resolver SELECT created_at',
+            ],
+            $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = 'public.idn_api_token'::regclass",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            ['tenant_isolation {public} ALL', 'resolver_read {pinround_resolver} SELECT'],
+            $connection->fetchFirstColumn(
+                "SELECT policyname || ' ' || roles::text || ' ' || cmd FROM pg_policies WHERE schemaname = 'public' AND tablename = 'idn_api_token'",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX idn_api_token_pkey ON public.idn_api_token USING btree (organization_id, id)',
+                'CREATE INDEX idn_api_token_user_id_created_at_idx ON public.idn_api_token USING btree (organization_id, user_id, created_at)',
+                'CREATE UNIQUE INDEX idn_api_token_token_hash_key ON public.idn_api_token USING btree (token_hash)',
+                'CREATE INDEX idn_api_token_expires_at_id_live_idx ON public.idn_api_token USING btree (organization_id, expires_at, id) WHERE (revoked_at IS NULL)',
+            ],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_api_token'"),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'idn_api_token_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 100)))',
+                'idn_api_token_token_hash_check CHECK ((octet_length(token_hash) = 32))',
+                "idn_api_token_prefix_check CHECK ((prefix ~ '^pr_[A-Za-z0-9_-]{8}$'::text))",
+                "idn_api_token_scopes_check CHECK (((cardinality(scopes) >= 1) AND (scopes <@ ARRAY['read'::text, 'rounds:write'::text, 'comments:write'::text, 'tickets:move'::text, 'reports:write'::text])))",
+                "idn_api_token_expires_at_check CHECK (((expires_at > created_at) AND (expires_at <= (created_at + '8760:00:00'::interval))))",
+                'idn_api_token_pkey PRIMARY KEY (organization_id, id)',
+            ],
+            $connection->fetchFirstColumn(
+                "SELECT conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
+                 WHERE conrelid = 'public.idn_api_token'::regclass AND contype IN ('c', 'p', 'u', 'f')",
+            ),
+        );
+    }
+
+    /**
+     * resolve_api_token runs as its owner pinround_resolver with a fixed search_path; besides that owner only the app
+     * may call it, and it returns the ids of a token that is neither revoked nor expired.
+     */
+    #[Test]
+    public function theApiTokenResolverReturnsOnlyTheIdsOfALiveToken(): void
+    {
+        $connection = $this->connection();
+
+        self::assertSame(
+            [
+                'owner' => 'pinround_resolver',
+                'is_security_definer' => true,
+                'config' => '{"search_path=pg_catalog, public, pg_temp"}',
+                'arguments' => 'p_token_hash bytea',
+                'result' => 'TABLE(token_id uuid, organization_id uuid, user_id uuid)',
+                'body' => 'SELECT t.id, t.organization_id, t.user_id FROM public.idn_api_token t'
+                    .' WHERE t.token_hash = p_token_hash AND t.revoked_at IS NULL AND t.expires_at > now()',
+            ],
+            $connection->fetchAssociative(
+                "SELECT p.proowner::regrole::text AS owner, p.prosecdef AS is_security_definer, p.proconfig::text AS config,
+                        pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result, btrim(p.prosrc) AS body
+                 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'resolve_api_token'",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            ['pinround_app', 'pinround_resolver'],
+            $connection->fetchFirstColumn(
+                "SELECT CASE acl.grantee WHEN 0 THEN 'PUBLIC' ELSE acl.grantee::regrole::text END
+                 FROM pg_proc p, aclexplode(p.proacl) acl
+                 WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'resolve_api_token' AND acl.privilege_type = 'EXECUTE'",
+            ),
+        );
+    }
+
+    /**
      * The upload slot and picture tables (Version20261115120000): the app reads, adds and changes them and removes
      * neither, as a used slot and a rejected picture keep their rows; support reads under the tenant policy.
      */
@@ -828,7 +926,7 @@ final class DatabaseRolesTest extends KernelTestCase
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
         $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912', 'ast_suggestion', 'public.ast_suggestion', 'ast_local_package', 'public.ast_local_package'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_draft', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'idn_api_token', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_draft', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);

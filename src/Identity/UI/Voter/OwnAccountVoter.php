@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\UI\Voter;
 
+use App\Identity\Api\LoginAssurance;
 use App\Identity\Application\AccountPermission;
 use Symfony\Component\Security\Core\Authentication\Token\RememberMeToken;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
@@ -14,15 +15,19 @@ use Symfony\Component\Security\Core\User\UserInterface;
 /**
  * Decides AccountPermission::EDIT_OWN (ADR-0013): only a person logged in with their password in this session may
  * change their own account. Any logged-in user qualifies: the pages act on the user of the session, never on an id
- * from the request.
- *
- * TODO(P09): refuse the token a personal access token login creates once that login exists; an API token must never
- * change the password or end the sessions of its user (FR-ID-05).
+ * from the request. A personal access token never qualifies: it must not change the password or end the sessions of
+ * its user (FR-ID-05).
  *
  * @extends Voter<string, null>
  */
 final class OwnAccountVoter extends Voter
 {
+    public const string TOKEN_REFUSAL_REASON = 'Changing your account needs a browser session, not a personal access token.';
+
+    public function __construct(private readonly LoginAssurance $loginAssurance)
+    {
+    }
+
     protected function supports(string $attribute, mixed $subject): bool
     {
         return AccountPermission::EDIT_OWN === $attribute && null === $subject;
@@ -30,6 +35,12 @@ final class OwnAccountVoter extends Voter
 
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
     {
+        if ($this->loginAssurance->isTokenAuthenticated($token)) {
+            $vote?->addReason(self::TOKEN_REFUSAL_REASON);
+
+            return false;
+        }
+
         // A remember-me login has not seen the password in this session (there is none today; this keeps it out).
         return $token->getUser() instanceof UserInterface && !$token instanceof RememberMeToken;
     }
