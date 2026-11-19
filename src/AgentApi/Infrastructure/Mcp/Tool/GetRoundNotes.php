@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\ChecklistFields;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\AgentApi\Infrastructure\Mcp\UntrustedText;
@@ -12,9 +13,7 @@ use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\MediaImage;
 use App\Media\Api\SignedUrls;
-use App\Review\Api\CheckItemView;
 use App\Review\Api\ChecklistQueries;
-use App\Review\Api\ChecklistView;
 use App\Review\Api\PinNote;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
@@ -163,7 +162,7 @@ final readonly class GetRoundNotes implements AgentTool
                 'round_id' => $draftNotes->roundId,
                 'screenshots' => array_map($screenshotFieldsOf, $draftNotes->screenshots),
             ],
-            'checklist' => null === $checklist ? null : self::checklistFieldsOf($checklist),
+            'checklist' => null === $checklist ? null : ChecklistFields::of($checklist),
         ];
 
         // No JSON_PRESERVE_ZERO_FRACTION: the SDK writes structuredContent without it, so a whole-number pin position
@@ -234,27 +233,6 @@ final readonly class GetRoundNotes implements AgentTool
                 'y_pct' => $pin->yPercent,
                 'note' => UntrustedText::wrap($pin->note),
             ], $screenshot->pins),
-        ];
-    }
-
-    /**
-     * The checklist as both get_round_notes and get_ticket answer it, each pin note wrapped as UntrustedText.
-     *
-     * @return array<string, mixed>
-     */
-    public static function checklistFieldsOf(ChecklistView $checklist): array
-    {
-        return [
-            'round_id' => $checklist->roundId,
-            'number' => $checklist->number,
-            'checked_ok_count' => $checklist->checkedOkCount,
-            'total' => $checklist->total,
-            'items' => array_map(static fn (CheckItemView $item): array => [
-                'item_id' => $item->itemId,
-                'pin_number' => $item->pinNumber,
-                'note' => UntrustedText::wrap($item->note),
-                'state' => $item->state,
-            ], $checklist->items),
         ];
     }
 }

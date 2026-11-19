@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\ChecklistFields;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
@@ -245,7 +246,7 @@ final readonly class GetTicket implements AgentTool
                 'asked_to' => $nameOf($question->toUserId),
                 'asked_at' => $question->createdAt->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM),
             ], $openQuestions),
-            'checklist' => null === $checklist ? null : GetRoundNotes::checklistFieldsOf($checklist),
+            'checklist' => null === $checklist ? null : ChecklistFields::of($checklist),
         ];
 
         return new CallToolResult(
