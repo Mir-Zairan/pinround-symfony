@@ -155,6 +155,7 @@ final class DoctrineStorageQuotaTest extends KernelTestCase
     #[Test]
     public function bytesInUseAtIsServedByIndexesAlone(): void
     {
+        $this->addRowsTheQuotaSkips(self::ACME_FOODS, 1_000);
         $plan = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): string {
             $this->connection()->executeStatement('SET LOCAL enable_seqscan = off');
             $debugData = $this->debugData();
@@ -264,6 +265,37 @@ final class DoctrineStorageQuotaTest extends KernelTestCase
             self::assertNotNull($intent);
             $this->uploadIntents()->recordUse($intent, new \DateTimeImmutable('2026-03-02 09:59:00+00:00'));
         });
+    }
+
+    /**
+     * Rejected objects and used intents the sums must skip, then fresh statistics and visibility map. On a near-empty
+     * table any index on organization_id costs the same, so the planner's pick follows whatever rows earlier tests left;
+     * with rows only the status and open indexes can skip, the index-only scans are the cheaper plan.
+     */
+    private function addRowsTheQuotaSkips(string $organizationId, int $rowsPerTable): void
+    {
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId($organizationId));
+        try {
+            $migrator->transactional(static function (Connection $migrator) use ($organizationId, $rowsPerTable): void {
+                $migrator->executeStatement(
+                    "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status, reject_reason)
+                     SELECT CAST(:organization AS uuid), gen_random_uuid(), 'uploads/skipped-' || n, 'image/png', n, CAST(:uploader AS uuid), CAST(:at AS timestamptz), 'rejected', 'Not a picture.'
+                     FROM generate_series(1, CAST(:rows AS int)) AS n",
+                    ['organization' => $organizationId, 'uploader' => self::MIA, 'at' => self::AT, 'rows' => $rowsPerTable],
+                );
+                $migrator->executeStatement(
+                    "INSERT INTO med_upload_intent (organization_id, id, user_id, purpose, max_bytes, mime_allowed, storage_key, expires_at, used_at, target_kind, target_id)
+                     SELECT CAST(:organization AS uuid), gen_random_uuid(), CAST(:user AS uuid), 'screenshot', n, ARRAY['image/png'], 'uploads/used-' || n, CAST(:later AS timestamptz), CAST(:at AS timestamptz), 'ticket', 'SHOP-12'
+                     FROM generate_series(1, CAST(:rows AS int)) AS n",
+                    ['organization' => $organizationId, 'user' => self::MIA, 'later' => self::LATER, 'at' => self::AT, 'rows' => $rowsPerTable],
+                );
+            });
+        } finally {
+            $tenantContext->clear();
+        }
+        $migrator->executeStatement('VACUUM ANALYZE med_object, med_upload_intent');
     }
 
     /**
