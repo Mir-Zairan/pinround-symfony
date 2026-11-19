@@ -41,8 +41,9 @@ interface ReportDrafts
      * "Make it a new ticket" (ADR-0044): deletes $owner's unshared draft round and saves its pictures, with their titles,
      * summaries and pins in the same order, as a new report draft of $owner for the project of the round's ticket. Its
      * detail is "Found while testing SHOP-42" with the ticket's key; its title is the first picture's title, or that
-     * line when no picture has one. The report draft points to the pictures the round had; nothing is uploaded again.
-     * Makes no ticket: only Send does. On a refusal the caller must roll back its transaction, which restores the round.
+     * line when no picture has one. The report draft points to the pictures the round had: nothing is uploaded again,
+     * and no picture is deleted or queued for deletion. Makes no ticket: only Send does. Every rule of create is
+     * checked before the round is deleted, so a refusal writes nothing. Of two moves of one draft, the second is refused.
      *
      * @return string the new report draft's uuid
      *

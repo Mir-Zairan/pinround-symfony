@@ -208,7 +208,7 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame(['looks_right', 'not_right'], $two->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-verdict-param')));
         self::assertSame('', $two->filter('input[data-field=title]')->attr('value'));
         self::assertCount(0, $two->filter('textarea.pin-list__note'));
-        self::assertSame(['Share with the team now', 'Delete draft'], $frame->filter('#round-'.$draft.' form button')->each(static fn (Crawler $button): string => $button->text()), 'Share and Delete stay.');
+        self::assertSame(['Share with the team now', 'Make it a new ticket', 'Delete draft'], $frame->filter('#round-'.$draft.' form button')->each(static fn (Crawler $button): string => $button->text()), 'Share, Make it a new ticket and Delete stay.');
     }
 
     /**
@@ -581,6 +581,9 @@ final class DraftRoundControllerTest extends WebTestCase
         $ticketsBefore = $this->ticketCount();
         self::assertSame(1, $ticketsBefore);
         self::assertSame([], $this->reportDraftRows());
+        $picturesBefore = $this->mediaRowsOf([$firstPicture, $secondPicture]);
+        self::assertCount(2, $picturesBefore);
+        $draftScreenshotsBefore = $this->screenshotRowsOf($draft);
 
         $this->logIn($this->client, $this->people['Mia']);
         $button = $this->frame()->filter('#round-'.$draft.' form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Make it a new ticket' === $form->filter('button')->text());
@@ -588,6 +591,7 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame($this->newTicketUrl($draft), $button->attr('action'));
         self::assertSame('_top', $button->attr('data-turbo-frame'));
         $form = $button->form();
+        $outboxBefore = $this->outboxMessages();
         $this->client->submit($form);
 
         self::assertResponseStatusCodeSame(303);
@@ -617,6 +621,13 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach ([self::MIA_DRAFT_NOTE, 'Second pin note', 'Total doubled', self::MIA_DRAFT_SUMMARY] as $moved) {
             self::assertStringContainsString($moved, $content, 'The report draft page shows what moved.');
         }
+        $images = $page->filter('.report-draft__picture img.screenshot__image')->each(static fn (Crawler $image): string => (string) $image->attr('src'));
+        self::assertCount(2, $images, 'Both pictures show, none as a placeholder.');
+        self::assertStringContainsString('media/'.$firstPicture.'/view.webp', $images[0]);
+        self::assertStringContainsString('media/'.$secondPicture.'/view.webp', $images[1]);
+        self::assertSame($picturesBefore, $this->mediaRowsOf([$firstPicture, $secondPicture]), 'The pictures stay in Media as they were.');
+        self::assertSame($draftScreenshotsBefore, $this->screenshotRowsOf($draft), 'The deleted draft keeps pointing to them; nothing is removed.');
+        self::assertSame($outboxBefore, $this->outboxMessages(), 'Nothing is queued: no delete of a picture, nor anything else.');
 
         $closed = $this->roundRow($ticketId, $draft);
         self::assertSame(['closed', self::NOW_AS_STORED, null], [$closed['state'], $closed['deleted_at'], $closed['shared_at']]);
@@ -884,6 +895,42 @@ final class DraftRoundControllerTest extends WebTestCase
         }
 
         return $pictures;
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     *
+     * @return list<array<string, mixed>> the pictures' Media rows as stored, by id
+     */
+    private function mediaRowsOf(array $mediaIds): array
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $mediaIds, &$rows): int {
+            $rows = $migrator->fetchAllAssociative(
+                'SELECT id, storage_key, status, uploaded_by, variants::text AS variants FROM med_object WHERE organization_id = ? AND id = ANY(CAST(? AS uuid[])) ORDER BY id',
+                [$organizationId, '{'.implode(',', $mediaIds).'}'],
+            );
+
+            return \count($rows);
+        });
+
+        return $rows;
+    }
+
+    /**
+     * @return list<array<string, mixed>> every message waiting in the outbox, which the relay would hand to a worker
+     */
+    private function outboxMessages(): array
+    {
+        $rows = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use (&$rows): int {
+            $rows = $migrator->fetchAllAssociative('SELECT id, body FROM messenger_outbox ORDER BY id');
+
+            return \count($rows);
+        });
+
+        return $rows;
     }
 
     private function ticketCount(): int

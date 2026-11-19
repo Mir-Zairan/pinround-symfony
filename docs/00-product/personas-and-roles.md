@@ -125,6 +125,7 @@ Legend: ✅ allowed · ⚠️ allowed with a condition (see note) · — not all
 | Keep / dismiss AI suggestion pin | — | — | ✅ | ⚠️ the round's reviewer | — | — |
 | Start / edit / share a draft round | — | — | ⚠️ if assignee or it is their turn ⁸ | ⚠️ if assignee or it is their turn ⁸ | — | — |
 | See a draft round | ⚠️ only after shared (never unshared) | ⚠️ only after shared | ⚠️ owner, or after shared (a lead never sees others' unshared drafts) | ⚠️ owner, or after shared | ⚠️ after shared | — |
+| Make it a new ticket (draft round to report draft) | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | — | — |
 | See, edit and send my report drafts ⁹ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |
 | Summarize with AI (shared summary) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | — | — |
 | Explain it to me (private) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy |

@@ -65,18 +65,26 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
     public function createFromDraftRound(string $roundId, UserId $owner, \DateTimeImmutable $at): string
     {
         $organizationId = $this->tenantContext->require();
-        $taken = $this->draftRoundContents->take($roundId, $owner, $at);
-        $ticketKey = $this->ticketKeyQueries->keyOf($taken->ticketId) ?? throw new \LogicException('The ticket of a draft round the tenant has is the tenant\'s.');
+        $draftRound = $this->draftRoundContents->contentsOf($roundId, $owner);
+        $ticketKey = $this->ticketKeyQueries->keyOf($draftRound->ticketId) ?? throw new \LogicException('The ticket of a draft round the tenant has is the tenant\'s.');
         $foundWhileTesting = \sprintf(self::FOUND_WHILE_TESTING, $ticketKey);
         $title = $foundWhileTesting;
-        foreach ($taken->screenshots as $screenshot) {
+        foreach ($draftRound->screenshots as $screenshot) {
             if (null !== $screenshot->title && '' !== trim($screenshot->title)) {
                 $title = $screenshot->title;
                 break;
             }
         }
+        $project = $this->reportableProject(self::projectKeyOf($ticketKey));
+        $checked = ReportDraftContentRules::checked(new ReportDraftContent($title, $foundWhileTesting, $draftRound->screenshots));
+        $this->refuseUnlessOwnUsablePictures($organizationId, $owner, $checked->screenshots);
 
-        return $this->create($organizationId, $owner, self::projectKeyOf($ticketKey), new ReportDraftContent($title, $foundWhileTesting, $taken->screenshots), $at);
+        // Only once every rule of a report draft holds, so a refused move writes nothing at all.
+        $this->draftRoundContents->deleteAsRead($draftRound, $owner, $at);
+        $id = $this->rows->nextId();
+        $this->rows->insert($organizationId, $id, $owner, $project->key(), $checked, $at);
+
+        return $id;
     }
 
     public function forOwner(UserId $owner, ?ReportDraftCursor $after = null): ReportDraftsPage
