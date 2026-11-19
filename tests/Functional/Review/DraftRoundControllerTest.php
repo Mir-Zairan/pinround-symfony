@@ -634,7 +634,7 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach (['Omar' => $omarsDraft, 'Lena' => $lenasDraft] as $owner => $ownDraft) {
             $this->logIn($this->client, $this->people[$owner]);
             $frame = $this->frame();
-            self::assertSame(['Round 1 · self-check by Mia', 'Draft round · only you can see this'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $owner.' sees their own draft and the shared round.');
+            self::assertSame(['Round 1 · findings by Mia', 'Draft round · only you can see this'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $owner.' sees their own draft and the shared round.');
             self::assertCount(1, $frame->filter(self::ROUNDS.' .claude-code-box'), $owner);
             self::assertCount(1, $frame->filter('#round-'.$ownDraft.' .claude-code-box'), $owner);
         }
@@ -642,7 +642,7 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach (['Mia', 'Raj', 'Sara'] as $person) {
             $this->logIn($this->client, $this->people[$person]);
             $frame = $this->frame();
-            self::assertSame(['Round 1 · self-check by Mia'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person.' sees the shared round only.');
+            self::assertSame(['Round 1 · findings by Mia'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person.' sees the shared round only.');
             self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' [data-controller="copy-text"]'), $person.': a shared round has no box, not even for its owner.');
             self::assertStringNotContainsString('Read my pinround notes', (string) $this->client->getResponse()->getContent(), $person);
         }

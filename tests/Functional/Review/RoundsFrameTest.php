@@ -317,9 +317,10 @@ final class RoundsFrameTest extends WebTestCase
         $transactions = new TenantTransactions(self::getContainer()->get(EntityManagerInterface::class), self::getContainer()->get(TenantContext::class));
         $sees = TicketVisibility::for($this->acmeFoods, $this->people['Lena']->id(), [$this->shop], false, null);
         $doesNotSee = TicketVisibility::for($this->acmeFoods, $this->people['Raj']->id(), [], false, null);
+        $assigneeId = $this->people['Omar']->id();
 
-        $seen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $sees, new \DateTimeImmutable(self::NOW)));
-        $unseen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $doesNotSee, new \DateTimeImmutable(self::NOW)));
+        $seen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $sees, $assigneeId, new \DateTimeImmutable(self::NOW)));
+        $unseen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $doesNotSee, $assigneeId, new \DateTimeImmutable(self::NOW)));
 
         self::assertCount(1, $seen->cards, 'The same rounds are there for a viewer who may see the ticket.');
         self::assertSame([], $unseen->cards);
@@ -361,10 +362,10 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · Review · by a former member', 'Round 2 · self-check by a former member'],
+            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · Review · by a former member', 'Round 2 · findings by a former member'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
-        self::assertSame('What a former member checked before passing the ticket on.', $page->filter(self::ROUNDS.' .round-card__description')->text());
+        self::assertSame('What a former member found while checking the ticket.', $page->filter(self::ROUNDS.' .round-card__description')->text());
         self::assertStringNotContainsString('Noor', (string) $this->client->getResponse()->getContent());
     }
 
@@ -381,7 +382,7 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['What Lena checked before passing the ticket on.', 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.'],
+            ['What Lena found while checking the ticket.', 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.'],
             $page->filter(self::ROUNDS.' .round-card__description')->each(static fn (Crawler $description): string => $description->text()),
             'A review round has no description.',
         );
