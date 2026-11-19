@@ -221,7 +221,8 @@ final class GetTicketTest extends WebTestCase
     }
 
     /**
-     * Beta Bakery has its own SHOP-1 and Omar is its member too, but his token is Acme Foods', which has no SHOP-1.
+     * Beta Bakery has its own SHOP-1 and Omar is its member too, but his token is Acme Foods', which has no SHOP-1. His
+     * Beta Bakery token finds it, so the refusal is the organization's and not the ticket's.
      */
     #[Test]
     public function aTicketOfAnotherOrganizationIsNotFoundThoughItHasTheSameKey(): void
@@ -229,7 +230,7 @@ final class GetTicketTest extends WebTestCase
         $betaBakery = $this->createOrganization('Beta Bakery');
         $this->addMembership($this->people['Omar'], $betaBakery);
         $bakeryShop = $this->addProject(null, 'SHOP', 'Bakery shop', $betaBakery);
-        $this->addTicketOf($betaBakery, $bakeryShop, null, 'SHOP-1', 'all', $this->addTodoStep($betaBakery), $this->people['Omar']);
+        $bakeryTicket = $this->addTicketOf($betaBakery, $bakeryShop, null, 'SHOP-1', 'all', $this->addTodoStep($betaBakery), $this->people['Omar']);
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
 
         $this->callGetTicket($token, ['key' => 'SHOP-1']);
@@ -238,6 +239,22 @@ final class GetTicketTest extends WebTestCase
         self::assertStringNotContainsString('Checkout button', $this->client->getInternalResponse()->getContent());
         self::assertSame([$this->toolCallRow($this->people['Omar'], $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found')], $this->auditRowsOf($this->acmeFoods));
         self::assertSame([], $this->auditRowsOf($betaBakery));
+
+        [$bakeryTokenId, $bakeryToken] = $this->issueApiToken($this->people['Omar'], $betaBakery);
+        $this->callGetTicket($bakeryToken, ['key' => 'SHOP-1']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame(
+            ['SHOP-1', '<untrusted_text>Checkout button is hidden</untrusted_text>', null, null],
+            [
+                $this->responseValueAt('result', 'structuredContent', 'key'),
+                $this->responseValueAt('result', 'structuredContent', 'title'),
+                $this->responseValueAt('result', 'structuredContent', 'now'),
+                $this->responseValueAt('result', 'structuredContent', 'next'),
+            ],
+        );
+        self::assertSame([$this->toolCallRow($this->people['Omar'], $bakeryTokenId, GetTicket::AUDIT_TARGET_TYPE, $bakeryTicket, 'ok')], $this->auditRowsOf($betaBakery));
     }
 
     #[Test]
