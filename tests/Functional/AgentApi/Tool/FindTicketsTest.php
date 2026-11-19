@@ -20,7 +20,6 @@ use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Integration\ReadsSentSql;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
-use Symfony\Bridge\Doctrine\Middleware\Debug\DebugDataHolder;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -54,6 +53,8 @@ final class FindTicketsTest extends WebTestCase
 
     private KernelBrowser $client;
 
+    private MockClock $clock;
+
     /** @var array<string, User> */
     private array $people;
 
@@ -71,7 +72,8 @@ final class FindTicketsTest extends WebTestCase
     {
         $this->client = self::createClient([], ['REMOTE_ADDR' => \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254))]);
         $this->client->disableReboot();
-        self::getContainer()->set('clock', new MockClock(self::NOW));
+        $this->clock = new MockClock(self::NOW);
+        self::getContainer()->set('clock', $this->clock);
         $this->people = $this->createAcmeFoodsPeople();
         $this->projects['SHOP'] = $this->addProject($this->shop, 'SHOP', 'Shop');
         $this->projects['OPS'] = $this->addProject($this->shop, 'OPS', 'Operations');
@@ -224,29 +226,33 @@ final class FindTicketsTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['OPS-1'], array_keys($this->foundTicketsByKey()));
 
+        // A second later, so the refusal's audit row sorts last: rows of one frozen instant may get v7 ids out of order,
+        // as UuidV7 re-randomizes whenever a real-clock id was generated in between.
+        $this->clock->sleep(1);
         $this->callTool($token, $sessionId, FindTickets::NAME, ['text' => 'cart', 'project' => 'NOPE']);
         self::assertResponseStatusCodeSame(200);
         self::assertTrue($this->responseValueAt('result', 'isError'));
         self::assertSame([['type' => 'text', 'text' => ToolRefusal::NOT_FOUND]], $this->responseValueAt('result', 'content'));
         self::assertSame(
-            [$this->toolCallRow($omar, $tokenId, 'ok'), $this->toolCallRow($omar, $tokenId, 'ok'), $this->toolCallRow($omar, $tokenId, 'not_found')],
+            [$this->toolCallRow($omar, $tokenId, 'ok'), $this->toolCallRow($omar, $tokenId, 'ok'), $this->toolCallRow($omar, $tokenId, 'not_found', '2026-11-10 09:00:21')],
             $this->auditRowsOf($this->acmeFoods),
         );
     }
 
     #[Test]
-    public function aTokenWithoutTheReadScopeGetsMissingScopeNoTicketAndOneMissingScopeRow(): void
+    public function aTokenWithoutTheReadScopeGetsMissingScopeReadsNoTicketAndWritesOneMissingScopeRow(): void
     {
         $omar = $this->people['Omar'];
         $this->addTicket('SHOP', self::HIDDEN_TITLE, $this->doingStep, $omar, null);
         [$tokenId, $token] = $this->issueApiTokenWithScopes($omar, $this->acmeFoods, [ApiTokenScope::RoundsWrite]);
         $sessionId = $this->startSession($token);
 
-        $this->callTool($token, $sessionId, FindTickets::NAME, ['text' => 'cart']);
+        $refusedSql = $this->sqlOfCall($token, $sessionId, ['text' => 'cart']);
 
-        self::assertResponseStatusCodeSame(200);
         self::assertTrue($this->responseValueAt('result', 'isError'));
         self::assertSame([['type' => 'text', 'text' => \sprintf(ToolRefusal::MISSING_SCOPE, 'read')]], $this->responseValueAt('result', 'content'));
+        self::assertNotSame([], $refusedSql);
+        self::assertSame([], array_values(array_filter($refusedSql, static fn (string $sql): bool => 1 === preg_match('/search_ticket_ids|\btkt_|\bins_ticket_turn\b/', $sql))));
         self::assertNull($this->responseValueAt('result', 'structuredContent'));
         self::assertStringNotContainsString(self::HIDDEN_TITLE, $this->client->getInternalResponse()->getContent());
         self::assertSame([$this->toolCallRow($omar, $tokenId, 'missing_scope')], $this->auditRowsOf($this->acmeFoods));
@@ -302,8 +308,7 @@ final class FindTicketsTest extends WebTestCase
      */
     private function sqlOfCall(string $token, string $sessionId, array $arguments): array
     {
-        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
-        \assert($debugData instanceof DebugDataHolder);
+        $debugData = $this->debugData();
         $debugData->reset();
         $this->callTool($token, $sessionId, FindTickets::NAME, $arguments);
         self::assertResponseStatusCodeSame(200);
@@ -439,9 +444,9 @@ final class FindTicketsTest extends WebTestCase
     /**
      * @return array{string, string, string, string, string, null, string, array<string, string>}
      */
-    private function toolCallRow(User $user, string $tokenId, string $outcome): array
+    private function toolCallRow(User $user, string $tokenId, string $outcome, string $at = '2026-11-10 09:00:20'): array
     {
-        return ['token', $user->id()->toString(), $tokenId, ToolCallAuditor::ACTION, ToolCallAuditor::TOOL_TARGET_TYPE, null, '2026-11-10 09:00:20', ['outcome' => $outcome, 'tool' => FindTickets::NAME]];
+        return ['token', $user->id()->toString(), $tokenId, ToolCallAuditor::ACTION, ToolCallAuditor::TOOL_TARGET_TYPE, null, $at, ['outcome' => $outcome, 'tool' => FindTickets::NAME]];
     }
 
     /**

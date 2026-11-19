@@ -52,12 +52,12 @@ final class FindTicketsFakes implements CurrentApiToken, CurrentUser, TicketVisi
         return \count($this->projectKeysAskedFor) + \count($this->visibilitiesAskedFor) + \count($this->searchesAskedFor);
     }
 
-    public function access(): ?ApiTokenAccess
+    public function access(): ApiTokenAccess
     {
         return new ApiTokenAccess(FindTicketsTest::OMARS_TOKEN, new OrganizationId(FindTicketsTest::ACME_FOODS), ['read'], new \DateTimeImmutable('2027-02-09 00:30:00 UTC'));
     }
 
-    public function id(): ?UserId
+    public function id(): UserId
     {
         return new UserId(FindTicketsTest::OMAR);
     }
