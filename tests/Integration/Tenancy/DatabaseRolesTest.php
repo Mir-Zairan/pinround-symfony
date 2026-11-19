@@ -893,7 +893,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'idn_api_token_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 100)))',
                 'idn_api_token_token_hash_check CHECK ((octet_length(token_hash) = 32))',
                 "idn_api_token_prefix_check CHECK ((prefix ~ '^pr_[A-Za-z0-9_-]{8}$'::text))",
-                "idn_api_token_scopes_check CHECK (((cardinality(scopes) >= 1) AND (scopes <@ ARRAY['read'::text, 'rounds:write'::text, 'comments:write'::text, 'tickets:move'::text, 'reports:write'::text])))",
+                "idn_api_token_scopes_check CHECK (((cardinality(scopes) >= 1) AND (scopes <@ ARRAY['read'::text, 'rounds:write'::text, 'comments:write'::text, 'tickets:move'::text, 'reports:write'::text, 'notebooks:write'::text])))",
                 "idn_api_token_expires_at_check CHECK (((expires_at > created_at) AND (expires_at <= (created_at + '8760:00:00'::interval))))",
                 'idn_api_token_pkey PRIMARY KEY (organization_id, id)',
             ],

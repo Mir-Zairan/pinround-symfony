@@ -263,7 +263,7 @@ See [ai-architecture.md](ai-architecture.md), [ADR-0020](../03-adr/0020-ai-safet
 ## MCP and personal access token threats
 
 - **Token leak** (for example pasted into a public repo): tokens have the recognisable prefix `pr_` for secret scanning, expire (default 90 days, max 1 year), can be revoked by the user and by admins, and `last_used_at` is shown.
-- **Over-wide token:** scopes `read`, `rounds:write`, `comments:write`, `tickets:move`. Default scope for a new Claude Code token is `read` + `rounds:write`.
+- **Over-wide token:** scopes `read`, `rounds:write`, `comments:write`, `tickets:move`, `reports:write`, `notebooks:write`. Default scope for a new Claude Code token is `read` + `rounds:write`; the others start unticked, and the database refuses any other scope name (`idn_api_token_scopes_check`).
 - **Agent acting beyond the user:** every tool calls the same application service and voter as the web UI. An MCP tool can never do more than the token's user can do in the browser.
 - **Malicious tool input:** JSON schema validation on every tool input; ids must belong to the token's org; size limits on text and images.
 - **Repudiation:** each tool call writes an audit event with the token id, tool name and target id (not the content).
