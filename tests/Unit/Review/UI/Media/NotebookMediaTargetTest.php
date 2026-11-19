@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Review\UI\Media;
 
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
+use App\Review\Api\AddedNotebookScreenshot;
 use App\Review\Api\NotebookCursor;
 use App\Review\Api\Notebooks;
 use App\Review\Api\NotebooksPage;
@@ -118,7 +119,7 @@ final class NotebookMediaTargetTest extends TestCase
                 throw new \LogicException('Not asked by NotebookMediaTarget.');
             }
 
-            public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int
+            public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedNotebookScreenshot
             {
                 throw new \LogicException('Not asked by NotebookMediaTarget.');
             }

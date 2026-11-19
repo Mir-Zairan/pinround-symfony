@@ -139,6 +139,19 @@ final class NotebookTest extends TestCase
     }
 
     #[Test]
+    public function aNotebookHoldsThePicturesOfItsScreenshotsWhateverTheCaseAndNoOthers(): void
+    {
+        $notebook = self::started('Order page')
+            ->withScreenshotAdded(self::screenshot(1), new \DateTimeImmutable(self::LATER))
+            ->withScreenshotAdded(self::screenshot(2), new \DateTimeImmutable(self::LATER));
+
+        self::assertSame(
+            [true, true, true, false, false],
+            [$notebook->holdsPicture(self::mediaId(1)), $notebook->holdsPicture(self::mediaId(2)), $notebook->holdsPicture(strtoupper(self::mediaId(2))), $notebook->holdsPicture(self::mediaId(3)), self::started('Order page')->holdsPicture(self::mediaId(1))],
+        );
+    }
+
+    #[Test]
     public function aScreenshotKeepsTheCapsOfARoundScreenshotEachWithAValidTwin(): void
     {
         $passing = NotebookScreenshot::of(strtoupper(self::mediaId(1)), ' '.str_repeat('t', 120).' ', str_repeat('s', 600), [NotebookPin::placed(0.0, 100.0, str_repeat('n', 1000))]);

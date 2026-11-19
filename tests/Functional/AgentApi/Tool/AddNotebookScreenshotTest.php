@@ -46,7 +46,6 @@ final class AddNotebookScreenshotTest extends WebTestCase
     private const string OMARS_NOTEBOOK = '0197a3c0-0000-7000-8000-0000000d0003';
     private const string FIRST_PICTURE = '0197a3c0-0000-7000-8000-0000000e0001';
     private const string NOTEBOOK_FULL = 'A notebook holds at most 10 screenshots.';
-    private const string SAME_PICTURE_TWICE = 'Each picture can be in the notebook only once.';
 
     private KernelBrowser $client;
 
@@ -150,28 +149,49 @@ final class AddNotebookScreenshotTest extends WebTestCase
     }
 
     /**
-     * The second call finds the upload completed already, so Media answers the same picture and Review refuses it.
+     * The call sent again, as after a lost answer: the second finds the upload completed already, so Media answers the
+     * same picture and Review finds it in the notebook. The picture is there once and the version moved once.
      */
     #[Test]
-    public function theSameUploadAddedTwiceIsRefusedTheSecondTimeAndTheNotebookKeepsItOnce(): void
+    public function theSameUploadSentTwiceIsAlreadyInTheNotebookTheSecondTimeAndTheNotebookKeepsItOnce(): void
     {
         $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, 'ready');
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
         $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
-        self::assertSame(2, $this->answer()['screenshot_count'] ?? null);
-        $okRow = [$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'ok'];
-        self::assertSame([$okRow], $this->toolRowsOf($this->acmeFoods));
+        self::assertSame(['notebook_id' => self::LENAS_NOTEBOOK, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ADDED, 'screenshot_count' => 2], $this->answer());
         $rowsAfterTheFirstCall = $this->notebookRowsOf($this->acmeFoods);
 
         $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
 
-        $this->assertRefused(self::SAME_PICTURE_TWICE);
+        self::assertSame(['notebook_id' => self::LENAS_NOTEBOOK, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 2], $this->answer());
         self::assertSame($rowsAfterTheFirstCall, $this->notebookRowsOf($this->acmeFoods));
         [$screenshots, $version] = $this->screenshotsAndVersionOf(self::LENAS_NOTEBOOK);
         self::assertSame([self::FIRST_PICTURE, $uploadId], array_column($screenshots, 'media_id'));
         self::assertSame(3, $version);
-        // Both rows carry the frozen clock's time, so their order is not the calls' order.
-        self::assertEqualsCanonicalizing([$okRow, [$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'refused']], $this->toolRowsOf($this->acmeFoods));
+        self::assertSame(array_fill(0, 2, [$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'ok']), $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * The tenth picture sent again, as after a lost answer, is in the full notebook already: not the cap's refusal.
+     */
+    #[Test]
+    public function theTenthPictureSentAgainIsAlreadyInTheFullNotebookAndNothingChanges(): void
+    {
+        $nearlyFullNotebook = '0197a3c0-0000-7000-8000-0000000d0005';
+        $pictures = array_map(static fn (int $number): array => self::storedPicture(Uuid::v7()->toRfc4122()), range(1, 9));
+        $this->addNotebook($this->acmeFoods, $this->people['Lena'], $nearlyFullNotebook, 'Nearly full', '2026-11-02 08:00:00+00', $pictures);
+        $tenthPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', $nearlyFullNotebook, 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $nearlyFullNotebook, 'upload_id' => $tenthPicture]);
+        self::assertSame(['notebook_id' => $nearlyFullNotebook, 'media_id' => $tenthPicture, 'status' => AddNotebookScreenshot::ADDED, 'screenshot_count' => 10], $this->answer());
+        $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
+
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $nearlyFullNotebook, 'upload_id' => $tenthPicture]);
+
+        self::assertSame(['notebook_id' => $nearlyFullNotebook, 'media_id' => $tenthPicture, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 10], $this->answer());
+        self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
+        self::assertSame(2, $this->screenshotsAndVersionOf($nearlyFullNotebook)[1]);
+        self::assertSame(array_fill(0, 2, [$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, $nearlyFullNotebook, AddNotebookScreenshot::NAME, 'ok']), $this->toolRowsOf($this->acmeFoods));
     }
 
     /**

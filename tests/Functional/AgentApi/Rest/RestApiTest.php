@@ -306,13 +306,13 @@ final class RestApiTest extends WebTestCase
     }
 
     /**
-     * Lena makes a notebook twice with one Idempotency-Key, begins an upload for it and adds a picture: one notebook,
-     * the picture in it, and no ticket.
+     * Lena makes a notebook twice with one Idempotency-Key, begins an upload for it and adds a picture, then sends the
+     * add again without a key, as after a lost answer: one notebook, the picture in it once, and no ticket.
      */
     #[Test]
     public function theOwnerMakesANotebookOnceForOneIdempotencyKeyUploadsForItAndAddsAPictureWithoutATicket(): void
     {
-        [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
 
         $this->request($token, 'POST', '/api/v1/notebooks', ['title' => 'Coupon questions'], ['HTTP_IDEMPOTENCY_KEY' => 'notebook-1']);
         self::assertResponseStatusCodeSame(201);
@@ -334,7 +334,14 @@ final class RestApiTest extends WebTestCase
         $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/screenshots', ['upload_id' => $uploadId, 'title' => 'Cart total']);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['notebook_id' => $notebookId, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ADDED, 'screenshot_count' => 1], $this->json());
-        self::assertSame([[$notebookId, 'Coupon questions', 1]], $this->rowsOf('SELECT id, title, jsonb_array_length(screenshots) FROM rvw_notebook'));
+        self::assertSame([[$notebookId, 'Coupon questions', 1, 2]], $this->rowsOf('SELECT id, title, jsonb_array_length(screenshots), version FROM rvw_notebook'));
+
+        $this->request($token, 'POST', '/api/v1/notebooks/'.$notebookId.'/screenshots', ['upload_id' => $uploadId, 'title' => 'Cart total']);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['notebook_id' => $notebookId, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 1], $this->json());
+        self::assertNull($this->client->getResponse()->headers->get(RestToolController::REPLAYED_HEADER), 'Sent without a key, it ran again.');
+        self::assertSame([[$notebookId, 'Coupon questions', 1, 2]], $this->rowsOf('SELECT id, title, jsonb_array_length(screenshots), version FROM rvw_notebook'));
+        self::assertSame([[$tokenId, 'ok'], [$tokenId, 'ok']], $this->toolAuditRowsOf(AddNotebookScreenshot::NAME));
         self::assertSame(0, $this->rowCountOf('tkt_ticket'));
     }
 

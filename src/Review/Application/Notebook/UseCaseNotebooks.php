@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Review\Application\Notebook;
 
 use App\Identity\Api\CurrentUser;
+use App\Review\Api\AddedNotebookScreenshot;
 use App\Review\Api\NotebookCursor;
 use App\Review\Api\NotebookPermission;
 use App\Review\Api\NotebookRefused;
@@ -56,19 +57,26 @@ final readonly class UseCaseNotebooks implements Notebooks
         return $notebook->id()->toString();
     }
 
-    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int
+    /**
+     * In ReportDrafts::addScreenshot's order: the picture's own rules, then the picture there already, then the cap.
+     */
+    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedNotebookScreenshot
     {
         $notebook = $this->editableNotebook($notebookId);
-        $changed = self::obeyingTheRules(static fn (): Notebook => $notebook->withScreenshotAdded(NotebookScreenshot::of(
+        $checked = self::obeyingTheRules(static fn (): NotebookScreenshot => NotebookScreenshot::of(
             $screenshot->mediaId,
             $screenshot->title,
             $screenshot->summary,
             array_map(static fn (PlacedPin $pin): NotebookPin => NotebookPin::placed($pin->xPercent, $pin->yPercent, $pin->note), $screenshot->pins),
-        ), $at));
-        $this->refuseUnlessOwnUsablePicture($notebook, $screenshot->mediaId);
+        ));
+        if ($notebook->holdsPicture($checked->mediaId())) {
+            return new AddedNotebookScreenshot(true, \count($notebook->screenshots()));
+        }
+        $changed = self::obeyingTheRules(static fn (): Notebook => $notebook->withScreenshotAdded($checked, $at));
+        $this->refuseUnlessOwnUsablePicture($notebook, $checked->mediaId());
         $this->save($changed);
 
-        return \count($changed->screenshots());
+        return new AddedNotebookScreenshot(false, \count($changed->screenshots()));
     }
 
     public function rename(string $notebookId, string $title, \DateTimeImmutable $at): void

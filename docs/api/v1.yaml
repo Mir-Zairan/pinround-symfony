@@ -197,8 +197,10 @@ paths:
     post:
       summary: Add a picture uploaded for this notebook at its end (add_notebook_screenshot, scope notebooks:write).
       description: >-
-        At most 10 pictures, each once. A picture still being processed is added and shows once ready. An upload begun
-        for anything but this notebook, or by anyone else, is 404.
+        At most 10 pictures; the 11th is 422. A picture in the notebook already is not added again
+        (`status: already_in_notebook`), so the call sent again without an Idempotency-Key changes nothing. A picture
+        still being processed is added and shows once ready. An upload begun for anything but this notebook, or by
+        anyone else, is 404.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -215,7 +217,7 @@ paths:
                 summary: { type: string, maxLength: 600 }
                 pins: { type: array, maxItems: 100, items: { type: object } }
       responses:
-        '200': { description: '{notebook_id, media_id, status: added, screenshot_count}' }
+        '200': { description: '{notebook_id, media_id, status: added | already_in_notebook, screenshot_count}' }
         '403': { $ref: '#/components/responses/Refused' }
         '404': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }

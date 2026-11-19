@@ -22,9 +22,9 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
 
 /**
- * add_notebook_screenshot over ScriptedNotebooks and ScriptedUploadCompletions: the answer is what Notebooks saved
- * under the row's lock, not what get() read before. Lena's notebook shows one picture when get() reads it; another
- * request may add more before the add locks the row. The clock is frozen on 10 Nov 2026, not today.
+ * add_notebook_screenshot over ScriptedNotebooks and ScriptedUploadCompletions: the answer is what Notebooks::addScreenshot
+ * read and saved over the version it read, not what get() read before. Lena's notebook shows one picture when get()
+ * reads it; another request may add more before the add reads it again. The clock is frozen on 10 Nov 2026, not today.
  */
 final class AddNotebookScreenshotTest extends TestCase
 {
@@ -45,12 +45,12 @@ final class AddNotebookScreenshotTest extends TestCase
     }
 
     /**
-     * get() shows one picture; under the lock the notebook holds three, so the add makes four, not two.
+     * get() shows one picture; when the add reads it the notebook holds three, so the add makes four, not two.
      */
     #[Test]
-    public function theCountIsTheOneNotebooksSavedUnderTheLockNotTheOneGetRead(): void
+    public function theCountIsTheOneNotebooksSavedNotTheOneGetRead(): void
     {
-        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), mediaIdsUnderLock: [self::FIRST_PICTURE, '0197a3c0-0000-7000-8000-00000000c012', '0197a3c0-0000-7000-8000-00000000c013']);
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), mediaIdsAtAdd: [self::FIRST_PICTURE, '0197a3c0-0000-7000-8000-00000000c012', '0197a3c0-0000-7000-8000-00000000c013']);
 
         $answer = $this->callWith($notebooks);
 
@@ -59,18 +59,42 @@ final class AddNotebookScreenshotTest extends TestCase
     }
 
     /**
-     * get() shows room for the picture; under the lock another request filled the notebook.
+     * get() shows room for the picture; before the add read it, another request filled the notebook.
      */
     #[Test]
     public function aNotebookFilledSinceGetReadItIsRefusedWithReviewsTextAndNothingIsAdded(): void
     {
         $tenPictures = array_map(static fn (int $number): string => \sprintf('0197a3c0-0000-7000-8000-0000000c01%02d', $number), range(1, 10));
-        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), mediaIdsUnderLock: $tenPictures);
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), mediaIdsAtAdd: $tenPictures);
 
         $refusal = $this->refusalOf($notebooks);
 
         self::assertSame(NotebookRule::TOO_MANY_SCREENSHOTS, $refusal->getMessage());
         self::assertSame([], $notebooks->added);
+    }
+
+    /**
+     * The call sent again, as after a lost answer: the picture is in the notebook already, as the tenth of ten, so the
+     * answer is already_in_notebook with the count the add read, not the cap's refusal, and nothing is added.
+     */
+    #[Test]
+    public function thePictureSentAgainIsAlreadyInTheFullNotebookAndNothingIsAdded(): void
+    {
+        $ninePictures = array_map(static fn (int $number): string => \sprintf('0197a3c0-0000-7000-8000-0000000c01%02d', $number), range(1, 9));
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), mediaIdsAtAdd: [...$ninePictures, self::UPLOAD]);
+
+        $answer = $this->callWith($notebooks);
+
+        self::assertSame(['notebook_id' => self::NOTEBOOK, 'media_id' => self::UPLOAD, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 10], $answer);
+        self::assertSame([], $notebooks->added);
+    }
+
+    #[Test]
+    public function theToolSaysARepeatedCallChangesNothing(): void
+    {
+        $annotations = $this->tool(new ScriptedNotebooks(null))->definition()->annotations;
+
+        self::assertSame([true, false], [$annotations?->idempotentHint, $annotations?->readOnlyHint]);
     }
 
     /**

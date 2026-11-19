@@ -11,7 +11,8 @@ namespace App\Review\Api;
  * lists only that person's rows of the tenant and asks no voter. Another person's notebook, another organization's,
  * and an unknown or malformed id are not found alike, and nothing changes. Every method runs in the caller's open
  * transaction whose tenant is the person's organization; a write is one read and one save that writes only over the
- * version it read, and counts as a use of the notebook.
+ * version it read, and counts as a use of the notebook; an addScreenshot that finds the picture there already saves
+ * nothing.
  */
 interface Notebooks
 {
@@ -44,18 +45,20 @@ interface Notebooks
     public function create(string $title, \DateTimeImmutable $at): string;
 
     /**
-     * Adds one picture at the end of the notebook. The picture is a Media object the person uploaded, still processing
-     * or ready, as an agent adds it right after its upload.
+     * Adds one picture at the end of the notebook, or does nothing when the picture is in it already, even when the
+     * notebook is full: the same call sent again, as after a lost answer, leaves the notebook and its version as they
+     * were. The picture is a Media object the person uploaded, still processing or ready, as an agent adds it right
+     * after its upload.
      *
-     * @return int the pictures the notebook holds after the add, as saved over the version read
+     * @return AddedNotebookScreenshot whether the picture was in the notebook already, and its picture count after the
+     *                                 call: as saved over the version read, or as read when nothing was saved
      *
-     * @throws NotebookRefused NOT_FOUND; at most MAX_SCREENSHOTS pictures, each once, and the picture's own rules
-     *                         (title, summary, pins); a RoundRefused MEDIA_ text for a picture that is not the person's
-     *                         upload or was rejected; NOTEBOOK_CHANGED when another request saved it meanwhile; nothing
-     *                         is saved
+     * @throws NotebookRefused NOT_FOUND; the picture's own rules (title, summary, pins); at most MAX_SCREENSHOTS
+     *                         pictures; a RoundRefused MEDIA_ text for a picture that is not the person's upload or was
+     *                         rejected; NOTEBOOK_CHANGED when another request saved it meanwhile; nothing is saved
      * @throws \LogicException when no transaction is open or no tenant is set
      */
-    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): int;
+    public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedNotebookScreenshot;
 
     /**
      * @throws NotebookRefused NOT_FOUND; a title rule; NOTEBOOK_CHANGED; nothing is saved

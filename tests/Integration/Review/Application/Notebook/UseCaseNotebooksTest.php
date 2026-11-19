@@ -11,6 +11,7 @@ use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\Roles;
 use App\Organization\Infrastructure\Doctrine\DbalMembershipQueries;
 use App\Organization\Infrastructure\Security\RequestScopedCurrentActor;
+use App\Review\Api\AddedNotebookScreenshot;
 use App\Review\Api\NotebookRefused;
 use App\Review\Api\Notebooks;
 use App\Review\Api\NotebooksPage;
@@ -273,9 +274,9 @@ final class UseCaseNotebooksTest extends KernelTestCase
         }
         $this->insert($notebook);
 
-        $screenshotCount = $this->committedAs('Lena', static fn (Notebooks $notebooks): int => $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins(self::mediaId(4), null, null, []), new \DateTimeImmutable(self::ADDED)));
+        $added = $this->committedAs('Lena', static fn (Notebooks $notebooks): AddedNotebookScreenshot => $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins(self::mediaId(4), null, null, []), new \DateTimeImmutable(self::ADDED)));
 
-        self::assertSame(4, $screenshotCount);
+        self::assertEquals(new AddedNotebookScreenshot(false, 4), $added);
         self::assertSame([4, 2], [\count($this->lenasNotebook()->screenshots), $this->lenasNotebook()->version]);
     }
 
@@ -308,24 +309,62 @@ final class UseCaseNotebooksTest extends KernelTestCase
     }
 
     /**
-     * The picture is Lena's own and ready, so only the notebook's rule of each picture once refuses it.
+     * The same add sent again, as after a lost answer: the picture is Lena's own and ready, so only the notebook's
+     * one copy of each picture keeps it from a second one. The answer says so, with the count read, and nothing is
+     * saved: not the version, the last use or the picture's title.
      */
     #[Test]
     #[DataProvider('thePictureTheNotebookHolds')]
-    public function aPictureTheNotebookHoldsAlreadyIsRefusedAndTheNotebookIsUnchanged(string $mediaId): void
+    public function aPictureTheNotebookHoldsAlreadyIsThereAlreadyAndTheNotebookIsUnchanged(string $mediaId): void
     {
         $this->insertLenasNotebook();
         $before = $this->storedRow(self::LENAS_NOTEBOOK);
         self::assertNotFalse($before);
 
-        $refused = $this->refusalOf('Lena', static function (Notebooks $notebooks) use ($mediaId): void {
-            $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins($mediaId, 'Again', null, []), new \DateTimeImmutable(self::ADDED));
-        });
+        $added = $this->committedAs('Lena', static fn (Notebooks $notebooks): AddedNotebookScreenshot => $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins($mediaId, 'Again', null, []), new \DateTimeImmutable(self::ADDED)));
 
-        self::assertSame([NotebookRuleBroken::SAME_PICTURE_TWICE, false], [$refused->getMessage(), $refused->isNotFound()]);
+        self::assertEquals(new AddedNotebookScreenshot(true, 1), $added);
         self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
         $view = $this->lenasNotebook();
         self::assertSame([[self::mediaId(1)], 1], [array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $view->screenshots), $view->version]);
+    }
+
+    /**
+     * Ten pictures, the tenth sent again: it is there already, not the cap's refusal.
+     */
+    #[Test]
+    public function thePictureAFullNotebookHoldsAlreadyIsThereAlreadyNotRefused(): void
+    {
+        $full = self::notebook(self::ACME_FOODS, self::LENAS_NOTEBOOK, self::LENA, self::CREATED);
+        foreach (range(1, 10) as $number) {
+            $full = $full->withScreenshotAdded(NotebookScreenshot::of(self::mediaId($number), 'Picture '.$number, null, []), new \DateTimeImmutable(self::CREATED));
+        }
+        $this->insert($full);
+        $before = $this->storedRow(self::LENAS_NOTEBOOK);
+        self::assertNotFalse($before);
+
+        $added = $this->committedAs('Lena', static fn (Notebooks $notebooks): AddedNotebookScreenshot => $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins(self::mediaId(10), 'Again', null, []), new \DateTimeImmutable(self::ADDED)));
+
+        self::assertEquals(new AddedNotebookScreenshot(true, 10), $added);
+        self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
+    }
+
+    /**
+     * The picture is in the notebook, but the repeat breaks a picture rule: the rule refuses first, as for report
+     * drafts.
+     */
+    #[Test]
+    public function aPictureTheNotebookHoldsWithATitleOverItsCapIsRefusedByThatRule(): void
+    {
+        $this->insertLenasNotebook();
+        $before = $this->storedRow(self::LENAS_NOTEBOOK);
+
+        $refused = $this->refusalOf('Lena', static function (Notebooks $notebooks): void {
+            $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins(self::mediaId(1), str_repeat('t', 121), null, []), new \DateTimeImmutable(self::ADDED));
+        });
+
+        self::assertSame([NotebookRuleBroken::PICTURE_TITLE_TOO_LONG, false], [$refused->getMessage(), $refused->isNotFound()]);
+        self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
     }
 
     /**

@@ -98,6 +98,21 @@ final readonly class Notebook
     }
 
     /**
+     * Whether one of its screenshots shows the Media object $mediaId, in any case.
+     */
+    public function holdsPicture(string $mediaId): bool
+    {
+        $lowercaseMediaId = strtolower($mediaId);
+        foreach ($this->screenshots as $screenshot) {
+            if ($screenshot->mediaId() === $lowercaseMediaId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * This notebook with $scenarios in place of its scenarios; ScenarioRules checked them, their number too.
      */
     public function withScenarios(Scenarios $scenarios, \DateTimeImmutable $at): self
