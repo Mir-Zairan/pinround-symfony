@@ -182,6 +182,84 @@ final class GetTicketTest extends WebTestCase
     }
 
     /**
+     * Lena's open question pauses SHOP-1 and Insight saved Omar's answer turn for it: the tool and the page both name
+     * that saved turn, not the one the turn rules would choose for a To do ticket.
+     */
+    #[Test]
+    public function nowAndNextOfASavedTurnAreTheLinesTheTicketPageShows(): void
+    {
+        $this->seedShop1();
+        $lena = $this->people['Lena']->id()->toString();
+        $omar = $this->people['Omar']->id()->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ? WHERE key = 'SHOP-1'",
+            [$omar, $lena],
+        ));
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)
+             SELECT organization_id, id, team_id, project_id, 'wait', ?, NULL, 'answer', 100, TIMESTAMPTZ '2026-11-09 08:30:00+00', visibility, reporter_id, assignee_id
+             FROM tkt_ticket WHERE key = 'SHOP-1'",
+            [$omar],
+        ));
+        [, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $this->callGetTicket($token, ['key' => 'SHOP-1']);
+        self::assertResponseStatusCodeSame(200);
+        $toolLines = [$this->responseValueAt('result', 'structuredContent', 'now'), $this->responseValueAt('result', 'structuredContent', 'next')];
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $page = $this->client->request('GET', '/t/SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Omar answers Lena’s question', $toolLines[0], 'The tool did not read the saved turn.');
+        self::assertSame([self::turnLineOf($page, 'now'), self::turnLineOf($page, 'next')], $toolLines);
+    }
+
+    /**
+     * In Code review the People section lists the code reviewer; the tool lists the same people with the same roles.
+     * The page shows one row per person and drops the reporter's role beside another, so the tool's roles are compared
+     * the same way.
+     */
+    #[Test]
+    public function thePeopleAndTheirRolesAreThoseOfThePagesPeopleSectionInCodeReview(): void
+    {
+        $this->seedShop1();
+        $reviewStep = Uuid::v7()->toRfc4122();
+        $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO wf_step (organization_id, id, team_id, name, grp, core_code, origin, position) VALUES (?, ?, NULL, 'Code review', 'check', 'review', 'core', 3)",
+            [$this->acmeFoods->toString(), $reviewStep],
+        ));
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE tkt_ticket SET step_id = ? WHERE key = 'SHOP-1'",
+            [$reviewStep],
+        ));
+        [, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $this->callGetTicket($token, ['key' => 'SHOP-1']);
+        self::assertResponseStatusCodeSame(200);
+        $toolPeople = $this->responseValueAt('result', 'structuredContent', 'people');
+        self::assertIsArray($toolPeople);
+        $toolRows = array_map(static function (mixed $person): array {
+            \assert(\is_array($person) && \is_string($person['name']) && \is_array($person['roles']));
+            $roles = array_map(static fn (mixed $role): string => \is_string($role) ? $role : throw new \UnexpectedValueException('A role code is not a string.'), $person['roles']);
+            if (\count($roles) > 1) {
+                $roles = array_values(array_diff($roles, ['reporter']));
+            }
+
+            return [preg_replace('~^<untrusted_text>(.*)</untrusted_text>$~', '$1', $person['name']), $roles];
+        }, $toolPeople);
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $page = $this->client->request('GET', '/t/SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        $pageRows = $page->filter('.people__row')->each(static fn (Crawler $row): array => [
+            preg_replace('/ \(you\)$/', '', $row->filter('.people__name')->text()),
+            self::roleCodesOf($row->filter('.people__role')->text()),
+        ]);
+        self::assertSame([['Omar', ['assignee']], ['Mia', ['tester']], ['Lena', ['reviewer']]], $pageRows, 'The page lists no code reviewer, so the comparison proves nothing.');
+        self::assertSame($pageRows, $toolRows);
+    }
+
+    /**
      * A Mobile-only ticket, which Omar, of Shop only and on no role of it, may not see: the answer is the same as for a
      * key that does not exist.
      */
@@ -450,6 +528,24 @@ final class GetTicketTest extends WebTestCase
         }
 
         return preg_replace('/^'.ucfirst($line).':\s+/', '', $paragraph->text());
+    }
+
+    /**
+     * The role codes of a People row's role line, without the person's job and the turn marker.
+     *
+     * @return list<string>
+     */
+    private static function roleCodesOf(string $roleLine): array
+    {
+        $codes = [];
+        foreach (explode(' · ', $roleLine) as $word) {
+            $code = ['Assignee' => 'assignee', 'Reporter' => 'reporter', 'Code reviewer' => 'reviewer', 'Tester for the team' => 'tester'][$word] ?? null;
+            if (null !== $code) {
+                $codes[] = $code;
+            }
+        }
+
+        return $codes;
     }
 
     /**
