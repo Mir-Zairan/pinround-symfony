@@ -296,7 +296,8 @@ final class RestApiTest extends WebTestCase
         self::assertCount(1, $screenshots);
         self::assertSame(['screenshot_id' => $screenshots[0]['id'], 'round_id' => $miasDraft, 'status' => AddScreenshot::ADDED, 'pin_count' => 0], $this->json());
         self::assertSame([0, 'Cart total'], [$screenshots[0]['position'], $screenshots[0]['title']]);
-        self::assertSame([[$tokenId, 'not_found'], [$tokenId, 'ok']], $this->addScreenshotAuditRows());
+        // Both calls share the frozen clock's time, so their rows tie on `at` and their order is not defined.
+        self::assertEqualsCanonicalizing([[$tokenId, 'not_found'], [$tokenId, 'ok']], $this->addScreenshotAuditRows());
     }
 
     private function addTodoStep(): string
