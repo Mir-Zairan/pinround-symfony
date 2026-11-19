@@ -18,3 +18,5 @@ tests/e2e/node_modules/
 tests/e2e/test-results/
 tests/e2e/playwright-report/
 tests/e2e/.auth/
+# The browser extension is loaded into Chrome from the repository; the app image does not serve it.
+extension/

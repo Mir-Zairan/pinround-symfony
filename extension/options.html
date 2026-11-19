@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>pinround extension options</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="module" src="src/options/options.js"></script>
+</head>
+<body>
+    <h1>Connect to pinround</h1>
+    <form id="pair-form">
+        <label>
+            pinround address
+            <input id="origin" type="url" required placeholder="https://pinround.acme-foods.example" autocomplete="off">
+        </label>
+        <label>
+            Personal access token
+            <input id="token" type="password" required autocomplete="off" spellcheck="false">
+        </label>
+        <p class="hint">Make the token in pinround under API tokens. Tick "rounds:write" to add screenshots to your draft rounds, and "reports:write" to make report drafts. The token stays in this browser profile only.</p>
+        <button type="submit">Save and check</button>
+    </form>
+
+    <section id="paired" hidden>
+        <p class="hint" id="paired-to"></p>
+        <button type="button" class="secondary" id="sign-out">Sign out</button>
+        <p class="hint">Sign out revokes the token in pinround, so it stops working everywhere.</p>
+    </section>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+</body>
+</html>

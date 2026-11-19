@@ -273,6 +273,8 @@ jobs:
           node-version: "22.12"
           cache: npm
           cache-dependency-path: tests/e2e/package-lock.json
+      - name: Run the browser extension's unit tests
+        run: node --test extension/tests/*.test.mjs
       - run: npm ci
         working-directory: tests/e2e
       - run: npx playwright install --with-deps chromium

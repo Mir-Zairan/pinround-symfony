@@ -173,6 +173,27 @@ final class RestApiTest extends WebTestCase
         }
     }
 
+    /**
+     * The extension's sign-out (P10.T8): the token revokes itself and stops working at once; another token of the same
+     * person keeps working.
+     */
+    #[Test]
+    public function aTokenRevokesItselfAndTheNextCallIsRefused(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
+        [, $otherToken] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
+
+        $this->request($token, 'POST', '/api/v1/me/token/revoke');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['revoked' => true], $this->json());
+        self::assertSame('2026-11-10 09:00:20', $this->usageOf($tokenId, $this->acmeFoods)['revoked_at']);
+
+        $this->request($token, 'GET', '/api/v1/me/tickets');
+        self::assertResponseStatusCodeSame(401);
+        $this->request($otherToken, 'GET', '/api/v1/me/tickets');
+        self::assertResponseStatusCodeSame(200);
+    }
+
     #[Test]
     public function aBodyThatIsNoJsonObjectIsABadRequestAndRunsNothing(): void
     {

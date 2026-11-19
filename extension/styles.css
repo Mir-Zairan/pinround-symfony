@@ -1,0 +1,100 @@
+/* The popup and the options page. Plain system UI; the extension loads no font or script from elsewhere. */
+:root {
+    color-scheme: light dark;
+    --gap: 12px;
+    --radius: 8px;
+    --border: #8a8f98;
+    --primary: #2f6fd6;
+    --error: #b3261e;
+    font: 14px/1.4 system-ui, sans-serif;
+}
+
+body {
+    margin: 0;
+    padding: 16px;
+    min-width: 320px;
+    max-width: 420px;
+}
+
+h1 {
+    font-size: 16px;
+    margin: 0 0 var(--gap);
+}
+
+form,
+fieldset {
+    display: grid;
+    gap: var(--gap);
+}
+
+fieldset {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--gap);
+}
+
+label {
+    display: grid;
+    gap: 4px;
+}
+
+input,
+select,
+textarea,
+button {
+    font: inherit;
+}
+
+input,
+select,
+textarea {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+button {
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--primary);
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+}
+
+button.secondary {
+    background: transparent;
+    color: var(--primary);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.hint {
+    margin: 0;
+    opacity: 0.8;
+}
+
+.status {
+    margin: var(--gap) 0 0;
+    min-height: 1.4em;
+}
+
+.status.error {
+    color: var(--error);
+}
+
+.captures {
+    margin: 0;
+    padding-left: 20px;
+}

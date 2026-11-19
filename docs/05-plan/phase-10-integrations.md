@@ -157,7 +157,7 @@ NFR-SEC-01, NFR-SEC-05, NFR-SEC-10, NFR-SEC-14, NFR-AVL-05, NFR-PERF-09, NFR-OPS
 - **Files:** `extension/manifest.json`, `extension/src/capture/*`.
 - **Acceptance:**
   - [ ] Works end to end on the dev stack with a hard-coded dev token; the screenshot passes the normal media validation.
-  - [ ] The manifest asks only for the permissions listed in the guide.
+  - [x] The manifest asks only for the permissions listed in the guide. (`extension/tests/pairing.test.mjs`, "the manifest asks for exactly the permissions the guide lists, and for no host": `activeTab` and `storage`, no host permission, no content script.)
 - **Tests:** API functional tests (already from P09.T7); a manual test checklist.
 - **Prototype check:** Report a problem screenshot area.
 - **Size:** M
@@ -171,8 +171,8 @@ NFR-SEC-01, NFR-SEC-05, NFR-SEC-10, NFR-SEC-14, NFR-AVL-05, NFR-PERF-09, NFR-OPS
   4. Write `docs/guides/browser-extension.md` (install, pair, capture, sign out, permissions and why).
 - **Files:** `extension/src/options/*`, `docs/guides/browser-extension.md`.
 - **Acceptance:**
-  - [ ] Sign-out revokes the token on the server.
-  - [ ] Requests to any host other than the configured address are refused by the extension.
+  - [x] Sign-out revokes the token on the server. (`extension/tests/pairing.test.mjs`: sign out POSTs `/api/v1/me/token/revoke`, then forgets the token; `RestApiTest::aTokenRevokesItselfAndTheNextCallIsRefused`: the server revokes it and the next call is 401. Not run in a real browser yet; see the manual check in the guide.)
+  - [x] Requests to any host other than the configured address are refused by the extension. (`extension/tests/api.test.mjs`: a path to another origin or outside `/api/v1/` is refused before any request; a PUT goes only to a `put_url` the configured origin answered, once.)
 - **Tests:** functional test of the pairing endpoint (if built); manual checklist in the guide.
 - **Prototype check:** "Capture with pinround" button text on Report a problem.
 - **Size:** M
@@ -200,3 +200,4 @@ NFR-SEC-01, NFR-SEC-05, NFR-SEC-10, NFR-SEC-14, NFR-AVL-05, NFR-PERF-09, NFR-OPS
 - Phase 11 builds the remaining admin pages; Connections from this phase stays as is.
 - Record the chosen OIDC library, Jira API version and extension pairing choice here.
 - 2026-11-19 (plan change): [phase 13](phase-13-capture-explore-and-scenarios.md) builds on P10.T7 and P10.T8 (pin overlay, session target, notebooks, scenario player). [ADR-0045](../03-adr/0045-evidence-is-captured-where-the-person-works.md) was accepted on 2026-11-19, so give the pairing page optional `reports:write` and `notebooks:write` scopes instead of `rounds:write` only, and request `activeTab` and `chrome.scripting` so P13.T5 needs no permission change.
+- 2026-11-19 (P10.T7, P10.T8): the extension is in `extension/` (Chrome MV3, plain ES modules, no build, no dependencies; `node --test extension/tests/*.test.mjs`, also a CI step in the e2e job). Pairing choice: the person pastes a personal access token on the options page; there is no pairing page in pinround. Sign-out calls the new `POST /api/v1/me/token/revoke` (Identity, `CurrentApiTokenVoter`: only a token login, only its own token). Per ADR-0045 a capture goes to a report draft (`POST /api/v1/uploads` with `project`, then `POST /api/v1/reports`) or to the person's draft round on a ticket, not to the Report a problem page; the token needs `read` plus `rounds:write` and/or `reports:write`. pinround must list the extension's origin in `EXTENSION_ORIGINS`, and the storage's CORS must allow it for PUT (`MINIO_CORS_ALLOW_ORIGIN` in dev). Still open: P10.T7's end-to-end run on the dev stack (the guide's manual check is not run yet), and step 3 of P10.T8, the "Capture with pinround" note on Report a problem, because that page (P06.T1 steps 1 to 4) is not built.
