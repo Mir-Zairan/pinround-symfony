@@ -7,6 +7,12 @@
     gap: var(--space-12);
 }
 
+/* A draft's title is the link to its page; without this it shows the browser's own blue and visited purple. */
+.report-drafts__card a {
+    color: var(--primary);
+    overflow-wrap: anywhere;
+}
+
 .report-draft__detail {
     min-height: 8rem;
     resize: vertical;
