@@ -64,8 +64,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - **Acceptance:**
   - [x] Mia may start a draft in Testing on a ticket she can see; she is refused when it is not her turn, with the reason, and nothing is created. (`DraftRoundControllerTest::theTesterWhoseTurnItIsStartsHerOwnDraftAndTheLeadIsStillRefused`; Mia refused on a ticket that is nobody else's turn in `noOneButTheAssigneeSeesTheStartButtonOrMayStartADraftWhileItIsNobodyElsesTurn`, toast `DraftRoundController::ONLY_THE_ASSIGNEE_OR_TURN_STARTS`; `VoterMatrixTest` rows "Shop ticket in Testing, Mia's turn".)
   - [x] Lena may start one in Code review; Sara (admin, not on the team) is refused. (`DraftRoundCreationVoterTest::thePersonWhoseTurnItIsMayStartADraftOnATicketTheyMaySee`, case "Lena, the reviewer"; Sara in `itRefuses` and in the `VoterMatrixTest` rows.)
-  - [ ] Omar, Lena and Sara cannot see Mia's unshared draft (HTML, queries, direct URLs; added to the visibility leak suite). Partly proven, see the 2026-11-19 P13.T1 hand-off line.
-  - [ ] "Needs changes" with Mia's draft holding screenshots asks the dialog once; Cancel moves and shares nothing. Partly proven, see the 2026-11-19 P13.T1 hand-off line.
+  - [x] Omar, Lena and Sara cannot see Mia's unshared draft (HTML, queries, direct URLs; added to the visibility leak suite). (`UnsharedDraftLeakTest`; `DraftRoundControllerTest::theTestersUnsharedDraftIsNotFoundAtEveryUrlForTheAssigneeTheLeadTheAdminAndAnotherOrganization`: 404 at every URL except the upload begin, which answers 403 "You may not add a file here." exactly as for an unknown round id; `DbalRoundQueriesTest::aDraftOfSomeoneOtherThanTheAssigneeIsLeftOutForEveryoneElse`.)
+  - [x] "Needs changes" with Mia's draft holding screenshots asks the dialog once; Cancel moves and shares nothing. (`TicketMoveDraftQuestionTest::aTestersNeedsChangesAsksOnceAboutOnlyHerDraftAndCancelMovesAndSharesNothing` and `::aTestersNextNeedsChangesAfterSheChoseAsksNothingMore`.)
 - **Tests:** voter unit tests; functional tests for the dialog on the new verbs; isolation test.
 - **Prototype check:** the existing draft round card and dialog texts; the card for a tester uses the same layout.
 - **Size:** M
@@ -92,9 +92,9 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   2. Text fields come back inside delimiters.
 - **Files:** `src/AgentApi/Infrastructure/Mcp/Tool/FindTickets.php`, tests beside the other tool tests.
 - **Acceptance:**
-  - [ ] Only tickets the caller may see come back; another organization's ticket and a team-only ticket of another team never do (visibility leak suite case).
-  - [ ] `text` over 200 characters is refused; a result list never holds more than 10.
-  - [ ] `may_start_draft` is true only where P13.T1's voter grants it.
+  - [x] Only tickets the caller may see come back; another organization's ticket and a team-only ticket of another team never do (visibility leak suite case). (`FindTicketsLeakTest::theCastsTeamOnlyTicketsAreFoundOnlyByAViewerWhoMaySeeThem` and `::eachViewerFindsExactlyTheOpenMatchesTheyMaySee…`; `FindTicketsTest::anotherOrganizationsTicketsAreNeverFound`; row-level security alone in `DbalTicketSearchQueriesTest`.)
+  - [x] `text` over 200 characters is refused; a result list never holds more than 10. (`FindTicketsTest::aTextOverTwoHundredCharactersIsRefusedBeforeAnyTicketQueryWithOneInvalidInputRow`, `::itReturnsAtMostTenSaysThereAreMoreAndSendsTheSameQueriesForOneMatchAsForTwelve`, exactly 10 with `has_more` false; guards in `DbalTicketSearchQueriesTest`.)
+  - [x] `may_start_draft` is true only where P13.T1's voter grants it. (`FindTicketsLeakTest::mayStartDraftIsTheDraftRoundCreationVotersDecision` compares every result with `DraftRoundCreationVoter`.)
 - **Tests:** MCP contract tests; leak suite case; query count.
 - **Prototype check:** none.
 - **Size:** S
