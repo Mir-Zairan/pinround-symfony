@@ -46,9 +46,11 @@ final class NotebookMediaTargetTest extends TestCase
     }
 
     /**
-     * The token's user, who is asked about, the organization and the notebook id.
+     * The token's user, who is asked about, the organization, the notebook id, and the person Notebooks acts for (the
+     * token's user unless named). A row whose Notebooks would find the notebook is refused by NotebookMediaTarget's own
+     * check alone.
      *
-     * @return iterable<string, array{TokenInterface, string, string, string}>
+     * @return iterable<string, array{0: TokenInterface, 1: string, 2: string, 3: string, 4?: string}>
      */
     public static function refusedUploads(): iterable
     {
@@ -56,19 +58,23 @@ final class NotebookMediaTargetTest extends TestCase
         yield 'an unknown id' => [self::tokenOf(self::LENA), self::LENA, self::ACME_FOODS, '0197a3c0-0000-7000-8000-0000000018e9'];
         yield 'a malformed id' => [self::tokenOf(self::LENA), self::LENA, self::ACME_FOODS, 'not-a-notebook'];
         yield 'asked about another person' => [self::tokenOf(self::OMAR), self::LENA, self::ACME_FOODS, self::LENAS_NOTEBOOK];
+        yield 'the owner logged in, asked about another person' => [self::tokenOf(self::LENA), self::OMAR, self::ACME_FOODS, self::LENAS_NOTEBOOK];
         yield 'another organization than the actor\'s' => [self::tokenOf(self::LENA), self::LENA, self::BETA_BAKERY, self::LENAS_NOTEBOOK];
         yield 'an admin of another organization' => [self::tokenOf(self::BEN), self::BEN, self::BETA_BAKERY, self::LENAS_NOTEBOOK];
-        yield 'nobody logged in' => [new NullToken(), self::LENA, self::ACME_FOODS, self::LENAS_NOTEBOOK];
+        yield 'nobody logged in, though Notebooks would find it' => [new NullToken(), self::LENA, self::ACME_FOODS, self::LENAS_NOTEBOOK, self::LENA];
     }
 
     #[Test]
     #[DataProvider('refusedUploads')]
-    public function anyoneButTheOwnerAndAnyOtherTargetIsRefused(TokenInterface $token, string $askedAbout, string $organizationId, string $notebookId): void
+    public function anyoneButTheOwnerAndAnyOtherTargetIsRefused(TokenInterface $token, string $askedAbout, string $organizationId, string $notebookId, ?string $notebooksActFor = null): void
     {
-        self::assertFalse(self::targetFor($token)->mayAttach(new OrganizationId($organizationId), new UserId($askedAbout), $notebookId));
+        self::assertFalse(self::targetFor($token, $notebooksActFor)->mayAttach(new OrganizationId($organizationId), new UserId($askedAbout), $notebookId));
     }
 
-    private static function targetFor(TokenInterface $token): NotebookMediaTarget
+    /**
+     * @param string|null $notebooksActFor whom the fake Notebooks finds notebooks for; null for the token's user
+     */
+    private static function targetFor(TokenInterface $token, ?string $notebooksActFor = null): NotebookMediaTarget
     {
         $tokenStorage = new TokenStorage();
         $tokenStorage->setToken($token);
@@ -81,7 +87,7 @@ final class NotebookMediaTargetTest extends TestCase
         $user = $token->getUser();
         $loggedIn = $user instanceof InMemoryUser ? $user->getUserIdentifier() : null;
 
-        return new NotebookMediaTarget($tokenStorage, $currentActor, self::notebooksOf($loggedIn));
+        return new NotebookMediaTarget($tokenStorage, $currentActor, self::notebooksOf($notebooksActFor ?? $loggedIn));
     }
 
     private static function notebooksOf(?string $loggedIn): Notebooks

@@ -6,11 +6,12 @@ namespace App\Review\Api;
 
 /**
  * A person's private notebooks (ADR-0046): pinned screenshots to ask their agent about, and the scenarios the agent
- * wrote for the extension to play. Every method acts for the request's logged-in person, its owner, and checks
- * NotebookPermission on the notebook through NotebookVoter. Another person's notebook, another organization's, and an
- * unknown or malformed id are not found alike, and nothing changes. Every method runs in the caller's open transaction
- * whose tenant is the person's organization; a write is one read and one save that writes only over the version it
- * read, and counts as a use of the notebook.
+ * wrote for the extension to play. Every method acts for the request's logged-in person, its owner. Each read or write
+ * of one notebook asks NotebookVoter for NotebookPermission on it (create asks it before the notebook exists); forOwner
+ * lists only that person's rows of the tenant and asks no voter. Another person's notebook, another organization's,
+ * and an unknown or malformed id are not found alike, and nothing changes. Every method runs in the caller's open
+ * transaction whose tenant is the person's organization; a write is one read and one save that writes only over the
+ * version it read, and counts as a use of the notebook.
  */
 interface Notebooks
 {
@@ -78,7 +79,7 @@ interface Notebooks
 
     /**
      * One notebook of the person, or null for a malformed or unknown id, another person's and another organization's
-     * notebook alike. Reading it is no use: its last use time stays.
+     * notebook, and with nobody logged in, alike. Reading it is no use: its last use time stays.
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */

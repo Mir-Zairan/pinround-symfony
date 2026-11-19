@@ -14,6 +14,7 @@ use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\DraftRoundAsRead;
 use App\Review\Application\DraftRoundContents;
+use App\Review\Application\PicturesToKeep;
 use App\Review\Application\ReportDraft\UseCaseReportDrafts;
 use App\Review\Infrastructure\Doctrine\DbalReportDraftRows;
 use App\SharedKernel\Application\TenantContext;
@@ -315,7 +316,7 @@ final class UseCaseReportDraftsTest extends KernelTestCase
             self::createStub(TicketCommands::class),
             $ticketKeys,
             self::createStub(RoundCommands::class),
-            new InMemoryUploadedMedia($tenantContext, $uploads),
+            new PicturesToKeep(new InMemoryUploadedMedia($tenantContext, $uploads)),
             $tenantContext,
             $draftRoundContents ?? self::createStub(DraftRoundContents::class),
         );

@@ -79,6 +79,16 @@ final class NotebookVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->voterUnder(null)->vote(self::tokenOf(self::LENA), self::lenasNotebook(), [NotebookPermission::VIEW]));
     }
 
+    /**
+     * The notebook is Lena's and of the tenant, so only the tenant not being her actor's organization denies it.
+     */
+    #[Test]
+    #[DataProvider('attributes')]
+    public function theOwnersActorOfAnotherOrganizationThanTheTenantIsRefusedHerNotebookOfTheTenant(string $attribute): void
+    {
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->voterUnder(self::BETA_BAKERY)->vote(self::tokenOf(self::LENA), self::lenasNotebook(self::BETA_BAKERY), [$attribute]));
+    }
+
     #[Test]
     public function itAbstainsOnOtherAttributesAndSubjects(): void
     {

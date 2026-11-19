@@ -13,6 +13,7 @@ use App\Organization\Infrastructure\Doctrine\DbalMembershipQueries;
 use App\Organization\Infrastructure\Security\RequestScopedCurrentActor;
 use App\Review\Api\NotebookRefused;
 use App\Review\Api\Notebooks;
+use App\Review\Api\NotebooksPage;
 use App\Review\Api\NotebookSummary;
 use App\Review\Api\NotebookView;
 use App\Review\Api\ReportDraftContent;
@@ -20,6 +21,7 @@ use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\Notebook\UseCaseNotebooks;
+use App\Review\Application\PicturesToKeep;
 use App\Review\Domain\Notebook\Notebook;
 use App\Review\Domain\Notebook\NotebookId;
 use App\Review\Domain\Notebook\NotebookPin;
@@ -276,6 +278,66 @@ final class UseCaseNotebooksTest extends KernelTestCase
         self::assertSame(NotebookRuleBroken::TOO_MANY_SCREENSHOTS, $refused->getMessage());
         self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
         self::assertCount(10, $this->lenasNotebook()->screenshots);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function thePictureTheNotebookHolds(): iterable
+    {
+        yield 'in lowercase' => [self::mediaId(1)];
+        yield 'in capitals' => [strtoupper(self::mediaId(1))];
+    }
+
+    /**
+     * The picture is Lena's own and ready, so only the notebook's rule of each picture once refuses it.
+     */
+    #[Test]
+    #[DataProvider('thePictureTheNotebookHolds')]
+    public function aPictureTheNotebookHoldsAlreadyIsRefusedAndTheNotebookIsUnchanged(string $mediaId): void
+    {
+        $this->insertLenasNotebook();
+        $before = $this->storedRow(self::LENAS_NOTEBOOK);
+        self::assertNotFalse($before);
+
+        $refused = $this->refusalOf('Lena', static function (Notebooks $notebooks) use ($mediaId): void {
+            $notebooks->addScreenshot(self::LENAS_NOTEBOOK, new ScreenshotWithPins($mediaId, 'Again', null, []), new \DateTimeImmutable(self::ADDED));
+        });
+
+        self::assertSame([NotebookRuleBroken::SAME_PICTURE_TWICE, false], [$refused->getMessage(), $refused->isNotFound()]);
+        self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
+        $view = $this->lenasNotebook();
+        self::assertSame([[self::mediaId(1)], 1], [array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $view->screenshots), $view->version]);
+    }
+
+    /**
+     * Lena's actor and token would let her through, so only the missing logged-in person refuses: a read or write by
+     * id is not found, and create and forOwner, which have no notebook to answer for, fail closed.
+     */
+    #[Test]
+    public function withNobodyLoggedInNothingIsFoundCreateAndTheListFailAndNothingChanges(): void
+    {
+        $this->insertLenasNotebook();
+        $before = $this->storedRow(self::LENAS_NOTEBOOK);
+        self::assertNotFalse($before);
+
+        $writes = self::writesOn(self::LENAS_NOTEBOOK);
+        self::assertNotEmpty($writes);
+        foreach ($writes as $method => $write) {
+            $refused = $this->thrownWithNobodyLoggedIn($write);
+            self::assertSame([NotebookRefused::class, NotebookRefused::NOT_FOUND], [$refused::class, $refused->getMessage()], $method);
+        }
+        $read = $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?NotebookView => $this->notebooksOf('Lena', true, $this->notebookRows(), isLoggedIn: false)->get(self::LENAS_NOTEBOOK));
+        $created = $this->thrownWithNobodyLoggedIn(static fn (Notebooks $notebooks): string => $notebooks->create('Cart page', new \DateTimeImmutable(self::ADDED)));
+        $listed = $this->thrownWithNobodyLoggedIn(static fn (Notebooks $notebooks): NotebooksPage => $notebooks->forOwner());
+
+        self::assertNull($read);
+        foreach (['create' => $created, 'forOwner' => $listed] as $method => $thrown) {
+            self::assertSame([\LogicException::class, 'Notebooks are a logged-in person\'s own; nobody is logged in.'], [$thrown::class, $thrown->getMessage()], $method);
+        }
+        self::assertSame($before, $this->storedRow(self::LENAS_NOTEBOOK));
+        self::assertSame([self::LENAS_NOTEBOOK], $this->storedIdsOf(self::ACME_FOODS), 'No notebook was made.');
+        self::assertSame(self::LENAS_NOTEBOOK, $this->lenasNotebook()->id, 'Logged in, she gets it.');
     }
 
     /**
@@ -591,7 +653,27 @@ final class UseCaseNotebooksTest extends KernelTestCase
         self::fail(\sprintf('%s was let through.', $person));
     }
 
-    private function notebooksOf(string $person, bool $hasActor, NotebookRows $rows): UseCaseNotebooks
+    /**
+     * Runs $work on Notebooks with Lena's token and actor but no logged-in person, committed under Acme Foods.
+     *
+     * @param \Closure(Notebooks): mixed $work
+     */
+    private function thrownWithNobodyLoggedIn(\Closure $work): \LogicException
+    {
+        try {
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): mixed => $work($this->notebooksOf('Lena', true, $this->notebookRows(), isLoggedIn: false)));
+        } catch (\LogicException $thrown) {
+            self::getContainer()->get('doctrine')->resetManager();
+
+            return $thrown;
+        }
+        self::fail('Nobody logged in was let through.');
+    }
+
+    /**
+     * @param bool $isLoggedIn false when CurrentUser finds nobody, while the token and actor NotebookVoter asks stay
+     */
+    private function notebooksOf(string $person, bool $hasActor, NotebookRows $rows, bool $isLoggedIn = true): UseCaseNotebooks
     {
         [$userId] = self::PEOPLE[$person];
         $tenantContext = self::getContainer()->get(TenantContext::class);
@@ -611,11 +693,11 @@ final class UseCaseNotebooksTest extends KernelTestCase
         $tokenStorage->setToken(new UsernamePasswordToken(new InMemoryUser($person, null), 'main'));
         $access = new SymfonyNotebookAccess(new AuthorizationChecker($tokenStorage, new AccessDecisionManager([new NotebookVoter(new FixedCurrentActor($actors), $tenantContext)])));
         $currentUser = self::createStub(CurrentUser::class);
-        $currentUser->method('id')->willReturn(new UserId($userId));
+        $currentUser->method('id')->willReturn($isLoggedIn ? new UserId($userId) : null);
         $uploadedMedia = self::getContainer()->get('test.media_uploaded_media');
         \assert($uploadedMedia instanceof UploadedMedia);
 
-        return new UseCaseNotebooks($rows, $access, $currentUser, $uploadedMedia, $tenantContext);
+        return new UseCaseNotebooks($rows, $access, $currentUser, new PicturesToKeep($uploadedMedia), $tenantContext);
     }
 
     /**
@@ -637,7 +719,7 @@ final class UseCaseNotebooksTest extends KernelTestCase
         $uploadedMedia = self::getContainer()->get('test.media_uploaded_media');
         \assert($uploadedMedia instanceof UploadedMedia);
 
-        return new UseCaseNotebooks($this->notebookRows(), $access, $currentUser, $uploadedMedia, $tenantContext);
+        return new UseCaseNotebooks($this->notebookRows(), $access, $currentUser, new PicturesToKeep($uploadedMedia), $tenantContext);
     }
 
     private function lenasNotebook(): NotebookView

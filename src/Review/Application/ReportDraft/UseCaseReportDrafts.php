@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Review\Application\ReportDraft;
 
-use App\Media\Api\MediaImageStatus;
-use App\Media\Api\UploadedMedia;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftCursor;
@@ -17,6 +15,7 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\DraftRoundContents;
+use App\Review\Application\PicturesToKeep;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -44,7 +43,7 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         private TicketCommands $ticketCommands,
         private TicketKeyQueries $ticketKeyQueries,
         private RoundCommands $roundCommands,
-        private UploadedMedia $uploadedMedia,
+        private PicturesToKeep $picturesToKeep,
         private TenantContext $tenantContext,
         private DraftRoundContents $draftRoundContents,
     ) {
@@ -195,20 +194,9 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
      */
     private function refuseUnlessOwnUsablePictures(OrganizationId $organizationId, UserId $owner, array $screenshots): void
     {
-        if ([] === $screenshots) {
-            return;
-        }
-        $mediaIds = array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $screenshots);
-        $states = $this->uploadedMedia->statesOf($organizationId, $owner, $mediaIds);
-        foreach ($mediaIds as $mediaId) {
-            $refusal = match ($states[$mediaId] ?? null) {
-                null => RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU,
-                MediaImageStatus::Rejected => RoundRefused::MEDIA_REJECTED,
-                MediaImageStatus::Pending, MediaImageStatus::Ready => null,
-            };
-            if (null !== $refusal) {
-                throw ReportDraftRefused::because($refusal);
-            }
+        $refusal = $this->picturesToKeep->refusalOf($organizationId, $owner, array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $screenshots));
+        if (null !== $refusal) {
+            throw ReportDraftRefused::because($refusal);
         }
     }
 

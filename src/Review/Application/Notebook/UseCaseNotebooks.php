@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace App\Review\Application\Notebook;
 
 use App\Identity\Api\CurrentUser;
-use App\Media\Api\MediaImageStatus;
-use App\Media\Api\UploadedMedia;
 use App\Review\Api\NotebookCursor;
 use App\Review\Api\NotebookPermission;
 use App\Review\Api\NotebookRefused;
@@ -15,8 +13,8 @@ use App\Review\Api\NotebooksPage;
 use App\Review\Api\NotebookSummary;
 use App\Review\Api\NotebookView;
 use App\Review\Api\PlacedPin;
-use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\PicturesToKeep;
 use App\Review\Domain\Notebook\Notebook;
 use App\Review\Domain\Notebook\NotebookCursor as RowsCursor;
 use App\Review\Domain\Notebook\NotebookId;
@@ -41,7 +39,7 @@ final readonly class UseCaseNotebooks implements Notebooks
         private NotebookRows $rows,
         private NotebookAccess $access,
         private CurrentUser $currentUser,
-        private UploadedMedia $uploadedMedia,
+        private PicturesToKeep $picturesToKeep,
         private TenantContext $tenantContext,
     ) {
     }
@@ -165,18 +163,11 @@ final readonly class UseCaseNotebooks implements Notebooks
     }
 
     /**
-     * A notebook may hold a picture still processing, as an agent adds it right after its upload.
-     *
      * @throws NotebookRefused with RoundRefused's MEDIA_NOT_UPLOADED_BY_YOU or MEDIA_REJECTED
      */
     private function refuseUnlessOwnUsablePicture(Notebook $notebook, string $mediaId): void
     {
-        $states = $this->uploadedMedia->statesOf($notebook->organizationId(), $notebook->ownerId(), [$mediaId]);
-        $refusal = match ($states[strtolower($mediaId)] ?? null) {
-            null => RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU,
-            MediaImageStatus::Rejected => RoundRefused::MEDIA_REJECTED,
-            MediaImageStatus::Pending, MediaImageStatus::Ready => null,
-        };
+        $refusal = $this->picturesToKeep->refusalOf($notebook->organizationId(), $notebook->ownerId(), [$mediaId]);
         if (null !== $refusal) {
             throw NotebookRefused::because($refusal);
         }
