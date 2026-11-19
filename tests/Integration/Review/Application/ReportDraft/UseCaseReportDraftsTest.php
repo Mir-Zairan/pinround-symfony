@@ -10,6 +10,7 @@ use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\DraftRoundContents;
 use App\Review\Application\ReportDraft\UseCaseReportDrafts;
 use App\Review\Infrastructure\Doctrine\DbalReportDraftRows;
 use App\SharedKernel\Application\TenantContext;
@@ -171,6 +172,7 @@ final class UseCaseReportDraftsTest extends KernelTestCase
             self::createStub(RoundCommands::class),
             new InMemoryUploadedMedia($tenantContext, $uploads),
             $tenantContext,
+            self::createStub(DraftRoundContents::class),
         );
     }
 

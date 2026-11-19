@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Review\UI;
 
 use App\Organization\Api\ActorContext;
+use App\Review\Api\ReportDraftRefused;
+use App\Review\Api\ReportDrafts;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
@@ -23,16 +25,17 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * The buttons of a private draft round in the Rounds section (P05.T8, ADR-0017, ticket-page.md, Draft round): "Start a
- * draft round", "Share with the team now" and "Delete draft". A change made answers with a redirect to the ticket's
- * Rounds section and its toast flashed. A refusal (a start the person may not make, an expired form, or a RoundRefused
+ * draft round", "Share with the team now", "Delete draft" and "Make it a new ticket" (ADR-0044). A change made answers
+ * with a redirect to the ticket's Rounds section and its toast flashed; "Make it a new ticket" to the new report draft's
+ * page instead. A refusal (a start the person may not make, an expired form, or a RoundRefused
  * other than NOT_FOUND) changes nothing and is a 422 toast stream for a Turbo form, and a redirect with the toast
  * flashed for any other form, as the ticket's other actions answer.
  *
  * Without the request transaction, as TicketMoveController: each action runs in a transaction of its own, so a refused
  * command leaves nothing and the toast is set only once the change is committed. In that order: a ticket the person may
- * not see is the ticket page's 404; on share and delete, a round id RoundQueries::accessFactsOf does not know (a
- * malformed one too), a round of another ticket, and a round RoundPermission VIEW or EDIT denies are all one 404, so
- * another person's draft cannot be told from a missing one; starting a draft without RoundPermission DRAFT_CREATE on a
+ * not see is the ticket page's 404; on share, delete and "Make it a new ticket", a round id RoundQueries::accessFactsOf
+ * does not know (a malformed one too), a round of another ticket, and a round RoundPermission VIEW, or EDIT (share and
+ * delete) or MOVE_TO_REPORT_DRAFT, denies are all one 404, so another person's draft cannot be told from a missing one; starting a draft without RoundPermission DRAFT_CREATE on a
  * ticket the person may see is refused with its toast, as the frame may show the button after the ticket changed;
  * then a form token that is not valid changes nothing.
  */
@@ -41,6 +44,7 @@ final class DraftRoundController extends AbstractController
     public const string START_ROUTE = 'review_draft_start';
     public const string SHARE_ROUTE = 'review_draft_share';
     public const string DELETE_ROUTE = 'review_draft_delete';
+    public const string NEW_TICKET_ROUTE = 'review_draft_new_ticket';
 
     public const string CSRF_FIELD = '_csrf_token';
 
@@ -48,6 +52,7 @@ final class DraftRoundController extends AbstractController
     /** With the round's number. */
     public const string DRAFT_SHARED = 'Shared with the team as round %d.';
     public const string DRAFT_DELETED = 'Draft round deleted.';
+    public const string MOVED_TO_REPORT_DRAFT = 'Your draft is a report draft now. Press Send to make the ticket.';
     public const string ONLY_THE_ASSIGNEE_OR_TURN_STARTS = 'Only the assignee, or the person whose turn it is, can start a draft round.';
 
     /** The flash type base.html.twig shows in its toast region. */
@@ -60,6 +65,7 @@ final class DraftRoundController extends AbstractController
         private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly RoundQueries $roundQueries,
         private readonly RoundCommands $roundCommands,
+        private readonly ReportDrafts $reportDrafts,
         private readonly RefusalAnswers $refusalAnswers,
         private readonly ClockInterface $clock,
     ) {
@@ -98,7 +104,7 @@ final class DraftRoundController extends AbstractController
         $now = $this->clock->now();
 
         return $this->respondToAction($request, $key, function () use ($key, $id, $csrfToken, $now): string {
-            $actor = $this->actorWhoMayEditRound($key, $id);
+            $actor = $this->actorWhoMayChangeRound($key, $id, RoundPermission::EDIT);
             $this->refuseAnExpiredForm($key, $csrfToken);
 
             return \sprintf(self::DRAFT_SHARED, $this->roundCommands->shareDraft($id, $actor->userId(), $now));
@@ -112,11 +118,30 @@ final class DraftRoundController extends AbstractController
         $now = $this->clock->now();
 
         return $this->respondToAction($request, $key, function () use ($key, $id, $csrfToken, $now): string {
-            $actor = $this->actorWhoMayEditRound($key, $id);
+            $actor = $this->actorWhoMayChangeRound($key, $id, RoundPermission::EDIT);
             $this->refuseAnExpiredForm($key, $csrfToken);
             $this->roundCommands->deleteDraft($id, $actor->userId(), $now);
 
             return self::DRAFT_DELETED;
+        });
+    }
+
+    #[Route('/t/{key}/rounds/{id}/new-ticket', name: self::NEW_TICKET_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function moveToReportDraft(string $key, string $id, Request $request): Response
+    {
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $now = $this->clock->now();
+
+        return $this->answerRefusalsOf($request, $key, function () use ($key, $id, $csrfToken, $now): Response {
+            $reportDraftId = $this->transactions->run(function () use ($key, $id, $csrfToken, $now): string {
+                $actor = $this->actorWhoMayChangeRound($key, $id, RoundPermission::MOVE_TO_REPORT_DRAFT);
+                $this->refuseAnExpiredForm($key, $csrfToken);
+
+                return $this->reportDrafts->createFromDraftRound($id, $actor->userId(), $now);
+            });
+            $this->addFlash(self::TOAST, self::MOVED_TO_REPORT_DRAFT);
+
+            return $this->redirectToRoute(ReportDraftController::PAGE_ROUTE, ['id' => $reportDraftId], Response::HTTP_SEE_OTHER);
         });
     }
 
@@ -125,12 +150,20 @@ final class DraftRoundController extends AbstractController
      */
     private function respondToAction(Request $request, string $key, callable $action): Response
     {
+        return $this->answerRefusalsOf($request, $key, fn (): Response => $this->redirectToTicket($key, $this->transactions->run($action(...))));
+    }
+
+    /**
+     * @param callable(): Response $change runs the change in its transaction and answers it once committed
+     */
+    private function answerRefusalsOf(Request $request, string $key, callable $change): Response
+    {
         if (null === $this->tenantContext->get()) {
             // Anonymous requests have no tenant, and the firewall sends the AccessDeniedException to the login page.
             throw $this->createAccessDeniedException();
         }
         try {
-            $toast = $this->transactions->run($action(...));
+            return $change();
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(RoundsController::NOT_FOUND);
         } catch (RefusedWithToast $refused) {
@@ -141,9 +174,13 @@ final class DraftRoundController extends AbstractController
             }
 
             return $this->respondToRefusal($request, $key, new RefusedWithToast($refused->getMessage()));
-        }
+        } catch (ReportDraftRefused $refused) {
+            if ($refused->isNotFound()) {
+                throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
+            }
 
-        return $this->redirectToTicket($key, $toast);
+            return $this->respondToRefusal($request, $key, new RefusedWithToast($refused->getMessage()));
+        }
     }
 
     private function respondToRefusal(Request $request, string $key, RefusedWithToast $refused): Response
@@ -160,16 +197,18 @@ final class DraftRoundController extends AbstractController
 
     /**
      * The round's own 404 for an unknown or malformed id, a round of another ticket, and one the person may not view or
-     * change, before the form is read (ADR-0017).
+     * may not change as $attribute says, before the form is read (ADR-0017).
+     *
+     * @param string $attribute RoundPermission EDIT or MOVE_TO_REPORT_DRAFT
      */
-    private function actorWhoMayEditRound(string $key, string $roundId): ActorContext
+    private function actorWhoMayChangeRound(string $key, string $roundId, string $attribute): ActorContext
     {
         $visible = $this->visibleTicketLookup->visibleTicketOf($key);
         $round = $this->roundQueries->accessFactsOf($roundId);
         if (null === $round
             || !$round->ticketId->equals($visible->ticket->id)
             || !$this->isGranted(RoundPermission::VIEW, $round)
-            || !$this->isGranted(RoundPermission::EDIT, $round)) {
+            || !$this->isGranted($attribute, $round)) {
             throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
         }
 
