@@ -293,6 +293,7 @@ final class CreateTicketTest extends KernelTestCase
             new DbalTicketHistory($this->connection()),
             $turnProjector,
             new MessengerTicketEvents(self::getContainer()->get('event.bus'), $this->connection()),
+            new \App\Ticketing\Domain\Intake\CheckReasons(),
         );
     }
 

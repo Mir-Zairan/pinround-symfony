@@ -265,6 +265,11 @@ final class NewTicketTest extends WebTestCase
             {
             }
 
+            public function report(\App\Ticketing\Api\ProblemReport $report): \App\Ticketing\Api\ReportedTicket
+            {
+                throw $this->refusal;
+            }
+
             public function create(OrganizationId $organizationId, UserId $reporter, string $projectId, string $title, string $description, string $type, string $priority, ?UserId $assignee, \DateTimeImmutable $reportedAt): string
             {
                 throw $this->refusal;

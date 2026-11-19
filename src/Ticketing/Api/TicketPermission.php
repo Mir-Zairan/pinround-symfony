@@ -16,6 +16,12 @@ final class TicketPermission
     /** Create a ticket for a team on the team ticket form; the subject is that TeamId. Its Lead, Member or Viewer. */
     public const string CREATE = 'TICKET_CREATE';
 
+    /**
+     * Report a problem (P06.T1, ADR-0038): the intake is open to every role of the organization; the subject is the
+     * OrganizationId. TicketReportVoter decides it.
+     */
+    public const string REPORT = 'TICKET_REPORT';
+
     /** Change a ticket's fields; the subject is its TicketVisibilityFacts. A Lead or Member of the ticket's team. */
     public const string EDIT = 'TICKET_EDIT';
 

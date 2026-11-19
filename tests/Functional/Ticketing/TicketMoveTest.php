@@ -1306,6 +1306,11 @@ final class TicketMoveTest extends WebTestCase
             {
             }
 
+            public function report(\App\Ticketing\Api\ProblemReport $report): \App\Ticketing\Api\ReportedTicket
+            {
+                throw $this->fault;
+            }
+
             public function create(OrganizationId $organizationId, UserId $reporter, string $projectId, string $title, string $description, string $type, string $priority, ?UserId $assignee, \DateTimeImmutable $reportedAt): string
             {
                 throw new \LogicException('The move routes create no ticket.');

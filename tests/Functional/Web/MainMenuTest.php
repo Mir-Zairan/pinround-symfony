@@ -70,7 +70,7 @@ final class MainMenuTest extends WebTestCase
         $menu = $page->filter('header nav[aria-label="Main"]');
         self::assertSame($expectedItems, $menu->children()->each(static fn (Crawler $item): string => self::labelOf($item)));
         self::assertSame($expectedTeams, $menu->filter('.nav-menu__list > *')->each(static fn (Crawler $team): string => self::labelOf($team)));
-        self::assertSame($canReportProblems ? ['Report a problem'] : [], $page->filter('header button.btn-tonal')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame($canReportProblems ? ['Report a problem'] : [], $page->filter('header a.btn-tonal')->each(static fn (Crawler $button): string => $button->text()));
         self::assertCount($canReportProblems ? 1 : 0, $page->filter('header button.icon-btn[aria-label="Pings"]'));
     }
 
@@ -154,7 +154,7 @@ final class MainMenuTest extends WebTestCase
         $menu = $page->filter('header nav[aria-label="Main"]');
         self::assertSame(['Home'], $menu->children()->each(static fn (Crawler $item): string => self::labelOf($item)));
         self::assertNull($menu->filter('a.nav')->attr('aria-current'));
-        self::assertCount(0, $page->filter('header button.btn-tonal'));
+        self::assertCount(0, $page->filter('header a.btn-tonal'));
         self::assertCount(0, $page->filter('header button[aria-label="Pings"]'));
     }
 

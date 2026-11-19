@@ -270,6 +270,7 @@ final class CreateTicketTest extends TestCase
             $this->writes,
             $this->writes,
             $this->writes,
+            new \App\Ticketing\Domain\Intake\CheckReasons(),
         );
 
         return $createTicket->create(

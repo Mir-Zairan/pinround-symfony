@@ -1,0 +1,113 @@
+/* Report a problem (report.html.twig, report-a-problem.md). Chips are radio inputs inside .chip labels; the checked one
+   looks pressed, and keyboard focus shows on the label. */
+.report {
+  max-width: 760px;
+  margin: 0 auto;
+  display: grid;
+  gap: var(--space-16);
+}
+
+.report__title {
+  font-size: 28px;
+  margin: 0;
+}
+
+.report__lede {
+  margin: 0;
+  color: var(--on-surface-var, inherit);
+}
+
+.report__form {
+  display: grid;
+  gap: var(--space-16);
+}
+
+.report__field {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.report__where {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.report__chips {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--space-8);
+  align-items: start;
+}
+
+.report__chips[hidden] {
+  display: none;
+}
+
+.report__label {
+  float: left;
+  padding-top: 6px;
+  font-weight: 500;
+}
+
+.report__chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.report__chip {
+  cursor: pointer;
+}
+
+.report__chip:has(input:checked) {
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
+}
+
+.report__chip:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.report__chip:has(input:disabled) {
+  cursor: default;
+}
+
+.report__footer {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.report__preview:empty {
+  display: none;
+}
+
+.report__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
+.screenshot-report__capture summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.screenshot-report__capture summary::-webkit-details-marker {
+  display: none;
+}
+
+.screenshot-report__capture-help {
+  max-width: 48ch;
+  margin: var(--space-8) 0 0;
+}
+
+@media (max-width: 560px) {
+  .report__chips {
+    grid-template-columns: 1fr;
+  }
+}

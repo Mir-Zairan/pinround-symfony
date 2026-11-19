@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Ticketing\Domain\Intake;
 
+use App\Ticketing\Domain\Intake\CheckReason;
 use App\Ticketing\Domain\Intake\CheckReasons;
 use App\Ticketing\Domain\Intake\DraftReport;
+use App\Ticketing\Domain\Intake\ReportContext;
 use App\Ticketing\Domain\Intake\WordLists;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -14,11 +16,11 @@ use PHPUnit\Framework\TestCase;
 final class CheckReasonsTest extends TestCase
 {
     #[Test]
-    public function theSecurityListIsPinnedToItsVersion(): void
+    public function theListsArePinnedToTheirVersion(): void
     {
         self::assertSame(
             [
-                'version' => 2,
+                'version' => 3,
                 'security' => [
                     'secur\p{L}*', 'insecur\p{L}*', 'unsecur\p{L}*', 'cybersecur\p{L}*',
                     'leak\p{L}*',
@@ -31,10 +33,12 @@ final class CheckReasonsTest extends TestCase
                     'permission\p{L}*',
                     'other\s+tenants?', 'another\s+tenant',
                 ],
+                'risk extras' => ['tenants?', 'data\s+loss', 'lost\s+data', 'deleted', 'crash\p{L}*', 'down', 'can(?:not|\s+not|[\'’]t)\s+log\s*in', 'all\s+customers', 'everyone'],
             ],
             [
                 'version' => new \ReflectionClassConstant(WordLists::class, 'VERSION')->getValue(),
                 'security' => new \ReflectionClassConstant(WordLists::class, 'SECURITY')->getValue(),
+                'risk extras' => \array_slice(WordLists::RISK, \count(WordLists::SECURITY)),
             ],
         );
     }
@@ -149,5 +153,50 @@ final class CheckReasonsTest extends TestCase
     public function aDraftWithoutASecurityWordIsNotSensitive(DraftReport $draft): void
     {
         self::assertFalse(new CheckReasons()->isSecuritySensitive($draft));
+    }
+
+    /**
+     * @return iterable<string, array{DraftReport, ReportContext, list<CheckReason>}>
+     */
+    public static function reportsAndTheirReasons(): iterable
+    {
+        $fortyCharacters = str_repeat('é', 40);
+        $teamWithNoPins = new ReportContext(hasTeam: true, pinCount: 0);
+
+        yield 'a 40-character detail and a team: none' => [new DraftReport('Total is doubled', $fortyCharacters, []), $teamWithNoPins, []];
+        yield 'a 39-character detail and no pin: little info' => [new DraftReport('Total is doubled', str_repeat('é', 39), []), $teamWithNoPins, [CheckReason::LittleInfo]];
+        yield 'a 39-character detail with a pin: none' => [new DraftReport('Total is doubled', str_repeat('é', 39), ['here']), new ReportContext(hasTeam: true, pinCount: 1), []];
+        yield 'spaces do not count as detail' => [new DraftReport('Total is doubled', '   '.str_repeat('a', 38).'   ', []), $teamWithNoPins, [CheckReason::LittleInfo]];
+        yield 'Not sure: no team' => [new DraftReport('Total is doubled', $fortyCharacters, []), new ReportContext(hasTeam: false, pinCount: 0), [CheckReason::NoTeam]];
+        yield 'the whole word down: risky' => [new DraftReport('The shop is down', $fortyCharacters, []), $teamWithNoPins, [CheckReason::Risky]];
+        yield 'download is not down' => [new DraftReport('The download button is grey', $fortyCharacters, []), $teamWithNoPins, []];
+        yield 'cannot log in, in a pin note' => [new DraftReport('Front page', $fortyCharacters, ['I cannot log in here']), new ReportContext(hasTeam: true, pinCount: 1), [CheckReason::Risky]];
+        yield 'can’t login with a curly apostrophe' => [new DraftReport('Can’t login after reset', $fortyCharacters, []), $teamWithNoPins, [CheckReason::Risky]];
+        yield 'a security word is risky too' => [new DraftReport('Password shown in the URL', $fortyCharacters, []), $teamWithNoPins, [CheckReason::Risky]];
+        yield 'all customers, across a line end' => [new DraftReport('Prices wrong', "Seen by all\ncustomers since Monday morning, sadly.", []), $teamWithNoPins, [CheckReason::Risky]];
+        yield 'the AI and the page add theirs, in order' => [
+            new DraftReport('Total is doubled', $fortyCharacters, []),
+            new ReportContext(hasTeam: false, pinCount: 0, wasDuplicateShown: true, aiSaysInfoIsMissing: true, aiSaysRisky: true, everyNewTicketNeedsACheck: true),
+            [CheckReason::Duplicate, CheckReason::LittleInfo, CheckReason::NoTeam, CheckReason::Risky, CheckReason::CompanyRule],
+        ];
+    }
+
+    /**
+     * @param list<CheckReason> $expectedReasons
+     */
+    #[Test]
+    #[DataProvider('reportsAndTheirReasons')]
+    public function eachReportGetsExactlyItsReasons(DraftReport $draft, ReportContext $context, array $expectedReasons): void
+    {
+        self::assertSame($expectedReasons, new CheckReasons()->for($draft, $context));
+    }
+
+    #[Test]
+    public function eachReasonHasThePrototypesPhrase(): void
+    {
+        self::assertSame(
+            ['dupe' => 'maybe the same as an older ticket', 'info' => 'little detail and no pins', 'team' => 'no team was picked', 'risk' => 'it sounds risky', 'rule' => 'the company rule: every new ticket gets a lead check'],
+            array_combine(array_column(CheckReason::cases(), 'value'), array_map(static fn (CheckReason $reason): string => $reason->phrase(), CheckReason::cases())),
+        );
     }
 }
