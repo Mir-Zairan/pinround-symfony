@@ -213,6 +213,7 @@ services:
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
+    App\Ticketing\Api\TicketSearchQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketSearchQueries'
     App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
     App\Ticketing\Api\TicketSummaryQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketSummaryQueries'
     App\Ticketing\Api\TicketSummaryCommands: '@App\Ticketing\Application\CheckedTicketSummaryCommands'
