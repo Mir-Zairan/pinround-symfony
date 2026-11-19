@@ -435,6 +435,11 @@ textarea.screenshot-report__input {
   overflow-wrap: anywhere;
 }
 
+/* A part of a round's card under its h3, such as a findings round's checklist: one step smaller than the card's headline. */
+.round-card__headline--sub {
+  font-size: 14px;
+}
+
 .round-card__status,
 .round-card__description,
 .round-card__empty,
@@ -479,7 +484,7 @@ textarea.screenshot-report__input {
   color: var(--on-error-container);
 }
 
-/* The checklist round's card (ChecklistCard, ChecklistController). */
+/* A round's checklist: the checklist round's card, or a findings round's part (ChecklistCard, ChecklistController). */
 .checklist {
   display: flex;
   flex-direction: column;
@@ -508,9 +513,22 @@ textarea.screenshot-report__input {
   color: var(--on-error);
 }
 
-.checklist__note {
+.checklist__text {
+  display: flex;
   flex: 1 1 12rem;
+  flex-direction: column;
+  gap: var(--space-4);
   min-width: 0;
+}
+
+.checklist__pin {
+  margin: 0;
+  color: var(--on-surface-var);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.checklist__note {
   margin: 0;
   font-size: 14px;
   overflow-wrap: anywhere;

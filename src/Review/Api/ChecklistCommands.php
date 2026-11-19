@@ -33,21 +33,6 @@ interface ChecklistCommands
     public function createFromReport(TicketId $ticketId, \DateTimeImmutable $at): ?string;
 
     /**
-     * Makes one open item per pin of a shared draft round whose owner is not the ticket's assignee (a findings round,
-     * ADR-0044, FR-RND-17), on that round, which the assignee marks fixed and the tester checks as above. A self-check
-     * round, whose owner is the assignee, gets none. Call it once, in the transaction that shares the round, so a
-     * failure here rolls the share back too. No event is published.
-     *
-     * @param string $roundId the id of the round just shared, as RoundCommands has it
-     *
-     * @return int the number of items made; 0 for a self-check round or a round without pins
-     *
-     * @throws \LogicException when no transaction is open, no tenant is set, the round is not the tenant's shared draft,
-     *                         its ticket cannot be read, or the round has items already (a second call)
-     */
-    public function createFromFindings(string $roundId, \DateTimeImmutable $at): int;
-
-    /**
      * Marks an open or not-fixed item fixed, so the tester checks it; publishes ChecklistItemChanged and clears the
      * actor's pings on the ticket (FR-PNG-05).
      *

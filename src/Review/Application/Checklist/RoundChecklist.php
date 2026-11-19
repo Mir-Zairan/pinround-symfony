@@ -13,11 +13,15 @@ use App\Review\Api\ChecklistView;
 final readonly class RoundChecklist
 {
     /**
-     * @param bool $isFindings true for a findings round's items, false for the checklist round's
+     * @param bool                            $isFindings       true for a findings round's items, false for the
+     *                                                          checklist round's
+     * @param array<string, CheckItemPicture> $picturesByItemId the picture of each item's pin, by item id: the report's
+     *                                                          for the checklist round, the round's own for findings
      */
     public function __construct(
         public ChecklistView $checklist,
         public bool $isFindings,
+        public array $picturesByItemId,
     ) {
     }
 }

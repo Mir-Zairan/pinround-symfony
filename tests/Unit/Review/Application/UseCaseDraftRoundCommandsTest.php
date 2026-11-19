@@ -681,6 +681,8 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
         self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
         self::assertSame([[self::DRAFT, self::at()->format('Y-m-d H:i:s')]], $this->checklistCommands->findingsCreated, 'The shared round is offered as findings once, after its save.');
+        $offered = $this->checklistCommands->findingsRounds[0] ?? self::fail('No round was offered as findings.');
+        self::assertSame([2, $shared->version()], [$offered->number(), $offered->version()], 'The findings step gets the round as the share saved it.');
     }
 
     #[Test]

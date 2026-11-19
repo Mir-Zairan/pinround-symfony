@@ -26,31 +26,34 @@ final readonly class FindingsChecklist
     }
 
     /**
-     * @param UserId|null             $assigneeId the ticket's assignee as the share reads it; null when it has none,
-     *                                            so every shared draft of the ticket is findings
-     * @param \Closure(): CheckItemId $nextItemId called once per pin
+     * @param \Closure(): ?UserId     $assigneeOf the ticket's assignee as the share reads it, null when it has none,
+     *                                            so every shared draft of the ticket is findings; called at most once,
+     *                                            and only for a round with pins
+     * @param \Closure(): CheckItemId $nextItemId called once per pin of findings
      *
      * @return self|null null for a self-check round and for a round without pins, as there is nothing to check
      *
      * @throws \InvalidArgumentException when the round is not a shared draft, or was deleted
      */
-    public static function ofSharedDraft(Round $round, ?UserId $assigneeId, \Closure $nextItemId, \DateTimeImmutable $createdAt): ?self
+    public static function ofSharedDraft(Round $round, \Closure $assigneeOf, \Closure $nextItemId, \DateTimeImmutable $createdAt): ?self
     {
         if (RoundKind::Draft !== $round->kind() || null === $round->sharedAt() || null !== $round->deletedAt()) {
             throw new \InvalidArgumentException('Only a shared draft round has findings to check.');
         }
+        $pins = [];
+        foreach ($round->screenshots() as $screenshot) {
+            foreach ($screenshot->pins() as $pin) {
+                $pins[] = $pin;
+            }
+        }
+        if ([] === $pins) {
+            return null;
+        }
+        $assigneeId = $assigneeOf();
         if (null !== $assigneeId && $round->ownerId()->equals($assigneeId)) {
             return null;
         }
-        $items = [];
-        foreach ($round->screenshots() as $screenshot) {
-            foreach ($screenshot->pins() as $pin) {
-                $items[] = CheckItem::open($nextItemId(), $round->id(), $round->ticketId(), $pin->id());
-            }
-        }
-        if ([] === $items) {
-            return null;
-        }
+        $items = array_map(static fn (Pin $pin): CheckItem => CheckItem::open($nextItemId(), $round->id(), $round->ticketId(), $pin->id()), $pins);
 
         return new self($round->id(), $round->organizationId(), $createdAt, $items);
     }

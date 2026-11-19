@@ -9,6 +9,7 @@ use App\Review\Api\CheckItemView;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ChecklistView;
+use App\Review\Application\Checklist\CheckItemPicture;
 use App\Review\Application\Checklist\RoundChecklist;
 use App\Review\Application\Checklist\RoundChecklistQueries;
 use App\SharedKernel\Application\TenantContext;
@@ -215,11 +216,15 @@ final class DbalChecklistQueriesTest extends KernelTestCase
                 new CheckItemView($reportItemIds[0], 1, '', ChecklistCommands::STATE_OK),
                 new CheckItemView($reportItemIds[1], 2, 'Wrong total.', ChecklistCommands::STATE_OPEN),
                 new CheckItemView($reportItemIds[2], 1, 'Logo too small.', ChecklistCommands::STATE_OPEN),
-            ]), false),
+            ]), false, [
+                $reportItemIds[0] => new CheckItemPicture(0, null),
+                $reportItemIds[1] => new CheckItemPicture(0, null),
+                $reportItemIds[2] => new CheckItemPicture(1, null),
+            ]),
             self::FINDINGS => new RoundChecklist(new ChecklistView(self::FINDINGS, 2, [
                 new CheckItemView(self::CUT_TEXT_ITEM, 1, 'Text cut off.', ChecklistCommands::STATE_OPEN),
                 new CheckItemView(self::BADGE_ITEM, 2, 'Badge overlaps.', ChecklistCommands::STATE_FIXED),
-            ]), true),
+            ]), true, [self::CUT_TEXT_ITEM => new CheckItemPicture(0, null), self::BADGE_ITEM => new CheckItemPicture(0, null)]),
         ], $checklists);
         self::assertSame([$checklistRoundId, self::FINDINGS], array_keys($checklists));
     }
