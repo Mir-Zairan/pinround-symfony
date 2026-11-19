@@ -7,6 +7,7 @@ namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 use App\AgentApi\Infrastructure\Mcp\Tool\SaveScenarios;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\UntrustedText;
 use App\Review\Api\NotebookPermission;
 use App\Review\Api\NotebookRefused;
 use App\Review\Api\NotebookView;
@@ -43,7 +44,8 @@ final class SaveScenariosTest extends TestCase
 
     /**
      * The SDK gives JSON objects as PHP arrays; Notebooks::replaceScenarios wants json_decode($json)'s shape, so each
-     * keyed array is a stdClass at every depth and each list, the empty one included, stays a list.
+     * keyed array is a stdClass at every depth and each list stays a list. The scenario passes ScenarioRules, which
+     * ScriptedNotebooks runs as the real one does.
      */
     #[Test]
     public function theScenariosGoToReplaceScenariosWithTheirObjectsAsStdClassAndTheClocksTime(): void
@@ -51,9 +53,12 @@ final class SaveScenariosTest extends TestCase
         $notebooks = new ScriptedNotebooks(self::notebook());
         $scenarios = [[
             'title' => 'Coupon',
+            'why' => 'CartTotal::apply() lets the total go below 0.',
+            'setup' => '',
+            'start_url' => 'http://localhost:8000/cart?coupon=1&step=2',
             'steps' => [
                 ['type' => 'click', 'say' => 'Apply it.', 'target' => ['role' => 'button', 'name' => 'Apply']],
-                ['type' => 'pause', 'say' => 'Look.', 'target' => []],
+                ['type' => 'pause', 'say' => 'Look.'],
             ],
         ]];
 
@@ -61,9 +66,12 @@ final class SaveScenariosTest extends TestCase
 
         $expected = [(object) [
             'title' => 'Coupon',
+            'why' => 'CartTotal::apply() lets the total go below 0.',
+            'setup' => '',
+            'start_url' => 'http://localhost:8000/cart?coupon=1&step=2',
             'steps' => [
                 (object) ['type' => 'click', 'say' => 'Apply it.', 'target' => (object) ['role' => 'button', 'name' => 'Apply']],
-                (object) ['type' => 'pause', 'say' => 'Look.', 'target' => []],
+                (object) ['type' => 'pause', 'say' => 'Look.'],
             ],
         ]];
         self::assertCount(1, $notebooks->replaced);
@@ -99,6 +107,40 @@ final class SaveScenariosTest extends TestCase
             self::assertSame([$expected->getMessage(), $expected->outcome], [$refused->getMessage(), $refused->outcome]);
         }
         self::assertSame([], $notebooks->replaced);
+    }
+
+    /**
+     * The double refuses as Notebooks does, so the tool's own mapping is what these tests check.
+     */
+    #[Test]
+    public function theDoubleRefusesAnIdGetDoesNotFindAndAScenarioThatBreaksARuleAndRecordsNothing(): void
+    {
+        $notebooks = new ScriptedNotebooks(self::notebook());
+        $at = new \DateTimeImmutable(self::NOW);
+
+        try {
+            $notebooks->replaceScenarios('0197a3c0-0000-7000-8000-0000000b0002', [], $at);
+            self::fail('The double saved for a notebook it does not hold.');
+        } catch (NotebookRefused $refused) {
+            self::assertTrue($refused->isNotFound());
+        }
+        try {
+            $notebooks->replaceScenarios(self::NOTEBOOK, [(object) ['title' => 'Coupon']], $at);
+            self::fail('The double saved a scenario ScenarioRules refuses.');
+        } catch (NotebookRefused $refused) {
+            self::assertFalse($refused->isNotFound());
+            self::assertStringStartsWith('Scenario 1', $refused->getMessage());
+        }
+        self::assertSame([], $notebooks->replaced);
+    }
+
+    #[Test]
+    public function theDescriptionTellsTheAgentToUnwrapTheTextsGetNotebookGave(): void
+    {
+        $description = self::tool(new ScriptedNotebooks(null))->definition()->description;
+
+        self::assertIsString($description);
+        self::assertStringContainsString(UntrustedText::UNWRAP, $description);
     }
 
     /**

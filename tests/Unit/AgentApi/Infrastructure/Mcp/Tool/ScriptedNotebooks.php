@@ -10,11 +10,14 @@ use App\Review\Api\Notebooks;
 use App\Review\Api\NotebooksPage;
 use App\Review\Api\NotebookView;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Domain\Scenario\ScenarioRefused;
+use App\Review\Domain\Scenario\ScenarioRules;
 
 /**
  * Notebooks as save_scenarios uses them: get() finds only the one notebook it holds, by its id exactly, as the real one
- * finds only a lowercase uuid of the person's; replaceScenarios() records what it was given, or throws $refusal and
- * records nothing, as the real one saves nothing when it refuses.
+ * finds only a lowercase uuid of the person's. replaceScenarios() refuses as the real one does, in its order: an id
+ * get() does not find as not found, then $refusal when one is given, then the first ScenarioRules rule broken; it
+ * records what it was given only when it refuses nothing, as the real one saves nothing when it refuses.
  */
 final class ScriptedNotebooks implements Notebooks
 {
@@ -32,8 +35,16 @@ final class ScriptedNotebooks implements Notebooks
 
     public function replaceScenarios(string $notebookId, mixed $decodedScenarios, \DateTimeImmutable $at): void
     {
+        if (null === $this->get($notebookId)) {
+            throw NotebookRefused::notFound();
+        }
         if (null !== $this->refusal) {
             throw $this->refusal;
+        }
+        try {
+            ScenarioRules::parse($decodedScenarios);
+        } catch (ScenarioRefused $refused) {
+            throw NotebookRefused::because($refused->reason, $refused);
         }
         $this->replaced[] = [$notebookId, $decodedScenarios, $at];
     }

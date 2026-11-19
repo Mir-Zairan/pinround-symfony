@@ -69,7 +69,7 @@ final readonly class GetNotebook implements AgentTool
                 .' works for a few minutes), title, summary and pins (number, x_pct and y_pct from 0 to 100, note): the'
                 .' person pinned what they ask about. scenarios are the ones save_scenarios saved, in their format.'
                 .' '.UntrustedText::NOTICE.' Titles, summaries, notes and every text of a scenario but a step\'s type are'
-                .' such text: unwrap them before you save scenarios again.',
+                .' such text: before you save scenarios again, '.UntrustedText::UNWRAP.'.',
             annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false),
         );
     }

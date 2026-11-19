@@ -461,15 +461,15 @@ when@test:
         test.review_verdict_commands:
             alias: App\Review\Api\VerdictCommands
             public: true
-        # No route changes a checklist item before the checklist card ships;
-        # UseCaseChecklistCommandsTest gets the Api as they will.
+        # UseCaseChecklistCommandsTest gets the Api by this id, as ChecklistController and the AgentApi tools get it
+        # injected.
         test.review_checklist_commands:
             alias: App\Review\Api\ChecklistCommands
             public: true
         test.review_checklist_queries:
             alias: App\Review\Api\ChecklistQueries
             public: true
-        # No tool or page uses notebooks before the MCP tools (P13.T8); NotebookLeakTest gets the Api as they will.
+        # NotebookLeakTest gets the Api by this id, as the notebook page and the AgentApi notebook tools get it injected.
         test.review_notebooks:
             alias: App\Review\Api\Notebooks
             public: true

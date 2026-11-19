@@ -7,6 +7,7 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\UntrustedText;
 use App\Review\Api\NotebookPermission;
 use App\Review\Api\NotebookRefused;
 use App\Review\Api\Notebooks;
@@ -57,8 +58,9 @@ final readonly class SaveScenarios implements AgentTool
                 .' pause and capture; a target is {role, name?}, {text} or {label}, never a CSS or XPath string; every'
                 .' go_to stays on the scheme, host and port of start_url. One broken rule refuses the whole list with'
                 .' the first problem ("Scenario 2, step 5: …") and the old scenarios stay. An empty list, and an empty'
-                .' object too, removes them all. Send the texts as plain text, without the <untrusted_text> markers'
-                .' get_notebook adds. Answers notebook_id and scenario_count.',
+                .' object too, removes them all. Send the texts as plain text: for a text get_notebook gave, '
+                .UntrustedText::UNWRAP.', or a start_url with &amp; is saved as written and plays the wrong address.'
+                .' Answers notebook_id and scenario_count.',
             annotations: new ToolAnnotations(readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false),
         );
     }

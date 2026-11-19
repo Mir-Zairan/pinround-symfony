@@ -8,6 +8,7 @@ use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\UntrustedText;
+use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Domain\User;
 use App\Media\Api\MediaImageStatus;
 use App\Media\Application\SignedVariantUrls;
@@ -168,6 +169,29 @@ final class GetNotebookTest extends WebTestCase
         }
         $notFoundRow = [$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, GetNotebook::NAME, 'not_found'];
         self::assertSame(array_fill(0, \count($ids), $notFoundRow), $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * notebooks:write lets a token change notebooks, not read them: get_notebook needs read.
+     */
+    #[Test]
+    public function aTokenWithoutReadGetsMissingScopeAndNoNotebook(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+
+        $this->callTool($token, GetNotebook::NAME, ['notebook' => self::LENAS_NOTEBOOK]);
+
+        $this->assertRefused(\sprintf(ToolRefusal::MISSING_SCOPE, 'read'));
+        self::assertSame([[$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, GetNotebook::NAME, 'missing_scope']], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    #[Test]
+    public function theDescriptionTellsTheAgentHowToUnwrapBeforeSavingScenarios(): void
+    {
+        $description = self::getContainer()->get(GetNotebook::class)->definition()->description;
+
+        self::assertIsString($description);
+        self::assertStringContainsString(UntrustedText::UNWRAP, $description);
     }
 
     private static function wrapped(string $text): string
