@@ -7,8 +7,8 @@ import { Controller } from '@hotwired/stimulus';
 // While the person types or picks, the form is posted to the preview url 400 ms after the last change, and the
 // answer's duplicates box and "When you send:" words replace the shown ones. An answer that comes back after a newer
 // change was made is dropped. The duplicates HTML is the server's own rendering of escaped titles.
-// No call is made while the fields the answer depends on are as they were for the last answer, so picking a type or a
-// priority, or typing a picture's title, asks nothing.
+// No call is made while the fields the answer depends on are as they were for the shown answer (the page's own at
+// first) or for the call still running, so picking a type or a priority, or typing a picture's title, asks nothing.
 const DEBOUNCE_MS = 400;
 // What ReportController::liveParts reads, with every pins[n][note]: the notes and their count change the check reasons.
 const PREVIEW_FIELDS = new Set(['title', 'description', 'team_id', 'project_id', 'assignee_id', 'screenshot_media_id']);
@@ -20,7 +20,13 @@ export default class extends Controller {
 
   #timer = null;
   #request = null;
+  #requestedFields = null;
   #answeredFields = null;
+
+  connect() {
+    // The server rendered the duplicates box and the "When you send:" line for the fields the page loaded with.
+    this.#answeredFields = previewFieldsOf(new FormData(this.element));
+  }
 
   disconnect() {
     clearTimeout(this.#timer);
@@ -56,6 +62,9 @@ export default class extends Controller {
     }
     const body = new FormData(this.element);
     const askedFields = previewFieldsOf(body);
+    if (this.#request !== null && askedFields === this.#requestedFields) {
+      return;
+    }
     // A call still running was asked for other values; its answer would replace the one that holds again.
     this.#request?.abort();
     if (askedFields === this.#answeredFields) {
@@ -64,6 +73,7 @@ export default class extends Controller {
     }
     const request = new AbortController();
     this.#request = request;
+    this.#requestedFields = askedFields;
     try {
       const response = await fetch(this.previewUrlValue, {
         method: 'POST',
@@ -86,6 +96,10 @@ export default class extends Controller {
       this.#answeredFields = askedFields;
     } catch {
       // An aborted or failed preview keeps the last words shown; the create works everything out again on the server.
+    } finally {
+      if (this.#request === request) {
+        this.#request = null;
+      }
     }
   }
 }

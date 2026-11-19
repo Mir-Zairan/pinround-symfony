@@ -159,6 +159,24 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
         self::assertReadsTicketsThroughIndexes($plan, $scans, ['tkt_ticket_title_trgm_idx' => 'title % ']);
     }
 
+    /**
+     * Report a problem's duplicate candidates call the function as IntakeCandidateQueries::similarOpenTickets does: no
+     * project and only the open steps, so the step list must not steer the planner away from either GIN index.
+     */
+    #[Test]
+    public function duplicateCandidatesOnTheOpenStepsReadTicketsThroughBothIndexesInsideTheFunction(): void
+    {
+        [$rows, $scans, $plan] = $this->searchAs(self::OMAR, [self::SHOP_TEAM], 'Café menu crashes on Android', '{'.ShopTeamRows::TO_DO_STEP.'}');
+
+        self::assertNotSame([], $rows);
+        self::assertSame('Café menu crashes the app on Android', $rows[0][1]);
+        foreach ($rows as [$key, $title]) {
+            self::assertStringStartsWith('SHOP-', $key);
+            self::assertStringNotContainsString(self::CLOSED_MARK, $title);
+        }
+        self::assertReadsTicketsThroughIndexes($plan, $scans, ['tkt_ticket_search_idx' => 'search @@', 'tkt_ticket_title_trgm_idx' => 'title % ']);
+    }
+
     #[Test]
     public function aKeyInAnyCaseFindsItsTicketFirstThroughTheKeyIndex(): void
     {
@@ -250,14 +268,15 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
      * transaction, and the plan of its body for the same arguments.
      *
      * @param list<string> $teamIds the teams the viewer's TicketVisibility gives, in id order
+     * @param ?string      $stepIds the p_step_ids array literal, as '{<uuid>,…}', or null for every step
      *
      * @return array{list<array{string, string}>, array<string, int>, string} the key and title of each ticket found,
      *                                                                        best first, the scans of tkt_ticket the
      *                                                                        call made, and the plan
      */
-    private function searchAs(string $viewerId, array $teamIds, string $query): array
+    private function searchAs(string $viewerId, array $teamIds, string $query, ?string $stepIds = null): array
     {
-        $arguments = [...$this->searchArgumentsOf($viewerId, $teamIds), 'query' => $query];
+        $arguments = [...$this->searchArgumentsOf($viewerId, $teamIds), 'query' => $query, 'steps' => $stepIds];
         [$rows, $scans] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($arguments): array {
             $connection = $this->connection();
             self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
@@ -265,7 +284,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             $scansBefore = self::scansOfTicketTable($connection);
             $ticketIds = $connection->fetchFirstColumn(
                 'SELECT ticket_id FROM search_ticket_ids(CAST(:org AS uuid), CAST(:query AS text), CAST(:me AS uuid),
-                     CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, NULL, NULL)',
+                     CAST(:teams AS uuid[]), CAST(:is_admin AS boolean), CAST(:is_triager AS boolean), NULL, CAST(:steps AS uuid[]), NULL)',
                 $arguments,
             );
             $scansAfter = self::scansOfTicketTable($connection);
@@ -342,7 +361,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
      * The body of search_ticket_ids as pg_proc holds it, with the arguments in place of its p_ inputs, explained as
      * the function runs: as pinround_resolver, with the function's search_path, under Acme Foods.
      *
-     * @param array{org: string, me: string, teams: string, is_admin: string, is_triager: string, query: string} $arguments
+     * @param array{org: string, me: string, teams: string, is_admin: string, is_triager: string, query: string, steps: ?string} $arguments
      */
     private static function planOfTheSearchFunctionBody(array $arguments): string
     {
@@ -355,7 +374,7 @@ final class TicketSearchQueryPlanTest extends KernelTestCase
             'p_is_admin' => 'CAST('.$migrator->quote($arguments['is_admin']).' AS boolean)',
             'p_is_triager' => 'CAST('.$migrator->quote($arguments['is_triager']).' AS boolean)',
             'p_project_id' => 'CAST(NULL AS uuid)',
-            'p_step_ids' => 'CAST(NULL AS uuid[])',
+            'p_step_ids' => null === $arguments['steps'] ? 'CAST(NULL AS uuid[])' : 'CAST('.$migrator->quote($arguments['steps']).' AS uuid[])',
             'p_assignee_id' => 'CAST(NULL AS uuid)',
         ];
         $body = $migrator->fetchOne("SELECT prosrc FROM pg_proc WHERE oid = 'public.search_ticket_ids(uuid, text, uuid, uuid[], boolean, boolean, uuid, uuid[], uuid)'::regprocedure");

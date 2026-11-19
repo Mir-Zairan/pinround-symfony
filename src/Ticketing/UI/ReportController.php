@@ -7,7 +7,6 @@ namespace App\Ticketing\UI;
 use App\Identity\Api\UserQueries;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
-use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\SettingsQueries;
 use App\Organization\Api\TeamPeopleQueries;
@@ -295,8 +294,8 @@ final class ReportController extends AbstractController
     /**
      * The possible duplicates and the "When you send:" words, or empty words while the posted project is not one of the
      * picked team's (of any team for "Not sure"). The preview runs this on every pause in typing, so it reads the posted
-     * project and the picked team's cached people only, never the form's choices with their ticket counts; a person who
-     * is not a non-tester of the reporter's own team counts as "the team decides", as the create refuses them anyway.
+     * project and the picked team's cached people only, never the form's choices with their ticket counts. A picked
+     * tester, or anyone when the reporter is not in the team, reads as "the team decides", as the create refuses them.
      *
      * @return array{list<IntakeCandidate>, string}
      */
@@ -312,7 +311,7 @@ final class ReportController extends AbstractController
             return [$facts->duplicates, ReportPreviewSentence::of($nextKey->key, $facts->reasonPhrases, $this->checkerNameOf($actor, null), null, null, $facts->isTeamOnly)];
         }
         $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
-        $lead = array_values(array_filter($people, static fn (PossibleAssignee $person): bool => $person->isLead))[0] ?? null;
+        $lead = ReportTeamPeople::leadOf($people);
         $checker = null === $lead ? null : ($lead->userId->equals($actor->userId()) ? 'You' : $lead->firstName);
 
         return [$facts->duplicates, ReportPreviewSentence::of($nextKey->key, $facts->reasonPhrases, $checker, $this->pickedPersonOf($actor, $teamId, $people, $input->assigneeId), $lead?->firstName, $facts->isTeamOnly)];
@@ -328,7 +327,7 @@ final class ReportController extends AbstractController
         if ('' === $assigneeId || !$actor->roles()->isInTeam($teamId)) {
             return null;
         }
-        $picked = array_values(array_filter($people, static fn (PossibleAssignee $person): bool => MemberJob::Tester !== $person->job && $person->userId->toString() === $assigneeId))[0] ?? null;
+        $picked = array_values(array_filter(ReportTeamPeople::giveToPeopleOf($people), static fn (PossibleAssignee $person): bool => $person->userId->toString() === $assigneeId))[0] ?? null;
         if (null === $picked) {
             return null;
         }

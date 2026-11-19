@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Organization\Api\ActorContext;
-use App\Organization\Api\MemberJob;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Api\TeamQueries;
@@ -86,8 +85,8 @@ final readonly class ReportFormChoices
         $choices = [];
         foreach ($ownTeams as [$summary, $projects]) {
             $people = $peopleByTeam[$summary->id()->toString()];
-            $lead = array_values(array_filter($people, static fn (PossibleAssignee $person): bool => $person->isLead))[0] ?? null;
-            $candidates = array_values(array_filter($people, static fn (PossibleAssignee $person): bool => MemberJob::Tester !== $person->job));
+            $lead = ReportTeamPeople::leadOf($people);
+            $candidates = ReportTeamPeople::giveToPeopleOf($people);
             usort($candidates, static fn (PossibleAssignee $first, PossibleAssignee $second): int => [$counts[$first->userId->toString()] ?? 0, $first->displayName, $first->userId->toString()] <=> [$counts[$second->userId->toString()] ?? 0, $second->displayName, $second->userId->toString()]);
             $giveTo = array_map(
                 static fn (PossibleAssignee $person): array => ['id' => $person->userId->toString(), 'label' => $person->userId->equals($actor->userId()) ? $person->firstName.' (you)' : $person->firstName],

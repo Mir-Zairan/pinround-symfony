@@ -29,7 +29,7 @@
                 {% endfor %}
             </ul>
             {% if nextAfter %}
-                <p><twig:Button variant="text" href="{{ path('review_report_drafts', {after: nextAfter}) }}" rel="next">Show more</twig:Button></p>
+                <p><twig:Button variant="outline" href="{{ path('review_report_drafts', {after: nextAfter}) }}" rel="next">Show more</twig:Button></p>
             {% endif %}
         {% endif %}
     </div>
