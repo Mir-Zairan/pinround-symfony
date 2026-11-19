@@ -8,6 +8,7 @@ use App\Review\Api\CheckItemAccessFacts;
 use App\Review\Api\CheckItemView;
 use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ChecklistView;
+use App\Review\Application\Checklist\CheckItemPicture;
 use App\Review\Application\Checklist\RoundChecklist;
 use App\Review\Application\Checklist\RoundChecklistQueries;
 use App\Review\Domain\CheckItemId;
@@ -94,7 +95,8 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
 
         // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; RoundId let through no comma or brace.
         $itemRows = $this->connection->fetchAllAssociative(
-            'SELECT round.id AS round_id, round.number AS round_number, round.kind, item.id AS item_id, pin.number AS pin_number, pin.note, item.state'
+            'SELECT round.id AS round_id, round.number AS round_number, round.kind, item.id AS item_id, pin.number AS pin_number, pin.note, item.state,'
+            .' screenshot.position AS picture_position, screenshot.title AS picture_title'
             .' FROM rvw_round AS round'
             .' JOIN rvw_check_item AS item ON item.organization_id = round.organization_id AND item.round_id = round.id'
             .' JOIN rvw_pin AS pin ON pin.organization_id = item.organization_id AND pin.id = item.pin_id'
@@ -112,11 +114,17 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
         );
 
         $itemsByRound = [];
+        $picturesByRound = [];
         $roundRows = [];
         foreach ($itemRows as $itemRow) {
             $roundId = self::text($itemRow['round_id'], 'round_id');
             $roundRows[$roundId] ??= $itemRow;
-            $itemsByRound[$roundId][] = self::itemOf($itemRow);
+            $item = self::itemOf($itemRow);
+            $itemsByRound[$roundId][] = $item;
+            $picturesByRound[$roundId][$item->itemId] = new CheckItemPicture(
+                self::integer($itemRow['picture_position'], 'picture position'),
+                null === $itemRow['picture_title'] ? null : self::text($itemRow['picture_title'], 'picture title'),
+            );
         }
 
         $checklists = [];
@@ -124,6 +132,7 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
             $checklists[$roundId] = new RoundChecklist(
                 new ChecklistView($roundId, self::integer($roundRows[$roundId]['round_number'], 'round number'), $items),
                 RoundKind::Draft->value === $roundRows[$roundId]['kind'],
+                $picturesByRound[$roundId],
             );
         }
 

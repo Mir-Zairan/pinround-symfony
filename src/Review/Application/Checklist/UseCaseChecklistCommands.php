@@ -15,7 +15,7 @@ use App\Review\Domain\CheckItemId;
 use App\Review\Domain\Checklist;
 use App\Review\Domain\Checklists;
 use App\Review\Domain\FindingsChecklist;
-use App\Review\Domain\RoundId;
+use App\Review\Domain\Round;
 use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
 use App\SharedKernel\Application\PingClearing;
@@ -25,10 +25,11 @@ use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketTurnQueries;
 
 /**
- * ChecklistCommands on Checklists; the contract is on {@see ChecklistCommands}. Every change locks its item before it
- * reads the state, so two changes of one item are made one after the other.
+ * ChecklistCommands and RoundChecklistCommands on Checklists; the contracts are on {@see ChecklistCommands} and
+ * {@see RoundChecklistCommands}. Every change locks its item before it reads the state, so two changes of one item are
+ * made one after the other.
  */
-final readonly class UseCaseChecklistCommands implements ChecklistCommands
+final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
 {
     public function __construct(
         private Checklists $checklists,
@@ -70,19 +71,19 @@ final readonly class UseCaseChecklistCommands implements ChecklistCommands
         return $checklist->id()->toString();
     }
 
-    public function createFromFindings(string $roundId, \DateTimeImmutable $at): int
+    public function createFromFindings(Round $sharedDraft, \DateTimeImmutable $at): int
     {
-        $this->tenantContext->require();
-        try {
-            $id = new RoundId($roundId);
-        } catch (\InvalidArgumentException $malformed) {
-            throw new \LogicException(\sprintf('Round id "%s" is not one RoundCommands gives.', $roundId), 0, $malformed);
+        if (!$this->tenantContext->require()->equals($sharedDraft->organizationId())) {
+            throw new \LogicException(\sprintf('Round %s is not the tenant\'s.', $sharedDraft->id()->toString()));
         }
-        $round = $this->rounds->get($id) ?? throw new \LogicException(\sprintf('Round %s is not the tenant\'s.', $id->toString()));
-        $ticket = $this->ticketTurnQueries->factsOf($round->ticketId())
-            ?? throw new \LogicException(\sprintf('The ticket of round %s cannot be read.', $id->toString()));
+        $assigneeOf = function () use ($sharedDraft): ?UserId {
+            $ticket = $this->ticketTurnQueries->factsOf($sharedDraft->ticketId())
+                ?? throw new \LogicException(\sprintf('The ticket of round %s cannot be read.', $sharedDraft->id()->toString()));
+
+            return $ticket->assigneeId;
+        };
         try {
-            $checklist = FindingsChecklist::ofSharedDraft($round, $ticket->assigneeId, $this->checklists->nextItemIdentity(...), $at);
+            $checklist = FindingsChecklist::ofSharedDraft($sharedDraft, $assigneeOf, $this->checklists->nextItemIdentity(...), $at);
         } catch (\InvalidArgumentException $notShared) {
             throw new \LogicException($notShared->getMessage(), 0, $notShared);
         }

@@ -135,8 +135,8 @@ interface RoundCommands
     /**
      * Shows the draft to everyone who may see the ticket as the ticket's next round number. Holds the ticket's round
      * numbers until the caller's transaction ends, so two shares on one ticket get two numbers. When the owner is not
-     * the ticket's assignee, each pin becomes an open checklist item in the same transaction
-     * (ChecklistCommands::createFromFindings).
+     * the ticket's assignee, each pin becomes an open checklist item in the same transaction (findings, ADR-0044), which
+     * reads the ticket's assignee for a draft with pins.
      *
      * @return int the round's number, from 1
      *

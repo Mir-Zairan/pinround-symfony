@@ -62,6 +62,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     private InMemoryChecklists $checklists;
     private RecordingReviewEvents $events;
     private InMemoryPingClearing $pingClearing;
+    private InMemoryTicketTurnQueries $ticketTurnQueries;
     private UseCaseChecklistCommands $commands;
 
     protected function setUp(): void
@@ -71,6 +72,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
         $this->checklists = new InMemoryChecklists($this->rounds, $this->tenantContext);
         $this->events = new RecordingReviewEvents();
         $this->pingClearing = new InMemoryPingClearing();
+        $this->ticketTurnQueries = new InMemoryTicketTurnQueries([self::ticketAssignedTo(self::TICKET, self::OMAR), self::ticketAssignedTo(self::OTHER_TICKET, null)], new TicketId(self::BROKEN_TICKET));
         $this->commands = new UseCaseChecklistCommands(
             $this->checklists,
             $this->rounds,
@@ -78,7 +80,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
             $this->events,
             $this->pingClearing,
             $this->tenantContext,
-            new InMemoryTicketTurnQueries([self::ticketAssignedTo(self::TICKET, self::OMAR), self::ticketAssignedTo(self::OTHER_TICKET, null)], new TicketId(self::BROKEN_TICKET)),
+            $this->ticketTurnQueries,
         );
 
         $this->tenantContext->set(new OrganizationId(self::BETA_BAKERY));
@@ -341,8 +343,9 @@ final class UseCaseChecklistCommandsTest extends TestCase
     {
         $roundId = $this->addSharedDraft(self::MIA, self::TICKET, true);
         $roundsBefore = $this->rounds->stored;
+        $loadedRoundsBefore = $this->rounds->loadedRounds;
 
-        $made = $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+        $made = $this->commands->createFromFindings($this->storedRound($roundId), new \DateTimeImmutable(self::NOW));
 
         self::assertSame(3, $made);
         $items = $this->acmeItems();
@@ -355,6 +358,8 @@ final class UseCaseChecklistCommandsTest extends TestCase
         }
         self::assertEquals($roundsBefore, $this->rounds->stored, 'Findings add no round of their own.');
         self::assertSame([[], []], [$this->rounds->numberedTicketIds, $this->events->published()]);
+        self::assertSame($loadedRoundsBefore, $this->rounds->loadedRounds, 'The round the share saved is not read again.');
+        self::assertSame([self::TICKET], $this->ticketTurnQueries->askedTicketIds, 'The ticket is read once, for its assignee.');
     }
 
     #[Test]
@@ -362,7 +367,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     {
         $roundId = $this->addSharedDraft(self::OMAR, self::TICKET, true);
 
-        self::assertSame(0, $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW)));
+        self::assertSame(0, $this->commands->createFromFindings($this->storedRound($roundId), new \DateTimeImmutable(self::NOW)));
 
         self::assertSame([], $this->acmeItems());
     }
@@ -372,30 +377,33 @@ final class UseCaseChecklistCommandsTest extends TestCase
     {
         $roundId = $this->addSharedDraft(self::OMAR, self::OTHER_TICKET, true);
 
-        self::assertSame(3, $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW)));
+        self::assertSame(3, $this->commands->createFromFindings($this->storedRound($roundId), new \DateTimeImmutable(self::NOW)));
 
         self::assertCount(3, $this->acmeItems());
     }
 
+    /**
+     * Nothing to check whoever shared it, so the ticket is not read: on the broken ticket a read would throw.
+     */
     #[Test]
-    public function sharedFindingsWithoutPinsGetNoItems(): void
+    public function sharedFindingsWithoutPinsGetNoItemsAndReadNoTicket(): void
     {
-        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, false);
+        $roundId = $this->addSharedDraft(self::MIA, self::BROKEN_TICKET, false);
 
-        self::assertSame(0, $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW)));
+        self::assertSame(0, $this->commands->createFromFindings($this->storedRound($roundId), new \DateTimeImmutable(self::NOW)));
 
-        self::assertSame([], $this->acmeItems());
+        self::assertSame([[], []], [$this->acmeItems(), $this->ticketTurnQueries->askedTicketIds]);
     }
 
     #[Test]
     public function aSecondCallForTheSameFindingsIsABugAndWritesNothing(): void
     {
-        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, true);
-        $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+        $round = $this->storedRound($this->addSharedDraft(self::MIA, self::TICKET, true));
+        $this->commands->createFromFindings($round, new \DateTimeImmutable(self::NOW));
         $itemsBefore = $this->checklists->storedItems;
 
         try {
-            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            $this->commands->createFromFindings($round, new \DateTimeImmutable(self::NOW));
             self::fail('A second call made items again.');
         } catch (\LogicException $refused) {
             self::assertSame(InMemoryChecklists::ITEM_REFUSED, $refused->getMessage());
@@ -411,8 +419,6 @@ final class UseCaseChecklistCommandsTest extends TestCase
     {
         yield 'an unshared draft' => [static fn (self $test): string => $test->addUnsharedDraft(), 'Only a shared draft round has findings to check.'];
         yield 'Round 0' => [static fn (self $test): string => $test->reportRoundId(), 'Only a shared draft round has findings to check.'];
-        yield 'an unknown round' => [static fn (): string => self::UNKNOWN_ITEM, \sprintf('Round %s is not the tenant\'s.', self::UNKNOWN_ITEM)];
-        yield 'a malformed id' => [static fn (): string => 'not-a-round', 'Round id "not-a-round" is not one RoundCommands gives.'];
         yield 'a round of a ticket that cannot be read' => [static fn (self $test): string => $test->addSharedDraft(self::MIA, self::BROKEN_TICKET, true), 'A ticket is in a step its organization does not have.'];
     }
 
@@ -423,10 +429,10 @@ final class UseCaseChecklistCommandsTest extends TestCase
     #[DataProvider('roundsThatAreNotSharedFindings')]
     public function aRoundThatIsNotSharedFindingsIsABugAndGetsNoItems(\Closure $roundIdOf, string $reason): void
     {
-        $roundId = $roundIdOf($this);
+        $round = $this->storedRound($roundIdOf($this));
 
         try {
-            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            $this->commands->createFromFindings($round, new \DateTimeImmutable(self::NOW));
             self::fail('Items were made for a round that is not shared findings.');
         } catch (\LogicException $refused) {
             self::assertSame($reason, $refused->getMessage());
@@ -441,7 +447,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
         $roundId = $this->addSharedDraft(self::MIA, self::TICKET_WITHOUT_PINS, true);
 
         try {
-            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            $this->commands->createFromFindings($this->storedRound($roundId), new \DateTimeImmutable(self::NOW));
             self::fail('Findings were made without knowing the ticket\'s assignee.');
         } catch (\LogicException $refused) {
             self::assertSame(\sprintf('The ticket of round %s cannot be read.', $roundId), $refused->getMessage());
@@ -453,18 +459,19 @@ final class UseCaseChecklistCommandsTest extends TestCase
     #[Test]
     public function anotherOrganizationsSharedFindingsAreNotTheTenants(): void
     {
-        $roundId = $this->addSharedDraft(self::MIA, self::TICKET, true);
+        $round = $this->storedRound($this->addSharedDraft(self::MIA, self::TICKET, true));
         $this->tenantContext->set(new OrganizationId(self::BETA_BAKERY));
         $betaItemsBefore = $this->checklists->storedItems;
 
         try {
-            $this->commands->createFromFindings($roundId, new \DateTimeImmutable(self::NOW));
+            $this->commands->createFromFindings($round, new \DateTimeImmutable(self::NOW));
             self::fail('Beta Bakery made items on Acme Foods\' round.');
         } catch (\LogicException $refused) {
-            self::assertSame(\sprintf('Round %s is not the tenant\'s.', $roundId), $refused->getMessage());
+            self::assertSame(\sprintf('Round %s is not the tenant\'s.', $round->id()->toString()), $refused->getMessage());
         }
 
         self::assertEquals($betaItemsBefore, $this->checklists->storedItems);
+        self::assertSame([], $this->ticketTurnQueries->askedTicketIds);
     }
 
     /**

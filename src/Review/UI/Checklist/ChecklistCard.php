@@ -6,7 +6,8 @@ namespace App\Review\UI\Checklist;
 
 use App\Review\Api\CheckItemView;
 use App\Review\Api\ChecklistCommands;
-use App\Review\Api\ChecklistView;
+use App\Review\Application\Checklist\CheckItemPicture;
+use App\Review\Application\Checklist\RoundChecklist;
 
 /**
  * The check items of one round as the Rounds section shows them to one viewer, with "k of n checked OK" and one row per
@@ -63,37 +64,26 @@ final readonly class ChecklistCard
     }
 
     /**
-     * The checklist round's card.
+     * The checklist round's card, or the "Checklist" part of a findings round's card.
      *
-     * @param bool $mayMarkFixed ChecklistPermission MARK_FIXED, granted on the round's items alike
-     * @param bool $mayCheck     ChecklistPermission CHECK, granted on the round's items alike
+     * @param bool $mayMarkFixed ChecklistPermission MARK_FIXED, granted on the ticket's items alike
+     * @param bool $mayCheck     ChecklistPermission CHECK, granted on the ticket's items alike
      *
-     * @throws \LogicException for an item state ChecklistCommands does not name
+     * @throws \LogicException for an item state ChecklistCommands does not name, or an item without its picture
      */
-    public static function of(ChecklistView $checklist, bool $mayMarkFixed, bool $mayCheck): self
+    public static function of(RoundChecklist $roundChecklist, bool $mayMarkFixed, bool $mayCheck): self
     {
-        return new self($checklist->roundId, $checklist->number, $checklist->checkedOkCount, self::rowsOf($checklist, $mayMarkFixed, $mayCheck));
-    }
+        $checklist = $roundChecklist->checklist;
 
-    /**
-     * The "Checklist" part of a findings round's card.
-     *
-     * @param bool $mayMarkFixed as of() takes it
-     * @param bool $mayCheck     as of() takes it
-     *
-     * @throws \LogicException for an item state ChecklistCommands does not name
-     */
-    public static function ofFindings(ChecklistView $checklist, bool $mayMarkFixed, bool $mayCheck): self
-    {
-        return new self($checklist->roundId, $checklist->number, $checklist->checkedOkCount, self::rowsOf($checklist, $mayMarkFixed, $mayCheck), true);
+        return new self($checklist->roundId, $checklist->number, $checklist->checkedOkCount, self::rowsOf($roundChecklist, $mayMarkFixed, $mayCheck), $roundChecklist->isFindings);
     }
 
     /**
      * @return non-empty-list<ChecklistRow>
      */
-    private static function rowsOf(ChecklistView $checklist, bool $mayMarkFixed, bool $mayCheck): array
+    private static function rowsOf(RoundChecklist $roundChecklist, bool $mayMarkFixed, bool $mayCheck): array
     {
-        return array_map(static function (CheckItemView $item) use ($mayMarkFixed, $mayCheck): ChecklistRow {
+        return array_map(static function (CheckItemView $item) use ($roundChecklist, $mayMarkFixed, $mayCheck): ChecklistRow {
             [$label, $class] = match ($item->state) {
                 ChecklistCommands::STATE_OPEN => ['Open', 'check-state--open'],
                 ChecklistCommands::STATE_FIXED => ['Fixed · to check', 'check-state--fixed'],
@@ -101,17 +91,31 @@ final readonly class ChecklistCard
                 ChecklistCommands::STATE_NOT_FIXED => ['Not fixed', 'check-state--not-fixed'],
                 default => throw new \LogicException(\sprintf('A check item has no state "%s".', $item->state)),
             };
+            $picture = $roundChecklist->picturesByItemId[$item->itemId]
+                ?? throw new \LogicException(\sprintf('Check item %s has no picture.', $item->itemId));
 
             return new ChecklistRow(
                 $item->itemId,
                 $item->pinNumber,
+                self::pinLabelOf($picture, $item->pinNumber),
                 '' === $item->note ? self::NO_NOTE : $item->note,
                 $label,
                 $class,
                 $mayMarkFixed && \in_array($item->state, [ChecklistCommands::STATE_OPEN, ChecklistCommands::STATE_NOT_FIXED], true),
                 $mayCheck && ChecklistCommands::STATE_FIXED === $item->state,
             );
-        }, $checklist->items);
+        }, $roundChecklist->checklist->items);
+    }
+
+    /**
+     * "Screenshot 2 · pin 1", or "Screenshot 2 · Checkout · pin 1" for a picture with a title: the number keeps two
+     * pictures with one title apart, as RoundCards numbers a draft's pictures.
+     */
+    private static function pinLabelOf(CheckItemPicture $picture, int $pinNumber): string
+    {
+        return null === $picture->title
+            ? \sprintf('Screenshot %d · pin %d', $picture->position + 1, $pinNumber)
+            : \sprintf('Screenshot %d · %s · pin %d', $picture->position + 1, $picture->title, $pinNumber);
     }
 
     /**

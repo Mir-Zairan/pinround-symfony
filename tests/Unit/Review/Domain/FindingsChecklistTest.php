@@ -39,11 +39,12 @@ final class FindingsChecklistTest extends TestCase
     private const string SHARED_AT = '2027-03-15 10:00:00+00:00';
 
     private int $issuedItemIds = 0;
+    private int $assigneeReads = 0;
 
     #[Test]
     public function aDraftOfSomeoneButTheAssigneeGetsAnOpenItemPerPinByPictureThenPinNumber(): void
     {
-        $checklist = FindingsChecklist::ofSharedDraft($this->sharedDraftOf(self::MIA), new UserId(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
+        $checklist = FindingsChecklist::ofSharedDraft($this->sharedDraftOf(self::MIA), $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
 
         self::assertNotNull($checklist);
         self::assertSame([self::ROUND, self::ACME_FOODS, self::SHARED_AT], [$checklist->roundId()->toString(), $checklist->organizationId()->toString(), $checklist->createdAt()->format('Y-m-d H:i:sP')]);
@@ -56,19 +57,20 @@ final class FindingsChecklistTest extends TestCase
             self::assertSame([self::ROUND, self::TICKET, CheckItemState::Open], [$item->roundId()->toString(), $item->ticketId()->toString(), $item->state()]);
         }
         self::assertSame(3, $this->issuedItemIds, 'One new id per pin.');
+        self::assertSame(1, $this->assigneeReads);
     }
 
     #[Test]
     public function theAssigneesOwnDraftIsASelfCheckAndGetsNone(): void
     {
-        self::assertNull(FindingsChecklist::ofSharedDraft($this->sharedDraftOf(self::OMAR), new UserId(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT)));
+        self::assertNull(FindingsChecklist::ofSharedDraft($this->sharedDraftOf(self::OMAR), $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT)));
         self::assertSame(0, $this->issuedItemIds);
     }
 
     #[Test]
     public function onATicketWithNoAssigneeEveryDraftIsFindings(): void
     {
-        $checklist = FindingsChecklist::ofSharedDraft($this->sharedDraftOf(self::OMAR), null, $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
+        $checklist = FindingsChecklist::ofSharedDraft($this->sharedDraftOf(self::OMAR), $this->assigneeIs(null), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
 
         self::assertNotNull($checklist);
         self::assertCount(3, $checklist->items());
@@ -82,7 +84,8 @@ final class FindingsChecklistTest extends TestCase
         $draft->addScreenshot($mia, new ScreenshotId(self::FIRST_SCREENSHOT), self::MEDIA);
         $draft->share($mia, 2, new \DateTimeImmutable(self::SHARED_AT));
 
-        self::assertNull(FindingsChecklist::ofSharedDraft($draft, new UserId(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT)));
+        self::assertNull(FindingsChecklist::ofSharedDraft($draft, $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT)));
+        self::assertSame(0, $this->assigneeReads, 'Nothing to check, whoever shared it: the assignee is not read.');
     }
 
     #[Test]
@@ -90,7 +93,7 @@ final class FindingsChecklistTest extends TestCase
     {
         $this->expectExceptionObject(new \InvalidArgumentException('Only a shared draft round has findings to check.'));
 
-        FindingsChecklist::ofSharedDraft($this->draftOf(self::MIA), new UserId(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
+        FindingsChecklist::ofSharedDraft($this->draftOf(self::MIA), $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
     }
 
     #[Test]
@@ -101,7 +104,19 @@ final class FindingsChecklistTest extends TestCase
 
         $this->expectExceptionObject(new \InvalidArgumentException('Only a shared draft round has findings to check.'));
 
-        FindingsChecklist::ofSharedDraft($draft, new UserId(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
+        FindingsChecklist::ofSharedDraft($draft, $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
+    }
+
+    /**
+     * @return \Closure(): ?UserId counts its calls in assigneeReads
+     */
+    private function assigneeIs(?string $assigneeId): \Closure
+    {
+        return function () use ($assigneeId): ?UserId {
+            ++$this->assigneeReads;
+
+            return null === $assigneeId ? null : new UserId($assigneeId);
+        };
     }
 
     private function nextItemId(): CheckItemId

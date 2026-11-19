@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Review\Application;
 
 use App\Review\Api\CheckItemChange;
-use App\Review\Api\ChecklistCommands;
+use App\Review\Application\Checklist\RoundChecklistCommands;
+use App\Review\Domain\Round;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
@@ -14,13 +15,16 @@ use App\SharedKernel\Domain\UserId;
  * for a ticket it has been asked about before, and 0 items for a round, as for a self-check round; it refuses the other
  * commands, which no caller of it uses.
  */
-final class RecordingChecklistCommands implements ChecklistCommands
+final class RecordingChecklistCommands implements RoundChecklistCommands
 {
     /** @var list<array{string, string}> the ticket id and time of each call */
     public array $created = [];
 
-    /** @var list<array{string, string}> the round id and time of each createFromFindings call */
+    /** @var list<array{string, string}> the round's id and the time of each createFromFindings call */
     public array $findingsCreated = [];
+
+    /** @var list<Round> the round of each createFromFindings call, as the caller passed it */
+    public array $findingsRounds = [];
 
     public function createFromReport(TicketId $ticketId, \DateTimeImmutable $at): ?string
     {
@@ -30,9 +34,10 @@ final class RecordingChecklistCommands implements ChecklistCommands
         return $isRepeat ? null : \sprintf('0197a3c0-0000-7000-8000-%012d', \count($this->created));
     }
 
-    public function createFromFindings(string $roundId, \DateTimeImmutable $at): int
+    public function createFromFindings(Round $sharedDraft, \DateTimeImmutable $at): int
     {
-        $this->findingsCreated[] = [$roundId, $at->format('Y-m-d H:i:s')];
+        $this->findingsCreated[] = [$sharedDraft->id()->toString(), $at->format('Y-m-d H:i:s')];
+        $this->findingsRounds[] = $sharedDraft;
 
         return 0;
     }

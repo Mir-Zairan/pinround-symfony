@@ -1,7 +1,7 @@
 {#- A round's check items (ChecklistCard): the checklist round's card body, or the part of a findings round's card
-    under its pictures, with its own h4. Its header, the rule, and one row per pin with the buttons the viewer may use. Each button posts a form of its own out of the frame (_top), so ChecklistController's
-    stream reaches the page; data-failed-toast tells assets/app.js the form expects that stream, and is its toast when
-    the answer is none. -#}
+    under its pictures, with its own h4. Its header, the rule, and one row per pin with the buttons the viewer may use.
+    Each button posts a form of its own out of the frame (_top), so ChecklistController's stream reaches the page;
+    data-failed-toast tells assets/app.js the form expects that stream, and is its toast when the answer is none. -#}
 {% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
 {% set csrfField = constant(checklistController ~ '::CSRF_FIELD') %}
 {% set csrfToken = checklist.hasControls ? csrf_token(checklistCsrfId) : null %}
@@ -10,33 +10,38 @@
 {% set focusedControlId = focusedControlId|default(null) %}
 <div id="{{ checklist.id }}" class="checklist">
     <header class="round-card__header">
-        <h{{ checklist.headingLevel }} id="{{ checklist.headingId }}" class="round-card__headline" tabindex="-1"{% if checklist.headingId is same as(focusedControlId) %} autofocus{% endif %}>{{ checklist.headline }}</h{{ checklist.headingLevel }}>
+        <h{{ checklist.headingLevel }} id="{{ checklist.headingId }}" class="round-card__headline{{ checklist.isFindings ? ' round-card__headline--sub' }}" tabindex="-1"{% if checklist.headingId is same as(focusedControlId) %} autofocus{% endif %}>{{ checklist.headline }}</h{{ checklist.headingLevel }}>
         <p class="round-card__status">{{ checklist.status }}</p>
     </header>
     <p class="round-card__description">{{ checklist.description }}</p>
     <ol class="checklist__rows">
         {% for row in checklist.rows %}
             {% set noteId = checklist.id ~ '-note-' ~ row.itemId %}
-            <li class="checklist__row" value="{{ row.pinNumber }}">
-                <span class="pin-list__number checklist__number">{{ row.pinNumber }}</span>
-                <p class="checklist__note" id="{{ noteId }}">{{ row.note }}</p>
+            {% set pinId = checklist.id ~ '-pin-' ~ row.itemId %}
+            {#- Pin numbers start at 1 on each picture, so the pin label, not the badge, tells the rows apart. -#}
+            <li class="checklist__row">
+                <span class="pin-list__number checklist__number" aria-hidden="true">{{ row.pinNumber }}</span>
+                <div class="checklist__text">
+                    <p class="checklist__pin" id="{{ pinId }}">{{ row.pinLabel }}</p>
+                    <p class="checklist__note" id="{{ noteId }}">{{ row.note }}</p>
+                </div>
                 <twig:Tag class="check-state {{ row.stateClass }}">{{ row.stateLabel }}</twig:Tag>
                 {% if row.mayMarkFixed or row.mayCheck %}
                     <div class="checklist__actions">
                         {% if row.mayMarkFixed %}
                             <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                <twig:Button type="submit" variant="tonal" size="sm" id="{{ row.markFixedId() }}" :autofocus="row.markFixedId() is same as(focusedControlId)" aria-describedby="{{ noteId }}">Mark fixed</twig:Button>
+                                <twig:Button type="submit" variant="tonal" size="sm" id="{{ row.markFixedId() }}" :autofocus="row.markFixedId() is same as(focusedControlId)" aria-describedby="{{ pinId }} {{ noteId }}">Mark fixed</twig:Button>
                             </form>
                         {% endif %}
                         {% if row.mayCheck %}
                             <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                <twig:Button type="submit" variant="tonal" size="sm" id="{{ row.okId() }}" :autofocus="row.okId() is same as(focusedControlId)" aria-describedby="{{ noteId }}">OK</twig:Button>
+                                <twig:Button type="submit" variant="tonal" size="sm" id="{{ row.okId() }}" :autofocus="row.okId() is same as(focusedControlId)" aria-describedby="{{ pinId }} {{ noteId }}">OK</twig:Button>
                             </form>
                             <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                <twig:Button type="submit" variant="outline" size="sm" aria-describedby="{{ noteId }}">Not fixed</twig:Button>
+                                <twig:Button type="submit" variant="outline" size="sm" aria-describedby="{{ pinId }} {{ noteId }}">Not fixed</twig:Button>
                             </form>
                         {% endif %}
                     </div>

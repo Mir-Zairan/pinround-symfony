@@ -17,8 +17,8 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 /**
  * Builds the checklist cards of a ticket's rounds for the logged-in viewer in two queries, whatever the number of rounds
  * and items: the items, and the ticket's facts, which CheckItemVoter then decides ChecklistPermission MARK_FIXED and
- * CHECK on without reading them again. Both are decided once per card, on its first item, as the voter decides them on
- * the item's ticket alone, which every item of the card shares.
+ * CHECK on without reading them again. Both are decided once for the ticket, on its first item, as the voter decides
+ * them on the item's ticket alone, which every item of every card shares.
  */
 final readonly class ChecklistCards
 {
@@ -42,25 +42,17 @@ final readonly class ChecklistCards
     public function forRounds(OrganizationId $organizationId, TicketId $ticketId, array $roundIds): array
     {
         $roundChecklists = $this->roundChecklistQueries->forRounds($ticketId, $roundIds);
-        if ([] === $roundChecklists) {
+        $firstRoundChecklist = reset($roundChecklists);
+        if (false === $firstRoundChecklist) {
             return [];
         }
-        $ticket = $this->ticketOf($ticketId);
-
-        return array_map(fn (RoundChecklist $roundChecklist): ChecklistCard => $this->cardOf($organizationId, $ticketId, $ticket, $roundChecklist), $roundChecklists);
-    }
-
-    private function cardOf(OrganizationId $organizationId, TicketId $ticketId, ?TicketTurnSnapshot $ticket, RoundChecklist $roundChecklist): ChecklistCard
-    {
-        $checklist = $roundChecklist->checklist;
-        $firstItem = $checklist->items[0];
-        $itemFacts = new CheckItemAccessFacts($organizationId, $firstItem->itemId, $checklist->roundId, $ticketId, $firstItem->pinNumber, $ticket);
+        $firstChecklist = $firstRoundChecklist->checklist;
+        $firstItem = $firstChecklist->items[0];
+        $itemFacts = new CheckItemAccessFacts($organizationId, $firstItem->itemId, $firstChecklist->roundId, $ticketId, $firstItem->pinNumber, $this->ticketOf($ticketId));
         $mayMarkFixed = $this->authorizationChecker->isGranted(ChecklistPermission::MARK_FIXED, $itemFacts);
         $mayCheck = $this->authorizationChecker->isGranted(ChecklistPermission::CHECK, $itemFacts);
 
-        return $roundChecklist->isFindings
-            ? ChecklistCard::ofFindings($checklist, $mayMarkFixed, $mayCheck)
-            : ChecklistCard::of($checklist, $mayMarkFixed, $mayCheck);
+        return array_map(static fn (RoundChecklist $roundChecklist): ChecklistCard => ChecklistCard::of($roundChecklist, $mayMarkFixed, $mayCheck), $roundChecklists);
     }
 
     /**

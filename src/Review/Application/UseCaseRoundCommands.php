@@ -6,12 +6,12 @@ namespace App\Review\Application;
 
 use App\Media\Api\UploadedMedia;
 use App\Review\Api\AddedDraftScreenshot;
-use App\Review\Api\ChecklistCommands;
 use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\Checklist\RoundChecklistCommands;
 use App\Review\Application\Checklist\TodoStep;
 use App\Review\Domain\DraftDecision;
 use App\Review\Domain\Pin;
@@ -43,7 +43,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         private TicketTurnQueries $ticketTurnQueries,
         private TenantContext $tenantContext,
         private ReportPictures $reportPictures,
-        private ChecklistCommands $checklistCommands,
+        private RoundChecklistCommands $checklistCommands,
     ) {
     }
 
@@ -260,7 +260,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         } catch (RoundSlotTaken $taken) {
             throw new RoundRefused(RoundRefused::NUMBER_TAKEN, 0, $taken);
         }
-        $this->checklistCommands->createFromFindings($draft->id()->toString(), $sharedAt);
+        $this->checklistCommands->createFromFindings($draft, $sharedAt);
 
         return $number;
     }
