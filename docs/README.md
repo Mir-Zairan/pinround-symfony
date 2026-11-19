@@ -63,6 +63,7 @@ Where every document is, what it holds, and the order to read it in.
 | File | Holds |
 |---|---|
 | [claude-code.md](guides/claude-code.md) | Connect Claude Code to pinround: token, `claude mcp add`, the tools, uploads, safety |
+| [reporting-with-claude-code.md](guides/reporting-with-claude-code.md) | Report while Claude Code checks: the `report_while_investigating` prompt, token scopes, the evidence log, the choices at the end, Send |
 
 ## 03 Decisions (ADRs)
 [03-adr/README.md](03-adr/README.md) lists all 30 decisions with a one-line summary each.

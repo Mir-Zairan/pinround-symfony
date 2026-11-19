@@ -8,8 +8,9 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
 - [Example prompts](#example-prompts) — what to say to Claude Code
-- [The tools](#the-tools) — what each of the nine tools does
+- [The tools](#the-tools) — what each of the ten tools does
 - [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`
+- [Reporting while you check](#reporting-while-you-check) — the prompt `report_while_investigating`, and where to read more
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
 - [Safety](#safety) — your token is your permissions
 - [Full loop check](#full-loop-check) — the steps to run by hand, and the record of the last run
@@ -97,6 +98,9 @@ Pictures never travel inside a tool call. A call body over 1 MB is refused. Clau
 A picture that is not a PNG, JPEG or WebP pinround can read, or is too big, is refused: upload another one. An `upload_id` that no `add_screenshot` used within a day expires: begin a new one.
 
 Each person may begin 60 uploads a minute (the web page counts too) and have at most 20 uploads waiting.
+
+## Reporting while you check
+pinround also offers the MCP prompt `report_while_investigating` (in Claude Code: `/mcp__pinround__report_while_investigating`). With it, Claude Code keeps an evidence log while it checks a problem and uploads nothing until you choose. At the end it files a new report draft, or adds the pictures to your draft round on a ticket. A report draft needs a token with `reports:write` ticked, and you press **Send** in pinround yourself. See [reporting-with-claude-code.md](reporting-with-claude-code.md).
 
 ## When a call is refused
 A refused call saves nothing. The answers you may see:
