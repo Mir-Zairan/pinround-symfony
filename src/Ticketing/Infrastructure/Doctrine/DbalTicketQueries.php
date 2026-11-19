@@ -7,6 +7,7 @@ namespace App\Ticketing\Infrastructure\Doctrine;
 use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
 use App\Insight\Api\TurnUserQueries;
+use App\Organization\Api\SettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
@@ -53,6 +54,7 @@ final readonly class DbalTicketQueries implements TicketQueries
         private TurnUserQueries $turnUserQueries,
         private UserQueries $userQueries,
         private TicketTeamLookup $teamLookup,
+        private SettingsQueries $settingsQueries,
     ) {
     }
 
@@ -270,7 +272,7 @@ final readonly class DbalTicketQueries implements TicketQueries
                 self::userIdOrNull($row['tester_id'], 'tester id'),
                 self::userIdOrNull($row['waiting_on_user_id'], 'waiting-on user id'),
             ),
-            TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds),
+            TurnSnapshotRow::snapshotOf(new TicketId(self::text($row['id'], 'ticket id')), $row, $step->groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds, TurnSnapshotRow::needsTheTriager($row) ? $this->settingsQueries->triagerOf($organizationId) : null),
             $displayNames,
             self::integer($row['version'], 'version'),
             $currentSummary,

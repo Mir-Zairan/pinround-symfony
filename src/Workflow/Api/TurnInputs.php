@@ -29,6 +29,8 @@ final class TurnInputs
      * @param string|null $waitingOnLabel who the ticket waits on when that is not a user
      * @param string|null $priority       one of blocker, critical, major, normal, minor
      * @param UserId|null $askedUserId    the person an open question waits on; null while no question is open
+     * @param bool        $isCheckNeeded  true while a new ticket waits for its quick check
+     * @param UserId|null $checkerId      who takes the quick look
      */
     public static function ticketState(
         string $stepId,
@@ -46,6 +48,8 @@ final class TurnInputs
         ?string $priority,
         ?string $release,
         ?UserId $askedUserId,
+        bool $isCheckNeeded = false,
+        ?UserId $checkerId = null,
     ): TicketState {
         return new TicketState(
             $stepId,
@@ -63,6 +67,8 @@ final class TurnInputs
             priority: $priority,
             release: $release,
             askedUserId: $askedUserId,
+            isCheckNeeded: $isCheckNeeded,
+            checkerId: $checkerId,
         );
     }
 
@@ -87,6 +93,8 @@ final class TurnInputs
             priority: $snapshot->priority,
             release: $snapshot->release,
             askedUserId: $snapshot->askedUserId,
+            isCheckNeeded: $snapshot->isCheckNeeded,
+            checkerId: $snapshot->checkerId,
         );
     }
 

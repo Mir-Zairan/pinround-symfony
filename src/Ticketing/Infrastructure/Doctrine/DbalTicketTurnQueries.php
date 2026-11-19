@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
+use App\Organization\Api\SettingsQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
@@ -21,6 +22,7 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         private Connection $connection,
         private TenantContext $tenantContext,
         private TicketTeamLookup $teamLookup,
+        private SettingsQueries $settingsQueries,
     ) {
     }
 
@@ -43,7 +45,9 @@ final readonly class DbalTicketTurnQueries implements TicketTurnQueries
         [$groupCode, $coreCode] = $this->teamLookup->groupAndCoreCodeOf($stepId, $teamId);
         [$leadId, $leadDisplayName, $developerIds, $testerIds] = null === $teamId ? [null, null, [], []] : $this->teamLookup->peopleOf($teamId);
 
-        return TurnSnapshotRow::snapshotOf($ticketId, $row, $groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds);
+        $triagerId = TurnSnapshotRow::needsTheTriager($row) ? $this->settingsQueries->triagerOf($this->tenantContext->require()) : null;
+
+        return TurnSnapshotRow::snapshotOf($ticketId, $row, $groupCode, $coreCode, $leadId, $leadDisplayName, $developerIds, $testerIds, $triagerId);
     }
 
     private static function text(mixed $value, string $column): string

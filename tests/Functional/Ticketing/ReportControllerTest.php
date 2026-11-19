@@ -163,6 +163,7 @@ final class ReportControllerTest extends WebTestCase
 
         self::assertSame(\sprintf(ReportController::CREATED_UNCHECKED, 'SHOP-1'), $this->toastAfterTheRedirect('/t/SHOP-1'));
         self::assertSame([$this->people['Omar']->id()->toString(), 'todo'], \array_slice($this->ticketRow('SHOP-1'), 4, 2));
+        self::assertSame([$this->people['Omar']->id()->toString(), 'build', null], $this->turnRow('SHOP-1'), 'No check reason, so no checker.');
     }
 
     #[Test]
@@ -174,6 +175,7 @@ final class ReportControllerTest extends WebTestCase
 
         self::assertSame(\sprintf(ReportController::CREATED_CHECKED, 'APP-1', 'Sara'), $this->toastAfterTheRedirect('/t/APP-1'));
         self::assertSame([null, 'all', '{team}', null, 'backlog'], \array_slice($this->ticketRow('APP-1'), 1, 5));
+        self::assertSame([$this->people['Sara']->id()->toString(), 'check', $this->people['Sara']->id()->toString()], $this->turnRow('APP-1'), 'The triager takes the quick look (turn rule 2).');
     }
 
     #[Test]
@@ -185,6 +187,7 @@ final class ReportControllerTest extends WebTestCase
 
         self::assertSame(\sprintf(ReportController::CREATED_CHECKED, 'SHOP-1', 'Lena'), $this->toastAfterTheRedirect('/t/SHOP-1'));
         self::assertSame(['team', '{info,risk}'], \array_slice($this->ticketRow('SHOP-1'), 2, 2));
+        self::assertSame([$this->people['Lena']->id()->toString(), 'check', $this->people['Lena']->id()->toString()], $this->turnRow('SHOP-1'), 'The team\'s lead takes the quick look.');
     }
 
     /**
@@ -281,6 +284,25 @@ final class ReportControllerTest extends WebTestCase
             return 0;
         });
         self::assertIsArray($row, 'no ticket '.$key);
+
+        return $row;
+    }
+
+    /**
+     * @return list<mixed> the turn user id, the kind and the check user id of the ticket's turn row
+     */
+    private function turnRow(string $key): array
+    {
+        $row = null;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($key, &$row): int {
+            $row = $migrator->fetchNumeric(
+                'SELECT turn.turn_user_id, turn.kind, turn.check_user_id FROM ins_ticket_turn turn JOIN tkt_ticket t ON t.organization_id = turn.organization_id AND t.id = turn.ticket_id WHERE t.key = ?',
+                [$key],
+            );
+
+            return 0;
+        });
+        self::assertIsArray($row, 'no turn row for '.$key);
 
         return $row;
     }

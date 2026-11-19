@@ -285,6 +285,14 @@ final class Ticket implements TenantOwned
     }
 
     /**
+     * True while the ticket has check reasons and nobody has checked it yet (FR-INT-07).
+     */
+    public function isCheckNeeded(): bool
+    {
+        return [] !== $this->checkReasons && null === $this->checkedAt;
+    }
+
+    /**
      * True while the ticket's check reasons include "risk".
      */
     public function isRiskCheck(): bool

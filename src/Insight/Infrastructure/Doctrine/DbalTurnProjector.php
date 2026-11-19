@@ -71,7 +71,8 @@ final readonly class DbalTurnProjector implements TurnProjector
     }
 
     /**
-     * @param TicketTurnFacts|null $facts null when the ticket is gone or no team owns it, so its row and count go
+     * @param TicketTurnFacts|null $facts null when the ticket is gone, or no team owns it and it waits on no check, so its
+     *                                    row and count go
      */
     private function write(TicketId $ticketId, ?TicketTurnFacts $facts, string $organizationId): ?string
     {
@@ -93,7 +94,7 @@ final readonly class DbalTurnProjector implements TurnProjector
     }
 
     /**
-     * A ticket with facts always has a team: the source gives none for a ticket no team owns.
+     * A ticket with no team is counted in no team's projects; the source gives it facts only while it waits on its check.
      */
     private static function countedTicketOf(TicketTurnFacts $facts): ?CountedTicket
     {

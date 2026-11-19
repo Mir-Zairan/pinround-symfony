@@ -284,6 +284,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
                 new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
+                self::getContainer()->get(\App\Organization\Api\SettingsQueries::class),
             )->list($this->filter()),
         );
 
@@ -779,6 +780,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
                 new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
+                self::getContainer()->get(\App\Organization\Api\SettingsQueries::class),
             )->pageOf($key, self::adminOf(self::ACME_FOODS)),
         );
 
@@ -1050,6 +1052,7 @@ final class DbalTicketQueriesTest extends KernelTestCase
                 new DbalTurnUserQueries($connection, $this->tenantContext()),
                 new DbalUserQueries($connection),
                 new TicketTeamLookup($acmeStepQueries, new DbalTeamPeopleQueries($connection, new DbalUserQueries($connection))),
+                self::getContainer()->get(\App\Organization\Api\SettingsQueries::class),
             )->positionOf($key, $this->filter()),
         );
 
