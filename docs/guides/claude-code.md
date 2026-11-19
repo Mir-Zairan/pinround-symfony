@@ -8,7 +8,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
 - [Example prompts](#example-prompts) — what to say to Claude Code
-- [The tools](#the-tools) — what each of the six tools does
+- [The tools](#the-tools) — what each of the seven tools does
 - [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
 - [Safety](#safety) — your token is your permissions
@@ -53,6 +53,7 @@ Then ask: "List my pinround tickets." You should see the tickets where it is you
 ## Example prompts
 - "Read my pinround notes for SHOP-88 and fix what is marked “Not right yet”." This is the line the **For Claude Code** box on your draft round gives you to copy.
 - "Which pinround tickets are waiting for me?"
+- "What does SHOP-88 ask for, and who tests it?"
 - "Take a screenshot of the checkout page and add it to my draft round on SHOP-88, with a pin on the total."
 - "The total on SHOP-88 is fixed now. Set the verdict of that screenshot to Looks right."
 
@@ -63,6 +64,7 @@ Every tool works as you, with your permissions in the app, and only inside the t
 |---|---|---|
 | `whoami` | `read` | Your user id and name, your organization id, the token's scopes and `expires_at`. |
 | `list_my_tickets` | `read` | Your open tickets where it is your turn or you are the assignee, the most recently changed first, at most 50 (`limit` 1 to 50). Each has its key, title, step, the "Now" line of the ticket page, `is_your_turn`, `is_assignee`, `updated_at`; `has_more` says there are more. Done tickets are never listed. |
+| `get_ticket` | `read` | One ticket by key, as its page shows it to you: key, title, description, step, the "Now" and "Next" lines, the people on it with their roles (assignee, reporter, reviewer, tester), the open questions in its thread, and its checklist. A ticket you may not see is "not found", like one that does not exist. |
 | `get_round_notes` | `read` | For one ticket key: the newest shared round that has screenshots, your own private draft round, and the checklist. Each screenshot has its id, a signed image URL that works for a few minutes, title, summary, verdict ("Looks right", "Not right yet" or none) and pins (number, `x_pct`, `y_pct` from 0 to 100, note). Another person's private draft is never returned. |
 | `set_verdict` | `rounds:write` | Sets "Looks right" (`looks_right`) or "Not right yet" (`not_right_yet`) on a screenshot of your own draft round, with an optional new summary of at most 600 characters. Or, when you are the ticket's assignee, marks a checklist item fixed: `{key, check_item_id, state: "fixed"}`. |
 | `create_upload` | `rounds:write` | Begins the upload of one screenshot into your own draft round on a ticket. When you have no draft there and you are the assignee, it starts one. Answers where to send the file. |
