@@ -88,7 +88,7 @@ final readonly class SetVerdict implements AgentTool
                     'key' => $idOf('The ticket key, such as SHOP-12.'),
                     'screenshot_id' => $idOf('A screenshot of your own draft round on the ticket, as get_round_notes lists it.'),
                     'verdict' => ['type' => 'string', 'enum' => array_keys(self::VERDICT_LABELS), 'description' => 'looks_right is "Looks right", not_right_yet is "Not right yet".'],
-                    'summary' => ['type' => 'string', 'description' => 'What the picture shows, in plain words: at most 600 characters after trimming. An empty one removes the summary; leave it out to keep the one there is.'],
+                    'summary' => ['type' => 'string', 'description' => \sprintf('What the picture shows, in plain words: at most %d characters after trimming. An empty one removes the summary; leave it out to keep the one there is.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'check_item_id' => $idOf('A checklist item of the ticket, as get_round_notes lists it.'),
                     'state' => ['type' => 'string', 'enum' => [self::FIXED], 'description' => 'Only "fixed": you mark the item fixed for the tester to check.'],
                 ],

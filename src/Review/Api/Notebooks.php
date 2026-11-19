@@ -18,6 +18,9 @@ interface Notebooks
     public const int MAX_SCREENSHOTS = 10;
     public const int MAX_SCENARIOS = 20;
 
+    /** A notebook title's characters at most, after trimming; a form or schema shows it. */
+    public const int MAX_TITLE_LENGTH = 120;
+
     /** The notebooks one page of forOwner holds at most. */
     public const int NOTEBOOKS_PER_PAGE = 20;
 
@@ -32,7 +35,7 @@ interface Notebooks
      *
      * @return string the notebook's uuid
      *
-     * @throws NotebookRefused a title rule (blank, over 120 characters, unsavable text); NOT_YOURS_TO_MAKE when
+     * @throws NotebookRefused a title rule (blank, over MAX_TITLE_LENGTH, unsavable text); NOT_YOURS_TO_MAKE when
      *                         NotebookVoter denies EDIT on the new notebook; nothing is saved. Membership is not checked
      *                         here: as for report drafts, the request's tenant is always one of the person's organizations
      *                         (EnterChosenOrganization), so a non-member never gets this far

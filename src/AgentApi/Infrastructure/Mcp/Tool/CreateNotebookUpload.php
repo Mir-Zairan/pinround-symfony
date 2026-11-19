@@ -34,8 +34,6 @@ final readonly class CreateNotebookUpload implements AgentTool
 {
     public const string NAME = 'create_notebook_upload';
     public const string AUDIT_TARGET_TYPE = 'notebook';
-    /** UploadPurpose::Screenshot, which this module may not read. */
-    private const string SCREENSHOT_PURPOSE = 'screenshot';
     /** The allowed types are 10 characters; the cap only keeps a refusal from echoing megabytes. */
     private const int MAX_MIME_LENGTH = 100;
 
@@ -114,7 +112,7 @@ final readonly class CreateNotebookUpload implements AgentTool
         }
         $access = $this->currentApiToken->access() ?? throw new \LogicException('create_notebook_upload ran without a personal access token.');
         try {
-            $slot = $this->uploads->begin($access->organizationId, $callerId, new UploadTarget(Notebooks::UPLOAD_TARGET_KIND, $notebook->id), self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
+            $slot = $this->uploads->begin($access->organizationId, $callerId, new UploadTarget(Notebooks::UPLOAD_TARGET_KIND, $notebook->id), CreateUpload::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
         } catch (UploadRefused $refused) {
             throw ToolRefusal::refused($refused->getMessage());
         } catch (UploadTargetDenied) {

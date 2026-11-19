@@ -14,6 +14,7 @@ use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -45,6 +46,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
     private const string OMARS_NOTEBOOK = '0197a3c0-0000-7000-8000-0000000d0003';
     private const string FIRST_PICTURE = '0197a3c0-0000-7000-8000-0000000e0001';
     private const string NOTEBOOK_FULL = 'A notebook holds at most 10 screenshots.';
+    private const string SAME_PICTURE_TWICE = 'Each picture can be in the notebook only once.';
 
     private KernelBrowser $client;
 
@@ -145,6 +147,53 @@ final class AddNotebookScreenshotTest extends WebTestCase
         $this->assertRefused(self::NOTEBOOK_FULL);
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
         self::assertSame([[$uploadId, 'notebook', $fullNotebook, null]], $this->uploadIntentsOf($this->acmeFoods));
+    }
+
+    /**
+     * The second call finds the upload completed already, so Media answers the same picture and Review refuses it.
+     */
+    #[Test]
+    public function theSameUploadAddedTwiceIsRefusedTheSecondTimeAndTheNotebookKeepsItOnce(): void
+    {
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        self::assertSame(2, $this->answer()['screenshot_count'] ?? null);
+        $okRow = [$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'ok'];
+        self::assertSame([$okRow], $this->toolRowsOf($this->acmeFoods));
+        $rowsAfterTheFirstCall = $this->notebookRowsOf($this->acmeFoods);
+
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+
+        $this->assertRefused(self::SAME_PICTURE_TWICE);
+        self::assertSame($rowsAfterTheFirstCall, $this->notebookRowsOf($this->acmeFoods));
+        [$screenshots, $version] = $this->screenshotsAndVersionOf(self::LENAS_NOTEBOOK);
+        self::assertSame([self::FIRST_PICTURE, $uploadId], array_column($screenshots, 'media_id'));
+        self::assertSame(3, $version);
+        // Both rows carry the frozen clock's time, so their order is not the calls' order.
+        self::assertEqualsCanonicalizing([$okRow, [$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'refused']], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * The upload expired one second before the frozen clock and was never used.
+     */
+    #[Test]
+    public function anUploadThatExpiredUnusedIsRefusedAndStaysUnusedAndTheNotebookAsItWas(): void
+    {
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, null);
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE med_upload_intent SET expires_at = TIMESTAMPTZ '2026-11-10 09:00:19+00' WHERE id = ?",
+            [$uploadId],
+        ));
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
+
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+
+        $this->assertRefused(AddNotebookScreenshot::UPLOAD_EXPIRED);
+        self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
+        self::assertSame([[$uploadId, 'notebook', self::LENAS_NOTEBOOK, null]], $this->uploadIntentsOf($this->acmeFoods));
+        self::assertSame([[$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'refused']], $this->toolRowsOf($this->acmeFoods));
     }
 
     /**

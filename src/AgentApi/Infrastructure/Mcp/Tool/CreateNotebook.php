@@ -21,17 +21,15 @@ use Psr\Clock\ClockInterface;
 
 /**
  * create_notebook (P13.T8, ADR-0046): saves a new, empty notebook of the caller through Notebooks::create. The notebook
- * does not exist yet, so the gate's target is the one it will be: the token's organization and the caller as owner,
- * with NotebookPermission EDIT, which NotebookVoter decides on those two alone; the audit row names the caller. Holds
- * no state (ADR-0008).
+ * does not exist yet, so the gate's target is NotebookView::notMadeYet, the token's organization with the caller as
+ * owner, with NotebookPermission EDIT, which NotebookVoter decides on those two alone; the audit row names the caller.
+ * Holds no state (ADR-0008).
  */
 final readonly class CreateNotebook implements AgentTool
 {
     public const string NAME = 'create_notebook';
     public const string AUDIT_TARGET_TYPE = 'user';
 
-    /** The id of a notebook not saved yet; NotebookVoter never reads it. */
-    private const string PROSPECTIVE_NOTEBOOK_ID = '00000000-0000-0000-0000-000000000000';
     /** The title rule allows far fewer characters and says so; the cap only keeps a check from reading megabytes. */
     private const int MAX_TITLE_LENGTH = 1000;
 
@@ -51,7 +49,7 @@ final readonly class CreateNotebook implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_TITLE_LENGTH, 'description' => 'What the notebook is about, at most 120 characters.'],
+                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_TITLE_LENGTH, 'description' => \sprintf('What the notebook is about, at most %d characters.', Notebooks::MAX_TITLE_LENGTH)],
                 ],
                 'required' => ['title'],
                 'additionalProperties' => false,
@@ -75,10 +73,8 @@ final readonly class CreateNotebook implements AgentTool
     {
         $access = $this->currentApiToken->access() ?? throw new \LogicException('create_notebook ran without a personal access token.');
         $callerId = $this->currentUser->id() ?? throw new \LogicException('create_notebook ran without a user.');
-        $now = $this->clock->now();
-        $prospectiveNotebook = new NotebookView(self::PROSPECTIVE_NOTEBOOK_ID, $access->organizationId, $callerId, '', [], [], 1, $now, $now, $now);
 
-        return new ToolTarget(NotebookPermission::EDIT, $prospectiveNotebook, self::AUDIT_TARGET_TYPE, $callerId->toString());
+        return new ToolTarget(NotebookPermission::EDIT, NotebookView::notMadeYet($access->organizationId, $callerId, $this->clock->now()), self::AUDIT_TARGET_TYPE, $callerId->toString());
     }
 
     /**

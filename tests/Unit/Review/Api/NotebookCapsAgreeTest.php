@@ -13,15 +13,17 @@ use App\Review\Domain\Scenario\ScenarioRules;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
- * The notebook caps a caller reads on Notebooks are the ones the domain refuses past, the scenario schema publishes,
- * rvw_notebook's CHECKs hold and the refusal texts name, so no layer lets through what another refuses.
+ * The notebook caps a caller reads on Notebooks are the ones the domain refuses past, the scenario schema and the REST
+ * API publish, rvw_notebook's CHECKs hold and the refusal texts name, so no layer lets through what another refuses.
  */
 final class NotebookCapsAgreeTest extends TestCase
 {
     private const string SCHEMA_FILE = __DIR__.'/../../../../docs/api/scenario.v1.json';
     private const string MIGRATION_FILE = __DIR__.'/../../../../migrations/Version20261120100000.php';
+    private const string REST_API_FILE = __DIR__.'/../../../../docs/api/v1.yaml';
 
     /**
      * @return iterable<string, array{int, int}>
@@ -30,6 +32,7 @@ final class NotebookCapsAgreeTest extends TestCase
     {
         yield 'screenshots, Notebook' => [Notebooks::MAX_SCREENSHOTS, Notebook::MAX_SCREENSHOTS];
         yield 'scenarios, ScenarioRules' => [Notebooks::MAX_SCENARIOS, ScenarioRules::MAX_SCENARIOS];
+        yield 'title, Notebook' => [Notebooks::MAX_TITLE_LENGTH, Notebook::TITLE_MAX_LENGTH];
     }
 
     #[Test]
@@ -46,6 +49,7 @@ final class NotebookCapsAgreeTest extends TestCase
     {
         yield 'screenshots' => [\sprintf('A notebook holds at most %d screenshots.', Notebooks::MAX_SCREENSHOTS), NotebookRefused::TOO_MANY_SCREENSHOTS];
         yield 'scenarios' => [\sprintf('A notebook holds at most %d scenarios.', Notebooks::MAX_SCENARIOS), ScenarioRefused::TOO_MANY_SCENARIOS];
+        yield 'title' => [\sprintf('Keep the notebook title to %d characters or fewer.', Notebooks::MAX_TITLE_LENGTH), NotebookRefused::TITLE_TOO_LONG];
     }
 
     #[Test]
@@ -64,6 +68,18 @@ final class NotebookCapsAgreeTest extends TestCase
         self::assertIsArray($schema['$defs']['scenarios'] ?? null);
 
         self::assertSame(Notebooks::MAX_SCENARIOS, $schema['$defs']['scenarios']['maxItems'] ?? null);
+    }
+
+    #[Test]
+    public function theRestApiDocumentsTheApisTitleCapForANewNotebook(): void
+    {
+        $titleCap = Yaml::parseFile(self::REST_API_FILE);
+        foreach (['paths', '/api/v1/notebooks', 'post', 'requestBody', 'content', 'application/json', 'schema', 'properties', 'title', 'maxLength'] as $key) {
+            self::assertIsArray($titleCap, 'no '.$key);
+            $titleCap = $titleCap[$key] ?? null;
+        }
+
+        self::assertSame(Notebooks::MAX_TITLE_LENGTH, $titleCap);
     }
 
     #[Test]

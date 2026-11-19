@@ -32,4 +32,14 @@ final readonly class NotebookView
         public \DateTimeImmutable $lastUsedAt,
     ) {
     }
+
+    /**
+     * The notebook $ownerId is about to make in $organizationId, for asking NotebookVoter EDIT on it before
+     * Notebooks::create saves it: NotebookVoter decides on the organization and the owner alone. It is no saved
+     * notebook: its id is the nil uuid, and it has no title, pictures or scenarios.
+     */
+    public static function notMadeYet(OrganizationId $organizationId, UserId $ownerId, \DateTimeImmutable $at): self
+    {
+        return new self('00000000-0000-0000-0000-000000000000', $organizationId, $ownerId, '', [], [], 1, $at, $at, $at);
+    }
 }
