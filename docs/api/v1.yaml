@@ -150,6 +150,21 @@ paths:
         '409': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
   /api/v1/notebooks:
+    get:
+      summary: My own private notebooks in the token's organization, the last used first (list_my_notebooks, scope read).
+      description: >-
+        At most 20 a page. `next_cursor` is null on the last page; else send it as `cursor` for the next one. Nobody
+        else's notebooks are ever listed. Titles come wrapped as untrusted text, as for `GET /api/v1/notebooks/{id}`.
+      parameters:
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the page before; leave it out for the first page.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': { description: '{untrusted_text_notice, notebooks: [{notebook_id, title, screenshot_count, scenario_count, last_used_at}], next_cursor}' }
+        '401': { $ref: '#/components/responses/NoToken' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
     post:
       summary: Make a new, empty private notebook of mine (create_notebook, scope notebooks:write).
       description: Only its owner ever sees it (ADR-0046). Each request without an Idempotency-Key makes another one.
@@ -168,6 +183,23 @@ paths:
         '201': { description: '{notebook_id}' }
         '403': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks/{id}:
+    get:
+      summary: One of my own notebooks with its pictures, pins and scenarios (get_notebook, scope read).
+      description: >-
+        Each picture's `image` is `{status, url}` with a signed URL that works for a few minutes, or null when the
+        picture is gone. Every text a person or an agent wrote (titles, summaries, pin notes, and each scenario text but
+        a step's `type`) comes wrapped as `<untrusted_text>…</untrusted_text>` with &, < and > escaped. To read it,
+        remove the <untrusted_text> and </untrusted_text> markers, then turn &lt; into <, &gt; into > and, last,
+        &amp; into &. Reading a notebook is no use of it. Another person's notebook, another organization's, and an
+        unknown or malformed id are 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{untrusted_text_notice, notebook_id, title, version, last_used_at, screenshots: [{media_id, position, image, title, summary, pins: [{number, x_pct, y_pct, note}]}], scenarios}' }
+        '401': { $ref: '#/components/responses/NoToken' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
   /api/v1/notebooks/{id}/uploads:
     post:
       summary: Begin one screenshot upload for my own notebook (create_notebook_upload, scope notebooks:write).

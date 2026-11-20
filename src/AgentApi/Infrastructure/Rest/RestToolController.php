@@ -13,6 +13,8 @@ use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReport;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReportUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
 use App\AgentApi\Infrastructure\Mcp\ToolCallGate;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
@@ -124,6 +126,29 @@ final readonly class RestToolController
      * {mime, bytes, sha256} begins an upload for the caller's own notebook (create_notebook_upload, notebooks:write);
      * apart from /api/v1/uploads, whose body names a ticket or a project, as the notebook is in the path here.
      */
+    /**
+     * One page of the caller's own notebooks, last used first (list_my_notebooks, read). The cursor goes to the tool as
+     * sent, so an empty one, one over its maxLength or a list (cursor[]=…) gets the tool's invalid input, 422.
+     */
+    #[Route('/api/v1/notebooks', name: 'api_v1_my_notebooks', methods: ['GET'])]
+    public function myNotebooks(Request $request): Response
+    {
+        $query = $request->query->all();
+        $arguments = \array_key_exists('cursor', $query) ? ['cursor' => $query['cursor']] : [];
+
+        return $this->run(ListMyNotebooks::NAME, $arguments, Response::HTTP_OK);
+    }
+
+    /**
+     * One of the caller's own notebooks with its pictures and scenarios (get_notebook, read), each text wrapped as
+     * UntrustedText, as the tool answers it.
+     */
+    #[Route('/api/v1/notebooks/{id}', name: 'api_v1_notebook', methods: ['GET'])]
+    public function notebook(string $id): Response
+    {
+        return $this->runOnPathId(GetNotebook::NAME, [], 'notebook', $id, Response::HTTP_OK);
+    }
+
     #[Route('/api/v1/notebooks/{id}/uploads', name: 'api_v1_notebook_uploads', methods: ['POST'])]
     public function notebookUploads(string $id, Request $request): Response
     {
