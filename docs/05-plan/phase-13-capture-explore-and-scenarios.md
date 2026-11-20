@@ -209,7 +209,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - [ ] All P13 tasks ticked; the three journeys of the [outcome](#outcome) pass in Playwright (tester findings, report from a Claude Code check, notebook with scenarios).
 - [ ] Privacy proven for tester drafts, report drafts and notebooks by voter, isolation and direct-URL tests.
 - [ ] No token path creates a ticket (count test per new tool and endpoint).
-- [ ] The extension source has no `eval(` or `new Function`, enforced in CI.
+- [x] The extension source has no `eval(` or `new Function`, enforced in CI. (`.github/workflows/ci.yml`, job `e2e`, step "Refuse eval( and new Function in the browser extension": `git grep` over every tracked file under `extension/`, source, tests and json, fails the build and names each file and line.)
 - [ ] Quality gates green; FR, data-model, modules, security and guide docs and their Index updated.
 
 ## Hand-off notes
