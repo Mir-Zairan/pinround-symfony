@@ -93,10 +93,15 @@ interface TicketCommands
      *                                rule's note when one explains it), the target is not a step of the team, is the
      *                                ticket's step now, the verb is give_it_to (giveTo takes it), or it leads to Needs
      *                                input and the reporter is no member of the organization; nothing is saved. Also when
-     *                                $draftChoice is Share and a shared round stays open after the move's close (the note
-     *                                is the round's reason): the move is written by then, so the caller rolls back
+     *                                $draftChoice is Share and the share must wait (ADR-0048, one open shared round per
+     *                                ticket): as MoveRefused::roundStillOpen while a shared round stays open after the
+     *                                move's close, with its number and, for a findings round, the assignee whose verdict
+     *                                it waits for, so the caller names that person or whoever's turn it is; and with
+     *                                Review's own reason when the draft has no screenshot left. The move is written by
+     *                                then, so the caller rolls back, and reads whose turn it is only after the rollback
      * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft with a screenshot on
-     *                                the ticket, after every check above but the save; nothing is saved
+     *                                the ticket, after every check above but the save; nothing is saved. Its draft carries
+     *                                the round that stays open, if any, so the question offers only keeping it private
      * @throws \LogicException        when no transaction is open
      */
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult;
@@ -139,7 +144,9 @@ interface TicketCommands
      *                                policy refuses the move (with the rule's note when one explains it), someone to
      *                                wait on is given for a step other than Needs input, or the person to wait on (the
      *                                reporter when nobody is named) is no member of the organization; nothing is saved.
-     *                                Also for a share, as move does
+     *                                Also for a share that must wait, as move does; being lead-only, this move closes no
+     *                                round first, so every open shared round holds the share back but a findings round
+     *                                that the assignee's own share closes
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is blank, over 100
      *                                characters or not one line; nothing is saved
      * @throws DraftDecisionNeeded    as move does, after every check above but the save; nothing is saved

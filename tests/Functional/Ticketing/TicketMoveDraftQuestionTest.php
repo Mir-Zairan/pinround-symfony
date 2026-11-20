@@ -625,6 +625,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             'moveUrl' => self::START_WORK,
             'draft' => new UndecidedDraft($this->omarsDraft, 2, 2),
             'stepName' => null,
+            'shareBlockedReason' => null,
             'fields' => [],
             'choiceField' => TicketMoveController::DRAFT_CHOICE_FIELD,
             'failedToast' => MoveToasts::MOVE_FAILED,
@@ -632,6 +633,105 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         self::assertMatchesRegularExpression('/value="share"[^>]*>\s*Share and move\s*<\/button>/', $content);
         self::assertStringNotContainsString('Share and move to', $content);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}> which round stays open, and the reason that names who gives its verdict
+     */
+    public static function roundsStillOpen(): iterable
+    {
+        yield 'Mia\'s findings round 1 waits for Omar, the assignee, though it is Mia\'s turn' => ['findings', 'Round 1 is still open. Omar gives a verdict first.'];
+        yield 'Omar\'s self-check round 2 waits for Mia, whose turn it is' => ['self-check', 'Round 2 is still open. Mia gives a verdict first.'];
+    }
+
+    /**
+     * ADR-0048, P14.T5: while another shared round stays open, Lena's move to a chosen step (lead-only, so it closes no
+     * round) asks about her draft with only "Keep private and move" and says who gives the verdict.
+     */
+    #[Test]
+    #[DataProvider('roundsStillOpen')]
+    public function whileAnotherRoundIsOpenTheQuestionOffersOnlyKeepPrivateAndNamesWhoGivesTheVerdict(string $openRound, string $expectedReason): void
+    {
+        $this->keepARoundOpen($openRound);
+        $before = $this->stateOf();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        foreach ([[], ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html']] as $headers) {
+            $this->client->request('POST', $this->moveToPath('progress'), $this->moveFields(), [], $headers);
+
+            self::assertResponseStatusCodeSame(409);
+            $content = html_entity_decode((string) $this->client->getResponse()->getContent(), \ENT_QUOTES | \ENT_HTML5);
+            self::assertStringContainsString('<p>'.$expectedReason.'</p>', $content);
+            self::assertStringContainsString('Your draft round has 1 screenshot. Keep it private and move; you can share it later.', $content);
+            self::assertSame(1, substr_count($content, 'name="draft_choice" value="keep"'));
+            self::assertSame(0, substr_count($content, 'value="share"'), 'No button shares while the round is open.');
+            self::assertSame(0, substr_count($content, 'Share and move'));
+            self::assertSame($before, $this->stateOf());
+        }
+    }
+
+    /**
+     * The dialog offers no share then, so a share sent anyway is a forged form: the move and the share roll back, and
+     * the toast names who gives the verdict, read after the rollback.
+     *
+     * @return iterable<string, array{string, string, string}> which round stays open, the move, and the reason
+     */
+    public static function sharesSentWhileARoundIsOpen(): iterable
+    {
+        foreach (self::roundsStillOpen() as $label => [$openRound, $expectedReason]) {
+            yield $label.', on a move to a chosen step' => [$openRound, 'move-to', $expectedReason];
+            yield $label.', on the lead\'s Put on hold' => [$openRound, '/t/SHOP-1/move/put_on_hold', $expectedReason];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('sharesSentWhileARoundIsOpen')]
+    public function aShareSentWhileAnotherRoundIsOpenIsRefusedWithWhoGivesTheVerdictAndChangesNothing(string $openRound, string $path, string $expectedReason): void
+    {
+        $this->keepARoundOpen($openRound);
+        $before = $this->stateOf();
+        self::assertNull($before['rounds'][$this->lenasDraft]['number']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request(
+            'POST',
+            'move-to' === $path ? $this->moveToPath('progress') : $path,
+            $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']),
+            [],
+            ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html'],
+        );
+
+        self::assertResponseStatusCodeSame(422);
+        $matched = preg_match('/data-toast-message-value="([^"]*)"/', (string) $this->client->getResponse()->getContent(), $toast);
+        self::assertSame(1, $matched);
+        self::assertSame($expectedReason, html_entity_decode($toast[1], \ENT_QUOTES | \ENT_HTML5));
+        self::assertSame($before, $this->stateOf(), 'The ticket did not move, and Lena\'s draft stays private, undecided and unnumbered.');
+    }
+
+    /**
+     * It is Mia's turn on SHOP-1 in the turn read model; with 'findings' Mia's round 1 opens again, which is findings for
+     * Omar, the assignee; with 'self-check' Omar's own shared round 2 is open.
+     */
+    private function keepARoundOpen(string $openRound): void
+    {
+        $miaId = $this->people['Mia']->id()->toString();
+        $ticketId = $this->ticketId;
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
+             SELECT organization_id, id, team_id, project_id, 'todo', ?, NULL, 'build', 10, '2026-11-06 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
+            [$miaId, $ticketId],
+        ));
+        if ('findings' === $openRound) {
+            $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                "UPDATE rvw_round SET state = 'open' WHERE ticket_id = ? AND number = 1",
+                [$ticketId],
+            ));
+
+            return;
+        }
+        $omarsRound = $this->addRound($this->ticketId, 2, 'draft', 'Omar', '2026-11-05 10:00:00+00');
+        $this->addScreenshot($omarsRound, $this->addMedia('ready', 'Omar'), 0, 'Self-check shot', null);
+        $this->seededRoundCount = 4;
     }
 
     /**
