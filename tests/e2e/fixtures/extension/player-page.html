@@ -52,6 +52,26 @@
     <p id="thanks" hidden>Thank you. Your order is on its way.</p>
     <p id="terms">Acme Foods delivers Monday to Wednesday.</p>
     <div aria-hidden="true"><button type="button" tabindex="-1">Pay 12.40 EUR</button></div>
+    <section>
+        <label for="extras">Extras</label>
+        <select id="extras" multiple>
+            <option selected>Napkins</option>
+            <option>Ice pack</option>
+        </select>
+        <label for="box-size">Box size</label>
+        <select id="box-size">
+            <option>Small</option>
+            <option>Large</option>
+            <option>Large</option>
+            <option disabled>Medium</option>
+        </select>
+        <button type="button" id="pay-by-card" aria-disabled="true">Pay by card</button>
+    </section>
+    <a href="/player-2" id="receipt-link">See the receipt</a>
+    <form id="send" action="/player-2" method="get">
+        <input id="reference" name="reference" type="text" aria-label="Order reference" value="SHOP-8">
+        <button type="submit">Send the order</button>
+    </form>
     <script>
         window.fieldEvents = [];
         for (const type of ['input', 'change']) {
@@ -70,9 +90,11 @@
         document.getElementById('pay').addEventListener('click', () => {
             document.getElementById('thanks').hidden = false;
         });
-        document.getElementById('pay-by-invoice').addEventListener('click', () => {
-            document.getElementById('thanks').hidden = false;
-        });
+        for (const id of ['pay-by-invoice', 'pay-by-card']) {
+            document.getElementById(id).addEventListener('click', () => {
+                document.getElementById('thanks').hidden = false;
+            });
+        }
     </script>
 </body>
 </html>

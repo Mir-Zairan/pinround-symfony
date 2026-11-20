@@ -6,8 +6,12 @@ import { PageInspector, TEST_PAGE_ORIGIN, expect, openPopupFor, tabIdOf, test, t
 // extension runs it, through step-runner.js in an extension page, which injects the player into the tab's isolated
 // world and checks its answer. The highlight's shadow root is closed, so PageInspector reads it.
 
-const PLAYER_PAGE_FILE = path.join(__dirname, 'fixtures', 'extension', 'player-page.html');
+const PLAYER_PAGE_FILES_BY_PATH: Record<string, string> = {
+  '/player': path.join(__dirname, 'fixtures', 'extension', 'player-page.html'),
+  '/player-2': path.join(__dirname, 'fixtures', 'extension', 'player-page-2.html'),
+};
 const PLAYER_PAGE_URL = `${TEST_PAGE_ORIGIN}/player`;
+const RECEIPT_PAGE_URL = `${TEST_PAGE_ORIGIN}/player-2`;
 const PAGE_PLAYER_FILES = ['src/player/player-text.js', 'src/player/page-player.js'];
 const HIGHLIGHT_TAG = 'pinround-player-highlight';
 // The ring sits this many CSS px outside the element (HIGHLIGHT_GAP_PX in page-player.js).
@@ -31,9 +35,12 @@ interface PlayerTab {
   inspector: PageInspector;
 }
 
-/** The player page in `testPage`, answered on the test page's origin, and an extension page to run steps from. */
+/** The player page in `testPage`, answered with its receipt page on the test page's origin, and an extension page to run steps from. */
 async function openPlayerPage(context: BrowserContext, testPage: Page): Promise<PlayerTab> {
-  await context.route(PLAYER_PAGE_URL, (route) => route.fulfill({ path: PLAYER_PAGE_FILE, contentType: 'text/html' }));
+  await context.route(
+    (url) => Object.hasOwn(PLAYER_PAGE_FILES_BY_PATH, url.pathname),
+    (route) => route.fulfill({ path: PLAYER_PAGE_FILES_BY_PATH[new URL(route.request().url()).pathname], contentType: 'text/html' }),
+  );
   await testPage.goto(PLAYER_PAGE_URL);
   const extensionPage = await openPopupFor(context, testPage);
   const tabId = await tabIdOf(extensionPage, PLAYER_PAGE_URL);
@@ -72,25 +79,30 @@ async function callPagePlayer(tab: PlayerTab, call: 'highlightTarget' | 'clearHi
 }
 
 /**
- * Runs wait_for in the isolated world with a wait that, the first time the player waits, presses the page's
- * "Check stock" button, whose own script then shows the stock line: the element appears while the step waits, with no
- * real time passing. Answers the step's answer and how often it waited.
+ * Runs wait_for in the isolated world with a wait that resolves at once and logs each pause, so no real time passes.
+ * With `checkStockAtWait`, that wait presses the page's "Check stock" button, whose own script then shows the stock
+ * line: the element appears while the step waits. Answers the step's answer and the pauses in ms.
  */
-async function waitForWithStockCheck(tab: PlayerTab, step: Step, timeoutMs: number): Promise<{ answer: StepAnswer; waits: number }> {
-  return tab.extensionPage.evaluate(async ({ tabId, files, waitStep, timeout }) => {
+async function waitForWithCountedWaits(
+  tab: PlayerTab,
+  step: Step,
+  options: { timeoutMs: number; pollMs?: number; checkStockAtWait: number | null },
+): Promise<{ answer: StepAnswer; waits: number[] }> {
+  return tab.extensionPage.evaluate(async ({ tabId, files, waitStep, timeoutMs, pollMs, checkStockAtWait }) => {
     const { chrome } = globalThis as unknown as ExtensionPageGlobals;
     await chrome.scripting.executeScript({ target: { tabId }, files });
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId },
-      args: [waitStep, timeout],
-      func: async (pageStep: Step, timeoutMs: number) => {
-        let waits = 0;
+      args: [waitStep, timeoutMs, pollMs, checkStockAtWait],
+      func: async (pageStep: Step, timeout: number, poll: number | null, pressAt: number | null) => {
+        const waits: number[] = [];
         const player = (globalThis as unknown as { pinroundPagePlayer: { runStep(step: Step, options: object): Promise<StepAnswer> } }).pinroundPagePlayer;
         const answer = await player.runStep(pageStep, {
-          timeoutMs,
-          wait: async () => {
-            waits += 1;
-            if (1 === waits) {
+          timeoutMs: timeout,
+          ...(null === poll ? {} : { pollMs: poll }),
+          wait: async (ms: number) => {
+            waits.push(ms);
+            if (waits.length === pressAt) {
               (document.getElementById('check-stock') as HTMLButtonElement).click();
             }
           },
@@ -98,8 +110,8 @@ async function waitForWithStockCheck(tab: PlayerTab, step: Step, timeoutMs: numb
         return { answer, waits };
       },
     });
-    return injection.result as { answer: StepAnswer; waits: number };
-  }, { tabId: tab.tabId, files: PAGE_PLAYER_FILES, waitStep: step, timeout: timeoutMs });
+    return injection.result as { answer: StepAnswer; waits: number[] };
+  }, { tabId: tab.tabId, files: PAGE_PLAYER_FILES, waitStep: step, timeoutMs: options.timeoutMs, pollMs: options.pollMs ?? null, checkStockAtWait: options.checkStockAtWait });
 }
 
 /** The highlight ring's border box in viewport CSS px, or null when the page shows no highlight. */
@@ -124,6 +136,42 @@ async function expectHighlightAround(tab: PlayerTab, element: Locator): Promise<
   expect(ring.top).toBeCloseTo(box.y - HIGHLIGHT_GAP_PX, 0);
   expect(ring.right).toBeCloseTo(box.x + box.width + HIGHLIGHT_GAP_PX, 0);
   expect(ring.bottom).toBeCloseTo(box.y + box.height + HIGHLIGHT_GAP_PX, 0);
+}
+
+/**
+ * Runs a capture step as the extension does, with a captureToNotebook that answers how many highlight hosts the page
+ * held when it was called.
+ */
+async function highlightHostsAtCapture(tab: PlayerTab): Promise<{ answer: StepAnswer; hostsAtCapture: number[] }> {
+  return tab.extensionPage.evaluate(`(async () => {
+    const { browser } = await import('/src/shared/browser.js');
+    const { stepRunnerFor } = await import('/src/player/step-runner.js');
+    const tabId = ${JSON.stringify(tab.tabId)};
+    const hostsAtCapture = [];
+    const captureToNotebook = async () => {
+      const [injection] = await browser.scripting.executeScript({ target: { tabId }, args: [${JSON.stringify(HIGHLIGHT_TAG)}], func: (tag) => document.getElementsByTagName(tag).length });
+      hostsAtCapture.push(injection.result);
+    };
+    const refuse = async () => { throw new Error('This spec opens no page.'); };
+    const answer = await stepRunnerFor(browser, { tabId, openUrl: refuse, captureToNotebook })({ type: 'capture', say: 'Keep a picture.' });
+    return { answer, hostsAtCapture };
+  })()`);
+}
+
+interface SeenTab {
+  id?: number;
+  status?: string;
+  url?: string;
+  pendingUrl?: string;
+}
+
+/** The tab as browser.tabs.get answers it in the extension page. */
+async function seenTab(tab: PlayerTab): Promise<SeenTab> {
+  return tab.extensionPage.evaluate(`(async () => {
+    const { browser } = await import('/src/shared/browser.js');
+    const { id, status, url, pendingUrl } = await browser.tabs.get(${JSON.stringify(tab.tabId)});
+    return { id, status, url, pendingUrl };
+  })()`);
 }
 
 const highlightHostCount = (page: Page) => page.evaluate((tag) => document.getElementsByTagName(tag).length, HIGHLIGHT_TAG);
@@ -284,13 +332,17 @@ test('wait_for waits until the page shows the element, and refuses once the time
   const waitForStock: Step = { type: 'wait_for', say: 'Wait for the stock.', target: { role: 'status' } };
 
   expect(await playStep(tab, { type: 'expect_visible', say: 'Stock shows.', target: { role: 'status' } })).toMatchObject({ stopped: true });
-  const timedOut = await waitForWithStockCheck(tab, waitForStock, 0);
-  expect(timedOut).toEqual({ answer: { stopped: true, message: 'Waited 0 seconds. Found no visible element with role status.' }, waits: 0 });
+  const timedOut = await waitForWithCountedWaits(tab, waitForStock, { timeoutMs: 0, checkStockAtWait: 1 });
+  expect(timedOut).toEqual({ answer: { stopped: true, message: 'Waited 0 seconds. Found no visible element with role status.' }, waits: [] });
   await expect(tab.page.locator('#stock')).toBeHidden();
 
-  const waited = await waitForWithStockCheck(tab, waitForStock, 10_000);
+  const neverShown = await waitForWithCountedWaits(tab, waitForStock, { timeoutMs: 300, pollMs: 100, checkStockAtWait: null });
+  expect(neverShown).toEqual({ answer: { stopped: true, message: 'Waited 0.3 seconds. Found no visible element with role status.' }, waits: [100, 100, 100] });
+  await expect(tab.page.locator('#stock')).toBeHidden();
 
-  expect(waited).toEqual({ answer: { ok: true }, waits: 1 });
+  const waited = await waitForWithCountedWaits(tab, waitForStock, { timeoutMs: 10_000, checkStockAtWait: 1 });
+
+  expect(waited).toEqual({ answer: { ok: true }, waits: [100] });
   await expect(tab.page.locator('#stock')).toBeVisible();
   await expectHighlightAround(tab, tab.page.locator('#stock'));
 });
@@ -361,4 +413,124 @@ test('the highlight rings the current step\'s element, moves with the next step,
   expect(await highlightHostCount(tab.page)).toBe(1);
   expect(await playStep(tab, { type: 'click', say: 'Pay later.', target: { role: 'button', name: 'Pay later' } })).toMatchObject({ stopped: true });
   expect(await highlightHostCount(tab.page)).toBe(0);
+});
+
+test('a capture step clears the highlight of the step before, so the ring is not in the screenshot', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+  expect(await playStep(tab, { type: 'click', say: 'Check the stock.', target: { role: 'button', name: 'Check stock' } })).toEqual({ ok: true });
+  expect(await highlightHostCount(tab.page)).toBe(1);
+
+  expect(await highlightHostsAtCapture(tab)).toEqual({ answer: { ok: true }, hostsAtCapture: [0] });
+});
+
+test('expect_text never reads a password field: a right and a wrong guess get the same refusal, and the value is in neither', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+  const refusal = { stopped: true, message: 'The player never reads a password field. Look at it yourself, then play on.' };
+  await tab.page.locator('#password').fill('jam-jar-2026');
+  await tab.page.locator('#pin').fill('4711');
+
+  const answers = [
+    await playStep(tab, { type: 'expect_text', say: 'The password is right.', target: { label: 'Password' }, text: 'jam-jar-2026' }),
+    await playStep(tab, { type: 'expect_text', say: 'The password is a guess.', target: { label: 'Password' }, text: 'jam-jar-2025' }),
+    await playStep(tab, { type: 'expect_text', say: 'The PIN is right.', target: { label: 'New PIN' }, text: '4711' }),
+    await playStep(tab, { type: 'expect_text', say: 'The PIN is a guess.', target: { label: 'New PIN' }, text: '1234' }),
+  ];
+
+  expect(answers).toEqual([refusal, refusal, refusal, refusal]);
+  for (const value of ['jam-jar-2026', '4711']) {
+    expect(JSON.stringify(answers)).not.toContain(value);
+  }
+  await expect(tab.page.locator('#password')).toHaveValue('jam-jar-2026');
+  // The twin: the same label lookup reads a field that is no password field.
+  expect(await playStep(tab, { type: 'expect_text', say: 'The order number.', target: { label: 'Order number' }, text: 'SHOP-7' })).toEqual({ ok: true });
+});
+
+test('select refuses a list that takes more than one choice, and changes nothing', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+
+  expect(await playStep(tab, { type: 'select', say: 'Add an ice pack.', target: { label: 'Extras' }, option: 'Ice pack' })).toEqual({
+    stopped: true,
+    message: 'The list labelled "Extras" takes more than one choice, and a step chooses one, so nothing was chosen.',
+  });
+
+  expect(await tab.page.locator('#extras option:checked').allTextContents()).toEqual(['Napkins']);
+  expect(await fieldEventsOf(tab.page)).toEqual([]);
+});
+
+test('select refuses two options with the same text and a disabled option; click refuses an aria-disabled button; nothing changes', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+
+  expect(await playStep(tab, { type: 'select', say: 'Choose large.', target: { label: 'Box size' }, option: 'Large' })).toEqual({
+    stopped: true,
+    message: 'Found 2 options "Large" in the list; a step needs exactly one.',
+  });
+  expect(await playStep(tab, { type: 'select', say: 'Choose medium.', target: { label: 'Box size' }, option: 'Medium' })).toEqual({
+    stopped: true,
+    message: 'The option "Medium" cannot be chosen.',
+  });
+  expect(await playStep(tab, { type: 'click', say: 'Pay by card.', target: { role: 'button', name: 'Pay by card' } })).toEqual({
+    stopped: true,
+    message: 'The element with role button named "Pay by card" is disabled, so it was not clicked.',
+  });
+
+  await expect(tab.page.locator('#box-size')).toHaveValue('Small');
+  expect(await fieldEventsOf(tab.page)).toEqual([]);
+  await expect(tab.page.locator('#thanks')).toBeHidden();
+  // The twin: the same list chooses an option it holds once.
+  expect(await playStep(tab, { type: 'select', say: 'Choose small.', target: { label: 'Box size' }, option: 'Small' })).toEqual({ ok: true });
+  expect(await fieldEventsOf(tab.page)).toEqual(['input box-size', 'change box-size']);
+});
+
+test('after a click follows a link, the next wait_for and expect_text run on the new page once it has loaded', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+
+  expect(await playStep(tab, { type: 'click', say: 'See the receipt.', target: { role: 'link', name: 'See the receipt' } })).toEqual({ ok: true });
+  expect(await playStep(tab, { type: 'wait_for', say: 'Wait for the receipt.', target: { text: 'Order sent' } })).toEqual({ ok: true });
+  expect(await playStep(tab, { type: 'expect_text', say: 'Omar packs it.', target: { role: 'status' }, text: 'Omar packs it today.' })).toEqual({ ok: true });
+
+  await expect(tab.page).toHaveURL(RECEIPT_PAGE_URL);
+  await expectHighlightAround(tab, tab.page.locator('#sent'));
+});
+
+test('after a click submits a form, the next expect_text and wait_for run on the new page once it has loaded', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+
+  expect(await playStep(tab, { type: 'click', say: 'Send the order.', target: { role: 'button', name: 'Send the order' } })).toEqual({ ok: true });
+  expect(await playStep(tab, { type: 'expect_text', say: 'The order is sent.', text: 'Order sent.' })).toEqual({ ok: true });
+  expect(await playStep(tab, { type: 'wait_for', say: 'Wait for the receipt.', target: { role: 'heading', name: 'Your receipt' } })).toEqual({ ok: true });
+
+  await expect(tab.page).toHaveURL(`${RECEIPT_PAGE_URL}?reference=SHOP-8`);
+});
+
+test('tabs.get, tabs.update and a func cut off by a navigation behave in Chrome as extension/tests/fake-browser.mjs models them', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+  expect(await seenTab(tab)).toEqual({ id: tab.tabId, status: 'complete', url: PLAYER_PAGE_URL });
+
+  const seen = await tab.extensionPage.evaluate(`(async () => {
+    const { browser } = await import('/src/shared/browser.js');
+    const tabId = ${JSON.stringify(tab.tabId)};
+    const refusalOf = async (call) => { try { await call(); return 'no refusal'; } catch (error) { return error.message; } };
+    const thrownBy = (call) => { try { call(); return 'did not throw'; } catch (error) { return [error.name, error.message]; } };
+    const [before] = await browser.scripting.executeScript({ target: { tabId }, func: () => true });
+    const pending = browser.scripting.executeScript({ target: { tabId }, func: () => new Promise(() => undefined) });
+    await browser.scripting.executeScript({ target: { tabId }, func: () => true });
+    const { id, status, url, pendingUrl } = await browser.tabs.update(tabId, { url: ${JSON.stringify(RECEIPT_PAGE_URL)} });
+    const [left] = await pending;
+    return {
+      updated: { id, status, url, pendingUrl },
+      left: { sameDocument: left.documentId === before.documentId, frameId: left.frameId, result: left.result },
+      missing: await refusalOf(() => browser.tabs.get(tabId + 100000)),
+      getWithText: thrownBy(() => browser.tabs.get(String(tabId))),
+      updateWithText: thrownBy(() => browser.tabs.update(String(tabId), { url: ${JSON.stringify(RECEIPT_PAGE_URL)} })),
+    };
+  })()`);
+
+  expect(seen).toEqual({
+    updated: { id: tab.tabId, status: 'loading', url: PLAYER_PAGE_URL, pendingUrl: RECEIPT_PAGE_URL },
+    left: { sameDocument: true, frameId: 0, result: null },
+    missing: `No tab with id: ${tab.tabId + 100000}.`,
+    getWithText: ['TypeError', 'Error in invocation of tabs.get(integer tabId, optional function callback): No matching signature.'],
+    updateWithText: ['TypeError', 'Error in invocation of tabs.update(optional integer tabId, object updateProperties, optional function callback): No matching signature.'],
+  });
+  await expect.poll(() => seenTab(tab)).toEqual({ id: tab.tabId, status: 'complete', url: RECEIPT_PAGE_URL });
 });

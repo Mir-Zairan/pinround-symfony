@@ -193,8 +193,9 @@ function targetOf(target, place) {
 }
 
 /**
- * Text as the server keeps it, not trimmed. A lone surrogate is what JSON gives for bytes that are no UTF-8, and
- * maxLength counts code points, as PHP's mb_strlen does, so an emoji is one character, not two UTF-16 units.
+ * Text as the server keeps it, not trimmed. A lone surrogate, which only an unpaired \uD800 to \uDFFF escape in the
+ * JSON gives, has no UTF-8 form, so it is refused as the server refuses it; maxLength counts code points, as PHP's
+ * mb_strlen does, so an emoji is one character, not two UTF-16 units.
  */
 function textOf(value, field, maxLength, mayBeBlank, place) {
     if ('string' !== typeof value) {

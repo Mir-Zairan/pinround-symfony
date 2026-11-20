@@ -16,6 +16,8 @@ export const browser = {
         query: (queryInfo) => chrome.tabs.query(queryInfo),
         captureVisibleTab: (options) => chrome.tabs.captureVisibleTab(options),
         create: (properties) => chrome.tabs.create(properties),
+        get: (tabId) => chrome.tabs.get(tabId),
+        update: (tabId, properties) => chrome.tabs.update(tabId, properties),
     },
     runtime: { openOptionsPage: () => chrome.runtime.openOptionsPage() },
     scripting: { executeScript: (injection) => chrome.scripting.executeScript(injection) },

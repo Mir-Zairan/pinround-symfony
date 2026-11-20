@@ -341,3 +341,35 @@ test('the caps, step types, target kinds, fields and patterns agree with extensi
         assert.equal(variant.additionalProperties, false);
     }
 });
+
+test('the texts that may be blank are the same here and in extension/scenario.v1.json: setup and the text a type step types', () => {
+    const { $defs: defs, properties } = SCHEMA;
+    const stepProperties = (type) => defs.step.oneOf.find((variant) => variant.properties.type.const === type).properties;
+    const targetProperties = (kind) => defs.target.oneOf.find((variant) => variant.required[0] === kind).properties;
+    const resolved = (schema) => (undefined === schema.$ref ? schema : defs[schema.$ref.replace('#/$defs/', '')]);
+    const typeStep = (text) => ({ type: 'type', say: 'Type the coupon.', target: { label: 'Coupon code' }, text });
+    const texts = [
+        ['title', properties.title, (blank) => [aScenario({ title: blank })]],
+        ['why', properties.why, (blank) => [aScenario({ why: blank })]],
+        ['setup', properties.setup, (blank) => [aScenario({ setup: blank })]],
+        ['say', stepProperties('click').say, (blank) => withStep({ ...clickStep(PAY_BUTTON), say: blank })],
+        ['type text', stepProperties('type').text, (blank) => withStep(typeStep(blank))],
+        ['select option', stepProperties('select').option, (blank) => withStep({ type: 'select', say: 'Choose.', target: { label: 'Delivery day' }, option: blank })],
+        ['expect_text text', stepProperties('expect_text').text, (blank) => withStep({ type: 'expect_text', say: 'It shows.', text: blank })],
+        ['target.name', targetProperties('role').name, (blank) => withStep(clickStep({ role: 'button', name: blank }))],
+        ['target.text', targetProperties('text').text, (blank) => withStep(clickStep({ text: blank }))],
+        ['target.label', targetProperties('label').label, (blank) => withStep(clickStep({ label: blank }))],
+    ];
+    const isFilled = (schema) => '\\S' === resolved(schema).pattern;
+
+    assert.deepEqual(texts.filter(([, schema]) => !isFilled(schema)).map(([field]) => field), ['setup', 'type text']);
+    assert.equal(stepProperties('type').text.$ref, '#/$defs/textValue');
+    for (const [, schema] of texts.slice(5)) {
+        assert.equal(schema.$ref, '#/$defs/filledTextValue');
+    }
+    for (const [field, schema, withBlank] of texts) {
+        for (const blank of ['', ' \u{A0}\r\n', '\u{FEFF}']) {
+            assert.equal(refusalOf(withBlank(blank)) === undefined, !isFilled(schema), `${field} ${JSON.stringify(blank)}`);
+        }
+    }
+});
