@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Insight\Application\MyReports;
+namespace App\Tests\Unit\Insight\Api;
 
+use App\Insight\Api\GroupedReports;
 use App\Insight\Api\MyReport;
-use App\Insight\Application\MyReports\GroupedReports;
-use App\Insight\Application\MyReports\ReportGroup;
+use App\Insight\Api\ReportGroup;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use PHPUnit\Framework\Attributes\Test;

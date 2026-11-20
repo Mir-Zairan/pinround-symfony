@@ -11,6 +11,7 @@ use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Domain\TeamId;
 use App\Web\UI\Admin\AdminTabRail;
 use App\Web\UI\Controller\Admin\AdminShellController;
+use App\Web\UI\Controller\MyReportsController;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Exception\RouteNotFoundException;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -31,8 +32,8 @@ final readonly class MainMenu
     public const string HOME_ROUTE = 'web_home';
     /** P03.T3 (`/tickets`). */
     public const string TICKETS_ROUTE = 'ticketing_tickets';
-    /** P14.T15 (`/my-reports`); hidden, not inert, until that route exists (product decision 2026-11-20). */
-    public const string MY_REPORTS_ROUTE = 'my_reports';
+    /** P14.T15 (`/my-reports`); left out, not inert, where the route does not exist (product decision 2026-11-20). */
+    public const string MY_REPORTS_ROUTE = MyReportsController::ROUTE;
     /** P02.T8 (`/teams/{slug}`), with the team's slug as "slug". */
     public const string TEAM_ROUTE = 'team_show';
     /**
