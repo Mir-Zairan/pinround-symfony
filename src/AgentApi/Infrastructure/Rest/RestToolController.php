@@ -123,10 +123,6 @@ final readonly class RestToolController
     }
 
     /**
-     * {mime, bytes, sha256} begins an upload for the caller's own notebook (create_notebook_upload, notebooks:write);
-     * apart from /api/v1/uploads, whose body names a ticket or a project, as the notebook is in the path here.
-     */
-    /**
      * One page of the caller's own notebooks, last used first (list_my_notebooks, read). The cursor goes to the tool as
      * sent, so an empty one, one over its maxLength or a list (cursor[]=…) gets the tool's invalid input, 422.
      */
@@ -149,6 +145,10 @@ final readonly class RestToolController
         return $this->runOnPathId(GetNotebook::NAME, [], 'notebook', $id, Response::HTTP_OK);
     }
 
+    /**
+     * {mime, bytes, sha256} begins an upload for the caller's own notebook (create_notebook_upload, notebooks:write);
+     * apart from /api/v1/uploads, whose body names a ticket or a project, as the notebook is in the path here.
+     */
     #[Route('/api/v1/notebooks/{id}/uploads', name: 'api_v1_notebook_uploads', methods: ['POST'])]
     public function notebookUploads(string $id, Request $request): Response
     {
