@@ -260,8 +260,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. "Your team" shows the avatar stack and "N people", linking to the team page.
   4. The admin tiles show their real values.
 - **Acceptance:**
-  - [ ] Home and "Whose turn?" agree on the count for Lena, Omar and Mia (functional test).
-  - [ ] Home reads in a fixed number of queries (query-count test).
+  - [x] Home and "Whose turn?" agree on the count for Lena, Omar and Mia (functional test).
+  - [x] Home reads in a fixed number of queries (query-count test).
 - **Prototype check:** `Main › Home`.
 - **Size:** M
 
@@ -370,3 +370,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (T11): T11 step 1 done in the extension (page-context.js); steps 2-3 (MCP requires title and summary, guides) still open. Criteria 1 and 3 are ticked on `extension/tests/page-context.test.mjs` and `tests/e2e/extension-capture-target.spec.ts` (14 passed in `chromium-extension`). That spec's credentialed-address test now routes `http://omar:s3cret@shop.acme-foods.test/**` itself: Playwright's request URL keeps the credentials, so the fixture's route for `TEST_PAGE_ORIGIN` did not match and the page went to DNS (`TEST_PAGE_FILE` is now exported from `extension.ts`).
 - 2026-11-21: T6 steps 1 and 5 done in 6a (column, chain to first try, cap 5); criteria for sixth try and foreign retake_of stay unticked until 6d maps the 404 at the MCP/REST edge; share still copies every try until 6b.
 - 2026-11-21 (P14.T13): Whose turn? reuses ProjectRail, TicketFilters (isWhoseTurnView) and the ticket-list frames; Show done changes only the rail counts. When a search passes the 1,000-match cap, each card's count reads "N+" as the total line does (`WhoseTurnTest::aSearchPastTheCapShowsTheCountAsALowerBound`). The criteria are ticked on `WhoseTurnTest` and on `whose-turn-toolbar.spec.ts`, which passed in full (4 of 4, as Lena) against the dev stack after a dev cache clear and an app and worker restart.
+- 2026-11-21: share keeps earlier tries for the owner; team reads and set_verdict filter by latestTrySql (6f, 6f1).
+- 2026-11-21 (T6, owed proof): the criterion "After share, the shared round has one screenshot per chain, the latest try; its "before" is the earlier round's "after"" stays open. Its first half is proven (`DbalRoundsTriesTest`, `UseCaseRoundCommandsShareTest`, `DbalRoundQueriesTriesTest`), but "before" is proven only on hand-inserted rows. Still owed: a test where the product path builds a shared round's "before" from the earlier round's "after".
+- 2026-11-21 (P14.T14): Home's Needs you now reads the turn rows (no score); the Jira tile returns with P10.
+- 2026-11-21 (P14.T14, ticks): both criteria are ticked on `tests/Functional/Web/HomeNeedsYouNowTest.php`: `::homeAndWhoseTurnAgreeOnTheTicketsThatWaitOnThePerson` (for Lena, Omar and Mia, Home's headline count and ticket keys match the person's Whose turn? card) and `::homeRunsTheSameQueriesForTwoTicketsAndForTwelve` (the same query count for 2 and 12 waiting tickets).
