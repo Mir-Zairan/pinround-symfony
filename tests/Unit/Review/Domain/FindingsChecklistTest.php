@@ -33,6 +33,10 @@ final class FindingsChecklistTest extends TestCase
     private const string FIRST_PIN = '0197a3c0-0000-7000-8000-00000000f041';
     private const string SECOND_PIN = '0197a3c0-0000-7000-8000-00000000f042';
     private const string THIRD_PIN = '0197a3c0-0000-7000-8000-00000000f043';
+    private const string SECOND_TRY = '0197a3c0-0000-7000-8000-00000000f033';
+    private const string THIRD_TRY = '0197a3c0-0000-7000-8000-00000000f034';
+    private const string SECOND_TRY_PIN = '0197a3c0-0000-7000-8000-00000000f044';
+    private const string THIRD_TRY_PIN = '0197a3c0-0000-7000-8000-00000000f045';
     private const string OMAR = '0197a3c0-0000-7000-8000-00000000f051';
     private const string MIA = '0197a3c0-0000-7000-8000-00000000f052';
     private const string MEDIA = '0197a3c0-0000-7000-8000-00000000f061';
@@ -86,6 +90,33 @@ final class FindingsChecklistTest extends TestCase
 
         self::assertNull(FindingsChecklist::ofSharedDraft($draft, $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT)));
         self::assertSame(0, $this->assigneeReads, 'Nothing to check, whoever shared it: the assignee is not read.');
+    }
+
+    /**
+     * ADR-0048: Mia retakes the first picture twice; its try-1 pins and try 2's pin are hers alone, so only the latest
+     * try's pin and the second picture's pin become items.
+     */
+    #[Test]
+    public function onlyThePinsOfTheLatestTryOfEachPictureBecomeItems(): void
+    {
+        $mia = new UserId(self::MIA);
+        $draft = $this->draftOf(self::MIA);
+        $draft->addScreenshot($mia, new ScreenshotId(self::SECOND_TRY), self::MEDIA, new ScreenshotId(self::FIRST_SCREENSHOT));
+        $draft->replacePins($mia, new ScreenshotId(self::SECOND_TRY), [Pin::placedBy(new PinId(self::SECOND_TRY_PIN), 1, 30.0, 30.0, 'Still cut off', $mia)]);
+        $draft->addScreenshot($mia, new ScreenshotId(self::THIRD_TRY), self::MEDIA, new ScreenshotId(self::SECOND_TRY));
+        $draft->replacePins($mia, new ScreenshotId(self::THIRD_TRY), [Pin::placedBy(new PinId(self::THIRD_TRY_PIN), 1, 40.0, 40.0, 'A little off', $mia)]);
+        $draft->share($mia, 2, new \DateTimeImmutable(self::SHARED_AT));
+        self::assertCount(4, $draft->screenshots(), 'The share kept every try.');
+
+        $checklist = FindingsChecklist::ofSharedDraft($draft, $this->assigneeIs(self::OMAR), $this->nextItemId(...), new \DateTimeImmutable(self::SHARED_AT));
+
+        self::assertNotNull($checklist);
+        self::assertSame(
+            [self::THIRD_PIN, self::THIRD_TRY_PIN],
+            array_map(static fn (CheckItem $item): string => $item->pinId()->toString(), $checklist->items()),
+            'The second picture (position 1), then the third try (position 3).',
+        );
+        self::assertSame(2, $this->issuedItemIds);
     }
 
     #[Test]

@@ -9,8 +9,9 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * The check items of a findings round (ADR-0044, FR-RND-17): a shared draft round whose owner is not the ticket's
- * assignee, with one open item per pin. The round is the draft itself, so unlike Checklist no round is added. A
- * self-check round, whose owner is the assignee, gets none.
+ * assignee, with one open item per pin on the latest try of each screenshot, as the team sees no earlier try (ADR-0048).
+ * The round is the draft itself, so unlike Checklist no round is added. A self-check round, whose owner is the
+ * assignee, gets none.
  */
 final readonly class FindingsChecklist
 {
@@ -41,7 +42,7 @@ final readonly class FindingsChecklist
             throw new \InvalidArgumentException('Only a shared draft round has findings to check.');
         }
         $pins = [];
-        foreach ($round->screenshots() as $screenshot) {
+        foreach ($round->latestTries() as $screenshot) {
             foreach ($screenshot->pins() as $pin) {
                 $pins[] = $pin;
             }

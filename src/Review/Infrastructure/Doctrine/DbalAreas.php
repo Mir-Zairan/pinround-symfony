@@ -110,10 +110,14 @@ final readonly class DbalAreas implements Areas
     {
         $organizationId = $this->requireTransactionAndTenant();
         // EXISTS, as two areas of a round may compare against one "before" picture. The pin by its key, then the
-        // areas by rvw_area_before_screenshot_id_idx.
+        // areas by rvw_area_before_screenshot_id_idx. A pin on an earlier try of a shared draft is the owner's alone
+        // (ADR-0048), so no area's "before" offers it.
         $pinRow = $this->connection->fetchAssociative(
-            'SELECT pin.id, pin.source, pin.ai_state, pin.verdict FROM rvw_pin AS pin WHERE pin.organization_id = ? AND pin.id = ?'
-            .' AND EXISTS (SELECT 1 FROM rvw_area AS area WHERE area.organization_id = pin.organization_id AND area.before_screenshot_id = pin.screenshot_id AND area.round_id = ?)',
+            'SELECT pin.id, pin.source, pin.ai_state, pin.verdict FROM rvw_pin AS pin'
+            .' JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = pin.organization_id AND screenshot.id = pin.screenshot_id'
+            .' WHERE pin.organization_id = ? AND pin.id = ?'
+            .' AND EXISTS (SELECT 1 FROM rvw_area AS area WHERE area.organization_id = pin.organization_id AND area.before_screenshot_id = pin.screenshot_id AND area.round_id = ?)'
+            .' AND '.DbalRoundQueries::latestTrySql('screenshot'),
             [$organizationId, $pinId->toString(), $roundId->toString()],
         );
         if (false === $pinRow) {

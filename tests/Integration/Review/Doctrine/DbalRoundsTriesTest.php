@@ -62,6 +62,7 @@ final class DbalRoundsTriesTest extends KernelTestCase
     private const string REVIEW_ROUND = '0197a3c0-0000-7000-8000-00000014a025';
     private const string REVIEW_SCREENSHOT = '0197a3c0-0000-7000-8000-00000014a036';
     private const string AREA = '0197a3c0-0000-7000-8000-00000014a061';
+    private const string LATEST_TRY_AREA = '0197a3c0-0000-7000-8000-00000014a062';
     private const string MEDIA = '0197a3c0-0000-7000-8000-00000014a051';
 
     private const string STARTED_AT = '2027-04-06 09:00:00+00:00';
@@ -262,58 +263,75 @@ final class DbalRoundsTriesTest extends KernelTestCase
     }
 
     /**
-     * Rounds::save writes Round::share's latest tries: try 2 is unhooked from Checkout before Checkout and try 1 go in
-     * one statement, so the foreign key holds, and the try-1 pin goes with its try.
+     * ADR-0048: the share stores no change to the screenshots, so every try and its pin stays for the owner, and the
+     * read-back round still tells the team's latest tries apart.
      */
     #[Test]
-    public function aSharedDraftKeepsOnlyTheLatestTryOfEachChainAndTheEarlierTriesGoWithTheirPins(): void
+    public function aSharedDraftKeepsEveryTryWithItsPins(): void
     {
         $otherRoundsBefore = $this->rowsOfOtherRounds();
         $this->addTwoTriesOfCheckoutWithAPinOnTheLatest();
-        self::assertCount(4, $this->chainRowsOfDraft());
+        $chainRowsBefore = $this->chainRowsOfDraft();
+        self::assertCount(4, $chainRowsBefore);
 
         $this->changeDraft(static function (Round $draft): void {
             $draft->share(new UserId(self::LENA), 2, self::savedAt());
         });
 
-        self::assertSame([[self::BASKET, null], [self::tryId(2)->toString(), null]], $this->chainRowsOfDraft());
-        self::assertSame([self::LATEST_TRY_PIN], $this->pinIdsOf([self::CHECKOUT_PIN, self::LATEST_TRY_PIN]));
+        self::assertSame($chainRowsBefore, $this->chainRowsOfDraft());
+        self::assertSame([self::CHECKOUT_PIN, self::LATEST_TRY_PIN], $this->pinIdsOf([self::CHECKOUT_PIN, self::LATEST_TRY_PIN]));
+        $shared = $this->readDraft();
+        self::assertSame(2, $shared->number());
         self::assertSame(
             [self::BASKET, self::tryId(2)->toString()],
-            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $this->readDraft()->screenshots()),
+            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $shared->latestTries()),
         );
         self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
     }
 
     /**
-     * ADR-0048: the next round's "before" is the earlier round's "after". After the share, Round 2 holds only Checkout's
-     * try 2, so a Round 3 area compares with it and checks its pin, and an earlier try is no row a "before" could name.
+     * ADR-0048: the next round's "before" is the earlier round's "after" as the team saw it. A Round 3 area that names
+     * Checkout's try 1 offers no pin of it to check; one that names the latest try offers its pin.
      */
     #[Test]
-    public function aLaterRoundsBeforeIsTheSharedRoundsLatestTryAndNeverAnEarlierOne(): void
+    public function onlyAPinOfTheSharedRoundsLatestTryCanBeCheckedFromALaterRoundsBefore(): void
     {
         $this->addTwoTriesOfCheckoutWithAPinOnTheLatest();
         $this->changeDraft(static function (Round $draft): void {
             $draft->share(new UserId(self::LENA), 2, self::savedAt());
         });
 
-        try {
-            $this->addReviewRoundThreeComparingWith(self::tryId(1)->toString());
-            self::fail('Try 1 is still stored, so a "before" could show it.');
-        } catch (ForeignKeyConstraintViolationException $refused) {
-            self::assertStringContainsString('rvw_area_before_screenshot_fkey', $refused->getMessage());
-        }
+        $this->addReviewRoundThreeComparingWith([self::AREA => self::CHECKOUT, self::LATEST_TRY_AREA => self::tryId(2)->toString()]);
 
-        $this->addReviewRoundThreeComparingWith(self::tryId(2)->toString());
-
-        [$area, $pinToCheck, $beforeRoundNumber] = $this->committed(self::ACME_FOODS, fn (): array => [
-            $this->areas()->areaOf(new RoundId(self::REVIEW_ROUND), new AreaId(self::AREA)),
+        [$earlierTryPin, $latestTryPin, $latestTryArea] = $this->committed(self::ACME_FOODS, fn (): array => [
+            $this->areas()->pinToCheckOf(new RoundId(self::REVIEW_ROUND), new PinId(self::CHECKOUT_PIN)),
             $this->areas()->pinToCheckOf(new RoundId(self::REVIEW_ROUND), new PinId(self::LATEST_TRY_PIN)),
-            $this->connection()->fetchOne('SELECT round.number FROM rvw_screenshot AS screenshot JOIN rvw_round AS round ON round.id = screenshot.round_id WHERE screenshot.id = ?', [self::tryId(2)->toString()]),
+            $this->areas()->areaOf(new RoundId(self::REVIEW_ROUND), new AreaId(self::LATEST_TRY_AREA)),
         ]);
-        self::assertSame(self::tryId(2)->toString(), $area?->beforeScreenshotId()?->toString());
-        self::assertSame(2, $beforeRoundNumber);
-        self::assertSame(self::LATEST_TRY_PIN, $pinToCheck?->id()->toString());
+        self::assertNull($earlierTryPin, 'The try-1 pin is Lena\'s alone.');
+        self::assertSame(self::LATEST_TRY_PIN, $latestTryPin?->id()->toString());
+        self::assertSame(self::tryId(2)->toString(), $latestTryArea?->beforeScreenshotId()?->toString());
+    }
+
+    /**
+     * Earlier tries go with their round: removing the round's row removes every try and every pin of it, and nothing of
+     * any other round.
+     */
+    #[Test]
+    public function removingTheSharedRoundRemovesItsEarlierTriesAndTheirPinsToo(): void
+    {
+        $this->addTwoTriesOfCheckoutWithAPinOnTheLatest();
+        $this->changeDraft(static function (Round $draft): void {
+            $draft->share(new UserId(self::LENA), 2, self::savedAt());
+        });
+        self::assertCount(4, $this->chainRowsOfDraft());
+        $otherRoundsBefore = $this->rowsOfOtherRounds();
+
+        self::assertSame([[self::DRAFT]], $this->roundRows()->runAs(self::ACME_FOODS, 'DELETE FROM rvw_round WHERE id = ? RETURNING id', [self::DRAFT]));
+
+        self::assertSame([], $this->chainRowsOfDraft());
+        self::assertSame([], $this->pinIdsOf([self::CHECKOUT_PIN, self::LATEST_TRY_PIN]));
+        self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
     }
 
     private function addTwoTriesOfCheckoutWithAPinOnTheLatest(): void
@@ -327,16 +345,22 @@ final class DbalRoundsTriesTest extends KernelTestCase
     }
 
     /**
-     * Review round 3 of the ticket with one area whose "after" is a new picture and whose "before" is $beforeScreenshotId;
-     * no command writes a review round yet, so its rows are added as the seed command adds them.
+     * Review round 3 of the ticket with one area per entry, each comparing a new picture with its "before"; no command
+     * writes a review round yet, so its rows are added as the seed command adds them.
+     *
+     * @param array<string, string> $beforeScreenshotIdByAreaId
      */
-    private function addReviewRoundThreeComparingWith(string $beforeScreenshotId): void
+    private function addReviewRoundThreeComparingWith(array $beforeScreenshotIdByAreaId): void
     {
-        $this->roundRows()->addAllOf(self::ACME_FOODS, [
+        $rows = [
             ['rvw_round', ['organization_id' => self::ACME_FOODS, 'id' => self::REVIEW_ROUND, 'ticket_id' => self::TICKET, 'number' => 3, 'kind' => 'review', 'owner_id' => self::LENA, 'shared_at' => self::SAVED_AT, 'state' => 'open', 'version' => 1, 'created_at' => self::SAVED_AT]],
             ['rvw_screenshot', ['organization_id' => self::ACME_FOODS, 'id' => self::REVIEW_SCREENSHOT, 'round_id' => self::REVIEW_ROUND, 'media_id' => self::MEDIA, 'position' => 0, 'created_at' => self::SAVED_AT]],
-            ['rvw_area', ['organization_id' => self::ACME_FOODS, 'id' => self::AREA, 'round_id' => self::REVIEW_ROUND, 'name' => 'Checkout', 'position' => 0, 'before_screenshot_id' => $beforeScreenshotId, 'after_screenshot_id' => self::REVIEW_SCREENSHOT, 'created_at' => self::SAVED_AT]],
-        ]);
+        ];
+        $position = 0;
+        foreach ($beforeScreenshotIdByAreaId as $areaId => $beforeScreenshotId) {
+            $rows[] = ['rvw_area', ['organization_id' => self::ACME_FOODS, 'id' => $areaId, 'round_id' => self::REVIEW_ROUND, 'name' => 'Checkout', 'position' => $position++, 'before_screenshot_id' => $beforeScreenshotId, 'after_screenshot_id' => self::REVIEW_SCREENSHOT, 'created_at' => self::SAVED_AT]];
+        }
+        $this->roundRows()->addAllOf(self::ACME_FOODS, $rows);
     }
 
     /**
