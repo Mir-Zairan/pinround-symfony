@@ -24,6 +24,7 @@ use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\RoundView;
+use App\Review\Domain\ScreenshotTriesFull;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
@@ -45,8 +46,8 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * add_screenshot over fakes of Media's, Review's and Ticketing's Api: its input schema as the gate's SchemaValidator
  * reads it, the round an upload finds and its voter attribute, what each processing state answers, the one Review
  * command a ready picture runs and both of its answers, and Review's and Media's refusals as its own. Omar owns an
- * unshared draft on SHOP-1 that holds one picture already, and a shared draft there; Mia owns an unshared draft there.
- * SHOP-2 is a ticket of its own.
+ * unshared draft on SHOP-1 that holds one picture already and a screenshot of two tries, and a shared draft there; Mia
+ * owns an unshared draft there with a screenshot of her own. SHOP-2 is a ticket of its own.
  */
 final class AddScreenshotTest extends TestCase
 {
@@ -61,6 +62,9 @@ final class AddScreenshotTest extends TestCase
     private const string OMARS_SHARED_DRAFT = '019a5f00-0000-7000-8000-00000000e742';
     private const string MIAS_DRAFT = '019a5f00-0000-7000-8000-00000000e743';
     private const string OMARS_ADDED_SHOT = '019a5f00-0000-7000-8000-00000000e751';
+    private const string OMARS_FIRST_TRY = '019a5f00-0000-7000-8000-00000000e752';
+    private const string OMARS_SECOND_TRY = '019a5f00-0000-7000-8000-00000000e753';
+    private const string MIAS_SHOT = '019a5f00-0000-7000-8000-00000000e754';
     private const string ADDED_UPLOAD = '019a5f00-0000-7000-8000-00000000e761';
     private const string READY_UPLOAD = '019a5f00-0000-7000-8000-00000000e762';
     private const string PENDING_UPLOAD = '019a5f00-0000-7000-8000-00000000e763';
@@ -103,6 +107,9 @@ final class AddScreenshotTest extends TestCase
         $this->uploads->add(new OrganizationId(self::BETA_BAKERY), $omar, self::BETA_BAKERY_UPLOAD, $roundOf(self::OMARS_DRAFT), $ready(self::BETA_BAKERY_UPLOAD));
         $this->draftScreenshots = new RecordingDraftScreenshots();
         $this->draftScreenshots->heldBefore[self::ADDED_UPLOAD] = new AddedDraftScreenshot(self::OMARS_ADDED_SHOT, true, 2);
+        $this->draftScreenshots->held(self::OMARS_DRAFT, self::OMARS_FIRST_TRY);
+        $this->draftScreenshots->held(self::OMARS_DRAFT, self::OMARS_SECOND_TRY, self::OMARS_FIRST_TRY);
+        $this->draftScreenshots->held(self::MIAS_DRAFT, self::MIAS_SHOT);
     }
 
     /**
@@ -119,6 +126,8 @@ final class AddScreenshotTest extends TestCase
         yield 'pins at the edges' => [['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'pins' => [['x_pct' => 0, 'y_pct' => 100, 'note' => '']]]];
         yield '100 pins' => [['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'pins' => array_fill(0, 100, $pin)]];
         yield 'a note of 1,000 characters' => [['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'pins' => [['x_pct' => 1, 'y_pct' => 1, 'note' => str_repeat('n', 1000)]]]];
+        yield 'a retake' => [['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'retake_of' => self::OMARS_FIRST_TRY]];
+        yield 'a retake_of of 64 characters' => [['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'retake_of' => str_repeat('a', 64)]];
     }
 
     /**
@@ -153,6 +162,30 @@ final class AddScreenshotTest extends TestCase
         yield 'a picture as base64' => [[...$upload, 'image' => 'iVBORw0KGgo=']];
         yield 'an upload id past the cap' => [['key' => 'SHOP-1', 'upload_id' => str_repeat('a', 65)]];
         yield 'a title that is no string' => [[...$upload, 'title' => null]];
+        yield 'a retake_of of 65 characters' => [[...$upload, 'retake_of' => str_repeat('a', 65)]];
+        yield 'an empty retake_of' => [[...$upload, 'retake_of' => '']];
+        yield 'a retake_of that is no string' => [[...$upload, 'retake_of' => null]];
+    }
+
+    /**
+     * /api/v1 runs definition() and MCP mcpDefinition(); both take retake_of with the cap of every other id.
+     */
+    #[Test]
+    public function bothSchemasTakeAnOptionalRetakeOfOfAtMostSixtyFourCharacters(): void
+    {
+        $tool = $this->addScreenshot();
+
+        foreach ([$tool->definition(), $tool->mcpDefinition()] as $definition) {
+            $properties = $definition->inputSchema['properties'] ?? null;
+            self::assertIsArray($properties);
+            $retakeOf = $properties['retake_of'] ?? null;
+            self::assertIsArray($retakeOf);
+            self::assertSame(['string', 1, 64], [$retakeOf['type'] ?? null, $retakeOf['minLength'] ?? null, $retakeOf['maxLength'] ?? null]);
+            $required = $definition->inputSchema['required'] ?? null;
+            self::assertIsArray($required);
+            self::assertNotContains('retake_of', $required);
+            self::assertStringContainsString('retake_of?}', (string) $definition->description);
+        }
     }
 
     /**
@@ -375,6 +408,62 @@ final class AddScreenshotTest extends TestCase
         $this->assertNothingChanged();
     }
 
+    #[Test]
+    public function aRetakeOfAnyTryIsAddedToTheChainOfItsFirstTry(): void
+    {
+        $result = $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'title' => 'Cart', 'pins' => [['x_pct' => 5, 'y_pct' => 6, 'note' => 'Still cut off']], 'retake_of' => self::OMARS_SECOND_TRY]);
+
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::READY_UPLOAD, 'Cart', null, [[5.0, 6.0, 'Still cut off']], '2026-11-10 09:00:20']], $this->draftScreenshots->added);
+        self::assertSame([[RecordingDraftScreenshots::NEW_SCREENSHOT, self::OMARS_FIRST_TRY]], $this->draftScreenshots->addedRetakes);
+        self::assertSame(['screenshot_id' => RecordingDraftScreenshots::NEW_SCREENSHOT, 'round_id' => self::OMARS_DRAFT, 'status' => AddScreenshot::ADDED, 'pin_count' => 1], $result['structured']);
+    }
+
+    #[Test]
+    public function withoutRetakeOfThePictureIsANewScreenshot(): void
+    {
+        $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'title' => 'Cart']);
+
+        self::assertCount(1, $this->draftScreenshots->added);
+        self::assertSame([], $this->draftScreenshots->addedRetakes);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function retakesOfNoScreenshotOfTheDraft(): iterable
+    {
+        yield 'a screenshot of Mia\'s draft' => [self::MIAS_SHOT];
+        yield 'an unknown id' => ['019a5f00-0000-7000-8000-00000000e75f'];
+        yield 'a malformed id' => ['not-a-screenshot-id'];
+        yield 'an id with a trailing newline' => [self::OMARS_FIRST_TRY."\n"];
+    }
+
+    #[Test]
+    #[DataProvider('retakesOfNoScreenshotOfTheDraft')]
+    public function aRetakeOfNoScreenshotOfTheDraftIsNotFoundAndAddsNothing(string $retakeOf): void
+    {
+        $refusal = self::refusalOf(fn () => $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'title' => 'Cart', 'retake_of' => $retakeOf]));
+
+        self::assertSame(ToolCallOutcome::NotFound, $refusal->outcome);
+        self::assertSame(ToolRefusal::NOT_FOUND, $refusal->getMessage());
+        $this->assertNothingChanged();
+        self::assertSame([], $this->draftScreenshots->addedRetakes);
+    }
+
+    #[Test]
+    public function aSixthTryIsAPlainRefusalWithTheCapsReasonAndAddsNothing(): void
+    {
+        foreach (['e755', 'e756', 'e757'] as $suffix) {
+            $this->draftScreenshots->held(self::OMARS_DRAFT, '019a5f00-0000-7000-8000-00000000'.$suffix, self::OMARS_FIRST_TRY);
+        }
+
+        $refusal = self::refusalOf(fn () => $this->callFor(['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'title' => 'Cart', 'retake_of' => self::OMARS_FIRST_TRY]));
+
+        self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
+        self::assertSame(ScreenshotTriesFull::REASON, $refusal->getMessage());
+        $this->assertNothingChanged();
+    }
+
     /**
      * @return iterable<string, array{\Throwable, ToolCallOutcome, string}>
      */
@@ -409,6 +498,8 @@ final class AddScreenshotTest extends TestCase
         yield 'a title Review refuses' => [RoundRefused::invalidContent('A picture title holds at most 120 characters.'), ToolCallOutcome::InvalidInput, \sprintf(ToolRefusal::INVALID_INPUT, 'A picture title holds at most 120 characters.')];
         yield 'changed meanwhile' => [new RoundRefused(RoundRefused::DRAFT_CHANGED), ToolCallOutcome::Refused, RoundRefused::DRAFT_CHANGED];
         yield 'a picture Review does not take' => [new RoundRefused(RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU), ToolCallOutcome::Refused, RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU];
+        yield 'a retake of no screenshot of the draft' => [new RoundRefused(RoundRefused::SCREENSHOT_NOT_FOUND), ToolCallOutcome::NotFound, ToolRefusal::NOT_FOUND];
+        yield 'a sixth try' => [new RoundRefused(ScreenshotTriesFull::REASON), ToolCallOutcome::Refused, ScreenshotTriesFull::REASON];
     }
 
     #[Test]

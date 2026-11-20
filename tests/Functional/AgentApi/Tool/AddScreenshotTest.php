@@ -13,6 +13,8 @@ use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Domain\User;
 use App\Media\Application\ProcessUpload;
+use App\Review\Domain\ScreenshotTriesFull;
+use App\Review\Infrastructure\Doctrine\DbalRoundQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\IssuesApiTokens;
@@ -37,8 +39,9 @@ use Zenstruck\Foundry\Test\Factories;
  * audit row, on Acme Foods' ticket SHOP-1. Omar is its assignee; his unshared draft holds one picture already, and he
  * has a shared draft there too. Mia, a member of Shop, has an unshared draft of her own. Each upload is an intent its
  * person began for one of those rounds, seeded as Media stores it; a used one has the media object its completion made,
- * which takes the intent's id, in the state processing left it. The clock is fixed on 10 Nov 2026, a day aud_event has
- * a partition for and not today.
+ * which takes the intent's id, in the state processing left it. A retake_of names a try of Omar's first picture, seeded
+ * as Review stores tries, or a screenshot of another round or organization. The clock is fixed on 10 Nov 2026, a day
+ * aud_event has a partition for and not today.
  */
 final class AddScreenshotTest extends WebTestCase
 {
@@ -49,6 +52,7 @@ final class AddScreenshotTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use SeedsRetakeTargets;
     use SeedsTicketRounds;
 
     private const string MCP = '/mcp';
@@ -310,6 +314,126 @@ final class AddScreenshotTest extends WebTestCase
     }
 
     /**
+     * Omar retakes his second try, not the first, in capitals, as an id is matched in any case: the new try joins the
+     * chain of its first try, so the chain stays one and the new try is its only latest one, as the team's read of a
+     * shared round (latestTrySql) finds it. The earlier tries keep their pins.
+     */
+    #[Test]
+    public function aRetakeOfAnyTryJoinsTheChainOfItsFirstTryWithItsOwnPinsAndTheEarlierTriesKeepTheirs(): void
+    {
+        $this->addPin($this->omarsFirstShot, 1, '10.00', '20.00', 'The old fee', 'Omar');
+        $secondTry = $this->addRetake($this->omarsDraft, $this->omarsFirstShot, 1, 'Omar');
+        $uploadId = $this->addUsedUpload('Omar', $this->omarsDraft, 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+
+        $this->callAddScreenshot($token, [
+            'key' => 'SHOP-1',
+            'upload_id' => $uploadId,
+            'title' => self::TITLE,
+            'summary' => self::SUMMARY,
+            'pins' => [['x_pct' => 12.5, 'y_pct' => 40, 'note' => self::PIN_NOTE]],
+            'retake_of' => strtoupper($secondTry),
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        $tries = $this->triesOf($this->omarsDraft);
+        self::assertCount(3, $tries);
+        $newTry = $tries[2][0];
+        self::assertIsString($newTry);
+        self::assertSame(['screenshot_id' => $newTry, 'round_id' => $this->omarsDraft, 'status' => AddScreenshot::ADDED, 'pin_count' => 1], $this->responseValueAt('result', 'structuredContent'));
+        self::assertSame([[$this->omarsFirstShot, 0, null], [$secondTry, 1, $this->omarsFirstShot], [$newTry, 2, $this->omarsFirstShot]], $tries);
+        self::assertSame([$newTry], $this->latestTriesOf($this->omarsDraft));
+        self::assertSame([
+            ['screenshot_id' => $this->omarsFirstShot, 'number' => 1, 'x_pct' => '10.00', 'y_pct' => '20.00', 'note' => 'The old fee'],
+            ['screenshot_id' => $newTry, 'number' => 1, 'x_pct' => '12.50', 'y_pct' => '40.00', 'note' => self::PIN_NOTE],
+        ], $this->pinRowsOf($this->omarsDraft));
+        self::assertSame([$this->toolRow('Omar', $tokenId, 'round', $this->omarsDraft, 'ok')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * @return iterable<string, array{'mias draft'|'shared round'|'beta bakery'|'unknown'|'malformed'|'trailing newline'}>
+     */
+    public static function retakesOfNoScreenshotOfTheDraft(): iterable
+    {
+        yield 'a screenshot of Mia\'s draft' => ['mias draft'];
+        yield 'a screenshot of Omar\'s shared round' => ['shared round'];
+        yield 'a screenshot of Omar\'s draft in Beta Bakery' => ['beta bakery'];
+        yield 'an unknown id' => ['unknown'];
+        yield 'a malformed id' => ['malformed'];
+        yield 'the first try\'s id with a trailing newline' => ['trailing newline'];
+    }
+
+    /**
+     * Review looks the retaken screenshot up in the draft the voter granted, so another person's draft, another round
+     * and another organization answer as an unknown id does, after the picture was found ready; the gate's savepoint
+     * takes everything back.
+     *
+     * @param 'mias draft'|'shared round'|'beta bakery'|'unknown'|'malformed'|'trailing newline' $retaken
+     */
+    #[Test]
+    #[DataProvider('retakesOfNoScreenshotOfTheDraft')]
+    public function aRetakeOfNoScreenshotOfTheOwnersDraftIsNotFoundAndNothingIsWritten(string $retaken): void
+    {
+        $retakeOf = match ($retaken) {
+            'mias draft' => $this->addScreenshot($this->miasDraft, $this->addMedia('ready', 'Mia'), 0, 'Hers', null),
+            'shared round' => $this->addScreenshot($this->omarsSharedDraft, $this->addMedia('ready', 'Omar'), 0, 'Shared', null),
+            'beta bakery' => $this->addOtherOrganizationsDraftScreenshot($this->createOrganization('Beta Bakery'), 'Omar'),
+            'unknown' => Uuid::v7()->toRfc4122(),
+            'malformed' => 'not-a-screenshot-id',
+            'trailing newline' => $this->omarsFirstShot."\n",
+        };
+        $uploadId = $this->addUsedUpload('Omar', $this->omarsDraft, 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored();
+        $triesBefore = $this->triesOf($this->omarsDraft);
+
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY, 'retake_of' => $retakeOf]);
+
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        self::assertSame($before, $this->stored());
+        self::assertSame([[$this->omarsFirstShot, 0, null]], $triesBefore);
+        self::assertSame($triesBefore, $this->triesOf($this->omarsDraft));
+        self::assertSame([$this->toolRow('Omar', $tokenId, 'round', $this->omarsDraft, 'not_found')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * Four tries are seeded; retaking the middle one adds the fifth, and a sixth, retaking the first, is Review's plain
+     * refusal with the cap's reason.
+     */
+    #[Test]
+    public function theFifthTryIsAddedAndASixthIsRefusedWithTheCapsReasonAndNothingIsWritten(): void
+    {
+        $secondTry = $this->addRetake($this->omarsDraft, $this->omarsFirstShot, 1, 'Omar');
+        $thirdTry = $this->addRetake($this->omarsDraft, $this->omarsFirstShot, 2, 'Omar');
+        $fourthTry = $this->addRetake($this->omarsDraft, $this->omarsFirstShot, 3, 'Omar');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $arguments = ['key' => 'SHOP-1', 'title' => self::TITLE, 'summary' => self::SUMMARY];
+
+        $sessionId = $this->callAddScreenshot($token, [...$arguments, 'upload_id' => $this->addUsedUpload('Omar', $this->omarsDraft, 'ready'), 'retake_of' => $thirdTry]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(AddScreenshot::ADDED, $this->responseValueAt('result', 'structuredContent', 'status'));
+        $fifthTry = $this->responseValueAt('result', 'structuredContent', 'screenshot_id');
+        self::assertIsString($fifthTry);
+        $chain = [[$this->omarsFirstShot, 0, null], [$secondTry, 1, $this->omarsFirstShot], [$thirdTry, 2, $this->omarsFirstShot], [$fourthTry, 3, $this->omarsFirstShot], [$fifthTry, 4, $this->omarsFirstShot]];
+        self::assertSame($chain, $this->triesOf($this->omarsDraft));
+        $sixthUpload = $this->addUsedUpload('Omar', $this->omarsDraft, 'ready');
+        $before = $this->stored();
+
+        $this->callTool($token, $sessionId, [...$arguments, 'upload_id' => $sixthUpload, 'retake_of' => $this->omarsFirstShot]);
+
+        $this->assertRefused(ScreenshotTriesFull::REASON);
+        self::assertSame($before, $this->stored());
+        self::assertSame($chain, $this->triesOf($this->omarsDraft));
+        // Both calls share the frozen clock's time, so their rows tie on `at` and their order is not defined.
+        self::assertEqualsCanonicalizing(
+            [$this->toolRow('Omar', $tokenId, 'round', $this->omarsDraft, 'ok'), $this->toolRow('Omar', $tokenId, 'round', $this->omarsDraft, 'refused')],
+            $this->toolRowsOf($this->acmeFoods),
+        );
+    }
+
+    /**
      * @return iterable<string, array{array<string, mixed>}>
      */
     public static function inputPastTheCaps(): iterable
@@ -566,6 +690,26 @@ final class AddScreenshotTest extends WebTestCase
     private function screenshotsOf(string $roundId): array
     {
         return $this->rowsOf($this->acmeFoods, 'SELECT id, media_id, position, title, summary FROM rvw_screenshot WHERE organization_id = ? AND round_id = ? ORDER BY position', [$roundId]);
+    }
+
+    /**
+     * @return list<list<mixed>> the id, position and retake_of of each screenshot of the round, by position
+     */
+    private function triesOf(string $roundId): array
+    {
+        return array_map(array_values(...), $this->rowsOf($this->acmeFoods, 'SELECT id, position, retake_of FROM rvw_screenshot WHERE organization_id = ? AND round_id = ? ORDER BY position', [$roundId]));
+    }
+
+    /**
+     * @return list<mixed> the ids of the round's screenshots that are the latest try of their chain, by position
+     */
+    private function latestTriesOf(string $roundId): array
+    {
+        return array_column($this->rowsOf(
+            $this->acmeFoods,
+            'SELECT screenshot.id FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = ? AND screenshot.round_id = ? AND '.DbalRoundQueries::latestTrySql('screenshot').' ORDER BY screenshot.position',
+            [$roundId],
+        ), 'id');
     }
 
     /**

@@ -128,6 +128,12 @@ paths:
   /api/v1/tickets/{key}/draft/screenshots:
     post:
       summary: Add an uploaded picture to my own draft round on the ticket (add_screenshot, scope rounds:write).
+      description: >-
+        With `retake_of`, the `screenshot_id` of any try of a screenshot in that draft, the picture becomes the next
+        try of that screenshot (ADR-0048) with its own pins; the earlier tries keep theirs. A screenshot keeps at most 5
+        tries: a sixth is 422 with outcome `refused`. A `retake_of` of another person's draft, of a shared round, of
+        another organization, or an unknown or malformed id is 404, as for any unknown id. Nothing is saved when the
+        request is refused.
       parameters:
         - { name: key, in: path, required: true, schema: { type: string }, example: SHOP-12 }
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -143,12 +149,17 @@ paths:
                 title: { type: string, maxLength: 120 }
                 summary: { type: string, maxLength: 600 }
                 pins: { type: array, maxItems: 100, items: { type: object } }
+                retake_of: { type: string, minLength: 1, maxLength: 64, description: 'The screenshot_id of a screenshot in this draft that the picture retakes; leave it out for a new screenshot.' }
       responses:
         '200': { description: '{screenshot_id, round_id, status: added | added_before, pin_count}, or {status: processing} while the picture is processed: send again in a few seconds' }
         '403': { $ref: '#/components/responses/Refused' }
-        '404': { $ref: '#/components/responses/Refused' }
+        '404':
+          $ref: '#/components/responses/Refused'
+          description: '{error, outcome: not_found}: an unknown key or upload, a ticket I may not see, or a `retake_of` that is not a screenshot of my draft round. Nothing was saved.'
         '409': { $ref: '#/components/responses/Refused' }
-        '422': { $ref: '#/components/responses/Refused' }
+        '422':
+          $ref: '#/components/responses/Refused'
+          description: '{error, outcome: invalid_input | refused}: input past a cap, a rejected or expired picture, or a sixth try of a screenshot (outcome refused, `error` names the 5-try cap). Nothing was saved.'
   /api/v1/notebooks:
     get:
       summary: My own private notebooks in the token's organization, the last used first (list_my_notebooks, scope read).

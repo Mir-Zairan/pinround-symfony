@@ -25,9 +25,11 @@ use App\Media\Api\MediaImageStatus;
 use App\Media\Application\SignedVariantUrls;
 use App\Review\Api\Notebooks;
 use App\Review\Api\ReportDraftRefused;
+use App\Review\Domain\ScreenshotTriesFull;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\AgentApi\Tool\CallsNotebookTools;
+use App\Tests\Functional\AgentApi\Tool\SeedsRetakeTargets;
 use App\Tests\Functional\Identity\IssuesApiTokens;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Review\RecordingSignedUrls;
@@ -59,6 +61,7 @@ final class RestApiTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use SeedsRetakeTargets;
     use SeedsTicketRounds;
 
     private const string NOW = '2026-11-10 09:00:20 UTC';
@@ -76,6 +79,11 @@ final class RestApiTest extends WebTestCase
     private const string EMPTY_CURSOR_PROBLEM = '/cursor: String must be at least 1 characters long.';
     private const string LONG_CURSOR_PROBLEM = '/cursor: String must not be longer than 100 characters.';
     private const string LIST_CURSOR_PROBLEM = '/cursor: Invalid type. Expected `string`, but received `array`.';
+    /** Acme Foods' rounds, screenshots with their chain, pins and pictures, as stored. */
+    private const string ROUND_STATE_QUERY = "SELECT 'screenshot', id::text, round_id::text || ' ' || position || ' ' || coalesce(retake_of::text, '-') FROM rvw_screenshot"
+        ." UNION ALL SELECT 'round', id::text, state || ' v' || version FROM rvw_round"
+        ." UNION ALL SELECT 'pin', id::text, screenshot_id::text FROM rvw_pin"
+        ." UNION ALL SELECT 'media', id::text, status FROM med_object ORDER BY 1, 2";
 
     private KernelBrowser $client;
 
@@ -348,6 +356,87 @@ final class RestApiTest extends WebTestCase
         self::assertSame([0, 'Cart total'], [$screenshots[0]['position'], $screenshots[0]['title']]);
         // Both calls share the frozen clock's time, so their rows tie on `at` and their order is not defined.
         self::assertEqualsCanonicalizing([[$tokenId, 'not_found'], [$tokenId, 'ok']], $this->toolAuditRowsOf(AddScreenshot::NAME));
+    }
+
+    /**
+     * @return iterable<string, array{'mias draft'|'shared round'|'beta bakery'|'unknown'|'malformed'|'trailing newline'}>
+     */
+    public static function retakesOfNoScreenshotOfTheDraft(): iterable
+    {
+        yield 'a screenshot of Mia\'s draft' => ['mias draft'];
+        yield 'a screenshot of Omar\'s shared round' => ['shared round'];
+        yield 'a screenshot of Omar\'s draft in Beta Bakery' => ['beta bakery'];
+        yield 'an unknown id' => ['unknown'];
+        yield 'a malformed id' => ['malformed'];
+        yield 'the first try\'s id with a trailing newline' => ['trailing newline'];
+    }
+
+    /**
+     * add_screenshot's not found, as for an unknown id: the answer never tells another person's draft, another round
+     * or another organization apart from it, and the picture stays out of every round.
+     *
+     * @param 'mias draft'|'shared round'|'beta bakery'|'unknown'|'malformed'|'trailing newline' $retaken
+     */
+    #[Test]
+    #[DataProvider('retakesOfNoScreenshotOfTheDraft')]
+    public function aDraftScreenshotRetakingNoScreenshotOfTheCallersDraftIsNotFoundAndNothingChanges(string $retaken): void
+    {
+        $this->stepId = $this->addTodoStep();
+        $ticketId = $this->addTicket('SHOP-1');
+        $omarsDraft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $omarsFirstShot = $this->addScreenshot($omarsDraft, $this->addMedia('ready', 'Omar'), 0, 'Before', null);
+        $retakeOf = match ($retaken) {
+            'mias draft' => $this->addScreenshot($this->addRound($ticketId, null, 'draft', 'Mia', null), $this->addMedia('ready', 'Mia'), 0, 'Hers', null),
+            'shared round' => $this->addScreenshot($this->addRound($ticketId, 1, 'draft', 'Omar', '2026-11-05 09:00:00+00'), $this->addMedia('ready', 'Omar'), 0, 'Shared', null),
+            'beta bakery' => $this->addOtherOrganizationsDraftScreenshot($this->createOrganization('Beta Bakery'), 'Omar'),
+            'unknown' => Uuid::v7()->toRfc4122(),
+            'malformed' => 'not-a-screenshot-id',
+            'trailing newline' => $omarsFirstShot."\n",
+        };
+        $uploadId = $this->addReadyUpload('Omar', 'round', $omarsDraft);
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $stateBefore = $this->rowsOf(self::ROUND_STATE_QUERY);
+        self::assertContains(['screenshot', $omarsFirstShot, $omarsDraft.' 0 -'], $stateBefore);
+
+        $this->request($token, 'POST', '/api/v1/tickets/SHOP-1/draft/screenshots', ['upload_id' => $uploadId, 'title' => 'Cart total', 'retake_of' => $retakeOf]);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+        self::assertSame($stateBefore, $this->rowsOf(self::ROUND_STATE_QUERY));
+        self::assertSame([[$tokenId, 'not_found']], $this->toolAuditRowsOf(AddScreenshot::NAME));
+    }
+
+    /**
+     * Four tries are seeded: a retake of the middle one is the fifth, with retake_of the chain's first try, and a sixth
+     * is add_screenshot's plain refusal with the cap's reason.
+     */
+    #[Test]
+    public function aFifthTryIsAddedAndASixthIsRefusedWith422AndNothingChanges(): void
+    {
+        $this->stepId = $this->addTodoStep();
+        $omarsDraft = $this->addRound($this->addTicket('SHOP-1'), null, 'draft', 'Omar', null);
+        $firstTry = $this->addScreenshot($omarsDraft, $this->addMedia('ready', 'Omar'), 0, 'Before', null);
+        $this->addRetake($omarsDraft, $firstTry, 1, 'Omar');
+        $thirdTry = $this->addRetake($omarsDraft, $firstTry, 2, 'Omar');
+        $this->addRetake($omarsDraft, $firstTry, 3, 'Omar');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+
+        $this->request($token, 'POST', '/api/v1/tickets/SHOP-1/draft/screenshots', ['upload_id' => $this->addReadyUpload('Omar', 'round', $omarsDraft), 'retake_of' => $thirdTry]);
+
+        self::assertResponseStatusCodeSame(200);
+        $fifthTry = $this->json()['screenshot_id'] ?? null;
+        self::assertIsString($fifthTry);
+        self::assertSame([$fifthTry, 4, $firstTry], $this->rowsOf(\sprintf("SELECT id, position, retake_of FROM rvw_screenshot WHERE round_id = '%s' ORDER BY position DESC LIMIT 1", $omarsDraft))[0] ?? null);
+        $sixthUpload = $this->addReadyUpload('Omar', 'round', $omarsDraft);
+        $stateBefore = $this->rowsOf(self::ROUND_STATE_QUERY);
+        self::assertCount(5, array_filter($stateBefore, static fn (array $row): bool => 'screenshot' === $row[0]));
+
+        $this->request($token, 'POST', '/api/v1/tickets/SHOP-1/draft/screenshots', ['upload_id' => $sixthUpload, 'retake_of' => $firstTry]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(['error' => ScreenshotTriesFull::REASON, 'outcome' => 'refused'], $this->json());
+        self::assertSame($stateBefore, $this->rowsOf(self::ROUND_STATE_QUERY));
+        self::assertEqualsCanonicalizing([[$tokenId, 'ok'], [$tokenId, 'refused']], $this->toolAuditRowsOf(AddScreenshot::NAME));
     }
 
     /**
