@@ -13,7 +13,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * What rvw_round, rvw_screenshot, rvw_pin and rvw_check_item keep on their own (Version20261115180000,
- * Version20261116100000, Version20261116120000, Version20261116130000), whatever writes them: the
+ * Version20261116100000, Version20261116120000, Version20261116130000, Version20261121100000), whatever writes them: the
  * CHECKs and keys refuse a row the domain could not make, written as the app past the domain, and the rows next to it
  * are still accepted; the indexes and foreign keys are as the migration made them. Grants, ownership and the schema
  * filter are pinned with every other module's in DatabaseRolesTest, row-level security in CatalogTest.
@@ -97,6 +97,8 @@ final class RoundTablesTest extends KernelTestCase
         yield 'a summary of 601 characters' => [[self::round([]), self::screenshot(['summary' => str_repeat('é', 601)])], 'rvw_screenshot_summary_check', self::CHECK_VIOLATION];
         yield 'a summary ending in a line break' => [[self::round([]), self::screenshot(['summary' => "The total is wrong\r\n"])], 'rvw_screenshot_summary_check', self::CHECK_VIOLATION];
         yield 'a second screenshot at one position' => [[self::round([]), self::screenshot([]), self::screenshot(['id' => self::SECOND_SCREENSHOT])], 'rvw_screenshot_round_id_position_key', self::UNIQUE_VIOLATION];
+        yield 'a screenshot that is a retake of itself' => [[self::draftRound([]), self::screenshot(['retake_of' => self::SCREENSHOT])], 'rvw_screenshot_retake_of_check', self::CHECK_VIOLATION];
+        yield 'a retake of a screenshot of another round' => [[self::round([]), self::draftRound(['id' => self::MISSING_ROUND]), self::screenshot([]), self::screenshot(['id' => self::SECOND_SCREENSHOT, 'round_id' => self::MISSING_ROUND, 'retake_of' => self::SCREENSHOT])], 'rvw_screenshot_retake_of_fkey', self::FOREIGN_KEY_VIOLATION];
         yield 'a pin on a screenshot that does not exist' => [[self::pin([])], 'rvw_pin_screenshot_fkey', self::FOREIGN_KEY_VIOLATION];
         yield 'a pin numbered 0' => [[self::round([]), self::screenshot([]), self::pin(['number' => 0])], 'rvw_pin_number_check', self::CHECK_VIOLATION];
         yield 'a pin right of the picture' => [[self::round([]), self::screenshot([]), self::pin(['x_pct' => '100.01'])], 'rvw_pin_position_check', self::CHECK_VIOLATION];
@@ -163,6 +165,11 @@ final class RoundTablesTest extends KernelTestCase
             self::checkItem([]),
             self::checkItem(['id' => self::SECOND_CHECK_ITEM, 'pin_id' => self::SECOND_PIN, 'state' => 'ok', 'changed_by' => self::LENA, 'changed_at' => '2027-03-16 09:00:00+00']),
         ]];
+        yield 'a first try and its retake in one draft' => [[
+            self::draftRound([]),
+            self::screenshot([]),
+            self::screenshot(['id' => self::SECOND_SCREENSHOT, 'position' => 1, 'retake_of' => self::SCREENSHOT]),
+        ]];
         yield 'two screenshots at two positions with a pin 1 each' => [[
             self::round([]),
             self::screenshot([]),
@@ -197,6 +204,7 @@ final class RoundTablesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX rvw_screenshot_pkey ON public.rvw_screenshot USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_screenshot_round_id_position_key ON public.rvw_screenshot USING btree (organization_id, round_id, "position")',
                 'CREATE UNIQUE INDEX rvw_screenshot_round_id_id_key ON public.rvw_screenshot USING btree (organization_id, round_id, id)',
+                'CREATE INDEX rvw_screenshot_retake_of_idx ON public.rvw_screenshot USING btree (organization_id, round_id, retake_of)',
                 'CREATE UNIQUE INDEX rvw_pin_pkey ON public.rvw_pin USING btree (organization_id, id)',
                 'CREATE UNIQUE INDEX rvw_pin_screenshot_id_number_key ON public.rvw_pin USING btree (organization_id, screenshot_id, number)',
             ],
@@ -214,6 +222,7 @@ final class RoundTablesTest extends KernelTestCase
         self::assertEqualsCanonicalizing(
             [
                 'rvw_screenshot (organization_id, round_id) -> rvw_round',
+                'rvw_screenshot (organization_id, round_id, retake_of) -> rvw_screenshot',
                 'rvw_pin (organization_id, screenshot_id) -> rvw_screenshot',
                 'rvw_check_item (organization_id, round_id) -> rvw_round',
                 'rvw_check_item (organization_id, pin_id) -> rvw_pin',

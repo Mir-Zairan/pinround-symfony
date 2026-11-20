@@ -29,7 +29,8 @@ interface Rounds
     public function add(Round $round): void;
 
     /**
-     * The tenant's round with that id, of any kind and state, deleted drafts too, with its screenshots and pins.
+     * The tenant's round with that id, of any kind and state, deleted drafts too, with its screenshots, the first try
+     * each retake points at, and pins, in a fixed number of queries; Round::tries() then needs none.
      *
      * @throws \LogicException when no transaction is open or no tenant is set
      */
@@ -74,8 +75,10 @@ interface Rounds
     /**
      * Writes the changes of a round read with get() or added, over the version it was read at, all or nothing: the
      * round's number, share time, state, version, decision and deletion, and its screenshots and pins (new ones added,
-     * changed ones updated, missing ones removed). A screenshot keeps its position and a pin its number; new ones
-     * and their pins are stamped $savedAt. Afterwards the stored round is at the round's version, so a further change
+     * changed ones updated, missing ones removed). A screenshot keeps its position and a pin its number, while the
+     * first try a retake points at may change (Round::removeScreenshot); new ones and their pins are stamped $savedAt.
+     * As the write is conditional on the version, of two saves that each add a try to one chain from the same read, the
+     * second is refused, so a chain never passes Screenshot::MAX_TRIES. Afterwards the stored round is at the round's version, so a further change
      * of this object cannot be saved: read the round again first.
      *
      * @throws RoundChanged    when the stored round is not at $round->savedVersion() any more, or is not the tenant's;

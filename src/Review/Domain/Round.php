@@ -140,24 +140,58 @@ final class Round
     }
 
     /**
-     * Adds a picture with no title, summary, pins or verdict after the last one.
+     * Adds a picture with no title, summary, pins or verdict after the last one. With $retakeOf it is the next try of
+     * that screenshot's chain (ADR-0048) and points at the chain's first try, whichever try $retakeOf names.
      *
+     * @param ScreenshotId|null $retakeOf any try of this draft's chain the picture retakes; null for a new screenshot
+     *
+     * @throws RetakenScreenshotNotFound when $retakeOf is not a screenshot of this draft; the round stays as it was
+     * @throws ScreenshotTriesFull       when the chain holds Screenshot::MAX_TRIES tries already; the round stays as it
+     *                                   was
      * @throws \DomainException          when the round is not an open unshared draft of $actorId; the round stays as it
      *                                   was
      * @throws \InvalidArgumentException when the round holds MAX_SCREENSHOTS already, as the constructor refuses more,
      *                                   or the media id is not a UUIDv7; the round stays as it was
      */
-    public function addScreenshot(UserId $actorId, ScreenshotId $screenshotId, string $mediaId): void
+    public function addScreenshot(UserId $actorId, ScreenshotId $screenshotId, string $mediaId, ?ScreenshotId $retakeOf = null): void
     {
         $this->requireEditableDraft($actorId);
+        $firstTryId = null === $retakeOf ? null : $this->firstTryIdOfChainWith($retakeOf);
+        if (null !== $firstTryId && \count($this->triesOfChain($firstTryId)) >= Screenshot::MAX_TRIES) {
+            throw new ScreenshotTriesFull();
+        }
         if (\count($this->screenshots) >= self::MAX_SCREENSHOTS) {
             throw new \InvalidArgumentException(\sprintf('A round holds at most %d screenshots.', self::MAX_SCREENSHOTS));
         }
         // After the highest position, never in a gap a removed picture left, so no stored picture has to move.
         $position = [] === $this->screenshots ? 0 : $this->screenshots[array_key_last($this->screenshots)]->position() + 1;
+        $added = Screenshot::of($screenshotId, $mediaId, $position, null, null, []);
 
-        $this->screenshots = [...$this->screenshots, Screenshot::of($screenshotId, $mediaId, $position, null, null, [])];
+        $this->screenshots = [...$this->screenshots, null === $firstTryId ? $added : $added->asTryOf($firstTryId)];
         ++$this->version;
+    }
+
+    /**
+     * Where each screenshot stands in its chain of tries, by position; a screenshot no one retook is "Try 1 of 1".
+     *
+     * @return list<ScreenshotTry>
+     */
+    public function tries(): array
+    {
+        $countByChain = [];
+        foreach ($this->screenshots as $screenshot) {
+            $chain = $screenshot->firstTryId()->toString();
+            $countByChain[$chain] = ($countByChain[$chain] ?? 0) + 1;
+        }
+        $tries = [];
+        $numberByChain = [];
+        foreach ($this->screenshots as $screenshot) {
+            $chain = $screenshot->firstTryId()->toString();
+            $numberByChain[$chain] = ($numberByChain[$chain] ?? 0) + 1;
+            $tries[] = new ScreenshotTry($screenshot->id(), $screenshot->firstTryId(), $numberByChain[$chain], $countByChain[$chain]);
+        }
+
+        return $tries;
     }
 
     /**
@@ -186,7 +220,8 @@ final class Round
     }
 
     /**
-     * Removes the picture with its pins; the others keep their positions.
+     * Removes the picture with its pins; the others keep their positions. When it was the first try of a chain, the
+     * next try becomes the first and the later ones point at it, so the chain stays one chain.
      *
      * @throws \DomainException when the round is not an open unshared draft of $actorId, or has no such picture; the
      *                          round stays as it was
@@ -198,7 +233,7 @@ final class Round
 
         $remaining = $this->screenshots;
         unset($remaining[$index]);
-        $this->screenshots = array_values($remaining);
+        $this->screenshots = self::withChainStartedAgain(array_values($remaining), $screenshotId);
         ++$this->version;
     }
 
@@ -540,20 +575,77 @@ final class Round
     }
 
     /**
+     * @throws RetakenScreenshotNotFound when the round has no such picture
+     */
+    private function firstTryIdOfChainWith(ScreenshotId $screenshotId): ScreenshotId
+    {
+        foreach ($this->screenshots as $screenshot) {
+            if ($screenshot->id()->equals($screenshotId)) {
+                return $screenshot->firstTryId();
+            }
+        }
+
+        throw new RetakenScreenshotNotFound();
+    }
+
+    /**
+     * @return list<Screenshot> by position, which is the order they were added in
+     */
+    private function triesOfChain(ScreenshotId $firstTryId): array
+    {
+        return array_values(array_filter($this->screenshots, static fn (Screenshot $screenshot): bool => $screenshot->firstTryId()->equals($firstTryId)));
+    }
+
+    /**
+     * The screenshots with the tries of $removedId's chain, if it was a first try, under the earliest of them instead.
+     *
+     * @param list<Screenshot> $screenshots by position, without $removedId
+     *
+     * @return list<Screenshot>
+     */
+    private static function withChainStartedAgain(array $screenshots, ScreenshotId $removedId): array
+    {
+        $newFirstTryId = null;
+        foreach ($screenshots as $index => $screenshot) {
+            if (null === $screenshot->retakeOf() || !$screenshot->retakeOf()->equals($removedId)) {
+                continue;
+            }
+            if (null === $newFirstTryId) {
+                $newFirstTryId = $screenshot->id();
+                $screenshots[$index] = $screenshot->asFirstTry();
+            } else {
+                $screenshots[$index] = $screenshot->asTryOf($newFirstTryId);
+            }
+        }
+
+        return $screenshots;
+    }
+
+    /**
      * @param list<Screenshot> $screenshots
      *
      * @return list<Screenshot>
      *
-     * @throws \InvalidArgumentException when two share a position
+     * @throws \InvalidArgumentException when two share a position, or a try points at a screenshot that is not a first
+     *                                   try of the round
      */
     private static function byPosition(array $screenshots): array
     {
         $positions = [];
+        $firstTryIds = [];
         foreach ($screenshots as $screenshot) {
             if (isset($positions[$screenshot->position()])) {
                 throw new \InvalidArgumentException('Two screenshots of one round cannot share a position.');
             }
             $positions[$screenshot->position()] = true;
+            if (null === $screenshot->retakeOf()) {
+                $firstTryIds[$screenshot->id()->toString()] = true;
+            }
+        }
+        foreach ($screenshots as $screenshot) {
+            if (null !== $screenshot->retakeOf() && !isset($firstTryIds[$screenshot->retakeOf()->toString()])) {
+                throw new \InvalidArgumentException('A retake points at the first try of its chain in the same round.');
+            }
         }
         usort($screenshots, static fn (Screenshot $first, Screenshot $second): int => $first->position() <=> $second->position());
 

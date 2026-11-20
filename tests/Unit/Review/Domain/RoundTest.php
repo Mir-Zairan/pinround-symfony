@@ -8,12 +8,15 @@ use App\Review\Domain\DraftDecision;
 use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
+use App\Review\Domain\RetakenScreenshotNotFound;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundId;
 use App\Review\Domain\RoundKind;
 use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
+use App\Review\Domain\ScreenshotTriesFull;
+use App\Review\Domain\ScreenshotTry;
 use App\Review\Domain\ScreenshotVerdict;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -568,6 +571,188 @@ final class RoundTest extends TestCase
     }
 
     #[Test]
+    public function aRetakeIsTheNextTryOfTheSameScreenshotAndThePinsStayOnTheTryTheyWerePutOn(): void
+    {
+        $draft = self::draftWithScreenshots(2);
+        $owner = new UserId(self::OMAR);
+        $draft->replacePins($owner, self::screenshotId(0), [self::pin(1)]);
+
+        $draft->addScreenshot($owner, self::screenshotId(2), self::MEDIA, self::screenshotId(0));
+
+        $retake = $draft->screenshots()[2];
+        self::assertSame(2, $retake->position());
+        self::assertSame(self::screenshotId(0)->toString(), $retake->retakeOf()?->toString());
+        self::assertSame([], $retake->pins());
+        self::assertSame([1], self::pinNumbersOf($draft, 0));
+        self::assertSame([[0, 1, 2], [1, 1, 1], [0, 2, 2]], self::triesOf($draft));
+        self::assertSame(3, $draft->version());
+    }
+
+    #[Test]
+    public function aRetakeOfALaterTryJoinsTheSameChainAndPointsAtItsFirstTry(): void
+    {
+        $draft = self::draftWithScreenshots(2);
+        $owner = new UserId(self::OMAR);
+        $draft->addScreenshot($owner, self::screenshotId(2), self::MEDIA, self::screenshotId(1));
+
+        $draft->addScreenshot($owner, self::screenshotId(3), self::MEDIA, self::screenshotId(2));
+
+        self::assertSame(self::screenshotId(1)->toString(), $draft->screenshots()[3]->retakeOf()?->toString());
+        self::assertSame([[0, 1, 1], [1, 1, 3], [1, 2, 3], [1, 3, 3]], self::triesOf($draft));
+    }
+
+    #[Test]
+    public function aSixthTryIsRefusedWithTheCapMessageAndTheRoundStaysAsItWas(): void
+    {
+        $draft = self::draftWithScreenshots(2);
+        $owner = new UserId(self::OMAR);
+        for ($position = 2; $position < 2 + Screenshot::MAX_TRIES - 1; ++$position) {
+            $draft->addScreenshot($owner, self::screenshotId($position), self::MEDIA, self::screenshotId(0));
+        }
+        self::assertSame([5, 5], [Screenshot::MAX_TRIES, \count(array_filter(self::triesOf($draft), static fn (array $try): bool => 0 === $try[0]))]);
+        $before = self::snapshot($draft);
+
+        foreach ([self::screenshotId(0), self::screenshotId(5)] as $triedAgain) {
+            try {
+                $draft->addScreenshot($owner, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, $triedAgain);
+                self::fail('A sixth try was added.');
+            } catch (ScreenshotTriesFull $refused) {
+                self::assertSame('This screenshot already has 5 tries. Remove one before you add another.', $refused->getMessage());
+            }
+            self::assertSame($before, self::snapshot($draft));
+        }
+
+        $draft->addScreenshot($owner, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, self::screenshotId(1));
+        self::assertSame([1, 2, 2], self::triesOf($draft)[6]);
+    }
+
+    #[Test]
+    public function aRemovedTryFreesItsPlaceInTheChainForAnother(): void
+    {
+        $draft = self::draftWithScreenshots(1);
+        $owner = new UserId(self::OMAR);
+        for ($position = 1; $position < Screenshot::MAX_TRIES; ++$position) {
+            $draft->addScreenshot($owner, self::screenshotId($position), self::MEDIA, self::screenshotId(0));
+        }
+        $draft->removeScreenshot($owner, self::screenshotId(2));
+
+        $draft->addScreenshot($owner, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, self::screenshotId(4));
+
+        self::assertSame([[0, 1, 5], [0, 2, 5], [0, 3, 5], [0, 4, 5], [0, 5, 5]], self::triesOf($draft));
+    }
+
+    #[Test]
+    public function aRetakeOfAScreenshotThisDraftDoesNotHaveIsRefusedAsNotFoundAndTheRoundStaysAsItWas(): void
+    {
+        $draft = self::draftWithScreenshots(2);
+        $before = self::snapshot($draft);
+
+        try {
+            $draft->addScreenshot(new UserId(self::OMAR), new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, new ScreenshotId(self::UNKNOWN_SCREENSHOT));
+            self::fail('A retake of an unknown screenshot was added.');
+        } catch (RetakenScreenshotNotFound $refused) {
+            self::assertSame('The screenshot to retake is not in this draft round.', $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($draft));
+    }
+
+    #[Test]
+    public function aRetakeDoesNotPassTheRoundsScreenshotCap(): void
+    {
+        $draft = self::draftWithScreenshots(Round::MAX_SCREENSHOTS);
+        $before = self::snapshot($draft);
+
+        try {
+            $draft->addScreenshot(new UserId(self::OMAR), new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, self::screenshotId(0));
+            self::fail('A 51st screenshot was added as a try.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('A round holds at most 50 screenshots.', $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($draft));
+    }
+
+    #[Test]
+    public function removingAFirstTryMakesTheNextTryTheFirstAndTheLaterOnesPointAtIt(): void
+    {
+        $draft = self::draftWithScreenshots(2);
+        $owner = new UserId(self::OMAR);
+        $draft->addScreenshot($owner, self::screenshotId(2), self::MEDIA, self::screenshotId(0));
+        $draft->addScreenshot($owner, self::screenshotId(3), self::MEDIA, self::screenshotId(1));
+        $draft->addScreenshot($owner, self::screenshotId(4), self::MEDIA, self::screenshotId(0));
+
+        $draft->removeScreenshot($owner, self::screenshotId(0));
+
+        self::assertSame(
+            [[1, null], [2, null], [3, self::screenshotId(1)->toString()], [4, self::screenshotId(2)->toString()]],
+            array_map(static fn (Screenshot $screenshot): array => [$screenshot->position(), $screenshot->retakeOf()?->toString()], $draft->screenshots()),
+        );
+        self::assertSame([[1, 1, 2], [2, 1, 2], [1, 2, 2], [2, 2, 2]], self::triesOf($draft));
+    }
+
+    #[Test]
+    public function removingALaterTryLeavesTheChainUnderItsFirstTry(): void
+    {
+        $draft = self::draftWithScreenshots(1);
+        $owner = new UserId(self::OMAR);
+        $draft->addScreenshot($owner, self::screenshotId(1), self::MEDIA, self::screenshotId(0));
+        $draft->addScreenshot($owner, self::screenshotId(2), self::MEDIA, self::screenshotId(0));
+
+        $draft->removeScreenshot($owner, self::screenshotId(1));
+
+        self::assertSame([null, self::screenshotId(0)->toString()], array_map(static fn (Screenshot $screenshot): ?string => $screenshot->retakeOf()?->toString(), $draft->screenshots()));
+        self::assertSame([[0, 1, 2], [0, 2, 2]], self::triesOf($draft));
+    }
+
+    #[Test]
+    public function aRestoredRoundKeepsItsTriesAndCountsThemInPositionOrder(): void
+    {
+        $firstTry = self::screenshotId(4);
+        $draft = self::restoredDraftOf([self::screenshot(7)->asTryOf($firstTry), self::screenshot(4), self::screenshot(5)->asTryOf($firstTry), self::screenshot(6)]);
+
+        self::assertSame([[4, 1, 3], [4, 2, 3], [6, 1, 1], [4, 3, 3]], self::triesOf($draft));
+    }
+
+    /**
+     * @return iterable<string, array{list<Screenshot>}>
+     */
+    public static function storedChainsThatBreakARule(): iterable
+    {
+        yield 'a try of a screenshot the round does not have' => [[self::screenshot(0), self::screenshot(1)->asTryOf(new ScreenshotId(self::UNKNOWN_SCREENSHOT))]];
+        yield 'a try of a later try' => [[self::screenshot(0), self::screenshot(1)->asTryOf(self::screenshotId(0)), self::screenshot(2)->asTryOf(self::screenshotId(1))]];
+    }
+
+    /**
+     * @param list<Screenshot> $screenshots
+     */
+    #[Test]
+    #[DataProvider('storedChainsThatBreakARule')]
+    public function aStoredRoundWithABrokenChainIsRefused(array $screenshots): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A retake points at the first try of its chain in the same round.');
+
+        self::restoredDraftOf($screenshots);
+    }
+
+    #[Test]
+    public function aTryIsAPlaceFromOneUpToTheChainsCount(): void
+    {
+        $id = self::screenshotId(0);
+        self::assertSame(3, new ScreenshotTry($id, $id, 3, 3)->number);
+
+        foreach ([[0, 2], [3, 2]] as [$number, $count]) {
+            try {
+                new ScreenshotTry($id, $id, $number, $count);
+                self::fail(\sprintf('Try %d of %d was accepted.', $number, $count));
+            } catch (\InvalidArgumentException $refused) {
+                self::assertSame(\sprintf('Try %d of %d is not a place in a chain.', $number, $count), $refused->getMessage());
+            }
+        }
+    }
+
+    #[Test]
     public function aTextEditSetsTrimmedTitleAndSummaryAndKeepsPinsAndVerdict(): void
     {
         $draft = self::draftWithScreenshots(2);
@@ -727,6 +912,7 @@ final class RoundTest extends TestCase
     public static function draftMutations(): iterable
     {
         yield 'add a screenshot' => [static fn (Round $round, UserId $actor) => $round->addScreenshot($actor, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA)];
+        yield 'add a try' => [static fn (Round $round, UserId $actor) => $round->addScreenshot($actor, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, self::screenshotId(0))];
         yield 'remove a screenshot' => [static fn (Round $round, UserId $actor) => $round->removeScreenshot($actor, self::screenshotId(0))];
         yield 'edit the text' => [static fn (Round $round, UserId $actor) => $round->editScreenshotText($actor, self::screenshotId(0), 'Title', 'Summary')];
         yield 'replace the pins' => [static fn (Round $round, UserId $actor) => $round->replacePins($actor, self::screenshotId(0), [self::pin(1)])];
@@ -1122,6 +1308,29 @@ final class RoundTest extends TestCase
         return Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), null, null, RoundState::Open, 1, $screenshots, new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
     }
 
+    /**
+     * @param list<Screenshot> $screenshots
+     */
+    private static function restoredDraftOf(array $screenshots): Round
+    {
+        return Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), null, null, RoundState::Open, 1, $screenshots, new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
+    }
+
+    /**
+     * Each screenshot's try as [position of the chain's first try, number, count], by position.
+     *
+     * @return list<array{int, int, int}>
+     */
+    private static function triesOf(Round $round): array
+    {
+        $positionById = [];
+        foreach ($round->screenshots() as $screenshot) {
+            $positionById[$screenshot->id()->toString()] = $screenshot->position();
+        }
+
+        return array_map(static fn (ScreenshotTry $try): array => [$positionById[$try->firstTryId->toString()], $try->number, $try->count], $round->tries());
+    }
+
     private static function restoredDraft(RoundState $state, int $version = 1): Round
     {
         return Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), null, null, $state, $version, [self::screenshot(0)], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
@@ -1206,6 +1415,7 @@ final class RoundTest extends TestCase
                 $screenshot->title(),
                 $screenshot->summary(),
                 $screenshot->verdict(),
+                $screenshot->retakeOf()?->toString(),
                 array_map(static fn (Pin $pin): array => [$pin->id()->toString(), $pin->number()], $screenshot->pins()),
             ], $round->screenshots()),
         ];

@@ -42,7 +42,7 @@ final readonly class DbalRounds implements Rounds
 
     private const string ROUND_COLUMNS = 'id, organization_id, ticket_id, kind, owner_id, number, shared_at, state, version, created_at, deleted_at, decision, decided_at';
 
-    private const array SCREENSHOT_COLUMNS = ['organization_id', 'id', 'round_id', 'media_id', 'position', 'variant_label', 'verdict', 'title', 'summary', 'created_at'];
+    private const array SCREENSHOT_COLUMNS = ['organization_id', 'id', 'round_id', 'media_id', 'position', 'variant_label', 'verdict', 'title', 'summary', 'created_at', 'retake_of'];
 
     private const array PIN_COLUMNS = ['organization_id', 'id', 'screenshot_id', 'number', 'x_pct', 'y_pct', 'note', 'verdict', 'source', 'ai_state', 'author_id', 'created_at'];
 
@@ -224,14 +224,16 @@ final readonly class DbalRounds implements Rounds
     }
 
     /**
-     * Removes first, so a new row never meets one that is going; then updates, then adds.
+     * Unhooks the stored tries whose first try changes, so removing that first try breaks no rvw_screenshot_retake_of_fkey;
+     * then removes, so a new row never meets one that is going; then adds the new screenshots, so a changed try may
+     * point at one; then updates, then adds the new pins.
      */
     private function syncScreenshotsAndPins(string $organizationId, Round $round, string $savedAt): void
     {
         $roundId = $round->id()->toString();
         $storedScreenshots = [];
         foreach ($this->connection->fetchAllAssociative(
-            'SELECT id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot WHERE organization_id = ? AND round_id = ?',
+            'SELECT id, media_id, position, variant_label, verdict, title, summary, retake_of FROM rvw_screenshot WHERE organization_id = ? AND round_id = ?',
             [$organizationId, $roundId],
         ) as $screenshotRow) {
             $storedScreenshots[self::text($screenshotRow['id'], 'id')] = [
@@ -241,6 +243,7 @@ final readonly class DbalRounds implements Rounds
                 self::textOrNull($screenshotRow['verdict'], 'verdict'),
                 self::textOrNull($screenshotRow['title'], 'title'),
                 self::textOrNull($screenshotRow['summary'], 'summary'),
+                self::textOrNull($screenshotRow['retake_of'], 'retake_of'),
             ];
         }
         $storedPins = [];
@@ -250,6 +253,7 @@ final readonly class DbalRounds implements Rounds
 
         $keptScreenshotIds = [];
         $changedScreenshots = [];
+        $rechainedScreenshotIds = [];
         $newScreenshots = [];
         $keptPinIds = [];
         $changedPins = [];
@@ -263,8 +267,11 @@ final readonly class DbalRounds implements Rounds
             } elseif ([$stored[0], $stored[1]] !== [$screenshot->mediaId(), $screenshot->position()]) {
                 // Only the UPDATE below changes a stored row, and it leaves both alone; a move would be lost silently.
                 throw new \LogicException(\sprintf('Screenshot %s keeps its picture and position once stored.', $screenshotId));
-            } elseif (\array_slice($stored, 2) !== [$screenshot->variantLabel()?->value, $screenshot->verdict()?->value, $screenshot->title(), $screenshot->summary()]) {
+            } elseif (\array_slice($stored, 2) !== [$screenshot->variantLabel()?->value, $screenshot->verdict()?->value, $screenshot->title(), $screenshot->summary(), $screenshot->retakeOf()?->toString()]) {
                 $changedScreenshots[] = $screenshot;
+                if (null !== $stored[6] && $stored[6] !== $screenshot->retakeOf()?->toString()) {
+                    $rechainedScreenshotIds[] = $screenshotId;
+                }
             }
             foreach ($screenshot->pins() as $pin) {
                 $pinId = $pin->id()->toString();
@@ -277,13 +284,20 @@ final readonly class DbalRounds implements Rounds
             }
         }
 
+        if ([] !== $rechainedScreenshotIds) {
+            $this->connection->executeStatement(
+                'UPDATE rvw_screenshot SET retake_of = NULL WHERE organization_id = ? AND id = ANY(CAST(? AS uuid[]))',
+                [$organizationId, self::uuidArray($rechainedScreenshotIds)],
+            );
+        }
         // The pins of a removed screenshot go with it (ON DELETE CASCADE).
         $this->deleteByIds('rvw_pin', $organizationId, array_keys(array_diff_key($storedPins, $keptPinIds)));
         $this->deleteByIds('rvw_screenshot', $organizationId, array_keys(array_diff_key($storedScreenshots, $keptScreenshotIds)));
+        $this->insertRows('rvw_screenshot', self::SCREENSHOT_COLUMNS, $newScreenshots);
         foreach ($changedScreenshots as $screenshot) {
             $this->connection->executeStatement(
-                'UPDATE rvw_screenshot SET verdict = ?, title = ?, summary = ?, variant_label = ? WHERE organization_id = ? AND id = ?',
-                [$screenshot->verdict()?->value, $screenshot->title(), $screenshot->summary(), $screenshot->variantLabel()?->value, $organizationId, $screenshot->id()->toString()],
+                'UPDATE rvw_screenshot SET verdict = ?, title = ?, summary = ?, variant_label = ?, retake_of = ? WHERE organization_id = ? AND id = ?',
+                [$screenshot->verdict()?->value, $screenshot->title(), $screenshot->summary(), $screenshot->variantLabel()?->value, $screenshot->retakeOf()?->toString(), $organizationId, $screenshot->id()->toString()],
             );
         }
         foreach ($changedPins as [$screenshotId, $pin]) {
@@ -292,7 +306,6 @@ final readonly class DbalRounds implements Rounds
                 [$screenshotId, ...self::pinValues($pin), $organizationId, $pin->id()->toString()],
             );
         }
-        $this->insertRows('rvw_screenshot', self::SCREENSHOT_COLUMNS, $newScreenshots);
         $this->insertRows('rvw_pin', self::PIN_COLUMNS, $newPinRows);
     }
 
@@ -359,7 +372,7 @@ final readonly class DbalRounds implements Rounds
         }
         $screenshotsByRound = [];
         foreach ($this->connection->fetchAllAssociative(
-            'SELECT round_id, id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot'
+            'SELECT round_id, id, media_id, position, variant_label, verdict, title, summary, retake_of FROM rvw_screenshot'
             .' WHERE organization_id = ? AND round_id = ANY(CAST(? AS uuid[])) ORDER BY round_id, position',
             [$organizationId->toString(), self::uuidArray($roundIds)],
         ) as $screenshotRow) {
@@ -373,6 +386,7 @@ final readonly class DbalRounds implements Rounds
                 $pinsByScreenshot[$screenshotId] ?? [],
                 self::enumOrNull(VariantLabel::class, $screenshotRow['variant_label'], 'variant_label'),
                 self::enumOrNull(ScreenshotVerdict::class, $screenshotRow['verdict'], 'verdict'),
+                null === $screenshotRow['retake_of'] ? null : new ScreenshotId(self::text($screenshotRow['retake_of'], 'retake_of')),
             );
         }
 
@@ -437,6 +451,7 @@ final readonly class DbalRounds implements Rounds
             $screenshot->title(),
             $screenshot->summary(),
             $createdAt,
+            $screenshot->retakeOf()?->toString(),
         ];
     }
 
