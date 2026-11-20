@@ -70,6 +70,10 @@ final readonly class RoundShareDraftQuestion implements ShareDraftQuestion
         try {
             return $this->roundCommands->shareDraftAtHandOff($roundId, $ownerId, $at);
         } catch (RoundRefused $refused) {
+            $openRoundNumber = $refused->openRoundNumber();
+            if (null !== $openRoundNumber) {
+                throw MoveRefused::roundStillOpen($refused->getMessage(), $openRoundNumber, $refused->readyForUserId(), $refused);
+            }
             if ($refused->isSharingBlocked()) {
                 throw new MoveRefused($refused->getMessage(), [], $refused);
             }

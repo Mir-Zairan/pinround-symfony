@@ -15,6 +15,7 @@ use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\SharedKernel\UI\PingsClearedToast;
+use App\SharedKernel\UI\RoundStillOpenReason;
 use App\Ticketing\Api\DraftChoice;
 use App\Ticketing\Api\DraftDecisionNeeded;
 use App\Ticketing\Api\MoveRefused;
@@ -53,7 +54,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * no number, changes nothing. Who may make which move is then the team's transition policy, whose refusal is a toast.
  * A verb move or move to a step the policy allows, by the owner of an undecided draft round with a screenshot, moves
  * nothing until the form says share or keep (ADR-0017, hand-off): until then it answers 409 with what the Share draft
- * dialog asks. A give does not ask.
+ * dialog asks. A give does not ask. A share chosen while another shared round of the ticket stays open (ADR-0048), which
+ * the dialog does not offer then, is refused with a toast that names who gives the verdict, and nothing is moved.
  */
 final class TicketMoveController extends AbstractController
 {
@@ -130,7 +132,7 @@ final class TicketMoveController extends AbstractController
                 try {
                     $moveResult = $this->ticketCommands->move($actor->organizationId(), $actor->userId(), $key, $verb, $expectedVersion, $now, $draftChoice);
                 } catch (MoveRefused $refused) {
-                    throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+                    throw $this->refusalOutOfTheMove($refused, $ticket);
                 }
                 if (null !== $moveResult->draftOutcome) {
                     return PingsClearedToast::withClearedPings(MoveToasts::movedToWithDraft($this->stepNameAfterMoveOf($ticket), $moveResult), $moveResult->clearedPingCount);
@@ -148,6 +150,8 @@ final class TicketMoveController extends AbstractController
             return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (MoveRefused $roundStillOpen) {
+            return $this->answerWithToast($request, $key, $this->roundStillOpenReasonAfterTheRollback($key, $roundStillOpen), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (DraftDecisionNeeded $needed) {
             return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_ROUTE, ['key' => $key, 'verb' => $verb]), fn (TicketPageView $ticket, ActorContext $actor): ?string => $this->verbTargetStepNameOf($verb, $ticket, $actor));
         }
@@ -190,7 +194,7 @@ final class TicketMoveController extends AbstractController
                         $draftChoice,
                     );
                 } catch (MoveRefused $refused) {
-                    throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+                    throw $this->refusalOutOfTheMove($refused, $ticket);
                 } catch (WaitingOnRefused) {
                     throw new MoveRefusedWithToast(MoveToasts::WAITING_ON_REFUSED);
                 }
@@ -208,6 +212,8 @@ final class TicketMoveController extends AbstractController
             return $this->answerWithToast($request, $key, MoveToasts::CHANGED_MEANWHILE, Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (MoveRefusedWithToast $refused) {
             return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (MoveRefused $roundStillOpen) {
+            return $this->answerWithToast($request, $key, $this->roundStillOpenReasonAfterTheRollback($key, $roundStillOpen), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (DraftDecisionNeeded $needed) {
             return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_TO_ROUTE, ['key' => $key, 'stepId' => $stepId]), fn (): string => $this->listedStepNameOf($stepId));
         }
@@ -260,23 +266,29 @@ final class TicketMoveController extends AbstractController
     /**
      * "Share your draft round?" in place of the move, which nothing made: the Share draft dialog as a Turbo Stream for a
      * Turbo form, whose buttons send the same form again with DRAFT_CHOICE_FIELD; for any other form a page with the
-     * same question and buttons, which needs no script. Both answer 409, and both repeat the form's own fields.
+     * same question and buttons, which needs no script. Both answer 409, and both repeat the form's own fields. While
+     * another shared round stays open (ADR-0048) both offer only "Keep private and move", with the reason.
      *
      * @param string                                                $moveUrl        where the buttons send the form again
      * @param \Closure(TicketPageView, ActorContext): (string|null) $targetStepName the step the move leads to, read in a transaction of its own
      */
     private function answerWithDraftQuestion(Request $request, string $key, UndecidedDraft $draft, string $moveUrl, \Closure $targetStepName): Response
     {
-        $stepName = $this->transactions->run(function () use ($key, $targetStepName): ?string {
+        [$stepName, $shareBlockedReason] = $this->transactions->run(function () use ($key, $targetStepName, $draft): array {
             [$actor, $ticket] = $this->movableTicketOf($key);
+            $openRoundNumber = $draft->openRoundNumber;
 
-            return $targetStepName($ticket, $actor);
+            return [
+                $targetStepName($ticket, $actor),
+                null === $openRoundNumber ? null : $this->roundStillOpenReasonOf($openRoundNumber, $draft->openRoundReadyForUserId, $ticket, $actor),
+            ];
         });
         $parameters = [
             'ticketKey' => $key,
             'moveUrl' => $moveUrl,
             'draft' => $draft,
             'stepName' => $stepName,
+            'shareBlockedReason' => $shareBlockedReason,
             'fields' => [
                 self::CSRF_FIELD => $request->request->getString(self::CSRF_FIELD),
                 self::VERSION_FIELD => $request->request->getString(self::VERSION_FIELD),
@@ -373,6 +385,49 @@ final class TicketMoveController extends AbstractController
         return [$actor, $ticket];
     }
 
+    /**
+     * The refusal to throw out of the move's transaction. A share refused while another round stays open leaves as it
+     * is: the move refreshed the turn row before the share, so whose turn it is can be read only after the rollback.
+     */
+    private function refusalOutOfTheMove(MoveRefused $refused, TicketPageView $ticket): MoveRefused|MoveRefusedWithToast
+    {
+        if (null !== $refused->openRoundNumber()) {
+            return $refused;
+        }
+
+        return new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+    }
+
+    /**
+     * @throws \LogicException for a refusal that names no open round, which refusalOutOfTheMove never lets through
+     */
+    private function roundStillOpenReasonAfterTheRollback(string $key, MoveRefused $refused): string
+    {
+        $openRoundNumber = $refused->openRoundNumber() ?? throw new \LogicException('Only a share refused for an open round leaves the move as MoveRefused.', 0, $refused);
+
+        return $this->transactions->run(function () use ($key, $openRoundNumber, $refused): string {
+            [$actor, $ticket] = $this->movableTicketOf($key);
+
+            return $this->roundStillOpenReasonOf($openRoundNumber, $refused->openRoundReadyForUserId(), $ticket, $actor);
+        });
+    }
+
+    /**
+     * Names who gives the verdict on the open round: the person Review named, else whoever's turn it is now.
+     */
+    private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, TicketPageView $ticket, ActorContext $reader): string
+    {
+        $verdictGiverId = $readyForUserId ?? $this->turnUserIdOf($ticket);
+        if (null === $verdictGiverId) {
+            return RoundStillOpenReason::of($openRoundNumber, null);
+        }
+        if ($verdictGiverId->equals($reader->userId())) {
+            return RoundStillOpenReason::forTheVerdictGiver($openRoundNumber);
+        }
+
+        return RoundStillOpenReason::of($openRoundNumber, $this->firstNameOf($verdictGiverId, $ticket));
+    }
+
     private function refusalToastOf(MoveRefused $refused, TicketPageView $ticket): string
     {
         if (null === $refused->ruleNoteTemplate) {
@@ -391,9 +446,19 @@ final class TicketMoveController extends AbstractController
      */
     private function turnFirstNameOf(TicketPageView $ticket): ?string
     {
-        $turnUserId = $this->turnUserQueries->turnUsersOf([$ticket->id])[$ticket->id->toString()] ?? null;
+        $turnUserId = $this->turnUserIdOf($ticket);
 
         return null === $turnUserId ? null : $this->firstNameOf($turnUserId, $ticket);
+    }
+
+    /**
+     * One query on ins_ticket_turn.
+     *
+     * @return UserId|null null when the turn is a label's or the ticket has no turn row
+     */
+    private function turnUserIdOf(TicketPageView $ticket): ?UserId
+    {
+        return $this->turnUserQueries->turnUsersOf([$ticket->id])[$ticket->id->toString()] ?? null;
     }
 
     /**

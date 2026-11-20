@@ -1,2 +1,7 @@
-{#- The question both answers to a move put to the owner of an undecided draft: the dialog and the page without script. -#}
+{#- The question both answers to a move put to the owner of an undecided draft: the dialog and the page without script. While another shared round stays open, shareBlockedReason says why the draft may not be shared now. -#}
+{% if shareBlockedReason is null %}
 <p>Your draft round has {{ draft.screenshotCount }} {{ 1 == draft.screenshotCount ? 'screenshot' : 'screenshots' }}. Share it with the team as round {{ draft.roundNumber }}, or keep it private. Private notes stay readable for you and Claude Code.</p>
+{% else %}
+<p>{{ shareBlockedReason }}</p>
+<p>Your draft round has {{ draft.screenshotCount }} {{ 1 == draft.screenshotCount ? 'screenshot' : 'screenshots' }}. Keep it private and move; you can share it later. Private notes stay readable for you and Claude Code.</p>
+{% endif %}

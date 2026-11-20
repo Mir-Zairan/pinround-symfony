@@ -25,6 +25,7 @@ use App\Tests\Unit\Media\Application\InMemoryTransactions;
 use App\Tests\Unit\Review\UI\Media\InMemoryTicketTurnQueries;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
 use App\Ticketing\Api\MoveFacts;
+use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\UndecidedDraft;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -467,6 +468,22 @@ final class RoundShareDraftQuestionTest extends TestCase
         $draft = $this->inTransaction(fn () => $this->questionInTransactions->undecidedDraftOf(new TicketId(self::TICKET), self::move(self::OMAR, isLeadOnlyMove: true, isMoversTurn: false)));
 
         self::assertEquals(new UndecidedDraft(self::OMARS_DRAFT, 2, 4), $draft, 'The lead-only move closes nothing, but Omar\'s share closes his findings round 3.');
+    }
+
+    #[Test]
+    public function anEmptyDraftsShareIsRefusedWithItsReasonAndNoOpenRound(): void
+    {
+        $before = $this->roundStates();
+
+        try {
+            $this->inTransaction(fn () => $this->questionInTransactions->share(self::RAJS_EMPTY_DRAFT, new UserId(self::RAJ), self::at()));
+            self::fail('The share was not refused.');
+        } catch (MoveRefused $refused) {
+            self::assertSame('Add a screenshot before you share.', $refused->ruleNoteTemplate);
+            self::assertNull($refused->openRoundNumber());
+            self::assertNull($refused->openRoundReadyForUserId());
+        }
+        self::assertSame($before, $this->roundStates());
     }
 
     private static function editOmarsDraftMeanwhile(Rounds $rounds): void
