@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Insight\Api;
 
 /**
- * Home's and the Whose turn view's reads of ins_ticket_turn, of the organization of TenantContext under row-level
+ * Home's, the Whose turn view's and My reports' reads of ins_ticket_turn, of the organization of TenantContext under row-level
  * security, so they need an open transaction whose tenant is the viewer's organization.
  */
 interface HomeQueries
@@ -13,6 +13,7 @@ interface HomeQueries
     public const int SHOWN_TICKETS = 5;
     public const int SHOWN_TICKETS_OF_THE_OPENED_GROUP = 100;
     public const int GROUPS_PER_PAGE = 20;
+    public const int MY_REPORTS_PER_PAGE = 50;
 
     /**
      * One page of the people and labels that open tickets wait on, with only the tickets the viewer may see (ADR-0013):
@@ -39,4 +40,17 @@ interface HomeQueries
      *                                   organization than the tenant, before any query
      */
     public function whoseTurn(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, ?string $searchText = null): WhoseTurnPage;
+
+    /**
+     * One page of the tickets the viewer reported, open and done, only those the viewer may see (ADR-0013; a reporter
+     * always may, team-only tickets included): MY_REPORTS_PER_PAGE at most, newest first, then the highest ticket id,
+     * each with its turn row while it has one. A next page goes on by keyset after its cursor. One query on Ticketing's
+     * view tkt_ticket_list_v joined to ins_ticket_turn.
+     *
+     * @param MyReportsCursor|null $after null for the first page; a page's nextCursor for the page after it
+     *
+     * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
+     *                         than the tenant, before any query
+     */
+    public function myReports(TicketViewer $viewer, ?MyReportsCursor $after): MyReportsPage;
 }

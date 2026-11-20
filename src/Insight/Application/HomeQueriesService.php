@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Insight\Application;
 
 use App\Insight\Api\HomeQueries;
+use App\Insight\Api\MyReportsCursor;
+use App\Insight\Api\MyReportsPage;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
 use App\Insight\Api\TurnGroupCursor;
 use App\Insight\Api\WhoseTurnPage;
+use App\Insight\Application\MyReports\MyReportsRows;
 use App\Ticketing\Api\ListFilter;
 
 final readonly class HomeQueriesService implements HomeQueries
@@ -17,7 +20,7 @@ final readonly class HomeQueriesService implements HomeQueries
     // Show more link, and the next page's cursor, of a label group with a longer label.
     private const int GROUP_KEY_MAX_LENGTH = 100;
 
-    public function __construct(private WhoseTurnRows $whoseTurnRows)
+    public function __construct(private WhoseTurnRows $whoseTurnRows, private MyReportsRows $myReportsRows)
     {
     }
 
@@ -55,6 +58,17 @@ final readonly class HomeQueriesService implements HomeQueries
         }
 
         return new WhoseTurnPage([...$viewersGroups, ...$groups], $read['ticketCount'], $nextCursor, $read['isSearchCapped']);
+    }
+
+    public function myReports(TicketViewer $viewer, ?MyReportsCursor $after): MyReportsPage
+    {
+        $reports = $this->myReportsRows->reportsOf($viewer, $after, self::MY_REPORTS_PER_PAGE + 1);
+        if (\count($reports) <= self::MY_REPORTS_PER_PAGE) {
+            return new MyReportsPage($reports, null);
+        }
+        $reports = \array_slice($reports, 0, self::MY_REPORTS_PER_PAGE);
+
+        return new MyReportsPage($reports, MyReportsCursor::after($reports[self::MY_REPORTS_PER_PAGE - 1]));
     }
 
     private static function isGroupKey(string $groupKey): bool

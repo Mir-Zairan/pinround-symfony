@@ -39,7 +39,7 @@ final class HomeQueriesServiceTest extends TestCase
             self::personGroup(self::RAJ, '2027-03-01 06:00:00'),
         ]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
+        $groups = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null)->groups;
 
         self::assertSame(
             [self::LENA, self::RAJ, 'Customer', self::OMAR, self::MIA, 'Supplier delivery'],
@@ -55,7 +55,7 @@ final class HomeQueriesServiceTest extends TestCase
             self::personGroup(self::OMAR, '2027-03-02 07:00:00'),
         ]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
+        $groups = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null)->groups;
 
         self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $groups));
     }
@@ -72,7 +72,7 @@ final class HomeQueriesServiceTest extends TestCase
             self::labelGroup('10', '2027-03-05 07:00:00'),
         ]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null)->groups;
+        $groups = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null)->groups;
 
         self::assertSame(['10', '9'], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $groups));
     }
@@ -90,7 +90,7 @@ final class HomeQueriesServiceTest extends TestCase
         }
         $rows = new FixedWhoseTurnRows([...$otherGroups, self::personGroup(self::LENA, '2027-03-25 09:00:00')], 40);
 
-        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null);
+        $page = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null);
 
         $expectedKeys = [self::LENA];
         for ($day = 1; $day <= 20; ++$day) {
@@ -114,7 +114,7 @@ final class HomeQueriesServiceTest extends TestCase
         }
         $rows = new FixedWhoseTurnRows([self::personGroup(self::LENA, '2027-03-25 09:00:00'), ...$otherGroups]);
 
-        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null);
+        $page = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null);
 
         self::assertCount(21, $page->groups);
         self::assertSame('Supplier 20', $page->groups[20]->groupKey());
@@ -133,7 +133,7 @@ final class HomeQueriesServiceTest extends TestCase
             self::personGroup(self::OMAR, '2027-03-02 07:00:00'),
         ], 7);
 
-        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, null, $after);
+        $page = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), self::SHOP_PROJECT, null, $after);
 
         self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $page->groups));
         self::assertSame(7, $page->ticketCount);
@@ -147,7 +147,7 @@ final class HomeQueriesServiceTest extends TestCase
         $after = new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, str_repeat('é', 100));
         $rows = new FixedWhoseTurnRows([]);
 
-        new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, $after);
+        new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, $after);
 
         self::assertSame([[null, null, $after, 21, null]], $rows->calls);
     }
@@ -168,7 +168,7 @@ final class HomeQueriesServiceTest extends TestCase
         $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')]);
 
         try {
-            new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, $label));
+            new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, new TurnGroupCursor(new \DateTimeImmutable('2027-03-01 06:00:00 UTC'), null, $label));
             self::fail('The read must be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame('A whose-turn cursor\'s label has at most 100 characters.', $exception->getMessage());
@@ -181,7 +181,7 @@ final class HomeQueriesServiceTest extends TestCase
     {
         $rows = new FixedWhoseTurnRows([]);
 
-        $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, 'Customer', null)->groups;
+        $groups = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), self::SHOP_PROJECT, 'Customer', null)->groups;
 
         self::assertSame([[], [[self::SHOP_PROJECT, 'Customer', null, 21, null]]], [$groups, $rows->calls]);
     }
@@ -191,7 +191,7 @@ final class HomeQueriesServiceTest extends TestCase
     {
         $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')], 1000, true);
 
-        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, null, null, 'cart total');
+        $page = new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), self::SHOP_PROJECT, null, null, 'cart total');
 
         self::assertSame([[self::SHOP_PROJECT, null, null, 21, 'cart total']], $rows->calls);
         self::assertSame([1000, true], [$page->ticketCount, $page->isTicketCountCapped]);
@@ -200,7 +200,7 @@ final class HomeQueriesServiceTest extends TestCase
     #[Test]
     public function aPageOfNoSearchIsNotCapped(): void
     {
-        $page = new HomeQueriesService(new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')], 1))->whoseTurn(self::lena(), null, null, null);
+        $page = new HomeQueriesService(new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')], 1), new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null);
 
         self::assertSame([1, false], [$page->ticketCount, $page->isTicketCountCapped]);
     }
@@ -224,7 +224,7 @@ final class HomeQueriesServiceTest extends TestCase
         $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')]);
 
         try {
-            new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null, $searchText);
+            new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, null, null, $searchText);
             self::fail('The read must be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame('Whose turn is searched with a trimmed text of 1 to 200 characters, valid UTF-8 without NUL.', $exception->getMessage());
@@ -254,7 +254,7 @@ final class HomeQueriesServiceTest extends TestCase
         $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')]);
 
         try {
-            new HomeQueriesService($rows)->whoseTurn(self::lena(), $projectId, $openedGroup, null);
+            new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), $projectId, $openedGroup, null);
             self::fail('The read must be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame($refusal, $exception->getMessage());
@@ -267,7 +267,7 @@ final class HomeQueriesServiceTest extends TestCase
     {
         $rows = new FixedWhoseTurnRows([]);
 
-        new HomeQueriesService($rows)->whoseTurn(self::lena(), null, str_repeat('é', 100), null);
+        new HomeQueriesService($rows, new FixedMyReportsRows())->whoseTurn(self::lena(), null, str_repeat('é', 100), null);
 
         self::assertSame([[null, str_repeat('é', 100), null, 21, null]], $rows->calls);
     }
