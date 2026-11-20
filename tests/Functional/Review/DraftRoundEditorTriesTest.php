@@ -354,11 +354,11 @@ final class DraftRoundEditorTriesTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(RoundRefused::SCREENSHOT_NOT_FOUND, $this->refusalShown());
-        self::assertSame([$this->otherShot, $this->latestTry], $this->sectionIdsShown(), 'By position, as the shared round lists them.');
+        self::assertSame([$this->latestTry, $this->otherShot], $this->sectionIdsShown(), 'By chain, as the draft listed them: the latest try at position 2 keeps its chain\'s place before position 1.');
         self::assertSame(
-            ['Screenshot 2', 'Screenshot 3'],
+            ['Screenshot 1', 'Screenshot 2'],
             $this->sections()->each(static fn (Crawler $section): string => $section->filter('.round-card__screenshot-label > span')->first()->text()),
-            'Numbered by stored position, as the findings checklist numbers its pins.',
+            'Each screenshot keeps the number the draft gave it, as the findings checklist numbers its pins.',
         );
         self::assertSame('1 of 2 look right', $this->statusShown());
         $response = new Crawler((string) $this->client->getResponse()->getContent());

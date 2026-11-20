@@ -44,7 +44,7 @@ final readonly class DbalRounds implements Rounds
 
     private const array SCREENSHOT_COLUMNS = ['organization_id', 'id', 'round_id', 'media_id', 'position', 'variant_label', 'verdict', 'title', 'summary', 'created_at', 'retake_of'];
 
-    private const array PIN_COLUMNS = ['organization_id', 'id', 'screenshot_id', 'number', 'x_pct', 'y_pct', 'note', 'verdict', 'source', 'ai_state', 'author_id', 'created_at'];
+    private const array PIN_COLUMNS = ['organization_id', 'id', 'screenshot_id', 'number', 'x_pct', 'y_pct', 'note', 'verdict', 'source', 'ai_state', 'author_id', 'fixed_on_try', 'created_at'];
 
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
@@ -302,7 +302,7 @@ final readonly class DbalRounds implements Rounds
         }
         foreach ($changedPins as [$screenshotId, $pin]) {
             $this->connection->executeStatement(
-                'UPDATE rvw_pin SET screenshot_id = ?, number = ?, x_pct = ?, y_pct = ?, note = ?, verdict = ?, source = ?, ai_state = ?, author_id = ? WHERE organization_id = ? AND id = ?',
+                'UPDATE rvw_pin SET screenshot_id = ?, number = ?, x_pct = ?, y_pct = ?, note = ?, verdict = ?, source = ?, ai_state = ?, author_id = ?, fixed_on_try = ? WHERE organization_id = ? AND id = ?',
                 [$screenshotId, ...self::pinValues($pin), $organizationId, $pin->id()->toString()],
             );
         }
@@ -368,6 +368,7 @@ final readonly class DbalRounds implements Rounds
                 PinSource::from(self::text($pinRow['source'], 'source')),
                 self::enumOrNull(AiPinState::class, $pinRow['ai_state'], 'ai_state'),
                 self::enumOrNull(PinVerdict::class, $pinRow['verdict'], 'verdict'),
+                self::integerOrNull($pinRow['fixed_on_try'], 'fixed_on_try'),
             );
         }
         $screenshotsByRound = [];
@@ -418,7 +419,7 @@ final readonly class DbalRounds implements Rounds
     private function pinRowsOfRounds(string $organizationId, array $roundIds): array
     {
         return $this->connection->fetchAllAssociative(
-            'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id'
+            'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id, pin.fixed_on_try'
             .' FROM rvw_pin AS pin JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = pin.organization_id AND screenshot.id = pin.screenshot_id'
             .' WHERE screenshot.organization_id = ? AND screenshot.round_id = ANY(CAST(? AS uuid[])) ORDER BY pin.screenshot_id, pin.number',
             [$organizationId, self::uuidArray($roundIds)],
@@ -481,7 +482,7 @@ final readonly class DbalRounds implements Rounds
     }
 
     /**
-     * The pin's columns from number to author_id, in PIN_COLUMNS order, as they are stored.
+     * The pin's columns from number to fixed_on_try, in PIN_COLUMNS order, as they are stored.
      *
      * @return list<string|int|null>
      */
@@ -497,6 +498,7 @@ final readonly class DbalRounds implements Rounds
             $pin->source()->value,
             $pin->aiState()?->value,
             $pin->authorId()->toString(),
+            $pin->fixedOnTry(),
         ];
     }
 
@@ -517,6 +519,7 @@ final readonly class DbalRounds implements Rounds
             self::text($pinRow['source'], 'source'),
             self::textOrNull($pinRow['ai_state'], 'ai_state'),
             self::text($pinRow['author_id'], 'author_id'),
+            self::integerOrNull($pinRow['fixed_on_try'], 'fixed_on_try'),
         ];
     }
 

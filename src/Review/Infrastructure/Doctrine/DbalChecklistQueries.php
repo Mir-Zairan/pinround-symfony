@@ -94,16 +94,23 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
         }
 
         // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; RoundId let through no comma or brace.
+        // A picture's place is that of its chain of tries among the round's chains, by their first tries (ADR-0048), so a
+        // pin is labelled with the number RoundCards gives its screenshot before and after share; every chain has one
+        // first try, with no retake_of, and rvw_screenshot_round_id_position_key serves the count.
         $itemRows = $this->connection->fetchAllAssociative(
             'SELECT round.id AS round_id, round.number AS round_number, round.kind, item.id AS item_id, pin.number AS pin_number, pin.note, item.state,'
-            .' screenshot.position AS picture_position, screenshot.title AS picture_title'
+            .' (SELECT COUNT(*) FROM rvw_screenshot AS earlier_first_try WHERE earlier_first_try.organization_id = screenshot.organization_id'
+            .' AND earlier_first_try.round_id = screenshot.round_id AND earlier_first_try.retake_of IS NULL'
+            .' AND earlier_first_try.position < COALESCE(first_try.position, screenshot.position)) AS picture_position,'
+            .' screenshot.title AS picture_title'
             .' FROM rvw_round AS round'
             .' JOIN rvw_check_item AS item ON item.organization_id = round.organization_id AND item.round_id = round.id'
             .' JOIN rvw_pin AS pin ON pin.organization_id = item.organization_id AND pin.id = item.pin_id'
             .' JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = pin.organization_id AND screenshot.id = pin.screenshot_id'
+            .' LEFT JOIN rvw_screenshot AS first_try ON first_try.organization_id = screenshot.organization_id AND first_try.id = screenshot.retake_of'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
             .' AND round.id = ANY(CAST(:rounds AS uuid[])) AND round.kind IN (:checklist, :findings)'
-            .' ORDER BY round.number, screenshot.position, pin.number',
+            .' ORDER BY round.number, picture_position, pin.number',
             [
                 'organization' => $organizationId,
                 'ticket' => $ticketId->toString(),

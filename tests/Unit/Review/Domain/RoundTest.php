@@ -1021,6 +1021,86 @@ final class RoundTest extends TestCase
     }
 
     #[Test]
+    public function fixedStoresTheTryNumberItsChainHadWhenMarkedAndALaterRetakeLeavesIt(): void
+    {
+        $draft = self::draftWithTries();
+        $owner = new UserId(self::OMAR);
+
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+        $draft->setPinVerdict($owner, self::pin(3)->id(), PinVerdict::Fixed);
+
+        self::assertSame([[3], [], [], [null], [2], []], self::fixedOnTriesOf($draft), 'Each pin names the latest try of its own chain: 3 tries, then 2.');
+
+        $draft->addScreenshot($owner, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, self::screenshotId(3));
+
+        self::assertSame([4, 4, 4, 4], array_map(static fn (ScreenshotTry $try): int => $try->count, array_values(array_filter($draft->tries(), static fn (ScreenshotTry $try): bool => $try->firstTryId->equals(self::screenshotId(0))))), 'The chain has a fourth try.');
+        self::assertSame([[3], [], [], [null], [2], [], []], self::fixedOnTriesOf($draft), 'The fourth try leaves "Fixed on try 3" as it was.');
+
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+
+        self::assertSame(4, self::fixedOnTriesOf($draft)[0][0], 'Marking it again names the latest try now.');
+    }
+
+    #[Test]
+    public function stillWrongAndAClearedMarkNameNoTry(): void
+    {
+        $draft = self::draftWithTries();
+        $owner = new UserId(self::OMAR);
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::StillWrong);
+
+        self::assertSame([[PinVerdict::StillWrong], [], [], [null], [null], []], self::pinVerdictsOf($draft));
+        self::assertSame([[null], [], [], [null], [null], []], self::fixedOnTriesOf($draft));
+
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+        $draft->setPinVerdict($owner, self::pin(1)->id(), null);
+
+        self::assertSame([[null], [], [], [null], [null], []], self::pinVerdictsOf($draft));
+        self::assertSame([[null], [], [], [null], [null], []], self::fixedOnTriesOf($draft));
+    }
+
+    #[Test]
+    public function removingATryClearsAMarkThatNamedItAndCountsOneLessOnAMarkThatNamedALaterTry(): void
+    {
+        $owner = new UserId(self::OMAR);
+        $earlierRemoved = self::draftWithTries();
+        $earlierRemoved->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+        $earlierRemoved->setPinVerdict($owner, self::pin(3)->id(), PinVerdict::Fixed);
+
+        $earlierRemoved->removeScreenshot($owner, self::screenshotId(2));
+
+        self::assertSame([[PinVerdict::Fixed], [], [null], [PinVerdict::Fixed], []], self::pinVerdictsOf($earlierRemoved));
+        self::assertSame([[2], [], [null], [2], []], self::fixedOnTriesOf($earlierRemoved), 'Try 3 is try 2 now; the other chain keeps its mark.');
+
+        $fixingTryRemoved = self::draftWithTries();
+        $fixingTryRemoved->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+        $version = $fixingTryRemoved->version();
+
+        $fixingTryRemoved->removeScreenshot($owner, self::screenshotId(3));
+
+        self::assertSame([[null], [], [], [null], []], self::pinVerdictsOf($fixingTryRemoved), 'The try that fixed it is gone, so is the mark.');
+        self::assertSame([[null], [], [], [null], []], self::fixedOnTriesOf($fixingTryRemoved));
+        self::assertSame($version + 1, $fixingTryRemoved->version());
+    }
+
+    #[Test]
+    public function removingATryAfterTheOneThatFixedAPinLeavesItsMark(): void
+    {
+        $draft = self::draftWithScreenshots(1);
+        $owner = new UserId(self::OMAR);
+        $draft->replacePins($owner, self::screenshotId(0), [self::pin(1)]);
+        $draft->addScreenshot($owner, self::screenshotId(1), self::MEDIA, self::screenshotId(0));
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+        $draft->addScreenshot($owner, self::screenshotId(2), self::MEDIA, self::screenshotId(0));
+
+        $draft->removeScreenshot($owner, self::screenshotId(2));
+
+        self::assertSame([[PinVerdict::Fixed], []], self::pinVerdictsOf($draft));
+        self::assertSame([[2], []], self::fixedOnTriesOf($draft));
+    }
+
+    #[Test]
     public function aPinOnTheLatestTryOfItsChainTakesNoMarkAndTheDraftStaysAsItWas(): void
     {
         $draft = self::draftWithTries();
@@ -1567,6 +1647,14 @@ final class RoundTest extends TestCase
     }
 
     /**
+     * @return list<list<int|null>> each pin's "Fixed on try N", by screenshot position and pin
+     */
+    private static function fixedOnTriesOf(Round $round): array
+    {
+        return array_map(static fn (Screenshot $screenshot): array => array_map(static fn (Pin $pin): ?int => $pin->fixedOnTry(), $screenshot->pins()), $round->screenshots());
+    }
+
+    /**
      * Everything a refused change must leave as it was.
      *
      * @return array<string, mixed>
@@ -1590,7 +1678,7 @@ final class RoundTest extends TestCase
                 $screenshot->summary(),
                 $screenshot->verdict(),
                 $screenshot->retakeOf()?->toString(),
-                array_map(static fn (Pin $pin): array => [$pin->id()->toString(), $pin->number(), $pin->verdict()], $screenshot->pins()),
+                array_map(static fn (Pin $pin): array => [$pin->id()->toString(), $pin->number(), $pin->verdict(), $pin->fixedOnTry()], $screenshot->pins()),
             ], $round->screenshots()),
         ];
     }

@@ -244,7 +244,8 @@ final class Round
 
     /**
      * Removes the picture with its pins; the others keep their positions. When it was the first try of a chain, the
-     * next try becomes the first and the later ones point at it, so the chain stays one chain.
+     * next try becomes the first and the later ones point at it, so the chain stays one chain. A pin of the chain fixed
+     * on the removed try loses its mark, and one fixed on a later try names that try by its new number.
      *
      * @throws \DomainException when the round is not an open unshared draft of $actorId, or has no such picture; the
      *                          round stays as it was
@@ -253,10 +254,18 @@ final class Round
     {
         $this->requireEditableDraft($actorId);
         $index = $this->indexOf($screenshotId);
+        $removed = $this->screenshots[$index];
+        $removedTryNumber = \count(array_filter(
+            $this->triesOfChain($removed->firstTryId()),
+            static fn (Screenshot $try): bool => $try->position() <= $removed->position(),
+        ));
 
         $remaining = $this->screenshots;
         unset($remaining[$index]);
-        $this->screenshots = self::withChainStartedAgain(array_values($remaining), $screenshotId);
+        $this->screenshots = self::withChainStartedAgain(
+            self::withFixesRenumbered(array_values($remaining), $removed->firstTryId(), $removedTryNumber),
+            $screenshotId,
+        );
         ++$this->version;
     }
 
@@ -313,7 +322,8 @@ final class Round
 
     /**
      * Marks a pin on an earlier try of a screenshot as fixed by a later try or still wrong, or clears the mark with null
-     * (ADR-0048). A pin on the latest try of its chain takes no mark: no later try can have fixed it yet.
+     * (ADR-0048). A pin on the latest try of its chain takes no mark: no later try can have fixed it yet. Fixed stores
+     * the chain's latest try number as it is now, so a later retake leaves "Fixed on try N" as it was.
      *
      * @throws \DomainException when the round is not an open unshared draft of $actorId, has no such pin, or the pin is
      *                          on the latest try of its chain; the round stays as it was
@@ -329,8 +339,9 @@ final class Round
                 if ($this->isLatestTry($screenshot)) {
                     throw new \DomainException(self::PIN_ON_LATEST_TRY);
                 }
+                $latestTryNumber = \count($this->triesOfChain($screenshot->firstTryId()));
                 $pins = $screenshot->pins();
-                $pins[$pinIndex] = $pin->withVerdict($verdict);
+                $pins[$pinIndex] = $pin->withVerdict($verdict, PinVerdict::Fixed === $verdict ? $latestTryNumber : null);
                 $this->replaceScreenshotAt($index, $screenshot->withPins($pins));
                 ++$this->version;
 
@@ -658,6 +669,33 @@ final class Round
     private function triesOfChain(ScreenshotId $firstTryId): array
     {
         return array_values(array_filter($this->screenshots, static fn (Screenshot $screenshot): bool => $screenshot->firstTryId()->equals($firstTryId)));
+    }
+
+    /**
+     * The screenshots with the "Fixed on try N" marks of $firstTryId's chain kept in step with its try $removedTryNumber
+     * being gone: a mark that named it is cleared, and one that named a later try counts one less.
+     *
+     * @param list<Screenshot> $screenshots by position, without the removed try
+     *
+     * @return list<Screenshot>
+     */
+    private static function withFixesRenumbered(array $screenshots, ScreenshotId $firstTryId, int $removedTryNumber): array
+    {
+        foreach ($screenshots as $index => $screenshot) {
+            if (!$screenshot->firstTryId()->equals($firstTryId)) {
+                continue;
+            }
+            $screenshots[$index] = $screenshot->withPins(array_map(static function (Pin $pin) use ($removedTryNumber): Pin {
+                $fixedOnTry = $pin->fixedOnTry();
+                if (null === $fixedOnTry || $fixedOnTry < $removedTryNumber) {
+                    return $pin;
+                }
+
+                return $fixedOnTry === $removedTryNumber ? $pin->withVerdict(null, null) : $pin->withVerdict(PinVerdict::Fixed, $fixedOnTry - 1);
+            }, $screenshot->pins()));
+        }
+
+        return $screenshots;
     }
 
     /**

@@ -61,7 +61,7 @@
                                         <p class="round-panel__note" id="{{ noteId }}">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
                                         <twig:Tag class="verdict-tag {{ row.verdictClass }}">{{ row.verdictLabel }}</twig:Tag>
                                         <div class="round-panel__pin-form" role="group" aria-label="Mark pin {{ row.number }}">
-                                            <twig:Chip :pressed="item.isPinFixed(row)" aria-describedby="{{ noteId }}" data-action="live#action" data-live-action-param="setPinVerdict" data-live-pin-id-param="{{ row.id }}" data-live-verdict-param="{{ item.isPinFixed(row) ? '' : fixed }}">{{ item.pinFixedLabel }}</twig:Chip>
+                                            <twig:Chip :pressed="item.isPinFixed(row)" aria-describedby="{{ noteId }}" data-action="live#action" data-live-action-param="setPinVerdict" data-live-pin-id-param="{{ row.id }}" data-live-verdict-param="{{ item.isPinFixed(row) ? '' : fixed }}">{{ item.pinFixedLabel(row) }}</twig:Chip>
                                             <twig:Chip :pressed="item.isPinStillWrong(row)" aria-describedby="{{ noteId }}" data-action="live#action" data-live-action-param="setPinVerdict" data-live-pin-id-param="{{ row.id }}" data-live-verdict-param="{{ item.isPinStillWrong(row) ? '' : stillWrong }}">{{ constant('App\\Review\\UI\\RoundCardScreenshot::PIN_STILL_WRONG') }}</twig:Chip>
                                         </div>
                                     </li>

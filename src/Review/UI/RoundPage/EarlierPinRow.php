@@ -15,6 +15,7 @@ final readonly class EarlierPinRow
      * @param string      $verdictLabel for example "Fixed" or "Not checked yet"
      * @param string      $verdictClass the tag's modifier class, so the verdict is also coloured
      * @param bool        $isChecked    true once the pin has a verdict, which Undo clears
+     * @param bool        $isFixed      true when that verdict is fixed, whatever try its label names
      */
     public function __construct(
         public string $id,
@@ -24,6 +25,7 @@ final readonly class EarlierPinRow
         public string $verdictLabel,
         public string $verdictClass,
         public bool $isChecked,
+        public bool $isFixed,
     ) {
     }
 }
