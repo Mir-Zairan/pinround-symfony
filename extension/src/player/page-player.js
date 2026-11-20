@@ -404,7 +404,7 @@ globalThis.pinroundPagePlayer ??= (() => {
             return ok();
         },
         // The attempts are counted, not timed, so a test's wait that resolves at once waits no real time.
-        async wait_for(step, { wait, timeoutMs, pollMs }) {
+        async wait_for(step, { wait, timeoutMs, pollMs, waitedBeforeMs }) {
             const attempts = Math.floor(timeoutMs / pollMs) + 1;
             for (let attempt = 1; ; attempt += 1) {
                 const found = locateAndHighlight(step.target);
@@ -412,7 +412,7 @@ globalThis.pinroundPagePlayer ??= (() => {
                     return ok();
                 }
                 if (attempt >= attempts) {
-                    return stopped(`Waited ${Number((timeoutMs / 1000).toFixed(1))} seconds. ${found.message}`);
+                    return stopped(`Waited ${Number(((waitedBeforeMs + timeoutMs) / 1000).toFixed(1))} seconds. ${found.message}`);
                 }
                 await wait(pollMs);
             }
@@ -460,12 +460,13 @@ globalThis.pinroundPagePlayer ??= (() => {
      * highlightTarget or clearHighlight; a step that finds no element leaves none.
      *
      * @param {object} step a step that ScenarioRules (scenario-rules.js) accepted
-     * @param {{wait?: (ms: number) => Promise<void>, timeoutMs?: number, pollMs?: number}} [options] wait_for's
-     *   timeout, 0 to 60 000 ms, and its pause between looks, 10 ms up to the timeout
+     * @param {{wait?: (ms: number) => Promise<void>, timeoutMs?: number, pollMs?: number, waitedBeforeMs?: number}} [options]
+     *   wait_for's timeout, 0 to 60 000 ms, its pause between looks, 10 ms up to the timeout, and how long the step
+     *   already waited before this look (0 to 60 000 ms, 0 by default), which its timeout message adds to the timeout
      * @returns {Promise<{ok: true} | {stopped: true, message: string, expected?: string, found?: string}>} found is
      *   capped page text with its control characters as they are; the extension makes them safe to show
      */
-    async function runStep(step, { wait = waitMs, timeoutMs = DEFAULT_TIMEOUT_MS, pollMs = DEFAULT_POLL_MS } = {}) {
+    async function runStep(step, { wait = waitMs, timeoutMs = DEFAULT_TIMEOUT_MS, pollMs = DEFAULT_POLL_MS, waitedBeforeMs = 0 } = {}) {
         clearHighlight();
         const handler = 'string' === typeof step?.type && Object.hasOwn(HANDLERS, step.type) ? HANDLERS[step.type] : null;
         if (null === handler) {
@@ -474,7 +475,7 @@ globalThis.pinroundPagePlayer ??= (() => {
         const timeout = withinRange(timeoutMs, 0, MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
         const poll = withinRange(pollMs, MIN_POLL_MS, Math.max(MIN_POLL_MS, timeout), DEFAULT_POLL_MS);
         try {
-            return await handler(step, { wait, timeoutMs: timeout, pollMs: poll });
+            return await handler(step, { wait, timeoutMs: timeout, pollMs: poll, waitedBeforeMs: withinRange(waitedBeforeMs, 0, MAX_TIMEOUT_MS, 0) });
         } catch (error) {
             return stopped(`The step broke on this page: ${cappedText(String(error?.message ?? error))}`);
         }

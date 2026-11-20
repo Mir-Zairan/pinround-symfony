@@ -56,7 +56,7 @@ async function playStep(tab: PlayerTab, step: Step): Promise<StepAnswer> {
     const { browser } = await import('/src/shared/browser.js');
     const { stepRunnerFor } = await import('/src/player/step-runner.js');
     const refuse = async () => { throw new Error('This spec opens no page and captures nothing.'); };
-    const runStep = stepRunnerFor(browser, { tabId: ${JSON.stringify(tab.tabId)}, openUrl: refuse, captureToNotebook: refuse });
+    const runStep = stepRunnerFor(browser, { pageRefusalOf: () => null, tabId: ${JSON.stringify(tab.tabId)}, openUrl: refuse, captureToNotebook: refuse });
     return runStep(${JSON.stringify(step)});
   })()`);
 }
@@ -153,7 +153,7 @@ async function highlightHostsAtCapture(tab: PlayerTab): Promise<{ answer: StepAn
       hostsAtCapture.push(injection.result);
     };
     const refuse = async () => { throw new Error('This spec opens no page.'); };
-    const answer = await stepRunnerFor(browser, { tabId, openUrl: refuse, captureToNotebook })({ type: 'capture', say: 'Keep a picture.' });
+    const answer = await stepRunnerFor(browser, { pageRefusalOf: () => null, tabId, openUrl: refuse, captureToNotebook })({ type: 'capture', say: 'Keep a picture.' });
     return { answer, hostsAtCapture };
   })()`);
 }

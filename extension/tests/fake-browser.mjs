@@ -10,7 +10,8 @@
 // reaches only the tab whose icon was clicked and keeps it after a navigation within the origin but not to another. A
 // `files` injection is recorded, not run: the page scope has no document. One window only. Proved by
 // tests/e2e/extension-player.spec.ts: tabs.get and tabs.update answer the tab with Chrome's status, and update's with the
-// old url and the new one as pendingUrl until the load ends; a missing tab rejects, an id that is no integer throws at
+// old url and the new one as pendingUrl until the load ends, with the old document still in reach until the new page
+// commits (its activeTab grant too, only documented); a missing tab rejects, an id that is no integer throws at
 // once; a func still running when its document navigates away answers null with that document's id. Not modelled:
 // Chrome's "Frame with ID 0 was removed." refusal of an injection into a page that is leaving, which comes and goes
 // with timing; a test that needs it wraps executeScript.
@@ -300,7 +301,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
 
                 return answerLater(() => asSeen(existingTab(tabId)));
             },
-            /** Navigates the tab to properties.url, the only property modelled; finishLoading ends the load. */
+            /** Navigates to properties.url, the only property modelled; the old document stays until finishLoading. */
             update(tabId, properties) {
                 checkTabId('update(optional integer tabId, object updateProperties, optional function callback)', tabId);
                 const unmodelled = Object.keys(properties ?? {}).filter((key) => 'url' !== key);
@@ -310,7 +311,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
 
                 return answerLater(() => {
                     const tab = existingTab(tabId);
-                    startLoading(tab, properties.url);
+                    tab.status = 'loading';
                     tab.pendingUrl = properties.url;
 
                     return asSeen(tab);
@@ -371,11 +372,14 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             startLoading(tab, url);
             tab.url = url;
         },
-        /** The load of the tab's page ends: the address it was going to is its url and its status is complete. */
+        /** The load ends and a tabs.update's page commits: its url is the new one, as startLoading leaves the old. */
         finishLoading(tabId) {
             const tab = tabOf(tabId);
-            tab.url = tab.pendingUrl ?? tab.url;
-            delete tab.pendingUrl;
+            if (undefined !== tab.pendingUrl) {
+                startLoading(tab, tab.pendingUrl);
+                tab.url = tab.pendingUrl;
+                delete tab.pendingUrl;
+            }
             tab.status = 'complete';
         },
         tabUrl: (tabId) => tabOf(tabId)?.url,
