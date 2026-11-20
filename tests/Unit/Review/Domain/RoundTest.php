@@ -140,29 +140,61 @@ final class RoundTest extends TestCase
 
     /**
      * Chain A is screenshots 0, 2 and 3 (try 3 last), B at 1 was never retaken, chain C is 4 and 5. Try 1 of A and of C
-     * carry pins, which must not reach the team, and A's try 3 carries its own.
+     * carry pins, which the team must not see, and A's try 3 carries its own. The earlier tries stay for the owner.
      */
     #[Test]
-    public function aShareKeepsOnlyTheLatestTryOfEachScreenshotAtItsPositionAsAFirstTryWithItsOwnPins(): void
+    public function aShareKeepsEveryTryWithItsPinsAndTheTeamSeesOnlyTheLatestTryOfEachScreenshot(): void
     {
         $draft = self::draftWithTries();
+        $screenshotsBefore = self::snapshot($draft)['screenshots'];
+        $triesBefore = self::triesOf($draft);
 
         $draft->share(new UserId(self::OMAR), 2, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
 
+        self::assertSame($screenshotsBefore, self::snapshot($draft)['screenshots'], 'Every try stays with its pins.');
+        self::assertSame($triesBefore, self::triesOf($draft));
+        self::assertSame([[0, 1, 3], [1, 1, 1], [0, 2, 3], [0, 3, 3], [4, 1, 2], [4, 2, 2]], self::triesOf($draft));
         self::assertSame(
-            [[1, null, []], [3, null, [2]], [5, null, []]],
+            [[1, null, []], [3, self::screenshotId(0)->toString(), [2]], [5, self::screenshotId(4)->toString(), []]],
             array_map(static fn (Screenshot $screenshot): array => [
                 $screenshot->position(),
                 $screenshot->retakeOf()?->toString(),
                 array_map(static fn (Pin $pin): int => $pin->number(), $screenshot->pins()),
-            ], $draft->screenshots()),
+            ], $draft->latestTries()),
+            'The latest try of each screenshot, by position, with its own pins only.',
         );
+        self::assertSame(2, $draft->version(), 'The share is one change.');
+    }
+
+    #[Test]
+    public function theLatestTriesOfADraftWithNoRetakeAreAllItsScreenshots(): void
+    {
+        $draft = self::draftWithScreenshots(3);
+        self::assertCount(3, $draft->screenshots());
+
+        self::assertEquals($draft->screenshots(), $draft->latestTries());
+    }
+
+    #[Test]
+    public function aDraftWithNoScreenshotHasNoLatestTry(): void
+    {
+        self::assertSame([], self::draft()->latestTries());
+    }
+
+    /**
+     * Try 1 of chain A (position 0) is removed, so try 2 starts the chain again; try 3 is still its latest.
+     */
+    #[Test]
+    public function afterAFirstTryIsRemovedTheLatestTryIsStillTheLastOfTheChain(): void
+    {
+        $draft = self::draftWithTries();
+
+        $draft->removeScreenshot(new UserId(self::OMAR), self::screenshotId(0));
+
         self::assertSame(
             [self::screenshotId(1)->toString(), self::screenshotId(3)->toString(), self::screenshotId(5)->toString()],
-            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $draft->screenshots()),
+            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $draft->latestTries()),
         );
-        self::assertSame([[1, 1, 1], [3, 1, 1], [5, 1, 1]], self::triesOf($draft), 'One try per screenshot in the shared round.');
-        self::assertSame(2, $draft->version(), 'The share is one change.');
     }
 
     #[Test]

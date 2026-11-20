@@ -91,7 +91,9 @@ final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
             .' AND pin.screenshot_id IN (area.before_screenshot_id, area.after_screenshot_id) AND '.self::COUNTED_PIN.') AS has_pins'
             .' FROM rvw_area AS area'
             .' JOIN rvw_screenshot AS after_shot ON after_shot.organization_id = area.organization_id AND after_shot.id = area.after_screenshot_id'
+            // A "before" is an earlier round's "after" as the team saw it, so an earlier try of a shared draft reads as none.
             .' LEFT JOIN rvw_screenshot AS before_shot ON before_shot.organization_id = area.organization_id AND before_shot.id = area.before_screenshot_id'
+            .' AND '.DbalRoundQueries::latestTrySql('before_shot')
             .' LEFT JOIN rvw_round AS before_round ON before_round.organization_id = before_shot.organization_id AND before_round.id = before_shot.round_id'
             .' WHERE area.organization_id = CAST(:organization AS uuid) AND area.round_id = CAST(:round AS uuid)'
             .' ORDER BY area.position',

@@ -105,9 +105,8 @@ final class Round
     }
 
     /**
-     * Shows the draft to everyone who may see the ticket as round $number, with only the latest try of each screenshot
-     * (ADR-0048), each now a first try at the position it had. The earlier tries and their pins leave the round, so
-     * Rounds::save deletes them and the team never sees them; their pictures stay in Media, as a deleted draft's do.
+     * Shows the draft to everyone who may see the ticket as round $number. They see only latestTries() (ADR-0048); the
+     * earlier tries and their pins stay in the round for its owner alone, and every try goes when the round does.
      *
      * @param int $number the next free round number of the ticket, which the caller reads; from 1, as 0 is the report
      *
@@ -138,7 +137,6 @@ final class Round
 
         $this->number = $number;
         $this->sharedAt = $sharedAt;
-        $this->screenshots = $this->latestTries();
         ++$this->version;
     }
 
@@ -195,6 +193,25 @@ final class Round
         }
 
         return $tries;
+    }
+
+    /**
+     * The last try of each chain, which is all anyone but the owner sees of a shared round (ADR-0048); a try keeps its
+     * retakeOf, so it may name a first try that is not in this list.
+     *
+     * @return list<Screenshot> by position
+     */
+    public function latestTries(): array
+    {
+        $latestIdByChain = [];
+        foreach ($this->screenshots as $screenshot) {
+            $latestIdByChain[$screenshot->firstTryId()->toString()] = $screenshot->id();
+        }
+
+        return array_values(array_filter(
+            $this->screenshots,
+            static fn (Screenshot $screenshot): bool => $latestIdByChain[$screenshot->firstTryId()->toString()]->equals($screenshot->id()),
+        ));
     }
 
     /**
@@ -597,27 +614,6 @@ final class Round
     private function triesOfChain(ScreenshotId $firstTryId): array
     {
         return array_values(array_filter($this->screenshots, static fn (Screenshot $screenshot): bool => $screenshot->firstTryId()->equals($firstTryId)));
-    }
-
-    /**
-     * The last try by position of each chain, each as a first try, since the tries it pointed at are not among them.
-     *
-     * @return list<Screenshot> by position
-     */
-    private function latestTries(): array
-    {
-        $latestIdByChain = [];
-        foreach ($this->screenshots as $screenshot) {
-            $latestIdByChain[$screenshot->firstTryId()->toString()] = $screenshot->id();
-        }
-        $latestTries = [];
-        foreach ($this->screenshots as $screenshot) {
-            if ($latestIdByChain[$screenshot->firstTryId()->toString()]->equals($screenshot->id())) {
-                $latestTries[] = $screenshot->asFirstTry();
-            }
-        }
-
-        return $latestTries;
     }
 
     /**

@@ -131,38 +131,51 @@ final class UseCaseRoundCommandsShareTest extends TestCase
     }
 
     /**
-     * ADR-0048: the team sees the latest try of each screenshot. Omar's draft holds its seeded screenshot (S) and
-     * chain A of three tries, added after S, with a pin on A's try 1 that must not reach the team.
+     * ADR-0048: the team sees the latest try of each screenshot, and the earlier tries stay with the owner. Omar's
+     * draft holds its seeded screenshot (S) and chain A of three tries, added after S, with a pin on A's try 1.
      */
     #[Test]
-    public function theSharedRoundHoldsOnlyTheLatestTryOfEachScreenshotInPositionOrder(): void
+    public function theSharedRoundKeepsEveryTryForTheOwnerAndShowsTheTeamOnlyTheLatestOfEachScreenshot(): void
     {
-        [$seeded, , , $tryThree] = $this->addChainOfThreeTriesToOmarsDraft();
-        self::assertCount(4, $this->storedRound(self::OMARS_DRAFT)->screenshots());
+        $tries = $this->addChainOfThreeTriesToOmarsDraft();
+        [$seeded, $tryOne, , $tryThree] = $tries;
 
         $number = $this->inTransaction(fn (): int => $this->commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()));
 
         self::assertSame(3, $number);
         $shared = $this->storedRound(self::OMARS_DRAFT);
+        self::assertSame($tries, array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $shared->screenshots()), 'Every try is kept.');
         self::assertSame(
-            [[$seeded, 0, null], [$tryThree, 3, null]],
-            array_map(static fn (Screenshot $screenshot): array => [$screenshot->id()->toString(), $screenshot->position(), $screenshot->retakeOf()?->toString()], $shared->screenshots()),
+            [[$tryOne, ['0197a3c0-0000-7000-8000-000000002c11']]],
+            array_values(array_filter(
+                array_map(static fn (Screenshot $screenshot): array => [$screenshot->id()->toString(), array_map(static fn (Pin $pin): string => $pin->id()->toString(), $screenshot->pins())], $shared->screenshots()),
+                static fn (array $screenshotPins): bool => [] !== $screenshotPins[1],
+            )),
+            'Try 1 keeps its pin.',
         );
-        self::assertSame([], array_merge(...array_map(static fn (Screenshot $screenshot): array => $screenshot->pins(), $shared->screenshots())), 'Try 1\'s pin left with try 1.');
+        self::assertSame(
+            [[$seeded, 0], [$tryThree, 3]],
+            array_map(static fn (Screenshot $screenshot): array => [$screenshot->id()->toString(), $screenshot->position()], $shared->latestTries()),
+        );
         self::assertSame([[self::OMARS_DRAFT, '2026-03-04 09:30:00']], $this->checklistCommands->findingsCreated);
+
+        $read = $this->inTransaction(fn (): DraftRoundAsRead => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::OMAR)));
+        self::assertCount(4, $read->screenshots, 'Omar still reads his earlier tries.');
+        self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::MIA))));
+        self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::LENA))));
     }
 
     #[Test]
-    public function aShareAtHandOffAlsoHoldsOnlyTheLatestTry(): void
+    public function aShareAtHandOffAlsoKeepsEveryTry(): void
     {
-        [$seeded, , , $tryThree] = $this->addChainOfThreeTriesToOmarsDraft();
+        $tries = $this->addChainOfThreeTriesToOmarsDraft();
+        [$seeded, , , $tryThree] = $tries;
 
         $this->inTransaction(fn (): int => $this->commands->shareDraftAtHandOff(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()));
 
-        self::assertSame(
-            [$seeded, $tryThree],
-            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $this->storedRound(self::OMARS_DRAFT)->screenshots()),
-        );
+        $shared = $this->storedRound(self::OMARS_DRAFT);
+        self::assertSame($tries, array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $shared->screenshots()));
+        self::assertSame([$seeded, $tryThree], array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $shared->latestTries()));
     }
 
     #[Test]
