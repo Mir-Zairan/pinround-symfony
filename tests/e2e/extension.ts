@@ -1,4 +1,4 @@
-import { test as base, chromium, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test as base, chromium, expect, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -40,6 +40,7 @@ async function testCopyOfExtension(hostPermissions: string[]): Promise<string> {
 interface ExtensionFixtures {
   extensionHostPermissions: string[];
   viewportFollowsWindow: boolean;
+  screenDeviceScaleFactor: number;
   extensionDirectory: string;
   context: BrowserContext;
   testPage: Page;
@@ -50,19 +51,22 @@ interface ExtensionFixtures {
  * TEST_PAGE_ORIGIN; `testPage` is a tab already on it. `extensionHostPermissions` is the copy's host permissions: the
  * test page's origin by default; `test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS })` for a capture.
  * `viewportFollowsWindow` drops Playwright's fixed viewport, for a spec that resizes the window (resizeWindowOf).
+ * `screenDeviceScaleFactor` is the screen's devicePixelRatio, which captureVisibleTab's picture follows; Playwright's
+ * fixed viewport emulates a ratio of 1 over it, so a spec that sets it also sets `viewportFollowsWindow`.
  */
 export const test = base.extend<ExtensionFixtures>({
   extensionHostPermissions: [[`${TEST_PAGE_ORIGIN}/*`], { option: true }],
   viewportFollowsWindow: [false, { option: true }],
+  screenDeviceScaleFactor: [1, { option: true }],
   extensionDirectory: async ({ extensionHostPermissions }, use) => {
     const directory = await testCopyOfExtension(extensionHostPermissions);
     await use(directory);
     await rm(directory, { recursive: true, force: true });
   },
-  context: async ({ extensionDirectory, viewportFollowsWindow }, use) => {
+  context: async ({ extensionDirectory, viewportFollowsWindow, screenDeviceScaleFactor }, use) => {
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
-      args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`],
+      args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`, `--force-device-scale-factor=${screenDeviceScaleFactor}`],
       ...(viewportFollowsWindow ? { viewport: null } : {}),
     });
     await context.route(`${TEST_PAGE_ORIGIN}/**`, (route) =>
@@ -174,4 +178,129 @@ export async function tabIdOf(extensionPage: Page, url: string): Promise<number>
     throw new Error(`Expected one tab at ${url}, found ${tabIds.length}.`);
   }
   return tabIds[0];
+}
+
+/** A node of the page's accessibility tree; `text` is the text of its descendants, for a role that takes no name from it. */
+export interface AccessibleNode {
+  role: string;
+  name: string;
+  description: string;
+  value: string;
+  text: string;
+  isFocused: boolean;
+  backendNodeId: number | undefined;
+}
+
+/** An element in a shadow root, as DevTools lists it. */
+export interface ShadowElement {
+  tagName: string;
+  className: string;
+  backendNodeId: number;
+}
+
+export interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+const boxOfQuad = (quad: number[]): Box => ({ left: quad[0], top: quad[1], right: quad[4], bottom: quad[5] });
+
+/**
+ * The page as Chrome's DevTools read it, inside closed shadow roots too, which Playwright's locators do not enter: the
+ * accessibility tree a screen reader gets, the elements of a shadow root and their boxes, and script run in the page's
+ * own world on one of those elements, as the page's script would run it if it held that element.
+ */
+export class PageInspector {
+  private constructor(private readonly session: CDPSession) {}
+
+  static async of(context: BrowserContext, page: Page): Promise<PageInspector> {
+    return new PageInspector(await context.newCDPSession(page));
+  }
+
+  /** Every node a screen reader gets, in tree order; ignored nodes are left out. */
+  async accessibleNodes(): Promise<AccessibleNode[]> {
+    const { nodes } = await this.session.send('Accessibility.getFullAXTree');
+    const byId = new Map(nodes.map((node) => [node.nodeId, node]));
+    const textOf = (nodeId: string): string => {
+      const node = byId.get(nodeId);
+      if (undefined === node) {
+        return '';
+      }
+      if (node.role?.value === 'StaticText') {
+        return String(node.name?.value ?? '');
+      }
+      return (node.childIds ?? []).map(textOf).join('');
+    };
+    return nodes.filter((node) => !node.ignored).map((node) => ({
+      role: String(node.role?.value ?? ''),
+      name: String(node.name?.value ?? ''),
+      description: String(node.description?.value ?? ''),
+      value: String(node.value?.value ?? ''),
+      text: textOf(node.nodeId),
+      isFocused: (node.properties ?? []).some((property) => property.name === 'focused' && property.value.value === true),
+      backendNodeId: node.backendDOMNodeId,
+    }));
+  }
+
+  /** The role and name of the node that has the keyboard focus, or null when the page itself has it. */
+  async focused(): Promise<{ role: string; name: string } | null> {
+    const node = (await this.accessibleNodes()).findLast((candidate) => candidate.isFocused && candidate.role !== 'RootWebArea');
+    return undefined === node ? null : { role: node.role, name: node.name };
+  }
+
+  /** The one node with this role and exact name; throws when there is none or more than one. */
+  async node(role: string, name: string): Promise<AccessibleNode> {
+    const found = (await this.accessibleNodes()).filter((node) => node.role === role && node.name === name);
+    if (found.length !== 1) {
+      throw new Error(`Expected one ${role} named "${name}", found ${found.length}.`);
+    }
+    return found[0];
+  }
+
+  /** The elements in the shadow root of the first element named `hostTagName`, open or closed, in tree order. */
+  async shadowElementsOf(hostTagName: string): Promise<ShadowElement[]> {
+    const { root } = await this.session.send('DOM.getDocument', { depth: -1, pierce: true });
+    type DomNode = typeof root;
+    const descendants = (node: DomNode): DomNode[] => [...(node.shadowRoots ?? []), ...(node.children ?? [])].flatMap((child) => [child, ...descendants(child)]);
+    const host = descendants(root).find((node) => node.localName === hostTagName);
+    if (undefined === host?.shadowRoots?.[0]) {
+      return [];
+    }
+    return descendants(host.shadowRoots[0]).filter((node) => node.nodeType === 1).map((node) => {
+      const attributes = node.attributes ?? [];
+      const classAt = attributes.indexOf('class');
+      return { tagName: node.localName, className: classAt === -1 ? '' : attributes[classAt + 1], backendNodeId: node.backendNodeId };
+    });
+  }
+
+  /** The element's border and padding boxes in CSS pixels of the viewport, or null when it is not rendered. */
+  async boxesOf(backendNodeId: number): Promise<{ border: Box; padding: Box } | null> {
+    try {
+      const { model } = await this.session.send('DOM.getBoxModel', { backendNodeId });
+      return { border: boxOfQuad(model.border), padding: boxOfQuad(model.padding) };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Could not compute box model')) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Runs `functionDeclaration` with `this` as the element, in the page's own world: what the page's script could do
+   * with it. Answers what the function returns, as JSON carries it.
+   */
+  async runAsPageOn(backendNodeId: number, functionDeclaration: string): Promise<unknown> {
+    const { object } = await this.session.send('DOM.resolveNode', { backendNodeId });
+    if (undefined === object.objectId) {
+      throw new Error(`Node ${backendNodeId} did not resolve to an object.`);
+    }
+    const { result, exceptionDetails } = await this.session.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration, returnByValue: true });
+    if (undefined !== exceptionDetails) {
+      throw new Error(`The page's script threw: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
+    }
+    return result.value;
+  }
 }

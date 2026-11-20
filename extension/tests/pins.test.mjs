@@ -23,14 +23,6 @@ test('a percent is refused for a viewport of no size or a point that is no numbe
     assert.throws(() => percentOf(Number.POSITIVE_INFINITY, 720), RangeError);
 });
 
-test('the same point keeps its percent at another devicePixelRatio, as CSS pixels do not change with it', () => {
-    const cssWidth = 1000;
-    for (const devicePixelRatio of [1, 1.25, 2]) {
-        const imageWidth = cssWidth * devicePixelRatio;
-        assert.equal(percentOf(250, cssWidth), (250 * devicePixelRatio / imageWidth) * 100);
-    }
-});
-
 test('a pin\'s accessible name is its number and note, or its number alone while the note is blank', () => {
     assert.equal(accessibleNameOf(2, 'Price is wrong'), 'Pin 2: Price is wrong');
     assert.equal(accessibleNameOf(2, '  Price is wrong\n'), 'Pin 2: Price is wrong');

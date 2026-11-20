@@ -33,6 +33,24 @@ test('an upload begins with the file\'s size and checksum, then PUTs it to the a
     assert.equal(calls[1].url, 'https://storage.acme-foods.example/u1?sig=1');
 });
 
+test('adding to a draft round posts the upload, the texts and the pins to the ticket\'s draft, the key escaped', async () => {
+    const calls = [];
+    const api = new PinroundApi('https://pinround.acme-foods.example', 'pr_abcdefghijklmnopqrstuvwxyz012345', async (url, init) => {
+        calls.push({ url, init });
+
+        return { ok: true, status: 200, json: async () => ({ screenshot_id: 's1', round_id: 'r1', status: 'added', pin_count: 2 }) };
+    });
+    const pins = [{ x_pct: 25, y_pct: 33.33, note: 'Logo is cut off' }, { x_pct: 70.5, y_pct: 100, note: '' }];
+
+    assert.deepEqual(await addToDraftRound(api, 'SHOP-12', 'u1', { title: 'Receipt', pins }, async () => assert.fail('no wait for an added picture')), { screenshot_id: 's1', round_id: 'r1', status: 'added', pin_count: 2 });
+    await addToDraftRound(api, 'SHOP/12?', 'u2', { pins: [] });
+
+    assert.deepEqual(calls.map(({ url, init }) => [init.method, url, JSON.parse(init.body)]), [
+        ['POST', 'https://pinround.acme-foods.example/api/v1/tickets/SHOP-12/draft/screenshots', { upload_id: 'u1', title: 'Receipt', pins }],
+        ['POST', 'https://pinround.acme-foods.example/api/v1/tickets/SHOP%2F12%3F/draft/screenshots', { upload_id: 'u2', pins: [] }],
+    ]);
+});
+
 test('adding to a draft round asks again while the picture is processing, and gives up after its tries', async () => {
     const statuses = ['processing', 'processing', 'added'];
     const paths = [];
