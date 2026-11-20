@@ -1,0 +1,166 @@
+/* The ScreenshotEditor (src/Review/UI/templates/components/ScreenshotEditor.html.twig): one screenshot at a time with
+   its title and summary beside it, then a strip of thumbnails. Needs review.css for the picture, pins and pin list. */
+
+.screenshot-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.screenshot-editor__kept {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-24);
+  align-items: start;
+}
+
+/* The grid above would show a hidden kept part; [hidden] keeps it hidden. */
+.screenshot-editor__kept[hidden] {
+  display: none;
+}
+
+.screenshot-editor__stage {
+  min-width: 0;
+}
+
+.screenshot-editor__stage .screenshot__frame {
+  display: block;
+}
+
+.screenshot-editor__stage .screenshot__image {
+  width: 100%;
+}
+
+.screenshot-editor__hint {
+  margin: 0 0 var(--space-8);
+  color: var(--on-surface-var);
+}
+
+.screenshot-editor__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.screenshot-editor__label {
+  font-weight: 600;
+}
+
+.screenshot-editor__label + .screenshot-editor__input,
+.screenshot-editor__label + .text-field {
+  margin-bottom: var(--space-8);
+}
+
+.screenshot-editor__input {
+  min-height: 0;
+}
+
+.screenshot-editor__remove {
+  align-self: flex-start;
+}
+
+.screenshot-editor__removed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  border: 1px dashed var(--outline-var);
+  border-radius: var(--radius-card);
+  color: var(--on-surface-var);
+}
+
+.screenshot-editor__removed[hidden] {
+  display: none;
+}
+
+.screenshot-editor__removed p {
+  margin: 0;
+}
+
+.screenshot-editor__strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.screenshot-editor__thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.screenshot-editor__thumb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 96px;
+  padding: var(--space-4);
+  border: 2px solid var(--outline-var);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+  cursor: pointer;
+}
+
+.screenshot-editor__thumb:hover {
+  border-color: var(--outline);
+}
+
+.screenshot-editor__thumb[aria-selected="true"] {
+  border-color: var(--primary);
+}
+
+.screenshot-editor__thumb:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.screenshot-editor__thumb-image,
+.screenshot-editor__thumb-placeholder {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: var(--radius-tag);
+  background: var(--s-c);
+}
+
+.screenshot-editor__thumb-label {
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.screenshot-editor__thumb-state {
+  font-size: 12px;
+  color: var(--on-surface-var);
+  text-align: center;
+}
+
+.screenshot-editor__thumb-state:empty {
+  display: none;
+}
+
+.screenshot-editor__thumb--removed .screenshot-editor__thumb-image {
+  opacity: .4;
+}
+
+.screenshot-editor__status:empty {
+  display: none;
+}
+
+.screenshot-editor__status {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+@media (max-width: 768px) {
+  .screenshot-editor__kept {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
