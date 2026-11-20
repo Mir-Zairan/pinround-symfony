@@ -202,3 +202,4 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
 ## Hand-off notes
 - Phase 08 may add AI re-ranking inside the top 10 only, behind the org AI policy. Keep `Workflow\Api\NeedsYouScore` as the default.
 - Write here any prototype differences you chose, with the reason.
+- 2026-11-20 (plan change): P07.T6 (My reports page) is built as [P14.T15](phase-14-tester-feedback.md#p14t15--my-reports-page) by the product owner's decision; tick its criteria here with a note when it is done. P07.T1–T5 stay here; until they land, Home shows the plain "your turn" list of P14.T14.

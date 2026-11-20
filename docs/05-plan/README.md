@@ -1,11 +1,11 @@
 # Build plan
 
-How pinround gets built: 14 phases, each split into tasks that fit one Claude Code session.
+How pinround gets built: 15 phases, each split into tasks that fit one Claude Code session.
 
 ## Index
 - [How the plan works](#how-the-plan-works) — one task = one session, how to start a session
 - [The prototype](#the-prototype) — link, how to read it in Claude Code, the fallback docs
-- [Phases](#phases) — table of P00–P13 with goal, dependencies, task count and 🏁 tasks
+- [Phases](#phases) — table of P00–P14 with goal, dependencies, task count and 🏁 tasks
 - [Dependency graph](#dependency-graph) — which phase needs which
 - [Hackathon slice](#hackathon-slice) — what we build by 22 Nov 2026 18:00 CET and what we cut
 - [Hackathon schedule](#hackathon-schedule) — day by day, three people, every 🏁 task with a day and an owner
@@ -20,7 +20,7 @@ How pinround gets built: 14 phases, each split into tasks that fit one Claude Co
 - **Every phase file is self-sufficient.** Its **Before you start** list names the prototype screens, requirement IDs, ADRs and architecture sections to read. You should not need anything else.
 - **Order:** do the tasks of a phase in their number order, unless the task says it can run in parallel.
 - **Tests come with the task**, not later. A task without its tests is not done.
-- **Phase files:** [P00](phase-00-foundation.md) · [P01](phase-01-identity-and-organization.md) · [P02](phase-02-projects-and-workflow.md) · [P03](phase-03-tickets-core.md) · [P04](phase-04-conversation-and-pings.md) · [P05](phase-05-screenshots-pins-and-rounds.md) · [P06](phase-06-intake-and-checks.md) · [P07](phase-07-home-and-my-reports.md) · [P08](phase-08-ai-assist.md) · [P09](phase-09-mcp-and-claude-code.md) · [P10](phase-10-integrations.md) · [P11](phase-11-admin-and-governance.md) · [P12](phase-12-hardening-and-launch.md) · [P13](phase-13-capture-explore-and-scenarios.md)
+- **Phase files:** [P00](phase-00-foundation.md) · [P01](phase-01-identity-and-organization.md) · [P02](phase-02-projects-and-workflow.md) · [P03](phase-03-tickets-core.md) · [P04](phase-04-conversation-and-pings.md) · [P05](phase-05-screenshots-pins-and-rounds.md) · [P06](phase-06-intake-and-checks.md) · [P07](phase-07-home-and-my-reports.md) · [P08](phase-08-ai-assist.md) · [P09](phase-09-mcp-and-claude-code.md) · [P10](phase-10-integrations.md) · [P11](phase-11-admin-and-governance.md) · [P12](phase-12-hardening-and-launch.md) · [P13](phase-13-capture-explore-and-scenarios.md) · [P14](phase-14-tester-feedback.md)
 
 ## The prototype
 The product must look and behave like the clickable prototype. Every task names the screens to compare with.
@@ -52,6 +52,7 @@ The product must look and behave like the clickable prototype. Every task names 
 | [P11 Admin and governance](phase-11-admin-and-governance.md) | All admin pages, activity log, retention, export, big-team checks | P07 | 9 | — |
 | [P12 Hardening and launch](phase-12-hardening-and-launch.md) | Load tests, security review, backups drill, accessibility audit, runbooks | all | 12 | — |
 | [P13 Capture, notebooks and scenarios](phase-13-capture-explore-and-scenarios.md) | Tester findings drafts, filing from a Claude Code check, live pins in the extension, notebooks, scenario player (ADR-0044–0046) | P05, P06, P09, P10 | 10 | — |
+| [P14 Tester feedback](phase-14-tester-feedback.md) | Fixes from the first hands-on test: pins and previews, round rules and tries, round page and full screen, recipient on Send, screenshot context, Claude Code capture, Whose turn? toolbar, My reports, honest Home, phone layout, demo two-step switch, floating dock, one-click connect (ADR-0048–0050) | P05, P06, P09, P10, P13 | 20 | — |
 
 One task is one Claude Code session. Sizes inside a phase file: S ≈ 1–2 hours, M ≈ half a day, L ≈ a full day. Use them to plan, not as a promise.
 
@@ -84,6 +85,7 @@ flowchart LR
   P06 --> P13
   P09 --> P13
   P10 --> P13
+  P13 --> P14[P14 Tester feedback]
 ```
 
 The hackathon slice breaks this order on purpose: it builds only the 🏁 tasks, and those were written so they do not call code from cut tasks (for example P05's 🏁 tasks do not need P04).
@@ -144,7 +146,7 @@ Every step names the 🏁 tasks it needs.
 8. Stretch, only if done: Sara switches AI to "Each person's laptop" and Omar's summary comes from Ollama on his laptop. (P08.T8–T9)
 
 ## After the hackathon
-Order after 22 Nov: first remove the hackathon shortcuts (replace any upload shortcut; the admin MFA flag is already gone with P01.T6), then finish the non-🏁 tasks of P00–P03 → P04 → P05 → P06 → P07 → P08 → P09 → P10 → P11 → P12. P13.T1 and P13.T3 can start now; the rest waits for P06.T1, P09.T7, P09.T9 and P10.T7–T8; only P13.T10 waits for the P11 retention job. P08 and P09 can run in parallel with P06/P07 when two developers are free. Move to Symfony 8.2 in the first week after its release ([ADR-0003](../03-adr/0003-php-and-symfony-versions.md)).
+Order after 22 Nov: first remove the hackathon shortcuts (replace any upload shortcut; the admin MFA flag is already gone with P01.T6), then finish the non-🏁 tasks of P00–P03 → P04 → P05 → P06 → P07 → P08 → P09 → P10 → P11 → P12. P13.T1 and P13.T3 can start now; the rest waits for P06.T1, P09.T7, P09.T9 and P10.T7–T8; only P13.T10 waits for the P11 retention job. P14 (tester feedback) can start now with T1–T3; T5, T6, T18 and T20 wait for their ADRs (P14.T4). P08 and P09 can run in parallel with P06/P07 when two developers are free. Move to Symfony 8.2 in the first week after its release ([ADR-0003](../03-adr/0003-php-and-symfony-versions.md)).
 
 ## Definition of done for every task
 - [ ] All acceptance criteria of the task are ticked in the phase file.
