@@ -28,7 +28,8 @@ final class ScreenshotGalleryTest extends WebTestCase
         self::assertCount(1, $shot->filter('.pin--selected'));
         self::assertCount(1, $shot->filter('.pin--ai'));
         self::assertCount(3, $crawler->filter('#gallery-screenshot-heading ~ .screenshot-example .pin-list__item'));
-        self::assertStringContainsString('left:28.00%;top:30.00%', (string) $client->getResponse()->getContent());
+        self::assertSame('28.00', $shot->filter('[data-controller="pin-layer"] .pin--n1')->attr('data-x-percent'));
+        self::assertSame('30.00', $shot->filter('[data-controller="pin-layer"] .pin--n1')->attr('data-y-percent'));
     }
 
     #[Test]
@@ -42,7 +43,7 @@ final class ScreenshotGalleryTest extends WebTestCase
         self::assertCount(1, $pending);
         self::assertSame('Processing…', $pending->filter('[role="status"].screenshot__placeholder')->text());
         self::assertCount(0, $pending->filter('img'));
-        self::assertStringContainsString('#gallery-pending-screenshot-frame{max-width:800px;aspect-ratio:800 / 450}', (string) $client->getResponse()->getContent());
+        self::assertCount(1, $pending->filter('#gallery-pending-screenshot-frame[data-controller="picture-shape"][data-picture-shape-width-value="800"][data-picture-shape-height-value="450"]'));
         $rejected = $crawler->filter('#gallery-rejected-screenshot-heading ~ .screenshot-example figure#gallery-rejected-screenshot');
         self::assertCount(1, $rejected);
         self::assertSame('We could not process this image. Try again.', $rejected->filter('.screenshot__placeholder--rejected')->text());

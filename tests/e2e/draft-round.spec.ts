@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
 import { seedDraftWithPicture } from './draft-picture';
+import { recordCspViolations, spotInLayer } from './pin-spots';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // The private draft round (P05.T8, ADR-0017) in a real browser. Omar is the assignee and the owner; Lena, Mia and Sara
@@ -262,6 +263,38 @@ test.describe('Draft round', () => {
     await expect(again.getByLabel('Note for pin 1')).toHaveValue('The total is hidden');
     await expect(again.getByRole('button', { name: 'Not right yet', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-draft-status]')).toHaveText('0 of 1 look right');
+    await context.close();
+  });
+
+  test('a saved pin sits at its stored percent after the frame loads and after a re-render, with no CSP violation', async ({ browser }) => {
+    test.setTimeout(90_000);
+    const { context, page } = await startDraftAsOmar(browser, true);
+    const frame = page.locator('section.draft-shot .screenshot__frame');
+    const box = (await frame.boundingBox())!;
+    const pinSaved = savedBy(page, 'setPins');
+    await frame.click({ position: { x: box.width * 0.3, y: box.height * 0.4 } });
+    await pinSaved;
+    const stored = {
+      x: Number(await page.locator('section.draft-shot input[name="pins[1][x]"]').inputValue()),
+      y: Number(await page.locator('section.draft-shot input[name="pins[1][y]"]').inputValue()),
+    };
+    const cspViolations = await recordCspViolations(page);
+    await page.reload({ waitUntil: 'networkidle' });
+    const shot = page.locator('section.draft-shot');
+    const marker = shot.locator('.pin-layer .pin[data-pin-number="1"]');
+    const distanceFromStored = async () => {
+      const spot = await spotInLayer(marker);
+      return Math.max(Math.abs(spot.x - stored.x), Math.abs(spot.y - stored.y));
+    };
+    await expect.poll(distanceFromStored, { message: 'pin 1 after the frame loads' }).toBeLessThanOrEqual(0.5);
+
+    const verdict = savedBy(page, 'setVerdict');
+    await shot.getByRole('button', { name: 'Looks right', exact: true }).click();
+    await verdict;
+    await expect(shot.getByRole('button', { name: 'Looks right', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+    await expect.poll(distanceFromStored, { message: 'pin 1 after the re-render' }).toBeLessThanOrEqual(0.5);
+    expect(await cspViolations()).toEqual([]);
     await context.close();
   });
 

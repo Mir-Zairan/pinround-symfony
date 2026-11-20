@@ -1,18 +1,12 @@
-<div class="pin-layer" id="{{ this.layerId }}" data-pin-placer-target="layer">
-    {% if this.view.pins is not empty %}
-        {#- The CSP allows no style attribute, so each spot is a rule in a style element that carries the nonce. -#}
-        <style nonce="{{ csp_nonce() }}">
-            {%- for pin in this.view.pins -%}
-                #{{ this.layerId }} .pin--n{{ pin.number }}{left:{{ pin.xPercent|number_format(2, '.', '') }}%;top:{{ pin.yPercent|number_format(2, '.', '') }}%}
-            {%- endfor -%}
-        </style>
-    {% endif %}
+{#- The pin-layer controller places each pin from its data-x-percent and data-y-percent: the CSP allows no style attribute, and a nonce'd style element would be dropped when the layer comes through a Turbo frame or a live component re-render. -#}
+<div class="pin-layer" id="{{ this.layerId }}" data-controller="pin-layer" data-pin-placer-target="layer">
     {% for pin in this.view.pins %}
         <button type="button"
             class="pin pin--n{{ pin.number }}{% if pin.isAiSuggested %} pin--ai{% endif %}{% if pin.number == this.selectedNumber %} pin--selected{% endif %}{% if pin.isBubbleOnLeft %} pin--bubble-left{% endif %}"
             aria-label="{{ pin.accessibleName }}"
             aria-pressed="{{ pin.number == this.selectedNumber ? 'true' : 'false' }}"
             data-pin-placer-target="pin"
+            data-pin-layer-target="pin"
             data-pin-number="{{ pin.number }}"
             data-x-percent="{{ pin.xPercent|number_format(2, '.', '') }}"
             data-y-percent="{{ pin.yPercent|number_format(2, '.', '') }}"

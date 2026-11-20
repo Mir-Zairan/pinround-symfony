@@ -69,7 +69,11 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertCount(0, $crawler->filter('img'));
         self::assertCount(0, $crawler->filter('.screenshot__placeholder--rejected'));
         self::assertCount(1, $crawler->filter('#shot-2-frame.screenshot__frame--shaped > [data-pin-placer-target="layer"]'));
-        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">#shot-2-frame\{max-width:800px;aspect-ratio:800 \/ 450\}<\/style>/', $html);
+        $frame = $crawler->filter('#shot-2-frame');
+        self::assertSame('picture-shape', $frame->attr('data-controller'));
+        self::assertSame('800', $frame->attr('data-picture-shape-width-value'));
+        self::assertSame('450', $frame->attr('data-picture-shape-height-value'));
+        self::assertStringNotContainsString('<style', $html);
         self::assertStringNotContainsString('style="', $html);
         self::assertSame('Checkout page', $crawler->filter('.screenshot__title')->text());
     }
@@ -82,6 +86,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
         self::assertSame('Processing…', new Crawler($html)->filter('[role="status"]')->text());
         self::assertStringNotContainsString('<style', $html);
         self::assertCount(0, new Crawler($html)->filter('.screenshot__frame--shaped'));
+        self::assertCount(0, new Crawler($html)->filter('[data-controller~="picture-shape"]'));
     }
 
     #[Test]
@@ -91,7 +96,8 @@ final class ScreenshotComponentsTest extends KernelTestCase
         $html = $this->render(Screenshot::class, ['view' => $view]);
         $crawler = new Crawler($html);
 
-        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">#shot-4-frame\{max-width:800px;aspect-ratio:800 \/ 450\}<\/style>/', $html);
+        self::assertCount(1, $crawler->filter('#shot-4-frame[data-controller="picture-shape"][data-picture-shape-width-value="800"][data-picture-shape-height-value="450"]'));
+        self::assertStringNotContainsString('<style', $html);
         self::assertCount(1, $crawler->filter('#shot-4-frame.screenshot__frame--shaped #shot-4-placeholder.screenshot__placeholder--rejected'));
         self::assertSame('We could not process this image. Try again.', $crawler->filter('#shot-4-placeholder')->text());
         self::assertStringNotContainsString('style="', $html);
@@ -165,11 +171,15 @@ final class ScreenshotComponentsTest extends KernelTestCase
             ['Pin 1: address is cut off', 'Pin 2: header is cut off', 'Pin 4'],
             $crawler->filter('button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('aria-label')),
         );
-        self::assertStringContainsString('#shot-1-pins .pin--n2{left:70.50%;top:12.25%}', $html);
-        self::assertStringContainsString('#shot-1-pins .pin--n1{left:0.00%;top:100.00%}', $html);
+        self::assertSame('pin-layer', $crawler->filter('#shot-1-pins')->attr('data-controller'));
+        self::assertSame(
+            [['1', '0.00', '100.00'], ['2', '70.50', '12.25'], ['4', '40.00', '40.00']],
+            $crawler->filter('#shot-1-pins button.pin[data-pin-layer-target="pin"]')->each(
+                static fn (Crawler $pin): array => [(string) $pin->attr('data-pin-number'), (string) $pin->attr('data-x-percent'), (string) $pin->attr('data-y-percent')],
+            ),
+        );
+        self::assertStringNotContainsString('<style', $html);
         self::assertStringNotContainsString('style="', $html);
-        self::assertSame('70.50', $crawler->filter('.pin--n2')->attr('data-x-percent'));
-        self::assertMatchesRegularExpression('/<style nonce="[A-Za-z0-9+\/=]+">/', $html);
     }
 
     #[Test]
@@ -179,6 +189,7 @@ final class ScreenshotComponentsTest extends KernelTestCase
 
         self::assertStringNotContainsString('<style', $html);
         self::assertCount(0, new Crawler($html)->filter('button.pin'));
+        self::assertSame('pin-layer', new Crawler($html)->filter('.pin-layer')->attr('data-controller'));
     }
 
     #[Test]

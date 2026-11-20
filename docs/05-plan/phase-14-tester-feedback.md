@@ -339,5 +339,6 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 
 ## Hand-off notes
 - 2026-11-20 (plan change): phase added from the product owner's hands-on test and a UI check of every page. P07.T6 (My reports page) moves here as T15, and the smallest part of P11.T1 (admin shell with the tabs that exist) as T3; their phase files say so. Evidence for T1 and T2 (live checks on SHOP-42 and Report a problem) is in this session's notes, not in the repo.
+- 2026-11-20 (T1): PinLayer and Screenshot print no `<style>` any more, on any path. The `pin-layer` controller places each pin from `data-x-percent`/`data-y-percent` (and re-places it when a re-render changes them); `picture-shape` sets a not-shown picture's frame shape. Chosen over keeping the style for full loads because one script path covers full loads, frames and live re-renders, and a page cannot tell which path it is on. Cost: pins sit at the corner until Stimulus connects. Proof owed: `pin-placement.spec.ts` and the draft re-render case in `draft-round.spec.ts` run as Omar and were not run, because the dev Omar has two-step login on; the same scenarios passed as Lena in an uncommitted copy. Tick the T1 boxes once they pass as Omar. `review.css` line 83 still says left/top come from the style element; fix it in a task that may touch CSS.
 </content>
 </invoke>

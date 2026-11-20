@@ -8,6 +8,7 @@ export function buildMarker(number) {
   marker.setAttribute('aria-label', `Pin ${number}`);
   marker.setAttribute('aria-pressed', 'false');
   marker.dataset.pinPlacerTarget = 'pin';
+  marker.dataset.pinLayerTarget = 'pin';
   marker.dataset.pinNumber = String(number);
   const tab = document.createElement('span');
   tab.className = 'pin__tab';
@@ -97,8 +98,8 @@ export function markSelected(layer, list, number) {
   }
 }
 
-// CSSOM, not a style attribute: the CSP forbids inline style attributes but allows script to set properties. It also
-// wins over the rule PinLayer prints for a pin that came with the page.
+// CSSOM, not a style attribute: the CSP forbids inline style attributes but allows script to set properties. The
+// pin-layer controller places the pins that came with the page with it too.
 export function placeMarker(marker, x, y) {
   marker.style.setProperty('left', `${x}%`);
   marker.style.setProperty('top', `${y}%`);

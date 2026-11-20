@@ -10,14 +10,12 @@
         </figcaption>
     {% endif %}
     {% set hasKnownShape = not this.view.isReady and this.view.width is not null %}
-    <div class="screenshot__frame{% if not this.view.isReady %} screenshot__frame--placeholder{% endif %}{% if hasKnownShape %} screenshot__frame--shaped{% endif %}" id="{{ this.frameId }}">
+    {#- The picture's shape sits on the frame, so the pin layer and the box are always the same size. The picture-shape controller sets it, as pin-layer places the pins: no style attribute, no style element. -#}
+    <div class="screenshot__frame{% if not this.view.isReady %} screenshot__frame--placeholder{% endif %}{% if hasKnownShape %} screenshot__frame--shaped{% endif %}" id="{{ this.frameId }}"
+        {%- if hasKnownShape %} data-controller="picture-shape" data-picture-shape-width-value="{{ this.view.width }}" data-picture-shape-height-value="{{ this.view.height }}"{% endif %}>
         {% if this.view.isReady %}
             <img class="screenshot__image" src="{{ this.view.imageUrl }}" alt="{{ this.view.altText }}" width="{{ this.view.width }}" height="{{ this.view.height }}" decoding="async"{% if this.loading is not null %} loading="{{ this.loading }}"{% endif %}>
         {% else %}
-            {% if hasKnownShape %}
-                {#- The CSP allows no style attribute, so the picture's shape is a rule in a style element with the nonce. It sits on the frame, so the pin layer and the box are always the same size. -#}
-                <style nonce="{{ csp_nonce() }}">#{{ this.frameId }}{max-width:{{ this.view.width }}px;aspect-ratio:{{ this.view.width }} / {{ this.view.height }}}</style>
-            {% endif %}
             {% if this.view.isPending %}
                 <div class="screenshot__placeholder" id="{{ this.placeholderId }}" role="status">Processing…</div>
             {% else %}
