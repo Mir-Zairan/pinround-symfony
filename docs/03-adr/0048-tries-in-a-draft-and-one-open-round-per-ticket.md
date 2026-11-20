@@ -23,7 +23,7 @@ The product owner accepted these decisions in a session on 2026-11-20, after tes
 ([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)). An ADR is accepted when it is merged
 ([README](README.md#status-lifecycle)), and this one was not merged yet, so it was amended in place on 2026-11-21 with
 four points the product owner decided that day: a findings round closes when the assignee moves the ticket on; only a
-move-on verb closes a round, and the lead-only verbs "Put on hold" and "Move to another step…" never do, whoever uses
+move-on verb closes a round, and the lead-only verbs "Put on hold", "Move to another step…" and "Go on" never do, whoever uses
 them, also when the lead is the person the round is ready for; after a lead-only move, whoever's turn it is now closes
 the round when they move the ticket on; and the confirmation test for a lead who is also the reviewer.
 
@@ -102,7 +102,7 @@ does not close them.
   [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue) that are not lead-only). The verb
   is the round's verdict. The round becomes `RoundState::Closed` in the move's transaction.
 - **Only the person whose turn it is closes it, and only with a move-on verb** (product owner, 2026-11-21). A move by
-  anyone else leaves an open round open. The lead-only verbs "Put on hold" and "Move to another step…" never close a
+  anyone else leaves an open round open. The lead-only verbs "Put on hold", "Move to another step…" and "Go on" never close a
   round, whoever uses them, also when the lead is the person the round is ready for. For example, Round 2 is ready for
   Lena at code review; Lena puts the ticket on hold; Round 2 stays open; later, back in Code review, her "Approve
   code" closes it.
