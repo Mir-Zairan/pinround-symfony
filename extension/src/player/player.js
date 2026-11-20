@@ -66,6 +66,11 @@ export class ScenarioPlayer {
         return this.#scenarios[this.#scenarioIndex];
     }
 
+    /** @returns {ReadonlyArray<object>} every scenario, as checked */
+    get scenarios() {
+        return this.#scenarios;
+    }
+
     /** From 0; equal to the number of steps once the scenario has run to its end. */
     get stepIndex() {
         return this.#stepIndex;

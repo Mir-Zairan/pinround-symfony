@@ -99,6 +99,63 @@ textarea:focus-visible {
     color: var(--error);
 }
 
+.scenarios {
+    display: grid;
+    gap: var(--gap);
+    margin-top: var(--gap);
+    border-top: 1px solid var(--border);
+    padding-top: var(--gap);
+}
+
+.scenarios h2,
+.scenarios h3,
+.scenarios p,
+.scenarios dl {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.scenarios h2 {
+    font-size: 15px;
+}
+
+.scenarios h3 {
+    font-size: 14px;
+}
+
+.scenario-list {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.scenario-list [aria-current] {
+    font-weight: 600;
+}
+
+.say {
+    min-height: 1.4em;
+    font-style: italic;
+}
+
+.player-stop {
+    color: var(--error);
+}
+
+.player-stop dd {
+    margin: 0 0 4px;
+}
+
+.player-controls,
+.host-question {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.host-question p {
+    flex-basis: 100%;
+}
+
 .captures {
     margin: 0;
     padding-left: 20px;

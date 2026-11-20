@@ -18,7 +18,11 @@ export const RUNNER_REFUSALS = Object.freeze({
     outOfReach: 'The player cannot reach this page. Open the scenario\'s page and play again.',
     unknownStep: 'The player cannot run this step.',
     notLoaded: `The page did not finish loading in ${PAGE_STEP_TIMEOUT_MS / 1000} seconds. Play the step again once it shows.`,
+    waitTimedOut: `Waited ${PAGE_STEP_TIMEOUT_MS / 1000} seconds, and the page changed while the step looked. Play the step again once it shows.`,
 });
+
+/** A refusal shown as it is, not as a step that broke: openUrl and captureToNotebook throw it for a plain "no". */
+export class StepRefusal extends Error {}
 
 const PAGE_STEP_TYPES = new Set(['click', 'type', 'select', 'wait_for', 'expect_text', 'expect_visible']);
 
@@ -32,17 +36,24 @@ const SYSTEM_CLOCK = Object.freeze({
 /**
  * @param {object} browser src/shared/browser.js, or a fake in tests
  * @param {{tabId: number, openUrl: (url: string) => Promise<void>, captureToNotebook: () => Promise<void>,
+ *   pageRefusalOf: (tab: {url?: string, pendingUrl?: string}) => string|null,
  *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} tab the tab the scenario plays in; openUrl
- *   navigates it after the caller's host checks, and captureToNotebook adds a screenshot of it to the notebook. The
- *   clock, in ms, times the waits for the tab to load; the system's by default.
+ *   navigates it after the caller's host checks, and captureToNotebook adds a screenshot of it to the notebook.
+ *   pageRefusalOf is asked about the loaded tab, as tabs.get answers it, before each step acts on it or captures it,
+ *   and its refusal stops the step. The clock, in ms, times the waits for the tab to load; the system's by default.
  * @returns {(step: object) => Promise<{ok: true} | {stopped: true, message: string, expected?: string, found?: string}>}
  *   never rejects: a failure is a stop with a plain message
+ * @throws {TypeError} without pageRefusalOf, so no runner acts on a page nobody checked
  */
-export function stepRunnerFor(browser, { tabId, openUrl, captureToNotebook, clock = SYSTEM_CLOCK }) {
+export function stepRunnerFor(browser, { tabId, openUrl, captureToNotebook, pageRefusalOf, clock = SYSTEM_CLOCK }) {
+    if ('function' !== typeof pageRefusalOf) {
+        throw new TypeError('stepRunnerFor needs pageRefusalOf, which checks the page before a step acts on it.');
+    }
+
     return async (step) => {
         try {
             if (PAGE_STEP_TYPES.has(step.type)) {
-                return await runInPage(browser, tabId, step, clock);
+                return await runInPage(browser, tabId, step, clock, pageRefusalOf);
             }
             if ('go_to' === step.type) {
                 await openUrl(step.url);
@@ -50,8 +61,13 @@ export function stepRunnerFor(browser, { tabId, openUrl, captureToNotebook, cloc
                 return { ok: true };
             }
             if ('capture' === step.type) {
-                if (!await hasLoaded(browser, tabId, clock, clock.now() + PAGE_STEP_TIMEOUT_MS)) {
+                const tab = await loadedTab(browser, tabId, clock, clock.now() + PAGE_STEP_TIMEOUT_MS);
+                if (null === tab) {
                     return { stopped: true, message: RUNNER_REFUSALS.notLoaded };
+                }
+                const refusal = pageRefusalOf(tab);
+                if (null !== refusal) {
+                    return { stopped: true, message: shownText(refusal, MESSAGE_MAX_LENGTH) };
                 }
                 // The ring of the step before would be in the screenshot.
                 await clearPageHighlight(browser, tabId);
@@ -66,6 +82,9 @@ export function stepRunnerFor(browser, { tabId, openUrl, captureToNotebook, cloc
 
             return { stopped: true, message: RUNNER_REFUSALS.unknownStep };
         } catch (error) {
+            if (error instanceof StepRefusal) {
+                return { stopped: true, message: shownText(error.message, MESSAGE_MAX_LENGTH) };
+            }
             if (isOutOfReach(error)) {
                 return { stopped: true, message: RUNNER_REFUSALS.outOfReach };
             }
@@ -101,17 +120,24 @@ export async function clearPageHighlight(browser, tabId) {
 }
 
 /**
- * A click can start a navigation, so the step waits for the tab to load before it is injected. A wait_for whose
- * document goes away while it looks, which answers null or rejects, looks again in the new document until its time is
- * up; a failed look and a next injection in the same document is a broken player, not a navigation. A refused
- * injection of the player itself names no document, so the next look waits LOAD_POLL_MS first: the time runs out.
+ * A click can start a navigation, so the step waits for the tab to load, and the loaded page is checked, before it is
+ * injected. A wait_for whose document goes away while it looks, which answers null or rejects, looks again in the new
+ * document until its time is up; a failed look and a next injection in the same document is a broken player, not a
+ * navigation. A refused injection of the player itself names no document, so the next look waits LOAD_POLL_MS first;
+ * once the time is up, the last refusal is the answer, as a page that always refuses (an error page) is no timeout.
  */
-async function runInPage(browser, tabId, step, clock) {
+async function runInPage(browser, tabId, step, clock, pageRefusalOf) {
     const deadline = clock.now() + PAGE_STEP_TIMEOUT_MS;
     let leftDocumentId = null;
+    let lastRefusal = null;
     for (;;) {
-        if (!await hasLoaded(browser, tabId, clock, deadline)) {
+        const tab = await loadedTab(browser, tabId, clock, deadline);
+        if (null === tab) {
             return { stopped: true, message: RUNNER_REFUSALS.notLoaded };
+        }
+        const pageRefusal = pageRefusalOf(tab);
+        if (null !== pageRefusal) {
+            return { stopped: true, message: shownText(pageRefusal, MESSAGE_MAX_LENGTH) };
         }
         let playerInjection;
         let stepInjection;
@@ -121,20 +147,31 @@ async function runInPage(browser, tabId, step, clock) {
             if (null !== leftDocumentId && playerInjection?.documentId === leftDocumentId) {
                 return { stopped: true, message: RUNNER_REFUSALS.unreadableAnswer };
             }
+            const timeoutMs = Math.max(0, deadline - clock.now());
+            // The page's timeout message names the whole step's time, not only what is left of it.
             [stepInjection] = await browser.scripting.executeScript({
                 target: { tabId },
-                args: [step, { timeoutMs: Math.max(0, deadline - clock.now()) }],
+                args: [step, { timeoutMs, waitedBeforeMs: PAGE_STEP_TIMEOUT_MS - timeoutMs }],
                 func: (pageStep, options) => globalThis.pinroundPagePlayer?.runStep(pageStep, options) ?? null,
             });
+            lastRefusal = null;
         } catch (error) {
             if ('wait_for' !== step.type || isOutOfReach(error)) {
                 throw error;
             }
+            lastRefusal = error;
             stepInjection = { documentId: playerInjection?.documentId, result: null };
         }
         const answer = stepInjection?.result ?? null;
-        if (null !== answer || 'wait_for' !== step.type || clock.now() >= deadline) {
+        if (null !== answer || 'wait_for' !== step.type) {
             return checkedPageAnswer(answer);
+        }
+        if (clock.now() >= deadline) {
+            if (null !== lastRefusal) {
+                throw lastRefusal;
+            }
+
+            return { stopped: true, message: RUNNER_REFUSALS.waitTimedOut };
         }
         leftDocumentId = stepInjection?.documentId ?? null;
         if (undefined === playerInjection) {
@@ -143,15 +180,15 @@ async function runInPage(browser, tabId, step, clock) {
     }
 }
 
-/** Whether the tab's status is complete by the deadline, looking every LOAD_POLL_MS. */
-async function hasLoaded(browser, tabId, clock, deadline) {
+/** The tab once its status is complete, looking every LOAD_POLL_MS, or null when it is still loading at the deadline. */
+async function loadedTab(browser, tabId, clock, deadline) {
     for (;;) {
         const tab = await browser.tabs.get(tabId);
         if ('complete' === tab.status) {
-            return true;
+            return tab;
         }
         if (clock.now() >= deadline) {
-            return false;
+            return null;
         }
         await clock.wait(LOAD_POLL_MS);
     }

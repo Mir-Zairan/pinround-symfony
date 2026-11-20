@@ -61,6 +61,43 @@
         </section>
     </form>
 
+    <section id="scenarios" class="scenarios" aria-labelledby="scenarios-heading" hidden>
+        <h2 id="scenarios-heading">Scenarios</h2>
+        <p class="hint" id="scenarios-message"></p>
+        <div id="scenario-player" hidden>
+            <ol class="scenario-list" id="scenario-list"></ol>
+            <p class="hint" id="scenario-position"></p>
+            <h3 id="scenario-title"></h3>
+            <p><strong>Why:</strong> <span id="scenario-why"></span></p>
+            <p id="scenario-setup-line"><strong>Setup:</strong> <span id="scenario-setup"></span></p>
+            <p class="say" id="player-say" aria-live="polite"></p>
+
+            <div id="player-stop" class="player-stop" hidden>
+                <p id="player-stop-message"></p>
+                <dl id="player-stop-texts" hidden>
+                    <dt>Expected</dt>
+                    <dd id="player-expected"></dd>
+                    <dt>Found</dt>
+                    <dd id="player-found"></dd>
+                </dl>
+            </div>
+
+            <div id="host-question" class="host-question" role="group" aria-labelledby="host-question-text" hidden>
+                <p id="host-question-text"></p>
+                <button type="button" id="host-question-play">Play anyway</button>
+                <button type="button" class="secondary" id="host-question-cancel">Cancel</button>
+            </div>
+
+            <div class="player-controls">
+                <button type="button" id="player-play">Play</button>
+                <button type="button" class="secondary" id="player-step">Step</button>
+                <button type="button" class="secondary" id="player-stop-run" disabled>Stop</button>
+                <button type="button" class="secondary" id="player-back">Back</button>
+                <button type="button" class="secondary" id="player-next">Next</button>
+            </div>
+        </div>
+    </section>
+
     <p class="status" id="status" role="status" aria-live="polite"></p>
 </body>
 </html>

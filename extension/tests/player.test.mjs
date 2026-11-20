@@ -260,7 +260,7 @@ test('the runner sends page steps to the page player and checks its answer', asy
             };
         },
     });
-    const runStep = stepRunnerFor(browser, { tabId: SHOP_PAGE.id, openUrl: async () => assert.fail('no navigation'), captureToNotebook: async () => assert.fail('no capture') });
+    const runStep = stepRunnerFor(browser, { pageRefusalOf: () => null, tabId: SHOP_PAGE.id, openUrl: async () => assert.fail('no navigation'), captureToNotebook: async () => assert.fail('no capture') });
 
     assert.deepEqual(await runStep(click('Pay')), { ok: true });
     assert.deepEqual(await runStep(expectText('Total shows', '12.40 EUR')), {
@@ -278,7 +278,7 @@ test('the runner sends page steps to the page player and checks its answer', asy
 test('a page with no player, or one that broke, stops the step: it never looks done', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
     browser.clickIcon(SHOP_PAGE.id);
-    const runStep = stepRunnerFor(browser, { tabId: SHOP_PAGE.id, openUrl: async () => undefined, captureToNotebook: async () => undefined });
+    const runStep = stepRunnerFor(browser, { pageRefusalOf: () => null, tabId: SHOP_PAGE.id, openUrl: async () => undefined, captureToNotebook: async () => undefined });
 
     assert.deepEqual(await runStep(click('Pay')), { stopped: true, message: RUNNER_REFUSALS.unreadableAnswer });
 
@@ -297,12 +297,12 @@ test('a page with no player, or one that broke, stops the step: it never looks d
 
 test('a page out of reach stops the step with a plain message; any other refusal is shown safely', async () => {
     const browser = fakeBrowser({ tabs: [SETTINGS_PAGE], hostOrigins: [ALL_URLS] });
-    const runStep = stepRunnerFor(browser, { tabId: SETTINGS_PAGE.id, openUrl: async () => undefined, captureToNotebook: async () => undefined });
+    const runStep = stepRunnerFor(browser, { pageRefusalOf: () => null, tabId: SETTINGS_PAGE.id, openUrl: async () => undefined, captureToNotebook: async () => undefined });
 
     assert.deepEqual(await runStep(click('Pay')), { stopped: true, message: RUNNER_REFUSALS.outOfReach });
     assert.deepEqual(browser.injectedFiles, []);
 
-    const goneTab = stepRunnerFor(browser, { tabId: 99, openUrl: async () => undefined, captureToNotebook: async () => undefined });
+    const goneTab = stepRunnerFor(browser, { pageRefusalOf: () => null, tabId: 99, openUrl: async () => undefined, captureToNotebook: async () => undefined });
     assert.deepEqual(await goneTab(click('Pay')), { stopped: true, message: 'The step could not run: No tab with id: 99.' });
 });
 
@@ -311,7 +311,7 @@ test('go_to opens the url through the given navigation, capture adds to the note
     browser.clickIcon(SHOP_PAGE.id);
     const opened = [];
     let captures = 0;
-    const runStep = stepRunnerFor(browser, {
+    const runStep = stepRunnerFor(browser, { pageRefusalOf: () => null,
         tabId: SHOP_PAGE.id,
         openUrl: async (url) => {
             opened.push(url);
@@ -333,7 +333,7 @@ test('go_to opens the url through the given navigation, capture adds to the note
 test('a navigation or capture that fails stops the step with its message, control characters shown safely', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
     browser.clickIcon(SHOP_PAGE.id);
-    const runStep = stepRunnerFor(browser, {
+    const runStep = stepRunnerFor(browser, { pageRefusalOf: () => null,
         tabId: SHOP_PAGE.id,
         openUrl: async () => {
             throw new Error('Tabs cannot be edited right now.');

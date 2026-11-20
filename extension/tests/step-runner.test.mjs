@@ -51,7 +51,7 @@ async function givePagePlayer(browser, answerSource) {
 const pageValue = async (browser, func) => (await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func }))[0].result;
 
 function runnerOf(browser, clock, captureToNotebook = async () => assert.fail('no capture')) {
-    return stepRunnerFor(browser, { tabId: SHOP_PAGE.id, openUrl: async () => assert.fail('no navigation'), captureToNotebook, clock });
+    return stepRunnerFor(browser, { pageRefusalOf: () => null, tabId: SHOP_PAGE.id, openUrl: async () => assert.fail('no navigation'), captureToNotebook, clock });
 }
 
 test('capture clears the highlight in the tab before it adds the screenshot to the notebook', async () => {
