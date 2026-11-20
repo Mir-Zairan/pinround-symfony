@@ -283,6 +283,42 @@ final class SetVerdictTest extends WebTestCase
         self::assertSame([$this->toolRow('Omar', $tokenId, 'screenshot', $this->omarsSharedShot, 'read_only')], $this->toolRowsOf($this->acmeFoods));
     }
 
+    /**
+     * Omar retook the shared draft's picture before he shared it, so the first try is his alone (ADR-0048): a guessed id
+     * of it is not found for Mia, who may see the round, and for Omar alike, as an unknown picture is, never read-only,
+     * which would tell it exists. The latest try is read-only, as the shared draft is.
+     */
+    #[Test]
+    public function anEarlierTryOfASharedDraftIsNotFoundForAnyoneAndNothingIsWritten(): void
+    {
+        $latestTry = $this->addScreenshot($this->omarsSharedDraft, $this->addMedia('ready', 'Omar'), 1, null, null);
+        $sharedDraft = $this->omarsSharedDraft;
+        $firstTry = $this->omarsSharedShot;
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE rvw_screenshot SET retake_of = ? WHERE round_id = ? AND id = ?',
+            [$firstTry, $sharedDraft, $latestTry],
+        ));
+        [$miasTokenId, $miasToken] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
+        [$omarsTokenId, $omarsToken] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored(2);
+        self::assertSame([$firstTry, $latestTry], array_column($before['screenshots'][$sharedDraft], 'id'));
+
+        $this->callSetVerdict($miasToken, ['key' => 'SHOP-1', 'screenshot_id' => $firstTry, 'verdict' => SetVerdict::LOOKS_RIGHT]);
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        $this->callSetVerdict($omarsToken, ['key' => 'SHOP-1', 'screenshot_id' => $firstTry, 'verdict' => SetVerdict::LOOKS_RIGHT, 'summary' => self::NEW_SUMMARY]);
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        $this->callSetVerdict($omarsToken, ['key' => 'SHOP-1', 'screenshot_id' => $latestTry, 'verdict' => SetVerdict::LOOKS_RIGHT]);
+        $this->assertRefused(ToolRefusal::READ_ONLY);
+
+        self::assertSame($before, $this->stored(2));
+        // The three rows share the frozen time, so their order is the order of their random ids.
+        self::assertEqualsCanonicalizing([
+            $this->toolRow('Mia', $miasTokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found'),
+            $this->toolRow('Omar', $omarsTokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found'),
+            $this->toolRow('Omar', $omarsTokenId, 'screenshot', $latestTry, 'read_only'),
+        ], $this->toolRowsOf($this->acmeFoods));
+    }
+
     #[Test]
     public function aTokenWithoutRoundsWriteGetsMissingScopeAndNothingIsWritten(): void
     {
@@ -526,16 +562,18 @@ final class SetVerdictTest extends WebTestCase
     /**
      * Every round of SHOP-1 with its screenshots, and the checklist item, as stored.
      *
+     * @param int $sharedDraftTries the screenshots Omar's shared draft holds; the other drafts hold one each
+     *
      * @return array{rounds: list<array<string, mixed>>, screenshots: array<string, list<array<string, mixed>>>, check_item: array<string, mixed>}
      */
-    private function stored(): array
+    private function stored(int $sharedDraftTries = 1): array
     {
         $rounds = $this->roundRowsOf($this->ticketId);
         self::assertCount(5, $rounds);
         $screenshots = [];
-        foreach ([$this->omarsDraft, $this->omarsSharedDraft, $this->miasDraft] as $roundId) {
+        foreach ([$this->omarsDraft => 1, $this->omarsSharedDraft => $sharedDraftTries, $this->miasDraft => 1] as $roundId => $screenshotCount) {
             $screenshots[$roundId] = $this->screenshotRowsOf($roundId);
-            self::assertCount(1, $screenshots[$roundId]);
+            self::assertCount($screenshotCount, $screenshots[$roundId]);
         }
 
         return ['rounds' => $rounds, 'screenshots' => $screenshots, 'check_item' => $this->checkItemRow()];

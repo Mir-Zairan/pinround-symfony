@@ -35,8 +35,8 @@ use Doctrine\DBAL\Connection;
  * and sharedRoundNotes send one query each and make no visibility check: the first two leave the decision to
  * RoundVoter, the next two read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
  * RoundVoter. draftOf reads one draft of its owner with its screenshots and pins, and needs none either. Of a shared
- * round, forTicket and sharedRoundNotes give only the latest try of each screenshot (ADR-0048), to everyone; draftOf and
- * the viewer's unshared draft give every try.
+ * round, forTicket and sharedRoundNotes give only the latest try of each screenshot (ADR-0048), to everyone, and
+ * draftScreenshotOf finds no earlier try; draftOf and the viewer's unshared draft give every try.
  */
 final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries, RoundsVisibleTo
 {
@@ -165,13 +165,15 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             return null;
         }
 
-        // Both tables by their primary key (organization_id, id); the round conditions only filter that one row.
+        // Both tables by their primary key (organization_id, id). An earlier try of a shared draft is the owner's alone
+        // (ADR-0048): not found, as an unknown picture is, since read-only would tell the team it exists.
         $roundRow = $this->connection->fetchAssociative(
             'SELECT round.id, round.owner_id, round.shared_at IS NULL AS is_unshared_draft, round.deleted_at IS NOT NULL AS is_deleted'
             .' FROM rvw_screenshot AS screenshot'
             .' JOIN rvw_round AS round ON round.organization_id = screenshot.organization_id AND round.id = screenshot.round_id'
             .' WHERE screenshot.organization_id = CAST(:organization AS uuid) AND screenshot.id = CAST(:screenshot AS uuid)'
-            ." AND round.ticket_id = CAST(:ticket AS uuid) AND round.kind = 'draft'",
+            ." AND round.ticket_id = CAST(:ticket AS uuid) AND round.kind = 'draft'"
+            .' AND (round.shared_at IS NULL OR '.self::latestTrySql('screenshot').')',
             ['organization' => $organizationId->toString(), 'screenshot' => $id->toString(), 'ticket' => $ticketId->toString()],
         );
         if (false === $roundRow) {

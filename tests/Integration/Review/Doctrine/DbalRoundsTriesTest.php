@@ -61,6 +61,7 @@ final class DbalRoundsTriesTest extends KernelTestCase
     private const string LATEST_TRY_PIN = '0197a3c0-0000-7000-8000-00000014a042';
     private const string REVIEW_ROUND = '0197a3c0-0000-7000-8000-00000014a025';
     private const string REVIEW_SCREENSHOT = '0197a3c0-0000-7000-8000-00000014a036';
+    private const string LATEST_TRY_REVIEW_SCREENSHOT = '0197a3c0-0000-7000-8000-00000014a037';
     private const string AREA = '0197a3c0-0000-7000-8000-00000014a061';
     private const string LATEST_TRY_AREA = '0197a3c0-0000-7000-8000-00000014a062';
     private const string MEDIA = '0197a3c0-0000-7000-8000-00000014a051';
@@ -301,7 +302,10 @@ final class DbalRoundsTriesTest extends KernelTestCase
             $draft->share(new UserId(self::LENA), 2, self::savedAt());
         });
 
-        $this->addReviewRoundThreeComparingWith([self::AREA => self::CHECKOUT, self::LATEST_TRY_AREA => self::tryId(2)->toString()]);
+        $this->addReviewRoundThreeComparingWith([
+            self::AREA => [self::CHECKOUT, self::REVIEW_SCREENSHOT],
+            self::LATEST_TRY_AREA => [self::tryId(2)->toString(), self::LATEST_TRY_REVIEW_SCREENSHOT],
+        ]);
 
         [$earlierTryPin, $latestTryPin, $latestTryArea] = $this->committed(self::ACME_FOODS, fn (): array => [
             $this->areas()->pinToCheckOf(new RoundId(self::REVIEW_ROUND), new PinId(self::CHECKOUT_PIN)),
@@ -345,20 +349,21 @@ final class DbalRoundsTriesTest extends KernelTestCase
     }
 
     /**
-     * Review round 3 of the ticket with one area per entry, each comparing a new picture with its "before"; no command
-     * writes a review round yet, so its rows are added as the seed command adds them.
+     * Review round 3 of the ticket with one area per entry, each comparing a new picture of its own (an "after" belongs
+     * to one area, rvw_area_after_screenshot_id_key) with its "before"; no command writes a review round yet, so its rows
+     * are added as the seed command adds them.
      *
-     * @param array<string, string> $beforeScreenshotIdByAreaId
+     * @param array<string, array{string, string}> $beforeAndAfterScreenshotIdsByAreaId
      */
-    private function addReviewRoundThreeComparingWith(array $beforeScreenshotIdByAreaId): void
+    private function addReviewRoundThreeComparingWith(array $beforeAndAfterScreenshotIdsByAreaId): void
     {
         $rows = [
             ['rvw_round', ['organization_id' => self::ACME_FOODS, 'id' => self::REVIEW_ROUND, 'ticket_id' => self::TICKET, 'number' => 3, 'kind' => 'review', 'owner_id' => self::LENA, 'shared_at' => self::SAVED_AT, 'state' => 'open', 'version' => 1, 'created_at' => self::SAVED_AT]],
-            ['rvw_screenshot', ['organization_id' => self::ACME_FOODS, 'id' => self::REVIEW_SCREENSHOT, 'round_id' => self::REVIEW_ROUND, 'media_id' => self::MEDIA, 'position' => 0, 'created_at' => self::SAVED_AT]],
         ];
         $position = 0;
-        foreach ($beforeScreenshotIdByAreaId as $areaId => $beforeScreenshotId) {
-            $rows[] = ['rvw_area', ['organization_id' => self::ACME_FOODS, 'id' => $areaId, 'round_id' => self::REVIEW_ROUND, 'name' => 'Checkout', 'position' => $position++, 'before_screenshot_id' => $beforeScreenshotId, 'after_screenshot_id' => self::REVIEW_SCREENSHOT, 'created_at' => self::SAVED_AT]];
+        foreach ($beforeAndAfterScreenshotIdsByAreaId as $areaId => [$beforeScreenshotId, $afterScreenshotId]) {
+            $rows[] = ['rvw_screenshot', ['organization_id' => self::ACME_FOODS, 'id' => $afterScreenshotId, 'round_id' => self::REVIEW_ROUND, 'media_id' => self::MEDIA, 'position' => $position, 'created_at' => self::SAVED_AT]];
+            $rows[] = ['rvw_area', ['organization_id' => self::ACME_FOODS, 'id' => $areaId, 'round_id' => self::REVIEW_ROUND, 'name' => 'Checkout', 'position' => $position++, 'before_screenshot_id' => $beforeScreenshotId, 'after_screenshot_id' => $afterScreenshotId, 'created_at' => self::SAVED_AT]];
         }
         $this->roundRows()->addAllOf(self::ACME_FOODS, $rows);
     }
