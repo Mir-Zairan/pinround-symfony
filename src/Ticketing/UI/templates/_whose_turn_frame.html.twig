@@ -1,0 +1,50 @@
+{# The cards' frame alone, as the whole page holds it and as a Turbo frame request gets it. It has the list frame's id, so the page's ticket-list controller loads each new URL into it; its links leave the page (_top). #}
+<turbo-frame id="ticket-list-frame" target="_top" {{ stimulus_target('ticket-list', 'frame') }}>
+    <div class="turn" data-total-line="{{ totalLine }}">
+        {% if cards is empty %}
+            <twig:EmptyState message="{{ noTickets }}" />
+        {% else %}
+            <p class="turn__intro">{{ intro }}</p>
+            <ul class="turn__cards">
+                {% for card in cards %}
+                    <li id="{{ card.id }}" class="turn__card turn__card--{{ card.tone }}">
+                        <div class="turn__head">
+                            <twig:Avatar name="{{ card.avatarName }}" size="lg" class="turn__avatar turn__avatar--{{ card.tone }}" aria-hidden="true" />
+                            <div class="turn__who">
+                                <h2 class="turn__name">{{ card.name }}</h2>
+                                <p class="turn__sentence">{{ card.sentence }}</p>
+                            </div>
+                            <progress class="turn__meter turn__meter--{{ card.meterLevel }}" max="{{ meterMax }}" value="{{ card.meterValue }}" title="{{ card.meterTitle }}" aria-hidden="true"></progress>
+                        </div>
+                        {# No hover prefetch: inside a frame Turbo prefetches links even with Drive off, and each would cost a ticket page's queries. #}
+                        <ul class="turn__rows" data-turbo-prefetch="false">
+                            {% for row in card.rows %}
+                                <li class="turn__row">
+                                    <a class="turn__row-link" href="{{ path('ticket_show', {key: row.key}|merge(listQuery)) }}">
+                                        <strong class="turn__verb">{{ row.verb }}</strong> · <span class="turn__key">{{ row.key }}</span> <span class="turn__title">{{ row.title }}</span>
+                                    </a>
+                                    <span class="turn__wait{{ row.isWaitTooLong ? ' turn__wait--too-long' }}">{{ row.wait }}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                        {% if card.moreText %}
+                            <twig:Button variant="text" size="sm" href="{{ card.moreUrl }}" class="turn__more">{{ card.moreText }}</twig:Button>
+                        {% elseif card.fewerUrl %}
+                            <twig:Button variant="text" size="sm" href="{{ card.fewerUrl }}" class="turn__more">Show fewer</twig:Button>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        {% if backToTheStartUrl or nextPageUrl %}
+            <nav class="turn__pages" aria-label="Pages of cards">
+                {% if backToTheStartUrl %}
+                    <a class="turn__first-page" href="{{ backToTheStartUrl }}">{{ backToTheStartText }}</a>
+                {% endif %}
+                {% if nextPageUrl %}
+                    <a class="turn__next-page" href="{{ nextPageUrl }}">{{ nextPageText }}</a>
+                {% endif %}
+            </nav>
+        {% endif %}
+    </div>
+</turbo-frame>

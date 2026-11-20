@@ -412,14 +412,23 @@
 }
 
 /* The whose-turn view (WhoseTurnController): one card per person or label, "You" first. */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
 .turn__intro {
   color: var(--on-surface-var);
 }
 
+/* No list indent, so the cards line up with the heading. */
 .turn__cards {
   display: flex;
   flex-direction: column;
   gap: var(--space-16);
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
@@ -513,6 +522,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
@@ -534,9 +545,11 @@
   text-decoration: underline;
 }
 
+/* A key never breaks, not even at its hyphen, though the row link around it may break anywhere. */
 .turn__key {
   font-family: var(--font-mono);
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .turn__wait {
@@ -551,7 +564,6 @@
 
 .turn__more {
   align-self: flex-start;
-  font-weight: 600;
 }
 
 .turn__pages {

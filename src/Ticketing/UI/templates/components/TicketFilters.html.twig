@@ -1,7 +1,8 @@
-{% set chips = this.peopleChips %}
+{# Whose turn? shows everyone, so it reads no people and shows no chips. #}
+{% set chips = isWhoseTurnView ? null : this.peopleChips %}
 {% set searchRefusal = this.searchRefusal %}
 <div{{ attributes.defaults({class: 'ticket-filters'}) }}>
-    <form class="ticket-filters__search" method="get" action="{{ path('ticketing_tickets') }}" role="search">
+    <form class="ticket-filters__search" method="get" action="{{ path(this.viewRoute) }}" role="search">
         {% for name, value in this.searchFormFields %}
             <input type="hidden" name="{{ name }}" value="{{ value }}">
         {% endfor %}
@@ -15,6 +16,7 @@
     {% endif %}
 
     {# Every chip is a link to the list it shows, so it works without script; with script the component takes the click. #}
+    {% if chips is not null %}
     <div class="ticket-filters__people" role="group" aria-labelledby="ticket-filters-people-label">
         <span class="ticket-filters__label" id="ticket-filters-people-label">{{ constant('PEOPLE_LABEL', this) }}</span>
         <a class="chip" href="{{ this.listUrl({person: null}) }}" data-person-chip="everyone"
@@ -35,6 +37,7 @@
                 aria-pressed="{{ chips.pickerChip.isPressed ? 'true' : 'false' }}">{{ chips.pickerChip.label }}</button>
         {% endif %}
     </div>
+    {% endif %}
 
     <a class="chip" href="{{ this.listUrl({done: showsDone ? null : '1'}) }}" data-done-chip
         {% if showsDone %}aria-current="true"{% endif %}

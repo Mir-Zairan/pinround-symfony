@@ -14,6 +14,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\ListFilter;
 use App\Ticketing\UI\TicketListContext;
 use App\Ticketing\UI\TicketListController;
+use App\Ticketing\UI\WhoseTurnController;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -41,6 +42,9 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
  * picker reads its people and counts in its own live request once opened, so the page pays nothing for it. The team's
  * people and names are one cached read (TeamPeopleQueries): no query when warm, two after a change of the team. A
  * person filter set by a chip or the picker must be a lead or member of the team.
+ *
+ * On the Whose turn view ($isWhoseTurnView) the toolbar is the same without the people: no chips, no picker and no
+ * person in its URLs, which open that view (WhoseTurnController::ROUTE), as the person filter does not apply there.
  */
 #[AsLiveComponent(name: 'TicketFilters', template: '@Ticketing/components/TicketFilters.html.twig', method: 'post')]
 final class TicketFilters
@@ -83,6 +87,10 @@ final class TicketFilters
     /** The search as typed, untrimmed; the list URL carries it trimmed. */
     #[LiveProp(writable: true)]
     public string $q = '';
+
+    /** True on the Whose turn view: the toolbar shows no people and its URLs open that view. */
+    #[LiveProp]
+    public bool $isWhoseTurnView = false;
 
     /** True after a chip, so the page adds a history entry; typing in the search only replaces the current one. */
     private bool $addsHistoryEntry = false;
@@ -170,13 +178,21 @@ final class TicketFilters
         $query = [
             TicketListContext::TEAM_QUERY => '' === $this->pickedTeam ? null : $this->pickedTeam,
             TicketListContext::PROJECT_QUERY => '' === $this->project ? null : $this->project,
-            TicketListContext::PERSON_QUERY => '' === $this->person ? null : $this->person,
+            TicketListContext::PERSON_QUERY => '' === $this->person || $this->isWhoseTurnView ? null : $this->person,
             TicketListContext::DONE_QUERY => $this->showsDone ? '1' : null,
             TicketListContext::SEARCH_QUERY => '' === trim($this->q) || null !== $this->searchRefusal() ? null : trim($this->q),
             ...$changes,
         ];
 
-        return $this->urlGenerator->generate(TicketListController::ROUTE, array_filter($query, static fn (?string $value): bool => null !== $value));
+        return $this->urlGenerator->generate($this->viewRoute(), array_filter($query, static fn (?string $value): bool => null !== $value));
+    }
+
+    /**
+     * The route of the view this toolbar narrows, which its URLs and its search form open.
+     */
+    public function viewRoute(): string
+    {
+        return $this->isWhoseTurnView ? WhoseTurnController::ROUTE : TicketListController::ROUTE;
     }
 
     /**
@@ -187,7 +203,7 @@ final class TicketFilters
         return array_filter([
             TicketListContext::TEAM_QUERY => $this->pickedTeam,
             TicketListContext::PROJECT_QUERY => $this->project,
-            TicketListContext::PERSON_QUERY => $this->person,
+            TicketListContext::PERSON_QUERY => $this->isWhoseTurnView ? '' : $this->person,
             TicketListContext::DONE_QUERY => $this->showsDone ? '1' : '',
         ], static fn (string $value): bool => '' !== $value);
     }
