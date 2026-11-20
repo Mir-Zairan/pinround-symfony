@@ -138,7 +138,7 @@ final class HomeQueriesServiceTest extends TestCase
         self::assertSame([self::OMAR, self::MIA], array_map(static fn (TurnGroup $group): string => $group->groupKey(), $page->groups));
         self::assertSame(7, $page->ticketCount);
         self::assertNull($page->nextCursor);
-        self::assertSame([[self::SHOP_PROJECT, null, $after, 21]], $rows->calls);
+        self::assertSame([[self::SHOP_PROJECT, null, $after, 21, null]], $rows->calls);
     }
 
     #[Test]
@@ -149,7 +149,7 @@ final class HomeQueriesServiceTest extends TestCase
 
         new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, $after);
 
-        self::assertSame([[null, null, $after, 21]], $rows->calls);
+        self::assertSame([[null, null, $after, 21, null]], $rows->calls);
     }
 
     /**
@@ -183,7 +183,53 @@ final class HomeQueriesServiceTest extends TestCase
 
         $groups = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, 'Customer', null)->groups;
 
-        self::assertSame([[], [[self::SHOP_PROJECT, 'Customer', null, 21]]], [$groups, $rows->calls]);
+        self::assertSame([[], [[self::SHOP_PROJECT, 'Customer', null, 21, null]]], [$groups, $rows->calls]);
+    }
+
+    #[Test]
+    public function itPassesTheSearchOnToTheRowsAndKeepsTheirSearchCap(): void
+    {
+        $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')], 1000, true);
+
+        $page = new HomeQueriesService($rows)->whoseTurn(self::lena(), self::SHOP_PROJECT, null, null, 'cart total');
+
+        self::assertSame([[self::SHOP_PROJECT, null, null, 21, 'cart total']], $rows->calls);
+        self::assertSame([1000, true], [$page->ticketCount, $page->isTicketCountCapped]);
+    }
+
+    #[Test]
+    public function aPageOfNoSearchIsNotCapped(): void
+    {
+        $page = new HomeQueriesService(new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')], 1))->whoseTurn(self::lena(), null, null, null);
+
+        self::assertSame([1, false], [$page->ticketCount, $page->isTicketCountCapped]);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function refusedSearchTexts(): iterable
+    {
+        yield 'an empty search' => [''];
+        yield 'a search with a leading space' => [' cart'];
+        yield 'a search of 201 characters' => [str_repeat('é', 201)];
+        yield 'a search that is not UTF-8' => ["cart\xC3"];
+        yield 'a search with a NUL' => ["cart\0"];
+    }
+
+    #[Test]
+    #[DataProvider('refusedSearchTexts')]
+    public function aSearchTheListWouldRefuseIsRefusedBeforeTheRowsAreRead(string $searchText): void
+    {
+        $rows = new FixedWhoseTurnRows([self::personGroup(self::OMAR, '2027-03-05 07:00:00')]);
+
+        try {
+            new HomeQueriesService($rows)->whoseTurn(self::lena(), null, null, null, $searchText);
+            self::fail('The read must be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('Whose turn is searched with a trimmed text of 1 to 200 characters, valid UTF-8 without NUL.', $exception->getMessage());
+        }
+        self::assertSame([], $rows->calls, 'No rows were read before the refusal.');
     }
 
     /**
@@ -223,7 +269,7 @@ final class HomeQueriesServiceTest extends TestCase
 
         new HomeQueriesService($rows)->whoseTurn(self::lena(), null, str_repeat('é', 100), null);
 
-        self::assertSame([[null, str_repeat('é', 100), null, 21]], $rows->calls);
+        self::assertSame([[null, str_repeat('é', 100), null, 21, null]], $rows->calls);
     }
 
     private static function personGroup(string $userId, string $oldestWaitingSince): TurnGroup

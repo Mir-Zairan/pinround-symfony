@@ -24,13 +24,20 @@ interface WhoseTurnRows
      * @param TurnGroupCursor|null $after           null to add the viewer's own group; else only the groups after it
      * @param int                  $otherGroupLimit at most this many groups besides the viewer's: the first in
      *                                              HomeQueries::whoseTurn's order, after $after
+     * @param string|null          $searchText      only the tickets the tickets list's search finds, as
+     *                                              ListFilter::isSearchText allows it, checked by the caller; null for
+     *                                              every ticket
      *
-     * @return array{groups: list<TurnGroup>, ticketCount: int} the groups in no promised order, each group's tickets the
-     *                                                          oldest wait first; and every ticket the viewer may see, of
-     *                                                          every group
+     * @return array{groups: list<TurnGroup>, ticketCount: int, isSearchCapped: bool} the groups in no promised order,
+     *                                                                                each group's tickets the oldest wait
+     *                                                                                first; every ticket the viewer may
+     *                                                                                see, of every group; and true when
+     *                                                                                the search found more than
+     *                                                                                TicketListStep::COUNT_CAP tickets, of
+     *                                                                                which only the best count
      *
      * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
      *                         than the tenant, before any query
      */
-    public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit): array;
+    public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit, ?string $searchText = null): array;
 }

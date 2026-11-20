@@ -16,19 +16,19 @@ use App\Insight\Application\WhoseTurnRows;
  */
 final class FixedWhoseTurnRows implements WhoseTurnRows
 {
-    /** @var list<array{?string, ?string, ?TurnGroupCursor, int}> the project id, opened group, cursor and limit of each call */
+    /** @var list<array{?string, ?string, ?TurnGroupCursor, int, ?string}> the project id, opened group, cursor, limit and search text of each call */
     public array $calls = [];
 
     /**
      * @param list<TurnGroup> $groups
      */
-    public function __construct(private readonly array $groups, private readonly int $ticketCount = 0)
+    public function __construct(private readonly array $groups, private readonly int $ticketCount = 0, private readonly bool $isSearchCapped = false)
     {
     }
 
-    public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit): array
+    public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit, ?string $searchText = null): array
     {
-        $this->calls[] = [$projectId, $openedGroup, $after, $otherGroupLimit];
+        $this->calls[] = [$projectId, $openedGroup, $after, $otherGroupLimit, $searchText];
         $groups = [];
         $otherGroups = 0;
         foreach ($this->groups as $group) {
@@ -39,6 +39,6 @@ final class FixedWhoseTurnRows implements WhoseTurnRows
             $groups[] = $group;
         }
 
-        return ['groups' => $groups, 'ticketCount' => $this->ticketCount];
+        return ['groups' => $groups, 'ticketCount' => $this->ticketCount, 'isSearchCapped' => $this->isSearchCapped];
     }
 }

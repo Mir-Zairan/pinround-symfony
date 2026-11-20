@@ -96,7 +96,7 @@ final class TicketListController extends AbstractController
         // The rail's frame, reloaded after a filter change, gets the rail alone and runs none of the list's queries.
         if (self::RAIL_FRAME_ID === $request->headers->get(self::TURBO_FRAME_HEADER)) {
             $response = $this->render('@Ticketing/_project_rail.html.twig', [
-                'rail' => $this->projectRail->viewOf($actor, $railTeamId, $project, $showsDone, $keptQuery),
+                'rail' => $this->projectRail->viewOf($actor, $railTeamId, $project, $showsDone, $keptQuery, self::ROUTE),
             ]);
             $response->setVary(self::TURBO_FRAME_HEADER, false);
 
@@ -111,7 +111,7 @@ final class TicketListController extends AbstractController
         // the list frame alone: no layout, menu, toolbar or rail, and none of their queries.
         $isFrameRequest = $request->headers->has(self::TURBO_FRAME_HEADER);
         $response = $this->render($isFrameRequest ? '@Ticketing/_list_frame.html.twig' : '@Ticketing/list.html.twig', [
-            'rail' => $isFrameRequest ? null : $this->projectRail->viewOf($actor, $railTeamId, $project, $showsDone, $keptQuery),
+            'rail' => $isFrameRequest ? null : $this->projectRail->viewOf($actor, $railTeamId, $project, $showsDone, $keptQuery, self::ROUTE),
             'heading' => null === $project ? self::ALL_TICKETS : $project->key().' · '.$project->name(),
             'totalLine' => TicketListText::totalLineOf($groups),
             'groups' => $this->groupViewsOf($groups, $actor->userId(), $project, $showsDone, $searchText, $assigneeId, $cursor, $collapsedStepIds),

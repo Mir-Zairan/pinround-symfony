@@ -44,11 +44,12 @@ final readonly class ProjectRail
     /**
      * @param TeamId|null           $teamId    the team RailTeamChoice::teamOf chose, one the viewer may see
      *                                         (TeamPermission::VIEW); null shows "All projects" alone
-     * @param array<string, string> $keptQuery the list's other filters (person, done, search), kept by every rail link
+     * @param array<string, string> $keptQuery the view's other filters (person, done, search), kept by every rail link
+     * @param string                $viewRoute the route of the view the rail links open: the list's or Whose turn's
      *
      * @return array{teamName: string|null, manageUrl: string|null, allProjectsUrl: string, isAllProjectsPressed: bool, allProjectsCount: array{number: int, label: string}|null, projects: list<array{key: string, name: string, count: array{number: int, label: string}, url: string, isPressed: bool}>, teamSwitch: list<array{name: string, url: string, isCurrent: bool}>}
      */
-    public function viewOf(ActorContext $viewer, ?TeamId $teamId, ?ProjectChoice $pickedProject, bool $showsDone, array $keptQuery): array
+    public function viewOf(ActorContext $viewer, ?TeamId $teamId, ?ProjectChoice $pickedProject, bool $showsDone, array $keptQuery, string $viewRoute): array
     {
         $roles = $viewer->roles();
         $isViewerInTeam = null !== $teamId && $roles->isInTeam($teamId);
@@ -56,7 +57,7 @@ final readonly class ProjectRail
             'teamName' => null,
             'manageUrl' => null,
             // A team the viewer is in stays on "All projects"; another team's rail came from its project alone.
-            'allProjectsUrl' => $this->listUrl([TicketListContext::TEAM_QUERY => $isViewerInTeam ? $teamId->toString() : null, ...$keptQuery]),
+            'allProjectsUrl' => $this->viewUrl($viewRoute, [TicketListContext::TEAM_QUERY => $isViewerInTeam ? $teamId->toString() : null, ...$keptQuery]),
             'isAllProjectsPressed' => null === $pickedProject,
             'allProjectsCount' => null,
             'projects' => [],
@@ -89,7 +90,7 @@ final readonly class ProjectRail
             'key' => $project->key(),
             'name' => $project->name(),
             'count' => self::countViewOf($count, $showsDone),
-            'url' => $this->listUrl([TicketListContext::PROJECT_QUERY => $project->key(), ...$keptQuery]),
+            'url' => $this->viewUrl($viewRoute, [TicketListContext::PROJECT_QUERY => $project->key(), ...$keptQuery]),
             'isPressed' => $pickedProject?->id() === $project->id(),
         ], $projects, $countOfEachProject);
 
@@ -97,7 +98,7 @@ final readonly class ProjectRail
         if (\count($ownTeams) > 1) {
             $rail['teamSwitch'] = array_map(fn (TeamSummary $ownTeam): array => [
                 'name' => $ownTeam->name(),
-                'url' => $this->listUrl([
+                'url' => $this->viewUrl($viewRoute, [
                     TicketListContext::TEAM_QUERY => $ownTeam->id()->toString(),
                     TicketListContext::DONE_QUERY => $keptQuery[TicketListContext::DONE_QUERY] ?? null,
                     TicketListContext::SEARCH_QUERY => $keptQuery[TicketListContext::SEARCH_QUERY] ?? null,
@@ -147,8 +148,8 @@ final readonly class ProjectRail
     /**
      * @param array<string, string|null> $query null drops a value
      */
-    private function listUrl(array $query): string
+    private function viewUrl(string $viewRoute, array $query): string
     {
-        return $this->urlGenerator->generate(TicketListController::ROUTE, array_filter($query, static fn (?string $value): bool => null !== $value));
+        return $this->urlGenerator->generate($viewRoute, array_filter($query, static fn (?string $value): bool => null !== $value));
     }
 }

@@ -27,12 +27,16 @@ interface HomeQueries
      *                                          the page opens none
      * @param TurnGroupCursor|null $after       null for the first page; a page's nextCursor for the page after it, which
      *                                          leaves out the viewer's own group
+     * @param string|null          $searchText  only the tickets the tickets list's search finds (the key or words of the
+     *                                          title), its best 1,000 at most (WhoseTurnPage::isTicketCountCapped);
+     *                                          trimmed, valid UTF-8 without NUL, 1 to 200 characters; null for every
+     *                                          ticket
      *
-     * @throws \InvalidArgumentException when the project id is not a canonical lowercase uuid, or the opened group or
-     *                                   the cursor's label is longer than 100 characters or not UTF-8, before any query
-     *                                   (a page answers 404)
+     * @throws \InvalidArgumentException when the project id is not a canonical lowercase uuid, the search text is not
+     *                                   one the tickets list takes, or the opened group or the cursor's label is
+     *                                   longer than 100 characters or not UTF-8, before any query (a page answers 404)
      * @throws \LogicException           when no transaction is open, no tenant is set, or the viewer is of another
      *                                   organization than the tenant, before any query
      */
-    public function whoseTurn(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after): WhoseTurnPage;
+    public function whoseTurn(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, ?string $searchText = null): WhoseTurnPage;
 }
