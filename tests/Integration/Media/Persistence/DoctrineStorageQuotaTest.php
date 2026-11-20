@@ -271,6 +271,9 @@ final class DoctrineStorageQuotaTest extends KernelTestCase
      * Rejected objects and used intents the sums must skip, then fresh statistics and visibility map. On a near-empty
      * table any index on organization_id costs the same, so the planner's pick follows whatever rows earlier tests left;
      * with rows only the status and open indexes can skip, the index-only scans are the cheaper plan.
+     * Each skipped object gets its own created_at, as real uploads do: with one shared time, B-tree deduplication
+     * shrinks med_object_status_created_at_idx to a couple of pages, and PostgreSQL 18 then costs its plain index scan
+     * below the index-only scan of med_object_status_bytes_idx.
      */
     private function addRowsTheQuotaSkips(string $organizationId, int $rowsPerTable): void
     {
@@ -281,7 +284,7 @@ final class DoctrineStorageQuotaTest extends KernelTestCase
             $migrator->transactional(static function (Connection $migrator) use ($organizationId, $rowsPerTable): void {
                 $migrator->executeStatement(
                     "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status, reject_reason)
-                     SELECT CAST(:organization AS uuid), gen_random_uuid(), 'uploads/skipped-' || n, 'image/png', n, CAST(:uploader AS uuid), CAST(:at AS timestamptz), 'rejected', 'Not a picture.'
+                     SELECT CAST(:organization AS uuid), gen_random_uuid(), 'uploads/skipped-' || n, 'image/png', n, CAST(:uploader AS uuid), CAST(:at AS timestamptz) - make_interval(secs => n), 'rejected', 'Not a picture.'
                      FROM generate_series(1, CAST(:rows AS int)) AS n",
                     ['organization' => $organizationId, 'uploader' => self::MIA, 'at' => self::AT, 'rows' => $rowsPerTable],
                 );
