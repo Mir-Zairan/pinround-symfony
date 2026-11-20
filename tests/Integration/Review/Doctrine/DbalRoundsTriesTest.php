@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Review\Doctrine;
 
+use App\Review\Domain\AreaId;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\RetakenScreenshotNotFound;
@@ -14,6 +15,7 @@ use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotTriesFull;
 use App\Review\Domain\ScreenshotTry;
+use App\Review\Infrastructure\Doctrine\DbalAreas;
 use App\Review\Infrastructure\Doctrine\DbalRounds;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -56,6 +58,10 @@ final class DbalRoundsTriesTest extends KernelTestCase
     private const string REPORT_SCREENSHOT = '0197a3c0-0000-7000-8000-00000014a034';
     private const string OTHER_ORGANIZATION_SCREENSHOT = '0197a3c0-0000-7000-8000-00000014a035';
     private const string CHECKOUT_PIN = '0197a3c0-0000-7000-8000-00000014a041';
+    private const string LATEST_TRY_PIN = '0197a3c0-0000-7000-8000-00000014a042';
+    private const string REVIEW_ROUND = '0197a3c0-0000-7000-8000-00000014a025';
+    private const string REVIEW_SCREENSHOT = '0197a3c0-0000-7000-8000-00000014a036';
+    private const string AREA = '0197a3c0-0000-7000-8000-00000014a061';
     private const string MEDIA = '0197a3c0-0000-7000-8000-00000014a051';
 
     private const string STARTED_AT = '2027-04-06 09:00:00+00:00';
@@ -253,6 +259,102 @@ final class DbalRoundsTriesTest extends KernelTestCase
             $this->chainRowsOfDraft(),
         );
         self::assertSame([], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchFirstColumn('SELECT id FROM rvw_pin WHERE id = ?', [self::CHECKOUT_PIN])), 'The pin went with its try.');
+    }
+
+    /**
+     * Rounds::save writes Round::share's latest tries: try 2 is unhooked from Checkout before Checkout and try 1 go in
+     * one statement, so the foreign key holds, and the try-1 pin goes with its try.
+     */
+    #[Test]
+    public function aSharedDraftKeepsOnlyTheLatestTryOfEachChainAndTheEarlierTriesGoWithTheirPins(): void
+    {
+        $otherRoundsBefore = $this->rowsOfOtherRounds();
+        $this->addTwoTriesOfCheckoutWithAPinOnTheLatest();
+        self::assertCount(4, $this->chainRowsOfDraft());
+
+        $this->changeDraft(static function (Round $draft): void {
+            $draft->share(new UserId(self::LENA), 2, self::savedAt());
+        });
+
+        self::assertSame([[self::BASKET, null], [self::tryId(2)->toString(), null]], $this->chainRowsOfDraft());
+        self::assertSame([self::LATEST_TRY_PIN], $this->pinIdsOf([self::CHECKOUT_PIN, self::LATEST_TRY_PIN]));
+        self::assertSame(
+            [self::BASKET, self::tryId(2)->toString()],
+            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $this->readDraft()->screenshots()),
+        );
+        self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
+    }
+
+    /**
+     * ADR-0048: the next round's "before" is the earlier round's "after". After the share, Round 2 holds only Checkout's
+     * try 2, so a Round 3 area compares with it and checks its pin, and an earlier try is no row a "before" could name.
+     */
+    #[Test]
+    public function aLaterRoundsBeforeIsTheSharedRoundsLatestTryAndNeverAnEarlierOne(): void
+    {
+        $this->addTwoTriesOfCheckoutWithAPinOnTheLatest();
+        $this->changeDraft(static function (Round $draft): void {
+            $draft->share(new UserId(self::LENA), 2, self::savedAt());
+        });
+
+        try {
+            $this->addReviewRoundThreeComparingWith(self::tryId(1)->toString());
+            self::fail('Try 1 is still stored, so a "before" could show it.');
+        } catch (ForeignKeyConstraintViolationException $refused) {
+            self::assertStringContainsString('rvw_area_before_screenshot_fkey', $refused->getMessage());
+        }
+
+        $this->addReviewRoundThreeComparingWith(self::tryId(2)->toString());
+
+        [$area, $pinToCheck, $beforeRoundNumber] = $this->committed(self::ACME_FOODS, fn (): array => [
+            $this->areas()->areaOf(new RoundId(self::REVIEW_ROUND), new AreaId(self::AREA)),
+            $this->areas()->pinToCheckOf(new RoundId(self::REVIEW_ROUND), new PinId(self::LATEST_TRY_PIN)),
+            $this->connection()->fetchOne('SELECT round.number FROM rvw_screenshot AS screenshot JOIN rvw_round AS round ON round.id = screenshot.round_id WHERE screenshot.id = ?', [self::tryId(2)->toString()]),
+        ]);
+        self::assertSame(self::tryId(2)->toString(), $area?->beforeScreenshotId()?->toString());
+        self::assertSame(2, $beforeRoundNumber);
+        self::assertSame(self::LATEST_TRY_PIN, $pinToCheck?->id()->toString());
+    }
+
+    private function addTwoTriesOfCheckoutWithAPinOnTheLatest(): void
+    {
+        $this->changeDraft(static function (Round $draft): void {
+            $lena = new UserId(self::LENA);
+            $draft->addScreenshot($lena, self::tryId(1), self::MEDIA, new ScreenshotId(self::CHECKOUT));
+            $draft->addScreenshot($lena, self::tryId(2), self::MEDIA, self::tryId(1));
+            $draft->replacePins($lena, self::tryId(2), [Pin::placedBy(new PinId(self::LATEST_TRY_PIN), 1, 50.0, 60.0, 'Total still cut off', $lena)]);
+        });
+    }
+
+    /**
+     * Review round 3 of the ticket with one area whose "after" is a new picture and whose "before" is $beforeScreenshotId;
+     * no command writes a review round yet, so its rows are added as the seed command adds them.
+     */
+    private function addReviewRoundThreeComparingWith(string $beforeScreenshotId): void
+    {
+        $this->roundRows()->addAllOf(self::ACME_FOODS, [
+            ['rvw_round', ['organization_id' => self::ACME_FOODS, 'id' => self::REVIEW_ROUND, 'ticket_id' => self::TICKET, 'number' => 3, 'kind' => 'review', 'owner_id' => self::LENA, 'shared_at' => self::SAVED_AT, 'state' => 'open', 'version' => 1, 'created_at' => self::SAVED_AT]],
+            ['rvw_screenshot', ['organization_id' => self::ACME_FOODS, 'id' => self::REVIEW_SCREENSHOT, 'round_id' => self::REVIEW_ROUND, 'media_id' => self::MEDIA, 'position' => 0, 'created_at' => self::SAVED_AT]],
+            ['rvw_area', ['organization_id' => self::ACME_FOODS, 'id' => self::AREA, 'round_id' => self::REVIEW_ROUND, 'name' => 'Checkout', 'position' => 0, 'before_screenshot_id' => $beforeScreenshotId, 'after_screenshot_id' => self::REVIEW_SCREENSHOT, 'created_at' => self::SAVED_AT]],
+        ]);
+    }
+
+    /**
+     * @param list<string> $pinIds
+     *
+     * @return list<string> those of $pinIds that are stored, in id order
+     */
+    private function pinIdsOf(array $pinIds): array
+    {
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => array_map(
+            static fn (mixed $id): string => \is_string($id) ? $id : '',
+            $this->connection()->fetchFirstColumn('SELECT id FROM rvw_pin WHERE id = ANY(CAST(? AS uuid[])) ORDER BY id', ['{'.implode(',', $pinIds).'}']),
+        ));
+    }
+
+    private function areas(): DbalAreas
+    {
+        return new DbalAreas($this->connection(), self::getContainer()->get(TenantContext::class));
     }
 
     private function seedRounds(): void
