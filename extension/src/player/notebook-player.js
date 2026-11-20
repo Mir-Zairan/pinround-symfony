@@ -12,7 +12,9 @@ import { StepRefusal, clearPageHighlight, stepRunnerFor } from './step-runner.js
 export const NOTEBOOK_PLAYER_TEXTS = Object.freeze({
     stopped: 'Stopped. Play to go on from this step.',
     notPlayed: 'Nothing ran.',
+    tabClosed: 'The tab is closed. Open the scenario\'s page and play again.',
     hostQuestion: (host) => `This scenario clicks and types on ${host}. It can change data there.`,
+    unconfirmedHost: (host) => `Stopped: this page is on ${host}, which you have not said yes to.`,
     brokenScenarios: (refusal) => `The scenarios in this notebook cannot be played. ${refusal} Ask Claude Code to save them again.`,
 });
 
@@ -50,8 +52,9 @@ const unwrappedScenarioOf = (scenario) => unwrappedFieldsOf(scenario, (field, va
  * nothing run, unless the scenario's start_url, each of its go_to urls and the tab's address (and the one it is
  * loading) are on an allowed host
  * and not on pinround, and the person said "Play anyway" for each of those hosts once. go_to checks its url again
- * before it navigates, and every page step checks the loaded tab before it acts. The page's highlight is cleared when
- * a run ends or stops, before Next and Back, and on close.
+ * before it navigates, and every page step and capture checks the loaded tab before it acts, also that the person said
+ * "Play anyway" for its host. A tab closed before the run is a refusal too. The page's highlight is cleared when a run
+ * ends or stops, before Next and Back, and on close.
  */
 export class NotebookPlayer {
     #scenarioPlayer;
@@ -215,7 +218,13 @@ export class NotebookPlayer {
                 return refusal;
             }
         }
-        const tab = await this.#browser.tabs.get(tabId);
+        let tab;
+        try {
+            tab = await this.#browser.tabs.get(tabId);
+        } catch {
+            // Chrome rejects for a tab that was closed after the popup found it; no other tab is played in its place.
+            return NOTEBOOK_PLAYER_TEXTS.tabClosed;
+        }
         const tabRefusal = tabRefusalOf(rules, tab);
         if (null !== tabRefusal) {
             return tabRefusal;
@@ -242,9 +251,23 @@ export class NotebookPlayer {
                 await this.#browser.tabs.update(tabId, { url });
             },
             captureToNotebook: () => this.#captureToNotebook(tabId, captureTexts(scenario.title, this.#scenarioPlayer.say ?? '')),
-            pageRefusalOf: (loadedTab) => tabRefusalOf(rules, loadedTab),
+            pageRefusalOf: async (loadedTab) => tabRefusalOf(rules, loadedTab) ?? await this.#unconfirmedRefusalOf(loadedTab),
             ...(undefined === this.#clock ? {} : { clock: this.#clock }),
         });
+
+        return null;
+    }
+
+    /**
+     * A click can take the tab to another allowed host nobody was asked about, and a run cannot stop to ask, so the
+     * step there is refused with that host named.
+     */
+    async #unconfirmedRefusalOf(loadedTab) {
+        for (const site of uniqueSites([loadedTab.url, loadedTab.pendingUrl])) {
+            if (!await isConfirmedSite(this.#storage, site)) {
+                return NOTEBOOK_PLAYER_TEXTS.unconfirmedHost(hostTextOf(site));
+            }
+        }
 
         return null;
     }

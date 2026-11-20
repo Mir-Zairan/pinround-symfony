@@ -36,7 +36,7 @@ const SYSTEM_CLOCK = Object.freeze({
 /**
  * @param {object} browser src/shared/browser.js, or a fake in tests
  * @param {{tabId: number, openUrl: (url: string) => Promise<void>, captureToNotebook: () => Promise<void>,
- *   pageRefusalOf: (tab: {url?: string, pendingUrl?: string}) => string|null,
+ *   pageRefusalOf: (tab: {url?: string, pendingUrl?: string}) => string|null|Promise<string|null>,
  *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} tab the tab the scenario plays in; openUrl
  *   navigates it after the caller's host checks, and captureToNotebook adds a screenshot of it to the notebook.
  *   pageRefusalOf is asked about the loaded tab, as tabs.get answers it, before each step acts on it or captures it,
@@ -65,7 +65,7 @@ export function stepRunnerFor(browser, { tabId, openUrl, captureToNotebook, page
                 if (null === tab) {
                     return { stopped: true, message: RUNNER_REFUSALS.notLoaded };
                 }
-                const refusal = pageRefusalOf(tab);
+                const refusal = await pageRefusalOf(tab);
                 if (null !== refusal) {
                     return { stopped: true, message: shownText(refusal, MESSAGE_MAX_LENGTH) };
                 }
@@ -135,7 +135,7 @@ async function runInPage(browser, tabId, step, clock, pageRefusalOf) {
         if (null === tab) {
             return { stopped: true, message: RUNNER_REFUSALS.notLoaded };
         }
-        const pageRefusal = pageRefusalOf(tab);
+        const pageRefusal = await pageRefusalOf(tab);
         if (null !== pageRefusal) {
             return { stopped: true, message: shownText(pageRefusal, MESSAGE_MAX_LENGTH) };
         }

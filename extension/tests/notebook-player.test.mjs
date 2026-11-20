@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { NOTEBOOK_PLAYER_TEXTS, NotebookPlayer, loadNotebookScenarios } from '../src/player/notebook-player.js';
 import { PLAYER_REFUSALS } from '../src/player/player.js';
 import { MAX_SCENARIOS, REFUSALS } from '../src/player/scenario-rules.js';
-import { PLAY_REFUSALS, addAllowedHost, isConfirmedSite, siteOf } from '../src/shared/allowed-hosts.js';
+import { PLAY_REFUSALS, addAllowedHost, confirmSite, isConfirmedSite, siteOf } from '../src/shared/allowed-hosts.js';
 import { ApiError, PinroundApi } from '../src/shared/api.js';
 import { fakeBrowser } from './fake-browser.mjs';
 
@@ -108,8 +108,10 @@ async function playerOf({
     onStepStart = () => undefined,
     clock = frozenClock(),
     isIconClicked = true,
+    hostOrigins = [],
+    activeTabId = async () => tab.id,
 } = {}) {
-    const fake = fakeBrowser({ tabs: [tab] });
+    const fake = fakeBrowser({ tabs: [tab], hostOrigins });
     if (isIconClicked) {
         fake.clickIcon(tab.id);
         await givePagePlayer(fake, answersBySay);
@@ -126,7 +128,7 @@ async function playerOf({
         browser,
         storage,
         pinroundOrigin,
-        activeTabId: async () => tab.id,
+        activeTabId,
         askToPlay: async (host) => {
             asked.push(host);
 
@@ -273,6 +275,7 @@ const REFUSED_RUNS = [
         asked: [],
     },
     { name: 'a tab whose address the extension may not see', options: { isIconClicked: false }, refusal: PLAY_REFUSALS.notAWebPage, asked: [] },
+    { name: 'a tab closed after the popup found it', options: { activeTabId: async () => SHOP_TAB.id + 1 }, refusal: NOTEBOOK_PLAYER_TEXTS.tabClosed, asked: [] },
     { name: 'a host the person did not say "Play anyway" for', options: { playAnyway: () => false }, refusal: NOTEBOOK_PLAYER_TEXTS.notPlayed, asked: ['localhost:8000', 'localhost:8000'] },
     {
         name: 'a second host, the tab\'s, the person said no to',
@@ -329,6 +332,52 @@ test('a step whose page has moved to a host not allowed stops before anything is
     assert.deepEqual(player.lastStop, { stepIndex: 1, message: PLAY_REFUSALS.notAWebPage });
     assert.notEqual(injectionsBeforeStep, null);
     assert.deepEqual(calls.injections.slice(injectionsBeforeStep).filter((injection) => 'clear highlight' !== injection), []);
+});
+
+/** The first scenario's 'Remove bread' runs after its 'Remove jam' took the tab to OTHER_SHOP_URL, allowed by localhost:*. */
+const OTHER_SHOP_URL = 'http://localhost:3000/basket';
+async function playerMovedToOtherShop({ isOtherShopConfirmed }) {
+    const moved = { injectionsBefore: null };
+    const made = await playerOf({
+        hostOrigins: ['http://localhost:3000'],
+        onStepStart: (step) => {
+            if ('Remove bread' === step.say) {
+                made.fake.navigate(SHOP_TAB.id, OTHER_SHOP_URL);
+                made.fake.finishLoading(SHOP_TAB.id);
+                moved.injectionsBefore = made.calls.injections.length;
+                moved.pagePlayerGiven = givePagePlayer(made.fake);
+            }
+        },
+    });
+    if (isOtherShopConfirmed) {
+        await confirmSite(made.storage, siteOf(OTHER_SHOP_URL));
+    }
+    await made.player.next();
+
+    return { ...made, moved };
+}
+
+test('a step whose page a click took to an allowed host nobody said yes to stops there, names it and runs nothing', async () => {
+    const { player, calls, asked, moved, fake, storage } = await playerMovedToOtherShop({ isOtherShopConfirmed: false });
+
+    assert.deepEqual(await player.play(), { ended: 'stopped' });
+
+    assert.deepEqual(asked, ['localhost:8000'], 'A run cannot stop to ask about the host it landed on.');
+    assert.deepEqual(player.lastStop, { stepIndex: 1, message: 'Stopped: this page is on localhost:3000, which you have not said yes to.' });
+    assert.equal(player.isRunning, false);
+    await moved.pagePlayerGiven;
+    assert.deepEqual(calls.injections.slice(moved.injectionsBefore).filter((injection) => 'clear highlight' !== injection), []);
+    assert.deepEqual((await pageOf(fake)).stepsRun, []);
+    assert.equal(await isConfirmedSite(storage, siteOf(OTHER_SHOP_URL)), false);
+});
+
+test('a step whose page a click took to an allowed host the person said yes to before runs there', async () => {
+    const { player, moved, fake } = await playerMovedToOtherShop({ isOtherShopConfirmed: true });
+
+    assert.deepEqual(await player.play(), { ended: 'done' });
+
+    await moved.pagePlayerGiven;
+    assert.deepEqual((await pageOf(fake)).stepsRun, ['Remove bread']);
 });
 
 test('go_to opens its address through tabs.update, and the next step runs once the new page has loaded', async () => {
