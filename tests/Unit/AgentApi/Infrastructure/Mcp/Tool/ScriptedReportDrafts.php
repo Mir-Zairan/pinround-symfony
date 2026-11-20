@@ -82,7 +82,7 @@ final class ScriptedReportDrafts implements ReportDrafts
         throw new \LogicException('add_report_screenshot deletes no draft.');
     }
 
-    public function send(string $draftId, UserId $owner, int $expectedVersion, \DateTimeImmutable $at): string
+    public function send(string $draftId, UserId $owner, int $expectedVersion, ?string $assigneeId, \DateTimeImmutable $at): string
     {
         throw new \LogicException('add_report_screenshot sends no draft.');
     }

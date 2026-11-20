@@ -22,6 +22,7 @@ use App\Ticketing\Api\NewTicketReportRefused;
 use App\Ticketing\Api\ProblemReport;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ReportedTicket;
+use App\Ticketing\Api\ReportGiveTo;
 use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketKeyQueries;
@@ -69,7 +70,7 @@ final class ReportController extends AbstractController
     public const string TEAM_UNKNOWN = 'Pick a team, or Not sure.';
     public const string PROJECT_UNKNOWN = 'Pick a project of that team.';
     public const string NO_PROJECT_YET = 'No project takes reports yet. Ask a team lead to add one.';
-    public const string ASSIGNEE_UNKNOWN = 'Pick someone from the list, or the team.';
+    public const string ASSIGNEE_UNKNOWN = ReportGiveTo::NOT_OFFERED;
     public const string TITLE_MISSING = 'Say what is wrong in one line.';
     /** With the key. */
     public const string CREATED_UNCHECKED = 'Ticket %s made. Nobody needs to check it.';
@@ -232,8 +233,7 @@ final class ReportController extends AbstractController
         $errors = null === $project ? ['project' => self::PROJECT_UNKNOWN] : [];
         $assignee = null;
         if ('' !== $input->assigneeId) {
-            $offered = null === $team ? [] : array_column($team->giveTo, 'id');
-            if (\in_array($input->assigneeId, $offered, true)) {
+            if (true === $team?->giveTo?->offers($input->assigneeId)) {
                 $assignee = new UserId($input->assigneeId);
             } else {
                 $errors['assignee'] = self::ASSIGNEE_UNKNOWN;
@@ -357,7 +357,7 @@ final class ReportController extends AbstractController
      */
     private static function defaultInputOf(array $teams): ReportFormInput
     {
-        $ownTeam = array_values(array_filter($teams, static fn (ReportTeamChoice $choice): bool => $choice->isOwn))[0] ?? null;
+        $ownTeam = array_values(array_filter($teams, static fn (ReportTeamChoice $choice): bool => $choice->isOwn()))[0] ?? null;
         if (null !== $ownTeam) {
             return new ReportFormInput(teamId: $ownTeam->id->toString(), projectId: $ownTeam->projects[0]->id());
         }

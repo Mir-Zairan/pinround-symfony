@@ -36,7 +36,8 @@ final class ReportDraftRefused extends \DomainException
     }
 
     /**
-     * @param string $reason the text to show the person, one of this class's constants or a RoundRefused MEDIA_ text
+     * @param string $reason the text to show the person, one of this class's constants, a RoundRefused MEDIA_ text or
+     *                       Ticketing's ReportGiveTo::NOT_OFFERED
      */
     public static function because(string $reason, ?\Throwable $cause = null): self
     {

@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/report.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report-drafts.css') }}">
 {% endblock %}
 
@@ -58,6 +59,25 @@
                     </label>
                 </twig:Card>
             {% endfor %}
+
+            {#- Report a problem's "Give it to" for the project's team; only Send reads it, a draft does not keep it. -#}
+            {% if giveTo %}
+                <fieldset class="report__chips">
+                    <legend class="report__label">Give it to</legend>
+                    <div class="report__chip-row">
+                        <label class="chip report__chip">
+                            <input class="visually-hidden" type="radio" name="assignee_id" value=""{% if not giveTo.offers(assigneeId) %} checked{% endif %}>
+                            The team ({{ giveTo.leadFirstName }} decides)
+                        </label>
+                        {% for person in giveTo.people %}
+                            <label class="chip report__chip">
+                                <input class="visually-hidden" type="radio" name="assignee_id" value="{{ person.id }}"{% if person.id == assigneeId %} checked{% endif %}>
+                                {{ person.label }}
+                            </label>
+                        {% endfor %}
+                    </div>
+                </fieldset>
+            {% endif %}
 
             {#- Save changes comes first, so Enter in a field saves rather than sends. Send saves what is typed, then sends it. -#}
             <p class="report-draft__actions">
