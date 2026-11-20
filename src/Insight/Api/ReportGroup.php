@@ -2,9 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Insight\Application\MyReports;
-
-use App\Insight\Api\MyReport;
+namespace App\Insight\Api;
 
 /**
  * The groups of My reports, in the page's order (my-reports.md, Groups).

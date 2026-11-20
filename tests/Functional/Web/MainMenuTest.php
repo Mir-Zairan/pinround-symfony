@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Ticketing\UI\TicketListController;
 use App\Web\UI\Controller\Admin\AdminShellController;
+use App\Web\UI\Controller\MyReportsController;
 use App\Web\UI\Controller\TeamController;
 use App\Web\UI\Navigation\MainMenu;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -20,8 +21,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The header's main menu, "Report a problem" and the bell for each person of Acme Foods, which has the teams Shop and
- * Mobile, both led by Lena. Team links the team page by its slug, Tickets the tickets list and Admin the admin area;
- * My reports has no route yet, so it is left out (P14.T15 builds it).
+ * Mobile, both led by Lena. Team links the team page by its slug, Tickets the tickets list, My reports the reports
+ * page and Admin the admin area.
  */
 final class MainMenuTest extends WebTestCase
 {
@@ -47,10 +48,10 @@ final class MainMenuTest extends WebTestCase
      */
     public static function people(): iterable
     {
-        yield 'Lena, Admin and lead of Shop and Mobile' => ['Lena', ['Home', 'Tickets', 'Teams', 'Admin'], ['Mobile', 'Shop'], true];
-        yield 'Omar, member of Shop and Mobile' => ['Omar', ['Home', 'Tickets', 'Teams'], ['Mobile', 'Shop'], true];
-        yield 'Mia, member of Shop' => ['Mia', ['Home', 'Tickets', 'Team'], [], true];
-        yield 'Raj, Manager and viewer of Shop' => ['Raj', ['Home', 'Tickets', 'Team'], [], true];
+        yield 'Lena, Admin and lead of Shop and Mobile' => ['Lena', ['Home', 'Tickets', 'My reports', 'Teams', 'Admin'], ['Mobile', 'Shop'], true];
+        yield 'Omar, member of Shop and Mobile' => ['Omar', ['Home', 'Tickets', 'My reports', 'Teams'], ['Mobile', 'Shop'], true];
+        yield 'Mia, member of Shop' => ['Mia', ['Home', 'Tickets', 'My reports', 'Team'], [], true];
+        yield 'Raj, Manager and viewer of Shop' => ['Raj', ['Home', 'Tickets', 'My reports', 'Team'], [], true];
         yield 'Sara, Admin with no team' => ['Sara', ['Home', 'Admin'], [], false];
         yield 'Noor, Manager with no team' => ['Noor', ['Home', 'Tickets'], [], false];
     }
@@ -85,7 +86,7 @@ final class MainMenuTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $menu = $page->filter('header nav[aria-label="Main"]');
         self::assertSame(
-            ['Home → / (current)', 'Tickets → /tickets', 'Mobile → /teams/mobile', 'Shop → /teams/shop', 'Admin → /admin'],
+            ['Home → / (current)', 'Tickets → /tickets', 'My reports → /my-reports', 'Mobile → /teams/mobile', 'Shop → /teams/shop', 'Admin → /admin'],
             $menu->filter('a')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href').('page' === $link->attr('aria-current') ? ' (current)' : '')),
         );
         self::assertCount(2, $menu->filter('.nav-menu__list > a.menu__item[data-menu-target="item"]'), 'the team links are the disclosure\'s items');
@@ -138,7 +139,21 @@ final class MainMenuTest extends WebTestCase
         self::assertNotNull($adminRoute);
         self::assertSame(AdminShellController::class.'::openFirstTab', $adminRoute->getDefault('_controller'));
         self::assertSame('/admin', $adminRoute->getPath());
-        self::assertNull($routes->get(MainMenu::MY_REPORTS_ROUTE), MainMenu::MY_REPORTS_ROUTE.' has a page now: show My reports again and expect it here (P14.T15)');
+        $myReportsRoute = $routes->get(MainMenu::MY_REPORTS_ROUTE);
+        self::assertNotNull($myReportsRoute);
+        self::assertSame(MyReportsController::class, $myReportsRoute->getDefault('_controller'));
+        self::assertSame('/my-reports', $myReportsRoute->getPath());
+    }
+
+    #[Test]
+    public function onMyReportsMyReportsIsTheCurrentPage(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Mia']);
+
+        $page = $this->client->request('GET', '/my-reports');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['My reports'], $page->filter('header nav[aria-label="Main"] a[aria-current="page"]')->each(static fn (Crawler $link): string => $link->text()));
     }
 
     #[Test]

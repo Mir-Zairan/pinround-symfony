@@ -1,0 +1,67 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}My reports · pinround{% endblock %}
+
+{% macro rows(rows) %}
+    {# No hover prefetch: each link would cost a ticket page's queries. #}
+    <ul class="my-reports__rows" data-turbo-prefetch="false">
+        {% for row in rows %}
+            <li class="my-reports__row">
+                <a class="my-reports__link" href="{{ row.url }}"><span class="my-reports__key">{{ row.key }}</span> · <span class="my-reports__title">{{ row.title }}</span></a>
+            </li>
+        {% endfor %}
+    </ul>
+{% endmacro %}
+
+{% block main %}
+    {%- set labels = {needs_you: 'Needs you', stuck: 'Stuck', moving: 'Moving'} -%}
+    {%- set hints = {needs_you: 'Someone waits for your answer', stuck: 'No change for more than 7 days. A ping can help.', moving: 'Nothing to do. Just follow along.'} -%}
+    <div class="my-reports">
+        <header class="my-reports__header">
+            <h1>My reports</h1>
+        </header>
+
+        {% if not hasReports %}
+            {% if isFirstPage %}
+                <twig:EmptyState message="When you report a problem, you can follow it here until it is fixed." />
+            {% else %}
+                <twig:EmptyState message="No more reports.">
+                    <twig:block name="action"><twig:Button variant="text" size="sm" href="{{ firstPageUrl }}" class="my-reports__first-page">Back to your newest reports</twig:Button></twig:block>
+                </twig:EmptyState>
+            {% endif %}
+        {% else %}
+            {% for section in sections %}
+                <section class="my-reports__group my-reports__group--{{ section.group }}" aria-labelledby="my-reports-{{ section.group }}">
+                    <header class="my-reports__group-header">
+                        <h2 id="my-reports-{{ section.group }}" class="my-reports__group-name">{{ labels[section.group] }} <span class="my-reports__count">{{ section.count|number_format }}</span></h2>
+                        <p class="my-reports__hint">{{ hints[section.group] }}</p>
+                    </header>
+                    {{ _self.rows(section.shown) }}
+                    {% if section.folded is not empty %}
+                        <details class="my-reports__more">
+                            <summary>Show {{ section.folded|length|number_format }} more</summary>
+                            {{ _self.rows(section.folded) }}
+                        </details>
+                    {% endif %}
+                </section>
+            {% endfor %}
+            {% if doneRows is not empty %}
+                <details class="my-reports__done">
+                    <summary>Show {{ doneRows|length|number_format }} done</summary>
+                    {{ _self.rows(doneRows) }}
+                </details>
+            {% endif %}
+        {% endif %}
+
+        {% if nextPageUrl or (hasReports and not isFirstPage) %}
+            <nav class="my-reports__pages" aria-label="Pages of reports">
+                {% if hasReports and not isFirstPage %}
+                    <twig:Button variant="text" size="sm" href="{{ firstPageUrl }}" class="my-reports__first-page">Back to your newest reports</twig:Button>
+                {% endif %}
+                {% if nextPageUrl %}
+                    <twig:Button variant="text" size="sm" href="{{ nextPageUrl }}" class="my-reports__next-page">Show more</twig:Button>
+                {% endif %}
+            </nav>
+        {% endif %}
+    </div>
+{% endblock %}
