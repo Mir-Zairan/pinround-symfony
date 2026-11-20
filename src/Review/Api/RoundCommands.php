@@ -116,6 +116,19 @@ interface RoundCommands
     public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void;
 
     /**
+     * Marks a pin on an earlier try of a screenshot "Fixed on try N" or "Still wrong" (ADR-0048), or clears the mark with
+     * null. A pin on the latest try of its screenshot takes no mark.
+     *
+     * @param string      $pinId   a pin of the draft
+     * @param string|null $verdict VerdictCommands::PIN_FIXED, VerdictCommands::PIN_STILL_WRONG or null
+     *
+     * @throws RoundRefused    NOT_FOUND or PIN_NOT_FOUND (isNotFound); UNKNOWN_PIN_VERDICT (isInvalidContent); a pin
+     *                         on the latest try; DRAFT_CHANGED; or when the draft is shared (isReadOnly); nothing is saved
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function setDraftPinVerdict(string $roundId, UserId $ownerId, string $pinId, ?string $verdict, \DateTimeImmutable $at): void;
+
+    /**
      * Sets the owner's verdict on the picture and, unless $summary is null, its summary (at most 600 characters,
      * trimmed; a blank one is none), in one save over the version the draft was read at: the title stays the one
      * stored, so a title saved by another request in between is never put back, as that save is refused as
