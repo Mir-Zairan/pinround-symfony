@@ -307,7 +307,7 @@ test('a capture into my draft round on a ticket sends the pins with the picture 
   await expect(testPage.locator('pinround-overlay')).toHaveCount(0);
 });
 
-test('a capture pinround refuses leaves the pins on the page and saves nothing', async ({ context, testPage }) => {
+test('a capture pinround refuses leaves the pins on the page, saves nothing, and puts focus back in the overlay', async ({ context, testPage }) => {
   await answerPinround(context, { uploadRefusal: 'This token may not make reports.' });
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
@@ -323,6 +323,9 @@ test('a capture pinround refuses leaves the pins on the page and saves nothing',
   await expect(testPage.locator('pinround-overlay')).toHaveCount(1);
   await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Total is wrong']);
   expect(await storedReportPins(popup)).toEqual([]);
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
+  await testPage.keyboard.press('Tab');
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Pin 1: Total is wrong' });
 });
 
 test('pressing "Pin this page" twice keeps one overlay with its pins', async ({ context, testPage }) => {
@@ -496,6 +499,29 @@ test('the page does not scroll under the overlay by wheel or keys, a long note s
   await expect.poll(scrollY).toBeGreaterThan(0);
 });
 
+test('Ctrl+wheel over the overlay is left to the browser to zoom, and a plain wheel is still cancelled', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await PageInspector.of(context, testPage);
+  await testPage.evaluate(() => {
+    const wheels: Array<[boolean, boolean]> = [];
+    (window as unknown as { pageWheels: typeof wheels }).pageWheels = wheels;
+    window.addEventListener('wheel', (event) => wheels.push([event.ctrlKey, event.defaultPrevented]));
+  });
+  const pageWheels = () => testPage.evaluate(() => (window as unknown as { pageWheels: Array<[boolean, boolean]> }).pageWheels);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
+
+  await testPage.mouse.move(400, 300);
+  await testPage.mouse.wheel(0, 100);
+  await testPage.keyboard.down('Control');
+  await testPage.mouse.wheel(0, 100);
+  await testPage.keyboard.up('Control');
+  await testPage.mouse.wheel(0, 100);
+
+  await expect.poll(pageWheels).toEqual([[false, true], [true, false], [false, true]]);
+});
+
 test('the short hint shows until the first pin and again once the last is gone, and the keys stay in the overlay\'s description', async ({ context, testPage }) => {
   await answerPinround(context);
   const popup = await pairedPopupFor(context, testPage);
@@ -583,6 +609,135 @@ test('the page\'s own script can neither reach the overlay nor drop, change or r
   const [pins] = await storedReportPins(popup);
   expect(pins.map((stored) => stored.note)).toEqual(['Price is wrong', 'Logo is cut off']);
   expect(storedPictures.length).toBe(1);
+});
+
+interface PageWrites {
+  beforeinputs: number;
+  wrote: boolean[];
+}
+
+const pageWritesOf = (page: Page) => page.evaluate(() => (window as unknown as { pageWrites: PageWrites }).pageWrites);
+
+test('a key whose beforeinput the page cancelled does not let the page\'s execCommand into the note, then or later', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await PageInspector.of(context, testPage);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await testPage.mouse.click(400, 300);
+  await testPage.keyboard.type('Logo is cut off');
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
+
+  // The page writes the cancelled key's own text over the whole note, so only the cancel tells it from the person's key.
+  await testPage.evaluate(() => {
+    const writes: PageWrites = { beforeinputs: 0, wrote: [] };
+    (window as unknown as { pageWrites: PageWrites }).pageWrites = writes;
+    window.addEventListener('beforeinput', (event) => {
+      writes.beforeinputs += 1;
+      event.preventDefault();
+      // Queued before any timer the overlay starts on this beforeinput, so it runs first.
+      setTimeout(() => writes.wrote.push(document.execCommand('selectAll') && document.execCommand('insertText', false, 'X')), 0);
+    }, { capture: true });
+  });
+  await testPage.keyboard.press('X');
+  await expect.poll(async () => (await pageWritesOf(testPage)).wrote).toEqual([true]);
+  await testPage.evaluate(() => {
+    (window as unknown as { pageWrites: PageWrites }).pageWrites.wrote.push(document.execCommand('selectAll') && document.execCommand('insertText', false, 'X'));
+  });
+
+  expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 1, wrote: [true, true] });
+  expect((await inspector.node('textbox', 'Note for pin 1')).value).toBe('Logo is cut off');
+  expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
+  expect(await inspector.focused()).toEqual({ role: 'textbox', name: 'Note for pin 1' });
+});
+
+test('a note key\'s beforeinput stops at the overlay, so the page cannot cancel it after the overlay heard it and write instead', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await PageInspector.of(context, testPage);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await testPage.mouse.click(400, 300);
+  await testPage.keyboard.type('Logo is cut off');
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
+  await testPage.evaluate(() => {
+    const writes: PageWrites = { beforeinputs: 0, wrote: [] };
+    (window as unknown as { pageWrites: PageWrites }).pageWrites = writes;
+    window.addEventListener('beforeinput', (event) => {
+      writes.beforeinputs += 1;
+      event.preventDefault();
+      writes.wrote.push(document.execCommand('insertText', false, ' Pay to another account'));
+    });
+  });
+
+  await testPage.keyboard.press('X');
+
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut offX']);
+  expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 0, wrote: [] });
+  expect((await inspector.node('textbox', 'Note for pin 1')).value).toBe('Logo is cut offX');
+});
+
+test('a key into a full note brings a beforeinput with no input, and that lets no execCommand of the page in, before or after the overlay\'s timer', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await PageInspector.of(context, testPage);
+  const fullNote = 'Prix faux, 価格が違う. '.repeat(60).slice(0, 1000);
+  expect(fullNote.length).toBe(1000);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await testPage.mouse.click(400, 300);
+  await testPage.keyboard.insertText(fullNote);
+  await expect.poll(async () => (await inspector.node('textbox', 'Note for pin 1')).value).toBe(fullNote);
+  await testPage.evaluate(() => {
+    const writes: PageWrites = { beforeinputs: 0, wrote: [] };
+    (window as unknown as { pageWrites: PageWrites }).pageWrites = writes;
+    window.addEventListener('beforeinput', () => {
+      writes.beforeinputs += 1;
+      if (writes.beforeinputs === 1) {
+        // Queued before the overlay's own timer on this beforeinput, so it runs first.
+        setTimeout(() => writes.wrote.push(document.execCommand('delete')), 0);
+      }
+    }, { capture: true });
+  });
+
+  await testPage.keyboard.press('X');
+  await expect.poll(async () => (await pageWritesOf(testPage)).wrote).toEqual([true]);
+  await testPage.keyboard.press('X');
+  // After the overlay's timer on the second key, the page writes the key's own kind and text over the whole note.
+  await testPage.evaluate(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    (window as unknown as { pageWrites: PageWrites }).pageWrites.wrote.push(document.execCommand('selectAll') && document.execCommand('insertText', false, 'X'));
+  });
+
+  expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 2, wrote: [true, true] });
+  const note = (await inspector.node('textbox', 'Note for pin 1')).value;
+  expect({ length: note.length, isTheFullNote: note === fullNote }).toEqual({ length: 1000, isTheFullNote: true });
+});
+
+test('an execCommand the page runs while a typed key\'s input is under way undoes that key and leaves the note as it was', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await PageInspector.of(context, testPage);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await testPage.mouse.click(400, 300);
+  await testPage.keyboard.type('Logo is cut off');
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
+  await testPage.evaluate(() => {
+    const writes: PageWrites = { beforeinputs: 0, wrote: [] };
+    (window as unknown as { pageWrites: PageWrites }).pageWrites = writes;
+    let hasWritten = false;
+    window.addEventListener('input', () => {
+      if (!hasWritten) {
+        hasWritten = true;
+        writes.wrote.push(document.execCommand('insertText', false, ' Pay to another account'));
+      }
+    }, { capture: true });
+  });
+
+  await testPage.keyboard.press('X');
+
+  await expect.poll(async () => (await pageWritesOf(testPage)).wrote).toEqual([true]);
+  await expect.poll(async () => (await inspector.node('textbox', 'Note for pin 1')).value).toBe('Logo is cut off');
+  expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
+  await testPage.keyboard.type(', 価格');
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off, 価格']);
 });
 
 test('the 101st pin is refused with a plain message and the 100 stay', async ({ context, testPage }) => {

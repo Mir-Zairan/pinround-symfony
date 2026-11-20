@@ -2,13 +2,15 @@
 // isolated world, where the popup reads them through executeScript (globalThis.pinroundOverlay) and checks them again.
 // The shadow root is closed and only this script holds it, so the page's script cannot reach the pins or read the
 // notes through the DOM, and every handler ignores an event the page dispatched (isTrusted false) or, for a note,
-// wrote with document.execCommand. The page can still remove or hide the host element. The root holds every style, so
-// none reach the page, and :host's !important declarations win over the page's own. Notes only ever go in through
-// textContent.
+// wrote with document.execCommand, but for the gaps the note guard below names. The page can still remove or hide the
+// host element. The root holds every style, so none reach the page, and :host's !important declarations win over the
+// page's own. Notes only ever go in through textContent.
+// The page still sees every key typed into a note: its capture-phase keydown and beforeinput listeners on window and
+// document run before the shadow root, so a page can log a note as it is typed. Only a note editor in an iframe of the
+// extension's own origin would hide the keys.
 (() => {
     if (undefined !== globalThis.pinroundOverlay) {
         globalThis.pinroundOverlay.show();
-        globalThis.pinroundOverlay.focusSurface();
 
         return;
     }
@@ -17,11 +19,11 @@
     const SHIFT_STEP_PERCENT = 10;
     // Stopped at the shadow root, so the page's listeners on the way up never hear a key or click meant for a pin; its
     // capture-phase listeners on window and document still run first.
-    const OVERLAY_EVENTS = ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keyup', 'keypress', 'input'];
+    const OVERLAY_EVENTS = ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input'];
     // A pin is a percent of the viewport, so the page must not scroll under it while the overlay is open, or the pin
-    // lands on other content in the picture. Wheel and touch scrolling are blocked over the whole overlay, and these
-    // keys everywhere but in the note field and Space on a button, which presses it. The page's own script, and a drag
-    // on the page's scrollbar, can still scroll it.
+    // lands on other content in the picture. Wheel (not Ctrl+wheel, which zooms) and touch scrolling are blocked over
+    // the whole overlay, and these keys everywhere but in the note field and Space on a button, which presses it. The
+    // page's own script, and a drag on the page's scrollbar, can still scroll it.
     const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
     // The ring of FR-RND-02 as assets/styles/review.css draws it: hollow, dark outside, white inside, number tab.
     const STYLES = `
@@ -314,17 +316,34 @@
             dropPin({ ...crosshairAt }, surface);
         }
     }));
-    // The page's document.execCommand('insertText') writes into the focused field with a trusted input event, but with
-    // no beforeinput first, as typing, pasting and composing have. So only an input right after a trusted beforeinput
-    // counts, which also leaves out an input the page dispatched, and any other is undone.
-    let isNoteInputFromPerson = false;
-    noteField.addEventListener('beforeinput', (event) => {
-        isNoteInputFromPerson = event.isTrusted;
+    // The page's document.execCommand writes into the focused field with a trusted input event, but with no beforeinput
+    // first, as typing, pasting and composing have. So a note takes an input only when it is the first after a trusted
+    // beforeinput, in that task, of the same kind, and with its text or a piece of it (Chrome splits text at line breaks
+    // into several inputs, and cuts it at maxLength); any other input is undone. That also keeps out an execCommand the
+    // page runs from its capture-phase input listener while the person's input is under way. The beforeinput is heard
+    // on the shadow root, where it stops, so no page listener runs after it: one the page cancelled lets nothing in.
+    // Two gaps stay until the note editor moves into an iframe of the extension: after a beforeinput that brings no
+    // input (Backspace at the start of the note, a key into a full one), an execCommand of that kind and text that the
+    // page queued for the same task still counts; and a deletion the page adds to the person's own goes through.
+    /** @type {null|{inputType: string, text: string}} */
+    let personEdit = null;
+    shadow.addEventListener('beforeinput', (event) => {
+        if (noteField !== event.target || !event.isTrusted || event.defaultPrevented) {
+            return;
+        }
+        const edit = { inputType: event.inputType, text: event.data ?? '' };
+        personEdit = edit;
+        setTimeout(() => {
+            if (personEdit === edit) {
+                personEdit = null;
+            }
+        }, 0);
     });
-    noteField.addEventListener('input', () => {
-        const isFromPerson = isNoteInputFromPerson;
-        isNoteInputFromPerson = false;
-        if (!isFromPerson) {
+    noteField.addEventListener('input', (event) => {
+        const edit = personEdit;
+        personEdit = null;
+        const isPersonEdit = null !== edit && null !== editing && edit.inputType === event.inputType && (null === event.data || edit.text.includes(event.data));
+        if (!isPersonEdit) {
             noteField.value = editing?.pin.note ?? '';
 
             return;
@@ -358,7 +377,11 @@
     }));
     // On the host: Chrome makes a wheel cancelable only over an element with a blocking listener, and a shadow root is
     // no element. The host's listener sees the host as the target, so the note field is found by the pointer over it.
+    // Ctrl+wheel is the browser's zoom, which keeps every pin in place, since a pin is a percent of the viewport.
     host.addEventListener('wheel', onlyTrusted((event) => {
+        if (event.ctrlKey) {
+            return;
+        }
         event.preventDefault();
         if (noteField.matches(':hover')) {
             noteField.scrollTop += event.deltaY;
@@ -369,12 +392,11 @@
     }
 
     globalThis.pinroundOverlay = {
+        /** Puts the overlay back in the page, if it is out, and focus on its surface, where a keyboard user starts. */
         show() {
             if (!host.isConnected) {
                 document.documentElement.append(host);
             }
-        },
-        focusSurface() {
             surface.focus();
         },
         /** Takes the overlay out of the page until show(), and answers the pins once the page is painted without it. */
@@ -389,5 +411,4 @@
     };
     placeAt(crosshair, crosshairAt);
     globalThis.pinroundOverlay.show();
-    surface.focus();
 })();
