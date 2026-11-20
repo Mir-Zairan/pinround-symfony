@@ -4,7 +4,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { NOTEBOOK_PLAYER_TEXTS } from '../src/player/notebook-player.js';
 import { ScenarioPanel } from '../src/popup/scenario-panel.js';
 import { focusFirstVisible } from '../src/popup/visible-focus.js';
-import { ALLOWED_HOSTS_KEY } from '../src/shared/allowed-hosts.js';
+import { ALLOWED_HOSTS_KEY, isConfirmedSite, siteOf } from '../src/shared/allowed-hosts.js';
 import { fakeBrowser } from './fake-browser.mjs';
 import { PINROUND_ORIGIN } from './fake-pinround.mjs';
 
@@ -262,7 +262,7 @@ async function popupWith({ allowedHosts = ['http://shop.acme-foods.test'] } = {}
     }, ['capture', 'target']);
     const focusedId = () => document.activeElement.id;
 
-    return { document, element, panel, statuses, focusedId };
+    return { document, element, panel, statuses, focusedId, browser };
 }
 
 test('focusFirstVisible focuses the first candidate that can be seen, skipping hidden and missing ones', () => {
@@ -335,7 +335,7 @@ test('hiding the scenarios leaves focus alone when it is outside them', async ()
 });
 
 test('another notebook chosen while the host question waits closes it as Cancel, and the new player shows no question', async () => {
-    const { element, panel } = await popupWith();
+    const { element, panel, statuses, browser } = await popupWith();
     await panel.showFor(CHECKOUT);
     element('player-play').click();
     await settle();
@@ -349,4 +349,47 @@ test('another notebook chosen while the host question waits closes it as Cancel,
     assert.equal(element('scenario-title').textContent, 'Expired coupon');
     assert.equal(element('host-question').hidden, true);
     assert.equal(element('player-play').disabled, false);
+    assert.equal(await isConfirmedSite(browser.storage.local, siteOf(START_URL)), false, 'The question was answered as Cancel.');
+    assert.deepEqual(browser.injectedFiles, []);
+    assert.equal(element('player-say').textContent, '');
+    assert.deepEqual(statuses, [{ message: '', isError: false }], 'The old run, cleared on Play, shows no line of its own.');
+});
+
+test('Play anyway hides the question, keeps focus on Stop, and the run goes on', async () => {
+    const { element, panel, browser, focusedId } = await popupWith();
+    await panel.showFor(CHECKOUT);
+    element('player-play').focus();
+    element('player-play').click();
+    await settle();
+    assert.equal(focusedId(), 'host-question-cancel');
+
+    element('host-question-play').click();
+
+    assert.equal(element('host-question').hidden, true);
+    assert.equal(focusedId(), 'player-stop-run');
+    assert.equal(element('player-stop-run').checkVisibility(), true);
+    await settle();
+    assert.equal(await isConfirmedSite(browser.storage.local, siteOf(START_URL)), true);
+    assert.equal(element('player-say').textContent, 'Open Apply a coupon');
+    assert.notDeepEqual(browser.injectedFiles.filter((injection) => SHOP_TAB.id === injection.tabId), []);
+});
+
+test('Cancel hides the question, runs no step, and gives back Play with focus on a control that is seen', async () => {
+    const { element, panel, statuses, browser, focusedId } = await popupWith();
+    await panel.showFor(CHECKOUT);
+    element('player-play').focus();
+    element('player-play').click();
+    await settle();
+
+    element('host-question-cancel').click();
+    await settle();
+
+    assert.equal(element('host-question').hidden, true);
+    assert.equal(element('player-play').disabled, false);
+    assert.equal(focusedId(), 'player-play');
+    assert.equal(element('player-play').checkVisibility(), true);
+    assert.equal(await isConfirmedSite(browser.storage.local, siteOf(START_URL)), false);
+    assert.deepEqual(browser.injectedFiles, []);
+    assert.equal(element('player-say').textContent, '');
+    assert.deepEqual(statuses.at(-1), { message: NOTEBOOK_PLAYER_TEXTS.notPlayed, isError: true });
 });
