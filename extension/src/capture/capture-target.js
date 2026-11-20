@@ -13,7 +13,16 @@ const MAX_ID_LENGTH = 64;
 const MAX_SHOWN_TITLE_LENGTH = 120;
 
 /** A remembered target pinround no longer offers; the popup forgets it and asks again. */
-export class TargetGoneError extends Error {}
+export class TargetGoneError extends Error {
+    /**
+     * @param {string} message
+     * @param {CaptureTarget} target the target the capture was sent to, which may no longer be the one the picker shows
+     */
+    constructor(message, target) {
+        super(message);
+        this.target = target;
+    }
+}
 
 /**
  * @typedef {{kind: 'new-report'} | {kind: 'ticket', ticketKey: string} | {kind: 'notebook', notebookId: string, title: string}} CaptureTarget

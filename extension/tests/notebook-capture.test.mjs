@@ -83,7 +83,7 @@ test('another person\'s notebook, or one gone, is refused as gone and nothing is
     const browser = await browserWithPins();
 
     for (const notebook of [{ notebookId: OMARS.notebook_id, title: 'Omar\'s' }, { notebookId: 'nb000000-0000-4000-8000-000000000099', title: 'Deleted' }]) {
-        await assert.rejects(captureToNotebook(apiOf(pinround), browser, notebook, SHOP_PAGE.id), (error) => error instanceof TargetGoneError && error.message === `The notebook "${notebook.title}" is gone. Choose where to put the next screenshot.`);
+        await assert.rejects(captureToNotebook(apiOf(pinround), browser, notebook, SHOP_PAGE.id), (error) => error instanceof TargetGoneError && 'notebook' === error.target.kind && notebook.notebookId === error.target.notebookId && error.message === `The notebook "${notebook.title}" is gone. Choose where to put the next screenshot.`);
     }
 
     assert.deepEqual(notebookOf(pinround, OMARS.notebook_id).screenshots, []);

@@ -190,6 +190,29 @@ final class RestApiTest extends WebTestCase
         self::assertSame([['new_report', 'SHOP']], $this->rowsOf('SELECT target_kind, target_id FROM med_upload_intent'));
     }
 
+    /**
+     * The extension learns a token cannot make reports from this refusal alone, so it must come before any upload
+     * intent: the token holds every other write scope the popup uses.
+     */
+    #[Test]
+    public function aReportUploadWithoutReportsWriteIsForbiddenAndMakesNoUploadIntent(): void
+    {
+        $upload = ['project' => 'SHOP', 'mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256];
+        [, $withoutReportsWrite] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::RoundsWrite, ApiTokenScope::NotebooksWrite]);
+
+        $this->request($withoutReportsWrite, 'POST', '/api/v1/uploads', $upload);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['error' => \sprintf(ToolRefusal::MISSING_SCOPE, 'reports:write'), 'outcome' => 'missing_scope'], $this->json());
+        self::assertSame(0, $this->rowCountOf('med_upload_intent'));
+
+        [, $withReportsWrite] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::ReportsWrite]);
+        $this->request($withReportsWrite, 'POST', '/api/v1/uploads', $upload);
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame([['new_report', 'SHOP']], $this->rowsOf('SELECT target_kind, target_id FROM med_upload_intent'));
+    }
+
     #[Test]
     public function onlyTheExtensionsOriginGetsCorsAndAnyOtherBrowserOriginIsRefused(): void
     {

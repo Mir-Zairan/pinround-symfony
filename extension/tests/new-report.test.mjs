@@ -4,11 +4,11 @@ import { PinroundApi } from '../src/shared/api.js';
 import { NEW_REPORT, TargetGoneError } from '../src/capture/capture-target.js';
 import { captureToTarget } from '../src/capture/capture-to-target.js';
 import {
-    NEW_REPORT_KEY, NOT_SENT, OLD_REPORT_CAPTURES_KEY, REPORTS_WRITE_MISSING, REPORT_FULL, REPORT_GONE, SEND_AGAIN_FIRST,
-    dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture,
+    CAPTURE_TOO_LONG, NEW_REPORT_KEY, NOT_SENT, OLD_REPORT_CAPTURES_KEY, PENDING_FOR_OTHER_PINROUND, REPORTS_WRITE_MISSING, REPORT_FULL, REPORT_GONE, SEND_AGAIN_FIRST,
+    addCaptureToNewReport, clearNewReport, dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture,
 } from '../src/capture/new-report.js';
 import { fakeBrowser } from './fake-browser.mjs';
-import { PINROUND_ORIGIN, fakePinround } from './fake-pinround.mjs';
+import { PINROUND_ORIGIN, TOKEN, fakePinround } from './fake-pinround.mjs';
 
 const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true };
 const CHECKOUT_PAGE = { id: 8, url: 'https://shop.acme-foods.example/checkout', title: 'Acme Foods checkout' };
@@ -187,7 +187,7 @@ test('a draft no longer the person\'s is forgotten with a plain message and noth
     const [draft] = pinround.myDrafts();
     draft.owner = 'omar';
 
-    await assert.rejects(capture(api, browser), (error) => error instanceof TargetGoneError && REPORT_GONE === error.message);
+    await assert.rejects(capture(api, browser), (error) => error instanceof TargetGoneError && REPORT_GONE === error.message && NEW_REPORT === error.target.kind);
 
     assert.equal(draft.screenshots.length, 1);
     assert.deepEqual(await loadNewReport(browser.storage.session), { project: '', reportTitle: '', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: null });
@@ -208,7 +208,7 @@ test('"Done" opens the draft only when its address is on the paired pinround, an
 
 test('"Done" is refused while a capture waits to be sent again, and the report is kept', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
-    const waiting = { project: 'SHOP', reportTitle: 'Basket', draftId: 'd1', draftUrl: `${PINROUND_ORIGIN}/report-drafts/d1`, screenshotCount: 1, pendingCapture: { idempotencyKey: 'k1', path: '/api/v1/reports/d1/screenshots', bodyJson: '{"upload_id":"u2","pins":[]}' } };
+    const waiting = { project: 'SHOP', reportTitle: 'Basket', draftId: 'd1', draftUrl: `${PINROUND_ORIGIN}/report-drafts/d1`, screenshotCount: 1, pendingCapture: { idempotencyKey: 'k1', path: '/api/v1/reports/d1/screenshots', bodyJson: '{"upload_id":"u2","pins":[]}', origin: PINROUND_ORIGIN } };
     await browser.storage.session.set({ [NEW_REPORT_KEY]: waiting });
 
     await assert.rejects(finishNewReport(browser.storage.session, browser, PINROUND_ORIGIN), { message: SEND_AGAIN_FIRST });
@@ -220,7 +220,7 @@ test('"Done" is refused while a capture waits to be sent again, and the report i
 test('a stored report of another shape starts empty, and the old upload-id list is dropped without being sent', async () => {
     const browser = fakeBrowser();
     const storage = browser.storage.session;
-    for (const stored of [{ project: 'SHOP', reportTitle: '', items: [{ upload_id: 'u1' }], idempotencyKey: 'k' }, 'text', null, { project: 'SHOP', reportTitle: 'x', draftId: 7, draftUrl: null, screenshotCount: 1, pendingCapture: null }, { project: 'SHOP', reportTitle: 'x', draftId: null, draftUrl: null, screenshotCount: 11, pendingCapture: null }, { project: 'SHOP', reportTitle: 'x', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: { idempotencyKey: 'k', path: '/api/v1/notebooks', bodyJson: '{}' } }]) {
+    for (const stored of [{ project: 'SHOP', reportTitle: '', items: [{ upload_id: 'u1' }], idempotencyKey: 'k' }, 'text', null, { project: 'SHOP', reportTitle: 'x', draftId: 7, draftUrl: null, screenshotCount: 1, pendingCapture: null }, { project: 'SHOP', reportTitle: 'x', draftId: null, draftUrl: null, screenshotCount: 11, pendingCapture: null }, { project: 'SHOP', reportTitle: 'x', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: { idempotencyKey: 'k', path: '/api/v1/notebooks', bodyJson: '{}', origin: PINROUND_ORIGIN } }, { project: 'SHOP', reportTitle: 'x', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: { idempotencyKey: 'k', path: '/api/v1/reports', bodyJson: '{}' } }]) {
         await storage.set({ [NEW_REPORT_KEY]: stored });
         assert.deepEqual(await loadNewReport(storage), { project: '', reportTitle: '', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: null }, JSON.stringify(stored));
     }
@@ -258,4 +258,103 @@ test('a refusal of the POST drops its key, so the next capture is not answered w
 
     assert.equal((await loadNewReport(browser.storage.session)).pendingCapture, null);
     assert.equal(draft.screenshots.length, 10);
+});
+
+/** An api whose request to `path` first runs `meanwhile`, as a "Start over" or sign-out while the request is under way. */
+function apiChangingStorageDuring(pinround, path, meanwhile) {
+    return new PinroundApi(PINROUND_ORIGIN, TOKEN, async (href, init) => {
+        if (path === new URL(href).pathname) {
+            await meanwhile();
+        }
+
+        return pinround.fetchFn(href, init);
+    });
+}
+
+test('a report forgotten while its first capture was under way is not written back when the answer comes', async () => {
+    const pinround = fakePinround();
+    const browser = await browserWithPins([{ x_pct: 1, y_pct: 2, note: 'Logo' }]);
+    const storage = browser.storage.session;
+    const api = apiChangingStorageDuring(pinround, '/api/v1/reports', () => clearNewReport(storage));
+
+    await capture(api, browser);
+
+    assert.equal(pinround.myDrafts().length, 1, 'pinround made the draft; only the popup forgot it.');
+    assert.deepEqual(await storage.get(NEW_REPORT_KEY), {});
+});
+
+test('a refusal or a gone draft answered after the report was started over leaves the new report as it is', async () => {
+    for (const [refuse, refusalMessage] of [
+        [(draft) => { draft.owner = 'omar'; }, 'Not found. It does not exist, or you may not see it.'],
+        [(draft) => { draft.screenshots.push(...Array.from({ length: 9 }, (unused, index) => ({ upload_id: `seeded-${index}`, pins: [] }))); }, 'A report holds at most 10 screenshots.'],
+    ]) {
+        const pinround = fakePinround();
+        const browser = await browserWithPins([]);
+        const storage = browser.storage.session;
+        await capture(new PinroundApi(PINROUND_ORIGIN, TOKEN, pinround.fetchFn), browser);
+        const [draft] = pinround.myDrafts();
+        refuse(draft);
+        const typedAfterStartOver = { project: 'MOBILE', reportTitle: 'Typed after starting over', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: null };
+        const api = apiChangingStorageDuring(pinround, `/api/v1/reports/${draft.id}/screenshots`, () => storage.set({ [NEW_REPORT_KEY]: typedAfterStartOver }));
+
+        await assert.rejects(capture(api, browser), (error) => !(error instanceof TargetGoneError) && refusalMessage === error.message);
+
+        assert.deepEqual(await loadNewReport(storage), typedAfterStartOver, refusalMessage);
+    }
+});
+
+test('a 500 from pinround keeps the capture to send again, and each resend adds its picture exactly once', async () => {
+    const { pinround, api } = pinroundAndApi();
+    const browser = await browserWithPins([{ x_pct: 1, y_pct: 2, note: 'Logo' }]);
+    const storage = browser.storage.session;
+    pinround.failOnServer('/api/v1/reports');
+
+    await assert.rejects(capture(api, browser), { message: NOT_SENT });
+    assert.equal((await loadNewReport(storage)).pendingCapture?.path, '/api/v1/reports');
+    assert.deepEqual(pinround.myDrafts(), []);
+    const made = await sendPendingCapture(storage, api);
+    const [draft, ...otherDrafts] = pinround.myDrafts();
+    assert.deepEqual(otherDrafts, []);
+    assert.deepEqual([made.draftId, made.screenshotCount, made.pendingCapture], [draft.id, 1, null]);
+
+    pinround.failOnServer(`/api/v1/reports/${draft.id}/screenshots`);
+    await assert.rejects(capture(api, browser), { message: NOT_SENT });
+    assert.equal((await loadNewReport(storage)).pendingCapture?.path, `/api/v1/reports/${draft.id}/screenshots`);
+    assert.equal(draft.screenshots.length, 1);
+    const added = await sendPendingCapture(storage, api);
+
+    assert.equal(added.screenshotCount, 2);
+    assert.deepEqual(draft.screenshots.map((screenshot) => screenshot.upload_id), ['upload-1', 'upload-2']);
+    assert.equal(pinround.myDrafts().length, 1);
+});
+
+test('a capture over pinround\'s 1 MB body cap is refused before its upload begins; one just under it is sent', async () => {
+    const file = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+    // é is two bytes: the first note is under 1 MB in characters but over it in bytes.
+    for (const [note, isRefused] of [['é'.repeat(500_000), true], ['é'.repeat(499_000), false]]) {
+        const { pinround, api } = pinroundAndApi();
+        const storage = fakeBrowser().storage.session;
+        const capturing = addCaptureToNewReport(storage, api, TYPED, { file, texts: {}, pins: [{ x_pct: 1, y_pct: 1, note }] });
+
+        if (isRefused) {
+            await assert.rejects(capturing, { message: CAPTURE_TOO_LONG });
+            assert.deepEqual(pinround.requests, []);
+            assert.deepEqual(await storage.get(null), {});
+        } else {
+            assert.equal((await capturing).screenshotCount, 1);
+            assert.equal(pinround.myDrafts()[0].screenshots[0].pins[0].note.length, 499_000);
+        }
+    }
+});
+
+test('a capture waiting to be sent to another pinround address is dropped with its report, and nothing is sent', async () => {
+    const { pinround, api } = pinroundAndApi();
+    const storage = fakeBrowser().storage.session;
+    const otherOrigin = 'https://pinround.other-foods.example';
+    await storage.set({ [NEW_REPORT_KEY]: { project: 'SHOP', reportTitle: 'Basket', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: { idempotencyKey: 'k1', path: '/api/v1/reports', bodyJson: '{"project":"SHOP","title":"Basket","screenshots":[]}', origin: otherOrigin } } });
+
+    await assert.rejects(sendPendingCapture(storage, api), { message: PENDING_FOR_OTHER_PINROUND });
+
+    assert.deepEqual(pinround.requests, []);
+    assert.deepEqual(await storage.get(null), {});
 });

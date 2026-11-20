@@ -15,6 +15,7 @@ import {
   test,
   type ExtensionPageGlobals,
   type PinroundStub,
+  type StubPin,
   type StubRequest,
   type StubScreenshot,
   type StubTicket,
@@ -285,4 +286,73 @@ test('a report draft pinround holds 10 pictures of refuses the next with its mes
   expect(stub.reportDrafts.get(MY_FULL_DRAFT_ID)?.screenshots).toEqual(tenScreenshots);
   await expect(popup.getByRole('button', { name: 'Send it again' })).toBeHidden();
   await expect(testPage.locator('pinround-overlay')).toHaveCount(1);
+});
+
+test('each target shows only its own fields: none for a ticket, the report fields for a new report, the title for a new notebook', async ({ context, testPage }) => {
+  await answerPinroundApi(context, { tickets: TICKETS });
+  const popup = await pairedPopupFor(context, testPage);
+  const reportFields = popup.getByRole('group', { name: 'New report' });
+  const notebookFields = popup.getByRole('group', { name: 'New notebook' });
+
+  for (const [label, isReportShown, isNotebookShown] of [
+    ['My draft round on SHOP-7', false, false],
+    ['A new report', true, false],
+    ['A new notebook', false, true],
+    ['Choose where to put it', false, false],
+  ] as const) {
+    await popup.getByLabel(TARGET_PICKER).selectOption({ label });
+    await expect(reportFields, label).toBeVisible({ visible: isReportShown });
+    await expect(notebookFields, label).toBeVisible({ visible: isNotebookShown });
+  }
+});
+
+test('while a capture is under way the whole form is disabled, so "Start over" and "Done" cannot act on it, and focus comes back after', async ({ context, testPage }) => {
+  const stub = await answerPinroundApi(context);
+  const popup = await pairedPopupFor(context, testPage);
+  await chooseNewReport(popup);
+  await pinAndCapture(popup, testPage, 'Total is wrong', [0.5, 0.5]);
+  await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
+  let releaseUpload = () => {};
+  const uploadReleased = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  await context.route(`${PINROUND_TEST_ORIGIN}/api/v1/uploads`, async (route) => {
+    await uploadReleased;
+    await route.fallback();
+  });
+
+  await pinAndCapture(popup, testPage, 'Jam price', [0.7, 0.2]);
+  await expect(popup.getByRole('status')).toHaveText('Uploading…');
+  for (const control of [popup.getByLabel(TARGET_PICKER), popup.getByRole('button', { name: 'Start over' }), popup.getByRole('button', { name: 'Done' }), popup.getByRole('button', { name: 'Capture this page' }), popup.getByRole('button', { name: 'Pin this page' })]) {
+    await expect(control).toBeDisabled();
+  }
+  releaseUpload();
+
+  await expect(popup.getByRole('status')).toHaveText('Screenshot 2 added to the report draft. Capture more pages, or press Done to open it.');
+  await expect(popup.getByRole('button', { name: 'Start over' })).toBeEnabled();
+  await expect(popup.getByRole('button', { name: 'Capture this page' })).toBeFocused();
+  await expect(popup.getByLabel('Project key')).toBeDisabled();
+  const [draft, ...otherDrafts] = stub.myReportDrafts();
+  expect(otherDrafts).toEqual([]);
+  expect(notesOf(draft.screenshots)).toEqual([['Total is wrong'], ['Jam price']]);
+});
+
+test('"Capture this page" with no target or an unmade notebook says what to do, sends nothing, and the pins stay for the next try', async ({ context, testPage }) => {
+  const stub = await answerPinroundApi(context, { tickets: TICKETS });
+  const popup = await pairedPopupFor(context, testPage);
+
+  await pinAndCapture(popup, testPage, 'Total is wrong', [0.5, 0.5]);
+  await expect(popup.getByRole('status')).toHaveText('Choose where to put the screenshot first.');
+  await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'A new notebook' });
+  await popup.getByRole('button', { name: 'Capture this page' }).click();
+  await expect(popup.getByRole('status')).toHaveText('Make the notebook first.');
+
+  expect(postsOf(stub)).toEqual([]);
+  expect(stub.uploads.size).toBe(0);
+  await expect(testPage.locator('pinround-overlay')).toHaveCount(1);
+  await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'My draft round on SHOP-7' });
+  await popup.getByRole('button', { name: 'Capture this page' }).click();
+  await expect(popup.getByRole('status')).toHaveText('Added to your draft round on SHOP-7. Only you see it.');
+  const [, addPost] = postsOf(stub);
+  expect((addPost.body?.pins as StubPin[]).map((pin) => pin.note)).toEqual(['Total is wrong']);
 });

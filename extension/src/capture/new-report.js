@@ -3,7 +3,7 @@
 // extension's session storage: the typed project and title, the draft made, and a capture whose answer never came.
 import { ApiError, MISSING_SCOPE, NOT_FOUND } from '../shared/api.js';
 import { MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH, upload } from './capture.js';
-import { TargetGoneError } from './capture-target.js';
+import { CAPTURE_TARGET_KEY, NEW_REPORT, TargetGoneError } from './capture-target.js';
 
 export const NEW_REPORT_KEY = 'pinroundNewReport';
 /** Where an earlier version kept upload ids for one "Make the report draft" request; dropped, never sent. */
@@ -11,6 +11,8 @@ export const OLD_REPORT_CAPTURES_KEY = 'pinroundReportCaptures';
 const PROJECT_KEY_MAX_LENGTH = 20;
 // pinround refuses a request body over 1 MB.
 const MAX_JSON_BODY_BYTES = 1_000_000;
+// An upload_id is a UUID; 64 leaves room for any id pinround answers.
+const MAX_UPLOAD_ID_LENGTH = 64;
 
 export const REPORTS_WRITE_MISSING = 'Your pinround token cannot make reports. Make a token that may prepare report drafts on the API tokens page, then pair the extension again.';
 export const SEND_AGAIN_FIRST = 'A screenshot has not reached pinround yet. Press Send it again, or Start over.';
@@ -18,10 +20,13 @@ export const NOT_SENT = 'The screenshot did not reach pinround. Check your conne
 export const REPORT_FULL = 'A report holds at most 10 screenshots. Press Done, then start a new report for more.';
 export const REPORT_GONE = 'Your report draft is gone from pinround, so the screenshot was not added. Choose where to put it.';
 export const OLD_CAPTURES_DROPPED = 'Screenshots captured with an earlier version of the extension were not made into a report. Capture them again.';
+export const CAPTURE_TOO_LONG = 'The pins and texts of this capture are too long to send. Shorten the notes.';
+export const PENDING_FOR_OTHER_PINROUND = 'The screenshot waiting to be sent was for another pinround address, so it was dropped with its report. Capture it again.';
 
 /**
- * @typedef {{idempotencyKey: string, path: string, bodyJson: string}} PendingCapture a POST sent, or about to be, whose
- *   answer has not come. bodyJson is the exact text sent: pinround matches a repeat to its key by the bytes.
+ * @typedef {{idempotencyKey: string, path: string, bodyJson: string, origin: string}} PendingCapture a POST sent, or
+ *   about to be, whose answer has not come. bodyJson is the exact text sent: pinround matches a repeat to its key by the
+ *   bytes. origin is the pinround it was made for; it is never sent anywhere else.
  * @typedef {{project: string, reportTitle: string, draftId: string|null, draftUrl: string|null, screenshotCount: number,
  *   pendingCapture: PendingCapture|null}} NewReport
  */
@@ -44,7 +49,7 @@ const isStringOrNull = (value) => null === value || 'string' === typeof value;
 
 function isPendingCapture(value) {
     return null !== value && 'object' === typeof value && 'string' === typeof value.idempotencyKey && 'string' === typeof value.bodyJson
-        && 'string' === typeof value.path && value.path.startsWith('/api/v1/reports');
+        && 'string' === typeof value.path && value.path.startsWith('/api/v1/reports') && 'string' === typeof value.origin;
 }
 
 /** @returns {NewReport} what is stored, or an empty new report when the stored shape is not this version's */
@@ -62,7 +67,7 @@ function checkedNewReport(stored) {
         draftId: stored.draftId,
         draftUrl: stored.draftUrl,
         screenshotCount: stored.screenshotCount,
-        pendingCapture: null === stored.pendingCapture ? null : { idempotencyKey: stored.pendingCapture.idempotencyKey, path: stored.pendingCapture.path, bodyJson: stored.pendingCapture.bodyJson },
+        pendingCapture: null === stored.pendingCapture ? null : { idempotencyKey: stored.pendingCapture.idempotencyKey, path: stored.pendingCapture.path, bodyJson: stored.pendingCapture.bodyJson, origin: stored.pendingCapture.origin },
     };
 }
 
@@ -77,6 +82,14 @@ async function saveNewReport(storage, newReport) {
 
 export async function clearNewReport(storage) {
     await storage.remove(NEW_REPORT_KEY);
+}
+
+/**
+ * Forgets the chosen target and the new report with any capture waiting to be sent: when the person signs out or pairs
+ * again, so nothing one person typed is sent with another token or to another pinround.
+ */
+export async function forgetCaptureSession(storage) {
+    await storage.remove([NEW_REPORT_KEY, CAPTURE_TARGET_KEY, OLD_REPORT_CAPTURES_KEY]);
 }
 
 /**
@@ -147,22 +160,29 @@ export function checkedNewReportCapture(newReport, typed) {
 export async function addCaptureToNewReport(storage, api, typed, { file, texts, pins }) {
     const newReport = await loadNewReport(storage);
     const { project, reportTitle } = checkedNewReportCapture(newReport, typed);
+    const requestOf = (uploadId) => {
+        const screenshot = { upload_id: uploadId, ...texts, pins };
+        const [path, body] = null === newReport.draftId
+            ? ['/api/v1/reports', { project, title: reportTitle, screenshots: [screenshot] }]
+            : [`/api/v1/reports/${encodeURIComponent(newReport.draftId)}/screenshots`, screenshot];
+        const bodyJson = JSON.stringify(body);
+        if (new TextEncoder().encode(bodyJson).length > MAX_JSON_BODY_BYTES) {
+            throw new Error(CAPTURE_TOO_LONG);
+        }
+
+        return { path, bodyJson };
+    };
+    // Measured with the longest upload id before the upload begins, so a capture too long to send makes no upload.
+    requestOf('x'.repeat(MAX_UPLOAD_ID_LENGTH));
     let uploadId;
     try {
         uploadId = await upload(api, { project }, file);
     } catch (error) {
         throw refusalOfUpload(error, project);
     }
-    const screenshot = { upload_id: uploadId, ...texts, pins };
-    const [path, body] = null === newReport.draftId
-        ? ['/api/v1/reports', { project, title: reportTitle, screenshots: [screenshot] }]
-        : [`/api/v1/reports/${encodeURIComponent(newReport.draftId)}/screenshots`, screenshot];
-    const bodyJson = JSON.stringify(body);
-    if (new TextEncoder().encode(bodyJson).length > MAX_JSON_BODY_BYTES) {
-        throw new Error('The pins and texts of this capture are too long to send. Shorten the notes.');
-    }
+    const { path, bodyJson } = requestOf(uploadId);
     // Stored before the request goes, so a popup closed while it is under way still has the key to send it again with.
-    await saveNewReport(storage, { ...newReport, project, reportTitle, pendingCapture: { idempotencyKey: crypto.randomUUID(), path, bodyJson } });
+    await saveNewReport(storage, { ...newReport, project, reportTitle, pendingCapture: { idempotencyKey: crypto.randomUUID(), path, bodyJson, origin: api.origin } });
 
     return sendPendingCapture(storage, api);
 }
@@ -171,8 +191,12 @@ export async function addCaptureToNewReport(storage, api, typed, { file, texts, 
  * Sends the capture whose answer has not come, with the same Idempotency-Key and the same bytes, so pinround answers
  * what it did with it the first time rather than making a second draft or picture.
  *
+ * The answer is written back only while storage still holds this capture: a sign-out or "Start over" during the
+ * request is not undone by it.
+ *
  * @returns {Promise<NewReport>}
- * @throws {Error} as addCaptureToNewReport; with nothing to send, a plain message
+ * @throws {Error} as addCaptureToNewReport; with nothing to send, a plain message; PENDING_FOR_OTHER_PINROUND when
+ *   the capture was made for another pinround address than `api`'s, which drops it unsent
  */
 export async function sendPendingCapture(storage, api) {
     const newReport = await loadNewReport(storage);
@@ -180,6 +204,11 @@ export async function sendPendingCapture(storage, api) {
     if (null === pending) {
         throw new Error('There is no screenshot to send again.');
     }
+    if (pending.origin !== api.origin) {
+        await clearNewReport(storage);
+        throw new Error(PENDING_FOR_OTHER_PINROUND);
+    }
+    const isStillPending = async () => (await loadNewReport(storage)).pendingCapture?.idempotencyKey === pending.idempotencyKey;
     let answer;
     try {
         answer = await api.call('POST', pending.path, JSON.parse(pending.bodyJson), pending.idempotencyKey);
@@ -187,11 +216,14 @@ export async function sendPendingCapture(storage, api) {
         if (error instanceof ApiError && error.mayHaveBeenSaved) {
             throw new Error(NOT_SENT);
         }
-        // A refusal saved nothing, and pinround answers the same refusal to the same key: the next capture gets a new one.
-        await saveNewReport(storage, { ...newReport, pendingCapture: null });
-        if (error instanceof ApiError && NOT_FOUND === error.outcome && null !== newReport.draftId) {
-            await clearNewReport(storage);
-            throw new TargetGoneError(REPORT_GONE);
+        const isDraftGone = error instanceof ApiError && NOT_FOUND === error.outcome && null !== newReport.draftId;
+        if (await isStillPending()) {
+            if (isDraftGone) {
+                await clearNewReport(storage);
+                throw new TargetGoneError(REPORT_GONE, { kind: NEW_REPORT });
+            }
+            // A refusal saved nothing, and pinround answers the same refusal to the same key: the next capture gets a new one.
+            await saveNewReport(storage, { ...newReport, pendingCapture: null });
         }
         throw error instanceof ApiError && MISSING_SCOPE === error.outcome ? new Error(REPORTS_WRITE_MISSING) : error;
     }
@@ -206,7 +238,9 @@ export async function sendPendingCapture(storage, api) {
         screenshotCount: Math.min(answer.screenshot_count, MAX_SCREENSHOTS),
         pendingCapture: null,
     };
-    await saveNewReport(storage, saved);
+    if (await isStillPending()) {
+        await saveNewReport(storage, saved);
+    }
 
     return saved;
 }

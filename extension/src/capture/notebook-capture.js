@@ -14,7 +14,9 @@ function refusalOf(error, notebook) {
         return new Error(NOTEBOOKS_WRITE_MISSING);
     }
     if (error instanceof ApiError && NOT_FOUND === error.outcome && undefined !== notebook) {
-        return new TargetGoneError(goneMessageOf({ kind: 'notebook', ...notebook }));
+        const target = { kind: 'notebook', notebookId: notebook.notebookId, title: notebook.title };
+
+        return new TargetGoneError(goneMessageOf(target), target);
     }
 
     return error;

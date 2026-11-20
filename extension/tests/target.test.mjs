@@ -109,7 +109,7 @@ test('a capture into a draft round pinround no longer offers is refused as gone,
     });
     const capture = (ticketKey) => captureToTarget({ api: apiOf(pinround), browser, storage: browser.storage.session, tabId: SHOP_PAGE.id, target: { kind: 'ticket', ticketKey }, typed: { project: '', reportTitle: '' }, texts: {} });
 
-    await assert.rejects(capture('SHOP-3'), (error) => error instanceof TargetGoneError && error.message.startsWith('You can no longer add screenshots to your draft round on SHOP-3.'));
+    await assert.rejects(capture('SHOP-3'), (error) => error instanceof TargetGoneError && error.message.startsWith('You can no longer add screenshots to your draft round on SHOP-3.') && 'SHOP-3' === error.target.ticketKey && 'ticket' === error.target.kind);
     const [{ result: closingsAfterRefusal }] = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => globalThis.closings });
     assert.equal(closingsAfterRefusal, 0);
 

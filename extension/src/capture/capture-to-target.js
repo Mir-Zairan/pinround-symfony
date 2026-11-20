@@ -26,7 +26,7 @@ export async function captureToTarget({ api, browser, storage, tabId, target, ty
         const uploadId = await upload(api, { ticket: target.ticketKey }, file);
         await addToDraftRound(api, target.ticketKey, uploadId, { ...texts, pins });
     } catch (error) {
-        throw error instanceof ApiError && NOT_FOUND === error.outcome ? new TargetGoneError(goneMessageOf(target)) : error;
+        throw error instanceof ApiError && NOT_FOUND === error.outcome ? new TargetGoneError(goneMessageOf(target), target) : error;
     }
     await closePinOverlay(browser, tabId);
 

@@ -36,7 +36,10 @@ export function fakePinround({ scopes = ALL_SCOPES, projects = ['SHOP'], tickets
     const requests = [];
     let uploadsBegun = 0;
     let idsMade = 0;
-    /** Paths whose next request fails: 'unreached' never gets to pinround, 'answerLost' is done but its answer lost. */
+    /**
+     * Paths whose next request fails: 'unreached' never gets to pinround, 'answerLost' is done but its answer lost,
+     * 'serverError' is answered 500 with nothing done.
+     */
     const failures = new Map();
     const newId = (prefix) => {
         idsMade += 1;
@@ -106,7 +109,7 @@ export function fakePinround({ scopes = ALL_SCOPES, projects = ['SHOP'], tickets
         }
         if ('POST' === method && '/api/v1/uploads' === path) {
             if (('ticket' in body) === ('project' in body)) {
-                return [400, { error: 'Name either "ticket" (your draft round on it) or "project" (a new report), not both.' }];
+                return [422, { error: 'Name either "ticket" (your draft round on it) or "project" (a new report), not both.' }];
             }
             if ('project' in body) {
                 if (!scopes.includes('reports:write')) {
@@ -228,6 +231,10 @@ export function fakePinround({ scopes = ALL_SCOPES, projects = ['SHOP'], tickets
         if ('unreached' === failure) {
             throw new TypeError('Failed to fetch');
         }
+        // As pinround's own failure: the request is rolled back and its Idempotency-Key is not kept.
+        if ('serverError' === failure) {
+            return response(500, { error: 'Something went wrong on our side.' });
+        }
         if (`Bearer ${TOKEN}` !== init.headers.Authorization) {
             return response(401, {});
         }
@@ -259,6 +266,10 @@ export function fakePinround({ scopes = ALL_SCOPES, projects = ['SHOP'], tickets
         /** The next request to the path is done by pinround, but its answer is lost on the way back. */
         loseAnswerTo(path) {
             failures.set(path, 'answerLost');
+        },
+        /** The next request to the path fails inside pinround: it answers 500 and saves nothing. */
+        failOnServer(path) {
+            failures.set(path, 'serverError');
         },
         myDrafts: () => [...state.reportDrafts.values()].filter((draft) => ME === draft.owner),
     };

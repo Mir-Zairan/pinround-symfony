@@ -349,7 +349,7 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
     }
     if (method === 'POST' && pathname === '/api/v1/uploads') {
       if (('ticket' in body) === ('project' in body)) {
-        return [400, { error: 'Name either "ticket" (your draft round on it) or "project" (a new report), not both.' }];
+        return [422, { error: 'Name either "ticket" (your draft round on it) or "project" (a new report), not both.' }];
       }
       if ('project' in body) {
         if (!scopes.includes('reports:write')) {
