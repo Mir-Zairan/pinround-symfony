@@ -155,8 +155,8 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
 - **Acceptance:**
   - [ ] Progress dots have an accessible text ("Step 2 of 4: Building").
   - [ ] Max two visible buttons per card.
-  - [ ] A team-only ticket the viewer reported is listed (reporter access), with no other team-only tickets.
-  - [ ] A reporter with 300 reports gets the first 50 and "Show more".
+  - [x] A team-only ticket the viewer reported is listed (reporter access), with no other team-only tickets. (Built in P14.T15. `tests/Integration/Insight/Infrastructure/MyReports/DbalMyReportsRowsTest::itListsOnlyTheViewersOwnReportsTeamOnlyOnesIncludedNewestFirstThenTheHighestId`: Lena's team-only report of a team her viewer is not in is listed, Omar's team-only one is not; `::anotherReporterGetsOnlyTheirOwnReportsNotTheOnesTheyMaySee`; `tests/Functional/Web/MyReportsTest::eachGroupShowsItsReportsNewestFirstAndNoOneElsesReports`: Mia's team-only APP-1 of Mobile, a team she is not in, shows, Omar's team-only APP-2 does not)
+  - [x] A reporter with 300 reports gets the first 50 and "Show more". (Built in P14.T15. `DbalMyReportsRowsTest::threeHundredReportsComeFiftyAPageThroughTheCursorWithNoGapAndNoRepeat`: 300 reports give the newest 50 and a cursor to the next 50; `MyReportsTest::showMoreOpensTheNextFiftyByTheKeysetWithNoGapOrRepeat`: the page shows the first 50 and a "Show more" link that opens the rest, proved with 60 reports)
 - **Tests:** unit for grouping rules; integration for the query (isolation); functional page per group; query count ≤ 5.
 - **Prototype check:** My reports as Tester — groups, card layout, texts.
 - **Size:** L
@@ -203,3 +203,4 @@ NFR-PERF-01, NFR-PERF-10, NFR-SCAL-04, NFR-USE-01, NFR-USE-03, NFR-A11Y-01, NFR-
 - Phase 08 may add AI re-ranking inside the top 10 only, behind the org AI policy. Keep `Workflow\Api\NeedsYouScore` as the default.
 - Write here any prototype differences you chose, with the reason.
 - 2026-11-20 (plan change): P07.T6 (My reports page) is built as [P14.T15](phase-14-tester-feedback.md#p14t15--my-reports-page) by the product owner's decision; tick its criteria here with a note when it is done. P07.T1–T5 stay here; until they land, Home shows the plain "your turn" list of P14.T14.
+- 2026-11-21 (P07.T6, built in P14.T15): the reporter-access and "300 reports, first 50 and Show more" criteria are ticked on `DbalMyReportsRowsTest` and `MyReportsTest`. The page shows Needs you, Stuck, Moving and Done with 50 reports a page; the progress dots, the card buttons, the intro line and the nav badge are not built yet, so the dots and two-buttons criteria stay open.
