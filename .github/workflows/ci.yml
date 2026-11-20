@@ -273,6 +273,27 @@ jobs:
           node-version: "22.12"
           cache: npm
           cache-dependency-path: tests/e2e/package-lock.json
+      # The scenario player interprets data only (P13 design notes): no file the extension keeps may build code from
+      # text. `\beval` leaves words like `evaluate(` alone. git grep exits 1 on no match and above 1 when it fails.
+      - name: Refuse eval( and new Function in the browser extension
+        run: |
+          set +e
+          hits="$(git grep -nE -e '\beval[[:space:]]*\(' -e '\bnew[[:space:]]+Function\b' -- extension/)"
+          status=$?
+          set -e
+          if [ "$status" -eq 1 ]; then
+            echo "No eval( or new Function under extension/."
+            exit 0
+          fi
+          if [ "$status" -ne 0 ]; then
+            echo "::error::git grep could not search extension/ (exit $status)."
+            exit "$status"
+          fi
+          while IFS=: read -r file line _; do
+            echo "::error file=$file,line=$line::The browser extension must not use eval( or new Function: the scenario player interprets data only."
+          done <<< "$hits"
+          echo "$hits"
+          exit 1
       - name: Run the browser extension's unit tests
         run: node --test extension/tests/*.test.mjs
       - run: npm ci
