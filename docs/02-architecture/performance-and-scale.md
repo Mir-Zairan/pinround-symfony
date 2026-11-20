@@ -110,7 +110,7 @@ Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 
 - `select turn_user_id, count(*), min(waiting_since) ... group by turn_user_id` on `ins_ticket_turn`, with the visibility predicate (so outsiders never count team-only tickets). Index: `(organization_id, team_id, turn_user_id, waiting_since)`, or `(organization_id, project_id, …)` when a project is picked — both in the [Index catalogue](data-model.md#index-catalogue).
 - Then the top 5 tickets per person with a `LATERAL` join, which uses the same index.
-- A search (the toolbar's, P14.T13) keeps only the turn rows of the tickets list's best 1,000 matches (`search_ticket_ids` with the open steps, inside the same query, so no extra round trip); past them the count shows "1,000+". "Show done" changes only the rail's counts: done tickets have no turn row.
+- A search (the toolbar's, P14.T13) keeps only the turn rows of the tickets list's best 1,000 matches (`search_ticket_ids` with the open steps, inside the same query, so no extra round trip); past them the total and each card's count end in "+" ("1,000+ tickets · grouped by who acts next", "6+ tickets wait on Mia · the oldest for 12 days"; a capped "1+" still says "tickets wait"), as each may hold more. "Show done" changes only the rail's counts: done tickets have no turn row.
 - Six queries beyond the app shell's (and the project's, when one is picked), whatever the number of cards, with a search or without: the triager, the cards, their names, and the project rail's three, as on the list. The toolbar shows no people, so it reads none. A filter change reloads the cards' frame (the first three only) and the rail's frame (the rail's three only). `WhoseTurnTest` checks the counts.
 
 ### Ticket page
