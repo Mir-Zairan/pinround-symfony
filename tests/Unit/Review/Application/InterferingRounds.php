@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Review\Application;
 use App\Review\Domain\DraftFacts;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
+use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
 use App\Review\Domain\Rounds;
 use App\Review\Domain\ScreenshotId;
@@ -27,6 +28,12 @@ final class InterferingRounds implements Rounds
 
     /** Answers openUnsharedDraftOf and openUnsharedDraftFactsOf with none, as a read made before another request started its draft. */
     public bool $hidesOpenDrafts = false;
+
+    /** Throws RoundChanged on a save of the round with this id, as a save that finds its version moved by another request. */
+    public ?string $refusedSaveRoundId = null;
+
+    /** @var (\Closure(): void)|null runs right before each openSharedRoundsOf, so a test can see what was locked by then */
+    public ?\Closure $beforeOpenSharedRoundsOf = null;
 
     public function __construct(private readonly Rounds $inner)
     {
@@ -81,11 +88,18 @@ final class InterferingRounds implements Rounds
 
     public function openSharedRoundsOf(TicketId $ticketId): array
     {
+        if (null !== $this->beforeOpenSharedRoundsOf) {
+            ($this->beforeOpenSharedRoundsOf)();
+        }
+
         return $this->inner->openSharedRoundsOf($ticketId);
     }
 
     public function save(Round $round, \DateTimeImmutable $savedAt): void
     {
+        if ($round->id()->toString() === $this->refusedSaveRoundId) {
+            throw new RoundChanged('The round changed since it was read.');
+        }
         $this->inner->save($round, $savedAt);
     }
 }

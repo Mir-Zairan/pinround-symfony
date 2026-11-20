@@ -20,11 +20,12 @@ use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Integration\Organization\SecondSession;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
+use App\Ticketing\Api\LockedTicketTurnQueries;
 use App\Ticketing\Api\TicketCommands;
-use App\Ticketing\Api\TicketTurnQueries;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries;
 use App\Ticketing\Infrastructure\Doctrine\TicketTeamLookup;
 use App\Workflow\Api\StepQueries;
@@ -34,7 +35,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The container's TicketTurnQueries on a ticket TicketCommands creates, as pinround_app under row-level security, with
+ * The container's LockedTicketTurnQueries on a ticket TicketCommands creates, as pinround_app under row-level security, with
  * Organization's and Identity's real queries behind it.
  */
 final class DbalTicketTurnQueriesTest extends KernelTestCase
@@ -62,6 +63,8 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         '0197a3c0-0000-7000-8000-00000000a764' => 'tester',
     ];
 
+    private ?EntityManagerInterface $otherSession = null;
+
     protected function setUp(): void
     {
         $this->removeRows();
@@ -76,6 +79,8 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
 
     protected function tearDown(): void
     {
+        $this->otherSession?->getConnection()->close();
+        $this->otherSession = null;
         self::getContainer()->get('doctrine')->resetManager();
         self::getContainer()->get(TenantContext::class)->reset();
         $this->removeRows();
@@ -245,6 +250,57 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         });
 
         self::assertNull($snapshotUnderAcmeContext);
+    }
+
+    /**
+     * A share reads who has the ticket with lockedFactsOf and closes the findings rounds for them; a give of the ticket
+     * to Mia meanwhile waits for the share's commit (lock_timeout ends the wait here, as PHP cannot wait in two places),
+     * so no round is closed for someone who no longer has the ticket. factsOf locks nothing, so the same give goes
+     * through beside it.
+     */
+    #[Test]
+    public function aGiveOfTheTicketWaitsForTheTransactionThatReadItsLockedFactsOnly(): void
+    {
+        $ticketId = $this->createdTicketFor(self::OMAR);
+        $secondSession = SecondSession::besideTheApp($this->entityManager(), $this->tenantContext());
+        $this->otherSession = $secondSession->entityManager;
+        $secondConnection = $secondSession->entityManager->getConnection();
+        $giveToMia = static fn (): int|string => $secondConnection->executeStatement(
+            'UPDATE tkt_ticket SET assignee_id = ? WHERE organization_id = ? AND id = ?',
+            [self::MIA, self::ACME_FOODS, $ticketId->toString()],
+        );
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+
+        $this->connection()->beginTransaction();
+        try {
+            $lockedAssigneeId = $this->turnQueries()->lockedFactsOf($ticketId)?->assigneeId?->toString();
+            $giveWaited = $secondSession->sqlStateOfFailedAttempt(static function () use ($giveToMia): void {
+                $giveToMia();
+            });
+        } finally {
+            $this->connection()->rollBack();
+        }
+
+        $this->connection()->beginTransaction();
+        try {
+            $this->turnQueries()->factsOf($ticketId);
+            // A lock here fails the give after the timeout rather than hang the run.
+            $secondConnection->executeStatement("SET lock_timeout = '300ms'");
+            $secondConnection->beginTransaction();
+            try {
+                $givenBesideAnUnlockedRead = $giveToMia();
+            } finally {
+                $secondConnection->rollBack();
+                $secondConnection->executeStatement('RESET lock_timeout');
+            }
+        } finally {
+            $this->connection()->rollBack();
+            $this->tenantContext()->clear();
+        }
+
+        self::assertSame(self::OMAR, $lockedAssigneeId);
+        self::assertSame(SecondSession::LOCK_NOT_AVAILABLE, $giveWaited, 'The give did not wait for the locked read.');
+        self::assertSame(1, $givenBesideAnUnlockedRead);
     }
 
     #[Test]
@@ -428,10 +484,10 @@ final class DbalTicketTurnQueriesTest extends KernelTestCase
         return array_map(static fn (UserId $userId): string => $userId->toString(), $userIds);
     }
 
-    private function turnQueries(): TicketTurnQueries
+    private function turnQueries(): LockedTicketTurnQueries
     {
         $turnQueries = self::getContainer()->get('test.ticketing_ticket_turn_queries');
-        self::assertInstanceOf(TicketTurnQueries::class, $turnQueries);
+        self::assertInstanceOf(LockedTicketTurnQueries::class, $turnQueries);
 
         return $turnQueries;
     }

@@ -208,6 +208,7 @@ services:
     App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
     App\Insight\Application\Turn\TicketTurnSource: '@App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource'
     App\Ticketing\Api\TicketTurnQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries'
+    App\Ticketing\Api\LockedTicketTurnQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries'
     # A viewer's ticket visibility predicate (ADR-0013), for the list queries of every module. TicketVoter takes
     # RoleTicketVisibilities itself, for ofActor.
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
@@ -318,7 +319,7 @@ when@test:
             alias: App\Insight\Application\Turn\TicketTurnSource
             public: true
         test.ticketing_ticket_turn_queries:
-            alias: App\Ticketing\Api\TicketTurnQueries
+            alias: App\Ticketing\Api\LockedTicketTurnQueries
             public: true
         # MoveTicket and LockedTicketPauses use it; their tests and EntityTicketTurnSnapshotsTest get the port as they do.
         test.ticketing_ticket_turn_snapshots:

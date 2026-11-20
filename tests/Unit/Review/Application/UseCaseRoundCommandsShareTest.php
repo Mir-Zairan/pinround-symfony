@@ -9,8 +9,10 @@ use App\Review\Api\RoundRefused;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\Round;
+use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
 use App\Review\Domain\RoundKind;
+use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
@@ -70,6 +72,7 @@ final class UseCaseRoundCommandsShareTest extends TestCase
     private InMemoryTransactions $transactions;
     private InMemoryRounds $rounds;
     private RecordingChecklistCommands $checklistCommands;
+    private InMemoryTicketTurnQueries $tickets;
     private UseCaseRoundCommands $commands;
     private int $screenshotSeeds = 0;
 
@@ -79,14 +82,21 @@ final class UseCaseRoundCommandsShareTest extends TestCase
         $this->tenantContext->set(new OrganizationId(self::ACME_FOODS));
         $this->transactions = new InMemoryTransactions($this->tenantContext);
         $this->rounds = new InMemoryRounds($this->tenantContext, $this->transactions);
+        // A run that throws puts the stored rounds back, as the caller's rolled-back transaction does on DbalRounds.
+        $this->transactions->enlist(function (): \Closure {
+            $stored = $this->rounds->stored;
+
+            return function () use ($stored): void {
+                $this->rounds->stored = $stored;
+            };
+        });
         $this->checklistCommands = new RecordingChecklistCommands();
-        $tickets = new InMemoryTicketTurnQueries([
+        $this->tickets = new InMemoryTicketTurnQueries([
             self::ticketFacts(self::TICKET, new UserId(self::OMAR)),
             self::ticketFacts(self::OTHER_TICKET, new UserId(self::OMAR)),
             self::ticketFacts(self::UNASSIGNED_TICKET, null),
         ], new TicketId(self::BROKEN_TICKET));
-        $uploadedMedia = new InMemoryUploadedMedia($this->tenantContext, [[self::ACME_FOODS, self::MEDIA, self::OMAR, MediaImageStatus::Ready]]);
-        $this->commands = new UseCaseRoundCommands($this->rounds, $tickets, $this->tenantContext, new ReportPictures($uploadedMedia), $this->checklistCommands);
+        $this->commands = $this->commandsOver($this->rounds);
 
         $this->inTransaction(function (): void {
             $this->rounds->add(Round::report(new RoundId(self::REPORT), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), [$this->screenshot()], self::earlier()));
@@ -340,6 +350,89 @@ final class UseCaseRoundCommandsShareTest extends TestCase
         }
 
         self::assertSame($before, $this->snapshot());
+    }
+
+    /**
+     * The assignee the share closes findings rounds for is read under the ticket's row lock, taken before the round
+     * locks, as a move takes them; an unlocked read would let a give to Mia commit before Omar's share closes the round.
+     */
+    #[Test]
+    public function theAssigneeIsReadUnderTheTicketsLockTakenBeforeTheRoundLocks(): void
+    {
+        $this->addOpenRound(self::OPEN_ROUND, RoundKind::Draft, self::MIA, 3);
+        $interfering = new InterferingRounds($this->rounds);
+        $lockedWhenRoundsWereRead = null;
+        $interfering->beforeOpenSharedRoundsOf = function () use (&$lockedWhenRoundsWereRead): void {
+            $lockedWhenRoundsWereRead = $this->tickets->lockedTicketIds;
+        };
+        $commands = $this->commandsOver($interfering);
+
+        $this->inTransaction(static fn (): int => $commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()));
+
+        self::assertSame([self::TICKET], $lockedWhenRoundsWereRead, 'The ticket was not locked before the rounds.');
+        self::assertSame([self::TICKET], $this->tickets->lockedTicketIds);
+        self::assertSame([], $this->tickets->askedTicketIds, 'The assignee came from an unlocked read.');
+        self::assertSame(RoundState::Closed, $this->storedRound(self::OPEN_ROUND)->state());
+    }
+
+    /**
+     * Round 3 closes and round 4's save finds it changed meanwhile, which its row lock rules out; the share and the close
+     * of round 3 are saved by then, so only a LogicException makes the caller's transaction roll them back.
+     */
+    #[Test]
+    public function aFindingsRoundThatCannotBeSavedClosedFailsTheShareSoItsTransactionRollsBack(): void
+    {
+        $this->addOpenRound(self::OPEN_ROUND, RoundKind::Draft, self::MIA, 3);
+        $this->addOpenRound(self::SECOND_OPEN_ROUND, RoundKind::Draft, self::LENA, 4);
+        $interfering = new InterferingRounds($this->rounds);
+        $interfering->refusedSaveRoundId = self::SECOND_OPEN_ROUND;
+        $commands = $this->commandsOver($interfering);
+        $before = $this->snapshot();
+        $savesBefore = $this->rounds->savedRounds;
+
+        try {
+            $this->inTransaction(static fn (): int => $commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()));
+            self::fail('The share went through though a findings round could not be closed.');
+        } catch (\LogicException $failed) {
+            self::assertSame(\sprintf('Round %s was read under a row lock, yet could not be closed.', self::SECOND_OPEN_ROUND), $failed->getMessage());
+            self::assertInstanceOf(RoundChanged::class, $failed->getPrevious());
+        }
+
+        self::assertSame(2, $this->rounds->savedRounds - $savesBefore, 'The share and round 3\'s close were saved before round 4 failed.');
+        self::assertSame($before, $this->snapshot(), 'The rollback leaves every round as it was.');
+        self::assertSame([], $this->checklistCommands->findingsCreated);
+    }
+
+    #[Test]
+    public function closingALockedRoundThatIsClosedAlreadyIsALogicExceptionAndSavesNothing(): void
+    {
+        $this->inTransaction(function (): void {
+            $this->rounds->add($this->stored(self::OPEN_ROUND, self::ACME_FOODS, self::TICKET, RoundKind::Draft, self::MIA, 3, RoundState::Closed));
+        });
+        $before = $this->snapshot();
+        $savesBefore = $this->rounds->savedRounds;
+
+        try {
+            $this->inTransaction(function (): void {
+                $closed = $this->rounds->get(new RoundId(self::OPEN_ROUND)) ?? throw new \LogicException('Round 3 is seeded.');
+                $this->commands->closeLockedRound($closed, self::at());
+            });
+            self::fail('A closed round was closed again.');
+        } catch (\LogicException $failed) {
+            self::assertSame(\sprintf('Round %s was read under a row lock, yet could not be closed.', self::OPEN_ROUND), $failed->getMessage());
+            $refusal = $failed->getPrevious();
+            self::assertInstanceOf(\DomainException::class, $refusal);
+            self::assertSame('This round is closed already.', $refusal->getMessage());
+        }
+
+        self::assertSame([$before, $savesBefore], [$this->snapshot(), $this->rounds->savedRounds]);
+    }
+
+    private function commandsOver(Rounds $rounds): UseCaseRoundCommands
+    {
+        $uploadedMedia = new InMemoryUploadedMedia($this->tenantContext, [[self::ACME_FOODS, self::MEDIA, self::OMAR, MediaImageStatus::Ready]]);
+
+        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($uploadedMedia), $this->checklistCommands);
     }
 
     /**

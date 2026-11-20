@@ -636,12 +636,14 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string}> which round stays open, and the reason that names who gives its verdict
+     * @return iterable<string, array{string, string, string}> which round stays open, whose turn the turn row names, and
+     *                                                         the reason that names who gives its verdict
      */
     public static function roundsStillOpen(): iterable
     {
-        yield 'Mia\'s findings round 1 waits for Omar, the assignee, though it is Mia\'s turn' => ['findings', 'Round 1 is still open. Omar gives a verdict first.'];
-        yield 'Omar\'s self-check round 2 waits for Mia, whose turn it is' => ['self-check', 'Round 2 is still open. Mia gives a verdict first.'];
+        yield 'Mia\'s findings round 1 waits for Omar, the assignee, though it is Mia\'s turn' => ['findings', 'Mia', 'Round 1 is still open. Omar gives a verdict first.'];
+        yield 'Omar\'s self-check round 2 waits for Mia, whose turn it is' => ['self-check', 'Mia', 'Round 2 is still open. Mia gives a verdict first.'];
+        yield 'Omar\'s self-check round 2 waits for Lena herself, whose turn it is' => ['self-check', 'Lena', 'Round 2 is still open. Give your verdict first.'];
     }
 
     /**
@@ -650,9 +652,9 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
      */
     #[Test]
     #[DataProvider('roundsStillOpen')]
-    public function whileAnotherRoundIsOpenTheQuestionOffersOnlyKeepPrivateAndNamesWhoGivesTheVerdict(string $openRound, string $expectedReason): void
+    public function whileAnotherRoundIsOpenTheQuestionOffersOnlyKeepPrivateAndNamesWhoGivesTheVerdict(string $openRound, string $turnPerson, string $expectedReason): void
     {
-        $this->keepARoundOpen($openRound);
+        $this->keepARoundOpen($openRound, $turnPerson);
         $before = $this->stateOf();
         $this->logIn($this->client, $this->people['Lena']);
 
@@ -674,21 +676,22 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
      * The dialog offers no share then, so a share sent anyway is a forged form: the move and the share roll back, and
      * the toast names who gives the verdict, read after the rollback.
      *
-     * @return iterable<string, array{string, string, string}> which round stays open, the move, and the reason
+     * @return iterable<string, array{string, string, string, string}> which round stays open, whose turn it is, the move,
+     *                                                                 and the reason
      */
     public static function sharesSentWhileARoundIsOpen(): iterable
     {
-        foreach (self::roundsStillOpen() as $label => [$openRound, $expectedReason]) {
-            yield $label.', on a move to a chosen step' => [$openRound, 'move-to', $expectedReason];
-            yield $label.', on the lead\'s Put on hold' => [$openRound, '/t/SHOP-1/move/put_on_hold', $expectedReason];
+        foreach (self::roundsStillOpen() as $label => [$openRound, $turnPerson, $expectedReason]) {
+            yield $label.', on a move to a chosen step' => [$openRound, $turnPerson, 'move-to', $expectedReason];
+            yield $label.', on the lead\'s Put on hold' => [$openRound, $turnPerson, '/t/SHOP-1/move/put_on_hold', $expectedReason];
         }
     }
 
     #[Test]
     #[DataProvider('sharesSentWhileARoundIsOpen')]
-    public function aShareSentWhileAnotherRoundIsOpenIsRefusedWithWhoGivesTheVerdictAndChangesNothing(string $openRound, string $path, string $expectedReason): void
+    public function aShareSentWhileAnotherRoundIsOpenIsRefusedWithWhoGivesTheVerdictAndChangesNothing(string $openRound, string $turnPerson, string $path, string $expectedReason): void
     {
-        $this->keepARoundOpen($openRound);
+        $this->keepARoundOpen($openRound, $turnPerson);
         $before = $this->stateOf();
         self::assertNull($before['rounds'][$this->lenasDraft]['number']);
         $this->logIn($this->client, $this->people['Lena']);
@@ -709,17 +712,17 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     }
 
     /**
-     * It is Mia's turn on SHOP-1 in the turn read model; with 'findings' Mia's round 1 opens again, which is findings for
-     * Omar, the assignee; with 'self-check' Omar's own shared round 2 is open.
+     * It is $turnPerson's turn on SHOP-1 in the turn read model; with 'findings' Mia's round 1 opens again, which is
+     * findings for Omar, the assignee; with 'self-check' Omar's own shared round 2 is open.
      */
-    private function keepARoundOpen(string $openRound): void
+    private function keepARoundOpen(string $openRound, string $turnPerson): void
     {
-        $miaId = $this->people['Mia']->id()->toString();
+        $turnUserId = $this->people[$turnPerson]->id()->toString();
         $ticketId = $this->ticketId;
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
              SELECT organization_id, id, team_id, project_id, 'todo', ?, NULL, 'build', 10, '2026-11-06 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
-            [$miaId, $ticketId],
+            [$turnUserId, $ticketId],
         ));
         if ('findings' === $openRound) {
             $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(

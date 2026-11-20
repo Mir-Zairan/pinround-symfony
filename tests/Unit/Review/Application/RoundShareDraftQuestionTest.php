@@ -406,6 +406,42 @@ final class RoundShareDraftQuestionTest extends TestCase
         self::assertSame('closed', $this->roundStates()[self::OPEN_ROUND]['state']);
     }
 
+    /**
+     * Omar's move closes both findings rounds; round 4's save finds it changed meanwhile, which its row lock rules out.
+     * Round 3's close is saved by then, so only a LogicException makes the move's transaction roll it back.
+     */
+    #[Test]
+    public function aRoundTheMoveCannotSaveClosedFailsTheMoveSoItsTransactionRollsBack(): void
+    {
+        $this->addOpenRound(self::OPEN_ROUND, self::MIA, 3);
+        $this->addOpenRound(self::SECOND_OPEN_ROUND, self::LENA, 4);
+        $this->transactions->enlist(function (): \Closure {
+            $stored = $this->roundsInTransactions->stored;
+
+            return function () use ($stored): void {
+                $this->roundsInTransactions->stored = $stored;
+            };
+        });
+        $interfering = new InterferingRounds($this->roundsInTransactions);
+        $interfering->refusedSaveRoundId = self::SECOND_OPEN_ROUND;
+        $question = $this->questionOver($interfering);
+        $before = $this->roundStates();
+        $savesBefore = $this->roundsInTransactions->savedRounds;
+
+        try {
+            $this->inTransaction(static function () use ($question): void {
+                $question->closeRoundsOnMove(new TicketId(self::TICKET), self::move(self::OMAR, isLeadOnlyMove: false, isMoversTurn: false), self::at());
+            });
+            self::fail('The move went through though a round it closes could not be saved.');
+        } catch (\LogicException $failed) {
+            self::assertSame(\sprintf('Round %s was read under a row lock, yet could not be closed.', self::SECOND_OPEN_ROUND), $failed->getMessage());
+            self::assertInstanceOf(RoundChanged::class, $failed->getPrevious());
+        }
+
+        self::assertSame(1, $this->roundsInTransactions->savedRounds - $savesBefore, 'Round 3\'s close was saved before round 4 failed.');
+        self::assertSame($before, $this->roundStates(), 'The rollback leaves every round open as it was.');
+    }
+
     #[Test]
     public function closingRoundsOnAMoveNeedsTheMovesTransactionAndClosesNothingWithout(): void
     {

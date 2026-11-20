@@ -138,7 +138,9 @@ interface RoundCommands
      * second waits and then sees the first one's round. A ticket has one open shared round (ADR-0048): while one is
      * open the share is refused, except the assignee's share, which closes the open findings rounds for them in the same
      * transaction and then shares. When the owner is not the ticket's assignee, each pin becomes an open checklist item
-     * in the same transaction (findings, ADR-0044). Both read the ticket's assignee.
+     * in the same transaction (findings, ADR-0044). Both read the ticket's assignee under a lock on the ticket's
+     * row, held until the caller's transaction ends, so a move or give of the ticket waits; that lock comes before the
+     * round locks, as in a move.
      *
      * @return int the round's number, from 1
      *

@@ -30,8 +30,8 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\LockedTicketTurnQueries;
 use App\Ticketing\Api\TicketNotFound;
-use App\Ticketing\Api\TicketTurnQueries;
 
 /**
  * RoundCommands, DraftScreenshotCommands, DraftRoundContents and LockedRoundClosing on the Round aggregate; the
@@ -42,7 +42,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
 {
     public function __construct(
         private Rounds $rounds,
-        private TicketTurnQueries $ticketTurnQueries,
+        private LockedTicketTurnQueries $ticketTurnQueries,
         private TenantContext $tenantContext,
         private ReportPictures $reportPictures,
         private RoundChecklistCommands $checklistCommands,
@@ -260,7 +260,8 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         $draft = $this->ownDraft($roundId, $ownerId);
         // A draft shared already is refused below as read-only, rather than as waiting for its own open round.
         $findingsRoundsToClose = $draft->isUnsharedDraft() ? $this->findingsRoundsClosedBySharing($draft->ticketId(), $ownerId) : [];
-        // Takes the number lock openSharedRoundsOf took again; a transaction-scoped advisory lock is re-entrant.
+        // The number lock is a transaction-scoped advisory lock, which is re-entrant, so taking it again is safe when
+        // openSharedRoundsOf took it above.
         $number = $this->rounds->nextFreeNumberOf($draft->ticketId());
 
         try {
@@ -288,6 +289,9 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
      * one's transaction and then sees its round. A findings round for the assignee is closed by the assignee's next
      * share (ADR-0048); every other open shared round makes the share wait for its verdict.
      *
+     * The ticket's row is locked first, so a give to another person cannot commit between this read of the assignee and
+     * the close; and first because a move holds that row before it takes the round locks.
+     *
      * @return list<Round> the open findings rounds the share closes, locked until the transaction ends; none when no
      *                     shared round is open
      *
@@ -296,11 +300,12 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
      */
     private function findingsRoundsClosedBySharing(TicketId $ticketId, UserId $sharerId): array
     {
+        $ticket = $this->ticketTurnQueries->lockedFactsOf($ticketId);
         $openRounds = $this->rounds->openSharedRoundsOf($ticketId);
         if ([] === $openRounds) {
             return [];
         }
-        $assigneeId = ($this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.'))->assigneeId;
+        $assigneeId = ($ticket ?? throw new TicketNotFound('That ticket does not exist.'))->assigneeId;
         foreach ($openRounds as $openRound) {
             if (!$openRound->isClosedByShareOf($sharerId, $assigneeId)) {
                 $number = $openRound->number() ?? throw new \LogicException('An open shared round has a number.');
