@@ -156,6 +156,52 @@ textarea:focus-visible {
     flex-basis: 100%;
 }
 
+.allowed-hosts {
+    display: grid;
+    gap: var(--gap);
+    margin-top: var(--gap);
+    border-top: 1px solid var(--border);
+    padding-top: var(--gap);
+}
+
+.allowed-hosts h2,
+.allowed-hosts p {
+    margin: 0;
+}
+
+.allowed-hosts h2 {
+    font-size: 15px;
+}
+
+.allowed-host-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.allowed-host-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.allowed-host-list span {
+    overflow-wrap: anywhere;
+}
+
+.allowed-host-add {
+    display: flex;
+    gap: 8px;
+}
+
+.allowed-host-add input {
+    flex: 1;
+    min-width: 0;
+}
+
 .captures {
     margin: 0;
     padding-left: 20px;
