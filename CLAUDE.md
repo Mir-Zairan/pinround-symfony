@@ -31,6 +31,7 @@ Rules for Claude Code sessions in pinround-symfony. Read this fully before any t
 ## Where things are
 - Docs map and reading order: [docs/README.md](docs/README.md).
 - Code (from phase 0): `src/<Module>/{Domain,Application,Infrastructure,UI,Api}`. Module list and rules: [docs/02-architecture/modules.md](docs/02-architecture/modules.md).
+- `demo-shop/`: a small Node shop with planted bugs to try pinround on. Not part of the product; its own `CLAUDE.md` applies there.
 - Prompt templates for AI: `src/Assist/Infrastructure/Prompt/` (versioned files, see [ai-architecture.md](docs/02-architecture/ai-architecture.md)).
 
 ## Architecture rules you must not break

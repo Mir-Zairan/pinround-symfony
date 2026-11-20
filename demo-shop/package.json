@@ -1,0 +1,14 @@
+{
+  "name": "pinround-demo-shop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small Acme Foods shop with planted bugs, to test pinround on.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  }
+}

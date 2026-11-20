@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down sh logs test qa e2e e2e-update db-roles migrate migrate-test seed check-compose
+.PHONY: help up down sh logs test qa e2e e2e-update db-roles migrate migrate-test demo-shop seed check-compose
 
 # .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
 ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
@@ -28,7 +28,7 @@ ROLES_SQL := -f /pinround/postgres/roles.sql \
 	-v retention_password='$(DB_RETENTION_PASSWORD)' -v readonly_password='$(DB_READONLY_PASSWORD)'
 
 help: ## List the targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
 
 up: ## Build the image, start the stack, apply the database roles and migrate
 	$(COMPOSE) build
@@ -84,6 +84,9 @@ migrate-test: ## Run the database migrations on the test database (as pinround_m
 
 check-compose: ## Validate compose.yaml and the service list
 	sh tests/shell/compose-config-check.sh
+
+demo-shop: ## Run the demo shop to test pinround on, at http://localhost:8090 (needs Node 20+; stop with Ctrl+C)
+	cd demo-shop && node server.js
 
 # --no-debug: in debug mode Doctrine and Messenger keep every query and message of the 2,000-person Crowd team in memory.
 # A non-debug kernel never checks its cached container against the code, so the cache is rebuilt first or an old one runs.

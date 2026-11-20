@@ -10,6 +10,9 @@
 #   extension <id>        allow a Chrome extension id in the app and in storage, restart, and check both
 #   mcp-command <folder>  print the lines that add pinround to Claude Code in that folder (the token is typed, never shown)
 #   mcp-status <folder>   for every Claude Code profile here, say whether it has pinround for that folder and if its token works
+#   ai-key <provider>     ask for a huggingface or anthropic key (typed, never shown), test it, save it and restart
+#                         (run it in your own terminal: it reads the key from the keyboard)
+#   ai-status             say which cloud AI keys the app has and test them, and whether Ollama here is ready for pinround
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -130,6 +133,12 @@ cmd_check() {
     local cors
     cors=$(compose_setting MINIO_CORS_ALLOW_ORIGIN '')
     [[ $cors == *chrome-extension://* ]] && ok 'storage allows the extension origin' || missing 'the extension origin in MINIO_CORS_ALLOW_ORIGIN' "$0 extension <id>"
+
+    if [[ -n $(app_setting AI_HUGGINGFACE_TOKEN) || -n $(app_setting AI_ANTHROPIC_KEY) ]]; then
+        ok 'a cloud AI key is set (test it with: ai-status)'
+    else
+        printf '  -        optional: no cloud AI key, so the AI buttons do nothing in "Company cloud AI" mode (%s ai-key huggingface, or ai-status for laptop AI)\n' "$0"
+    fi
 }
 
 cmd_stack() {
@@ -258,6 +267,147 @@ cmd_mcp_status() {
     [[ $found_any == yes ]] || missing "no Claude Code profile has pinround for $folder" "run the lines from: $0 mcp-command $folder"
 }
 
+# The value Symfony uses in dev for a setting: the last of .env, .env.local, .env.dev, .env.dev.local that sets it.
+# Callers only test it for emptiness; never print it.
+app_setting() {
+    local key=$1 value='' file line
+    for file in .env .env.local .env.dev .env.dev.local; do
+        [[ -f $file ]] || continue
+        line=$(grep -E "^${key}=" "$file" | tail -n 1 || true)
+        [[ -n $line ]] && value=${line#*=}
+    done
+    printf '%s' "$value"
+}
+
+app_setting_file() {
+    local key=$1 found='' file
+    for file in .env .env.local .env.dev .env.dev.local; do
+        [[ -f $file ]] && grep -qE "^${key}=.+" "$file" && found=$file
+    done
+    printf '%s' "$found"
+}
+
+ai_env_key() {
+    case $1 in
+        huggingface) printf 'AI_HUGGINGFACE_TOKEN' ;;
+        anthropic) printf 'AI_ANTHROPIC_KEY' ;;
+        *) fail 'the provider is huggingface or anthropic.' ;;
+    esac
+}
+
+# Tests a key against its provider. The key goes to curl in a private header file (-H @file), never on a command line.
+# Hugging Face: a 1-token chat completion with the model the app uses (meta-llama/Llama-3.1-8B-Instruct, the default
+# in AiProviderName), so it also proves the token may call Inference Providers. Anthropic: the free model list.
+# Prints the HTTP status.
+ai_key_status() {
+    local provider=$1 key=$2 header_file status
+    header_file=$(mktemp)
+    chmod 600 "$header_file"
+    if [[ $provider == huggingface ]]; then
+        printf 'Authorization: Bearer %s\n' "$key" > "$header_file"
+        status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -H "@$header_file" -H 'Content-Type: application/json' \
+            -d '{"model":"meta-llama/Llama-3.1-8B-Instruct","messages":[{"role":"user","content":"Say OK."}],"max_tokens":1}' \
+            https://router.huggingface.co/v1/chat/completions || true)
+    else
+        printf 'x-api-key: %s\nanthropic-version: 2023-06-01\n' "$key" > "$header_file"
+        status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "@$header_file" https://api.anthropic.com/v1/models || true)
+    fi
+    rm -f "$header_file"
+    printf '%s' "$status"
+}
+
+explain_key_status() {
+    local provider=$1 status=$2
+    case $status in
+        200) ok "the $provider key works" ;;
+        401) missing "the $provider key is wrong or revoked (401)" 'make a new key and run ai-key again' ;;
+        402) missing "the $provider account has no credit left (402)" 'add credit, or use laptop AI (ai-status)' ;;
+        403) missing "the $provider key may not call the model (403)" 'for Hugging Face, make a token with "Make calls to Inference Providers" ticked' ;;
+        000) missing "$provider did not answer" 'check the internet connection' ;;
+        *) missing "$provider answered $status" 'try again later' ;;
+    esac
+}
+
+cmd_ai_key() {
+    local provider=${1:-} env_key key status
+    env_key=$(ai_env_key "$provider")
+    [[ -t 0 ]] || fail "run this in your own terminal: it asks for the key and never shows it. $0 ai-key $provider"
+    if [[ $provider == huggingface ]]; then
+        echo 'Make a token at https://huggingface.co/settings/tokens (type "Fine-grained", tick "Make calls to Inference Providers").'
+    else
+        echo 'Make a key at https://console.anthropic.com/settings/keys.'
+    fi
+    read -rs -p "Paste the $provider key (it is not shown) and press Enter: " key
+    echo
+    [[ -n $key ]] || fail 'no key typed; nothing changed.'
+    if [[ $provider == huggingface && $key != hf_* ]] || [[ $provider == anthropic && $key != sk-ant-* ]]; then
+        fail "that does not look like a $provider key; nothing changed."
+    fi
+    echo "Testing the key with $provider (one tiny request, no ticket text)."
+    status=$(ai_key_status "$provider" "$key")
+    explain_key_status "$provider" "$status"
+    [[ $status == 200 ]] || fail 'the key was not saved.'
+    set_env_line .env.dev.local "$env_key" "$key"
+    key=''
+    chmod 600 .env.dev.local
+    echo "Saved as $env_key in .env.dev.local. Restarting the app and the workers."
+    compose restart app worker worker-heavy > /dev/null 2>&1 || fail 'the app did not restart; run: make logs'
+    wait_for_app
+    ok 'the app runs with the key'
+    if [[ $provider == anthropic ]]; then
+        echo 'Next: log in as Sara, open Admin > AI and choose Anthropic as the provider. Hugging Face is the default.'
+    fi
+}
+
+cmd_ai_status() {
+    local provider env_key file key status
+    echo 'Cloud AI (Admin > AI: "Company cloud AI"):'
+    for provider in huggingface anthropic; do
+        env_key=$(ai_env_key "$provider")
+        file=$(app_setting_file "$env_key")
+        if [[ -z $file ]]; then
+            printf '  -        no %s key (%s ai-key %s)\n' "$provider" "$0" "$provider"
+            continue
+        fi
+        ok "$env_key is set in $file"
+        key=$(app_setting "$env_key")
+        status=$(ai_key_status "$provider" "$key")
+        key=''
+        explain_key_status "$provider" "$status"
+    done
+
+    echo 'Laptop AI (Admin > AI: "Each person'"'"'s laptop (Ollama)" or "Laptop first"):'
+    local origin headers tags model
+    origin=$(base_url)
+    headers=$(mktemp)
+    tags=$(curl -s --max-time 3 -D "$headers" -H "Origin: $origin" http://localhost:11434/api/tags 2>/dev/null || true)
+    if [[ -z $tags ]]; then
+        missing 'Ollama does not answer on http://localhost:11434' 'install it from https://ollama.com (Linux: curl -fsSL https://ollama.com/install.sh | sh), then start it'
+        rm -f "$headers"
+        return
+    fi
+    ok 'Ollama answers on http://localhost:11434'
+    if tr -d '\r' < "$headers" | grep -qix "access-control-allow-origin: \($origin\|\*\)"; then
+        ok "Ollama lets $origin talk to it"
+    else
+        missing "Ollama refuses $origin" "set OLLAMA_ORIGINS=$origin for Ollama and restart it (Linux service: sudo systemctl edit ollama, add [Service] and Environment=\"OLLAMA_ORIGINS=$origin\", then sudo systemctl restart ollama)"
+    fi
+    rm -f "$headers"
+    # The browser picks a model the same way (local_ai_controller.js): qwen3*, else phi4* or gemma*, else the first.
+    model=$(printf '%s' "$tags" | python3 -I -c '
+import json, sys
+names = [m.get("name", "") for m in json.load(sys.stdin).get("models", [])]
+pick = next((n for n in names if n.startswith("qwen3")), None) \
+    or next((n for n in names if n.startswith(("phi4", "gemma"))), None) \
+    or (names[0] if names else "")
+print(pick)' 2>/dev/null || true)
+    if [[ -n $model ]]; then
+        ok "pinround will use the model $model"
+    else
+        missing 'Ollama has no model' 'ollama pull qwen3:4b (about 2.5 GB)'
+    fi
+}
+
 case ${1:-} in
     check) cmd_check ;;
     stack) cmd_stack ;;
@@ -265,5 +415,7 @@ case ${1:-} in
     extension) cmd_extension "${2:-}" ;;
     mcp-command) cmd_mcp_command "${2:-}" ;;
     mcp-status) cmd_mcp_status "${2:-}" ;;
+    ai-key) cmd_ai_key "${2:-}" ;;
+    ai-status) cmd_ai_status ;;
     *) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print } /^set -euo/ { exit }' "$0"; exit 2 ;;
 esac

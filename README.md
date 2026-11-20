@@ -1,57 +1,51 @@
 # pinround
 
-Screenshot-first review and ticketing. Built with Symfony 8, Symfony AI and the official PHP MCP SDK.
+Bug reports as screenshots with numbered pins. Every ticket says in plain words what happens next and whose turn it is. Claude Code reads the pins and fixes the code.
 
-Most ticket tools tell you what *status* a ticket has. pinround tells you **what to do next**.
-Problems are shown on screenshots with numbered pins. Work moves in *rounds*: the developer fixes, the tester checks each pin, and everyone sees "Now: …" and "Next: …" in plain words.
+## Set it up (about 15 minutes)
 
-> Status: the P00 skeleton and Docker stack run locally (see "Run it locally"). Application features come phase by phase; see [phase 0](docs/05-plan/phase-00-foundation.md) and [docs/README.md](docs/README.md).
+You need: Docker with Compose v2, `make`, `git`, Node 22 or newer, Chrome, and [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) (logged in).
 
-## Run it locally
+```bash
+git clone https://github.com/Mir-Zairan/pinround-symfony.git
+cd pinround-symfony
+claude
+```
 
-You need Docker with Compose v2, and `make`. You do not need PHP on your machine. Only `make e2e` (the browser tests) also needs Node 22.12 or newer on your machine.
+In Claude Code, type `/pinround-setup` and follow it. It does everything it can, and stops only for what you must click yourself.
 
-1. Run `make up`. The first run builds MinIO from source and takes about 5-6 minutes. Later runs start in seconds.
-2. Open https://localhost and accept the local certificate that Caddy makes.
-3. Mail the app sends shows up in Mailpit at http://localhost:8025.
-4. The MinIO console is at http://localhost:9001.
+## Try it on the demo shop
 
-On Linux, `make` passes your user and group id to the build. If you run plain `docker compose up` instead, set `APP_UID` and `APP_GID` in `.env.local` (run `id -u` and `id -g`). Then run `make db-roles`, `make migrate` and `make migrate-test`: the app connects as the `pinround_app` database role, which only exists after `make db-roles`. `make up` does all of this for you.
+1. In a second terminal: `make demo-shop`, then open http://localhost:8090. The shop has 4 hidden bugs.
+2. Find one. For example, add the same product twice: the total is wrong.
+3. Report it: click the pinround extension icon › **A new report** › project `SHOP` › **Capture this page** › **Done** › **Send**.
+4. In pinround (https://localhost), log in as Lena, open the new ticket and **Give it to** Omar.
+5. In a terminal: `cd demo-shop && claude`, then say: "Read my pinround notes for SHOP-<number> and fix it."
+6. Run `npm test` in `demo-shop`: the test for that bug now passes.
 
-If a port is taken, put a new one in `.env.local`, for example `HTTP_PORT=8081`. The other settings are `HTTPS_PORT`, `MAILPIT_UI_PORT`, `MINIO_API_PORT` and `MINIO_CONSOLE_PORT`, plus `JAEGER_UI_PORT` and `JAEGER_OTLP_HTTP_PORT` for the optional `observability` profile (see [operations.md](docs/02-architecture/operations.md#observability)).
+Put the bugs back with `git restore demo-shop/src`. The answers are in [demo-shop/BUGS.md](demo-shop/BUGS.md).
 
-Run `make qa` (or `composer qa` inside the app container) to run every quality gate. CI lives in `.github/workflows/ci.yml`.
+## Log in
 
-Run `make help` to see every command.
+| Person | Email | Role |
+|---|---|---|
+| Omar | `omar@acme-foods.example` | developer |
+| Mia | `mia@acme-foods.example` | tester |
+| Lena | `lena@acme-foods.example` | lead |
+| Sara | `sara@acme-foods.example` | admin |
+| Raj | `raj@acme-foods.example` | manager |
 
-To set up everything with Claude Code instead — the stack, the demo people, the local certificate, Claude Code's pinround connection and the browser extension — run `/pinround-setup` in Claude Code in this repo. It stops for the four steps only you can do in the browser.
+All use the same password: `grep DEMO_PASSWORD .env.dev.local`
 
-## Why it exists
+## Good to know
 
-- A lead should not lose a morning finding out what waits on them. Home shows the top 5, with the reason for each.
-- A tester should not write a novel to explain a bug. They drop pins on a screenshot.
-- A developer working with Claude Code should be able to say "read my pinround notes and fix what is wrong", and it works.
-- A manager should compare teams without learning each team's process. Every team maps to the same five groups.
+- **Something is wrong?** Run `.claude/skills/pinround-setup/pinround-setup.sh check`. It names the problem and the fix.
+- **Start or stop later:** `make up` / `make down`.
+- **A port is taken?** Put another one in `.env.local`, for example `HTTPS_PORT=8443`, and run `make up` again.
+- **Home is empty.** That page is not built yet. Your tickets are under **Tickets**.
 
-## What is inside
+## Working on pinround
 
-| Area | Where |
-|---|---|
-| Product vision, personas, UX rules | [docs/00-product](docs/00-product) |
-| Requirements (functional, non-functional, constraints) | [docs/01-requirements](docs/01-requirements) |
-| Architecture (modules, data, security, performance, AI) | [docs/02-architecture](docs/02-architecture) |
-| Architecture decision records | [docs/03-adr](docs/03-adr) |
-| The clickable prototype, screen by screen | [docs/04-prototype](docs/04-prototype) |
-| Phase-by-phase build plan | [docs/05-plan](docs/05-plan) |
-
-## Tech at a glance
-
-PHP 8.4+ · Symfony 8.1 (8.2 on release) · PostgreSQL 18 · Valkey · S3-compatible storage · FrankenPHP with Mercure · Symfony UX (Turbo, Stimulus, Live Components) · Symfony AI (Hugging Face, Anthropic, Ollama) · MCP server for Claude Code.
-
-## Working on this repo with Claude Code
-
-Read [CLAUDE.md](CLAUDE.md) first. Every build session starts from one phase file in [docs/05-plan](docs/05-plan).
-
-## Data rule
-
-This repository must never contain real customer data, real ticket content or real people's data from any company system. Use the neutral examples from the docs (Acme Foods, project SHOP, Lena, Omar, Mia, Raj, Sara).
+- Read [CLAUDE.md](CLAUDE.md) first. The docs start at [docs/README.md](docs/README.md); the build plan is in [docs/05-plan](docs/05-plan).
+- `make test` runs the tests, `make qa` every quality gate, `make help` every command.
+- Never put real company, customer or people data in this repository. Use Acme Foods, project SHOP, Lena, Omar, Mia, Raj and Sara.
