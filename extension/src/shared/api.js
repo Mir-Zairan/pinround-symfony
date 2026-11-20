@@ -6,15 +6,25 @@ export class ApiError extends Error {
     /**
      * @param {string} message the server's plain message, or ours
      * @param {number} status the HTTP status, 0 when the server was not reached
+     * @param {string|null} outcome the refusal's `outcome` (docs/api/v1.yaml Refused), such as missing_scope; null when
+     *   the answer named none
      */
-    constructor(message, status) {
+    constructor(message, status, outcome = null) {
         super(message);
         this.status = status;
+        this.outcome = outcome;
+    }
+
+    /** True when pinround may have done the request although no answer came: not reached, or a server failure. */
+    get mayHaveBeenSaved() {
+        return 0 === this.status || this.status >= 500;
     }
 }
 
 export const NOT_REACHED = 'Could not reach pinround. Check the address and your connection.';
 export const OTHER_HOST = 'The extension only talks to the pinround address you set.';
+export const MISSING_SCOPE = 'missing_scope';
+export const NOT_FOUND = 'not_found';
 
 export class PinroundApi {
     /**
@@ -55,9 +65,14 @@ export class PinroundApi {
         } catch {
             throw new ApiError(NOT_REACHED, 0);
         }
-        const answer = await response.json().catch(() => ({}));
+        const parsed = await response.json().catch(() => ({}));
+        const answer = null !== parsed && 'object' === typeof parsed ? parsed : {};
         if (!response.ok) {
-            throw new ApiError(401 === response.status ? 'pinround does not accept this token any more. Pair the extension again in its options.' : (answer.error ?? `pinround answered ${response.status}.`), response.status);
+            throw new ApiError(
+                401 === response.status ? 'pinround does not accept this token any more. Pair the extension again in its options.' : ('string' === typeof answer.error ? answer.error : `pinround answered ${response.status}.`),
+                response.status,
+                'string' === typeof answer.outcome ? answer.outcome : null,
+            );
         }
         if ('string' === typeof answer.put_url) {
             this.issuedPutUrls.add(answer.put_url);

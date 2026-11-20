@@ -17,10 +17,19 @@
     <form id="capture-form" hidden>
         <label>
             Put the screenshot in
-            <select id="target" required></select>
+            <select id="target"></select>
         </label>
 
-        <fieldset id="report-fields">
+        <fieldset id="new-notebook-fields" hidden>
+            <legend>New notebook</legend>
+            <label>
+                Notebook title
+                <input id="notebook-title" type="text" maxlength="120" autocomplete="off">
+            </label>
+            <button type="button" id="make-notebook">Make the notebook</button>
+        </fieldset>
+
+        <fieldset id="report-fields" hidden>
             <legend>New report</legend>
             <label>
                 Project key
@@ -44,11 +53,11 @@
         <button type="button" class="secondary" id="pin-page">Pin this page</button>
         <button type="submit" id="capture">Capture this page</button>
 
-        <section id="report-captures" hidden>
-            <p class="hint" id="captures-count"></p>
-            <ol class="captures" id="captures-list"></ol>
-            <button type="button" id="make-draft">Make the report draft</button>
-            <button type="button" class="secondary" id="clear-captures">Start over</button>
+        <section id="report-draft" hidden>
+            <p class="hint" id="report-draft-count"></p>
+            <button type="button" id="send-again" hidden>Send it again</button>
+            <button type="button" id="finish-report">Done</button>
+            <button type="button" class="secondary" id="start-over">Start over</button>
         </section>
     </form>
 
