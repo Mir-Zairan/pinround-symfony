@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Review\UI;
 
-use App\Organization\Api\ActorContext;
+use App\Identity\Api\UserQueries;
+use App\Identity\Api\UserView;
+use App\Insight\Api\TurnUserQueries;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
 use App\Review\Api\RoundCommands;
@@ -15,7 +17,9 @@ use App\Review\UI\Controller\RefusalAnswers;
 use App\Review\UI\Controller\RefusedWithToast;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
+use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
+use App\SharedKernel\UI\RoundStillOpenReason;
 use App\Ticketing\Api\TicketNotFound;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -29,7 +33,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * with a redirect to the ticket's Rounds section and its toast flashed; "Make it a new ticket" to the new report draft's
  * page instead. A refusal (a start the person may not make, an expired form, or a RoundRefused
  * other than NOT_FOUND) changes nothing and is a 422 toast stream for a Turbo form, and a redirect with the toast
- * flashed for any other form, as the ticket's other actions answer.
+ * flashed for any other form, as the ticket's other actions answer. A share while another shared round of the ticket
+ * is open (ADR-0048) is refused with a toast that names who gives the verdict, as the hand-off dialog says it.
  *
  * Without the request transaction, as TicketMoveController: each action runs in a transaction of its own, so a refused
  * command leaves nothing and the toast is set only once the change is committed. In that order: a ticket the person may
@@ -67,6 +72,8 @@ final class DraftRoundController extends AbstractController
         private readonly RoundCommands $roundCommands,
         private readonly ReportDrafts $reportDrafts,
         private readonly RefusalAnswers $refusalAnswers,
+        private readonly TurnUserQueries $turnUserQueries,
+        private readonly UserQueries $userQueries,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -104,10 +111,15 @@ final class DraftRoundController extends AbstractController
         $now = $this->clock->now();
 
         return $this->respondToAction($request, $key, function () use ($key, $id, $csrfToken, $now): string {
-            $actor = $this->actorWhoMayChangeRound($key, $id, RoundPermission::EDIT);
+            $visible = $this->visibleTicketWithChangeableRound($key, $id, RoundPermission::EDIT);
             $this->refuseAnExpiredForm($key, $csrfToken);
+            try {
+                $roundNumber = $this->roundCommands->shareDraft($id, $visible->actor->userId(), $now);
+            } catch (RoundRefused $refused) {
+                throw $this->namedRefusalOf($refused, $visible);
+            }
 
-            return \sprintf(self::DRAFT_SHARED, $this->roundCommands->shareDraft($id, $actor->userId(), $now));
+            return \sprintf(self::DRAFT_SHARED, $roundNumber);
         });
     }
 
@@ -118,9 +130,9 @@ final class DraftRoundController extends AbstractController
         $now = $this->clock->now();
 
         return $this->respondToAction($request, $key, function () use ($key, $id, $csrfToken, $now): string {
-            $actor = $this->actorWhoMayChangeRound($key, $id, RoundPermission::EDIT);
+            $visible = $this->visibleTicketWithChangeableRound($key, $id, RoundPermission::EDIT);
             $this->refuseAnExpiredForm($key, $csrfToken);
-            $this->roundCommands->deleteDraft($id, $actor->userId(), $now);
+            $this->roundCommands->deleteDraft($id, $visible->actor->userId(), $now);
 
             return self::DRAFT_DELETED;
         });
@@ -134,10 +146,10 @@ final class DraftRoundController extends AbstractController
 
         return $this->answerRefusalsOf($request, $key, function () use ($key, $id, $csrfToken, $now): Response {
             $reportDraftId = $this->transactions->run(function () use ($key, $id, $csrfToken, $now): string {
-                $actor = $this->actorWhoMayChangeRound($key, $id, RoundPermission::MOVE_TO_REPORT_DRAFT);
+                $visible = $this->visibleTicketWithChangeableRound($key, $id, RoundPermission::MOVE_TO_REPORT_DRAFT);
                 $this->refuseAnExpiredForm($key, $csrfToken);
 
-                return $this->reportDrafts->createFromDraftRound($id, $actor->userId(), $now);
+                return $this->reportDrafts->createFromDraftRound($id, $visible->actor->userId(), $now);
             });
             $this->addFlash(self::TOAST, self::MOVED_TO_REPORT_DRAFT);
 
@@ -201,7 +213,7 @@ final class DraftRoundController extends AbstractController
      *
      * @param string $attribute RoundPermission EDIT or MOVE_TO_REPORT_DRAFT
      */
-    private function actorWhoMayChangeRound(string $key, string $roundId, string $attribute): ActorContext
+    private function visibleTicketWithChangeableRound(string $key, string $roundId, string $attribute): VisibleTicket
     {
         $visible = $this->visibleTicketLookup->visibleTicketOf($key);
         $round = $this->roundQueries->accessFactsOf($roundId);
@@ -212,7 +224,42 @@ final class DraftRoundController extends AbstractController
             throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
         }
 
-        return $visible->actor;
+        return $visible;
+    }
+
+    /**
+     * A share refused while another shared round of the ticket is open (ADR-0048) names who gives the verdict, as the
+     * hand-off dialog does; any other refusal leaves as Review said it. Read in the share's transaction, which wrote
+     * nothing before the refusal.
+     */
+    private function namedRefusalOf(RoundRefused $refused, VisibleTicket $visible): RoundRefused|RefusedWithToast
+    {
+        $openRoundNumber = $refused->openRoundNumber();
+        if (null === $openRoundNumber) {
+            return $refused;
+        }
+
+        return new RefusedWithToast($this->roundStillOpenReasonOf($openRoundNumber, $refused->readyForUserId(), $visible));
+    }
+
+    /**
+     * Names the person Review named, else whoever's turn it is now; nobody for a turn that is a label's or no turn row.
+     */
+    private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, VisibleTicket $visible): string
+    {
+        $ticketId = $visible->ticket->id;
+        $verdictGiverId = $readyForUserId ?? $this->turnUserQueries->turnUsersOf([$ticketId])[$ticketId->toString()] ?? null;
+        if (null === $verdictGiverId) {
+            return RoundStillOpenReason::of($openRoundNumber, null);
+        }
+        if ($verdictGiverId->equals($visible->actor->userId())) {
+            return RoundStillOpenReason::forTheVerdictGiver($openRoundNumber);
+        }
+        $displayName = $visible->ticket->displayNames[$verdictGiverId->toString()]
+            ?? $this->userQueries->byIds([$verdictGiverId])[$verdictGiverId->toString()]->displayName
+            ?? null;
+
+        return RoundStillOpenReason::of($openRoundNumber, null === $displayName ? null : new UserView($verdictGiverId, $displayName)->firstName());
     }
 
     /**

@@ -9,6 +9,7 @@ use App\Media\UI\Controller\UploadIntentController;
 use App\Media\UI\Controller\UploadStatusController;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\RoundRefused;
+use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\Controller\RefusedWithToast;
@@ -21,6 +22,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -112,6 +114,19 @@ final class DraftRoundControllerTest extends WebTestCase
 
             return 0;
         });
+    }
+
+    /**
+     * The turn read model says it is $person's turn on the ticket, which stays in To do.
+     */
+    private function addTurnRowOf(string $ticketId, string $person): void
+    {
+        $personId = $this->people[$person]->id()->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
+             SELECT organization_id, id, team_id, project_id, 'todo', ?, NULL, 'build', 10, '2026-11-06 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
+            [$personId, $ticketId],
+        ));
     }
 
     protected function tearDown(): void
@@ -534,6 +549,66 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertSame('This draft round is shared, so it no longer changes.', $this->toastOfTheRefusal());
 
         self::assertSame($before, $this->roundRowsOf($ticketId));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string|null, string}> who shares their draft, who owns the open
+     *                                                                      round 1, whose turn it is (null for no turn
+     *                                                                      row), and the toast
+     */
+    public static function sharesWhileRoundOneIsOpen(): iterable
+    {
+        yield 'Mia\'s findings round waits for Omar, the assignee, whatever the turn says' => ['Lena', 'Mia', 'Mia', 'Round 1 is still open. Omar gives a verdict first.'];
+        yield 'Omar\'s self-check round waits for Mia, whose turn it is' => ['Omar', 'Omar', 'Mia', 'Round 1 is still open. Mia gives a verdict first.'];
+        yield 'Sara, an admin of no team whose turn it is, is named though the ticket does not list her' => ['Omar', 'Omar', 'Sara', 'Round 1 is still open. Sara gives a verdict first.'];
+        yield 'Mia, whose turn it is, is told to give her verdict' => ['Mia', 'Omar', 'Mia', 'Round 1 is still open. Give your verdict first.'];
+        yield 'no turn row names nobody, as Review does' => ['Omar', 'Omar', null, 'Round 1 is still open. Wait for its verdict before you share.'];
+    }
+
+    /**
+     * ADR-0048, P14.T5: one open shared round per ticket. "Share with the team now" on a draft card while round 1 is
+     * open is a toast that names who gives the verdict, and the draft stays private and unnumbered.
+     */
+    #[Test]
+    #[DataProvider('sharesWhileRoundOneIsOpen')]
+    public function sharingWhileAnotherRoundIsOpenSaysWhoGivesTheVerdictAndKeepsTheDraftPrivate(string $sharer, string $openRoundOwner, ?string $turnPerson, string $expectedToast): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $openRound = $this->addRound($ticketId, 1, 'draft', $openRoundOwner, self::SHARED_AT);
+        $this->addScreenshot($openRound, $this->addMedia('ready', $openRoundOwner), 0, 'Shared shot', null);
+        $draft = $this->addRound($ticketId, null, 'draft', $sharer, null);
+        $this->addScreenshot($draft, $this->addMedia('ready', $sharer), 0, 'Draft shot to share', null);
+        if (null !== $turnPerson) {
+            $this->addTurnRowOf($ticketId, $turnPerson);
+        }
+        $before = $this->roundRowsOf($ticketId);
+        self::assertCount(2, $before);
+        $this->logIn($this->client, $this->people[$sharer]);
+
+        $this->client->request('POST', $this->shareUrl($draft), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))], [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame($expectedToast, $this->toastOfTheRefusal());
+        self::assertSame($before, $this->roundRowsOf($ticketId));
+        $unshared = $this->roundRow($ticketId, $draft);
+        self::assertSame(['open', null, null], [$unshared['state'], $unshared['number'], $unshared['shared_at']]);
+        self::assertSame('open', $this->roundRow($ticketId, $openRound)['state'], 'The refused share closes nothing.');
+    }
+
+    #[Test]
+    public function sharingADraftWithNoScreenshotSaysToAddOneAndKeepsTheDraftPrivate(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addTurnRowOf($ticketId, 'Mia');
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $before = $this->roundRowsOf($ticketId);
+        self::assertCount(1, $before);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', $this->shareUrl($draft), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))], [], self::TURBO_FORM_HEADERS);
+
+        self::assertSame(DraftHasNoScreenshots::REASON, $this->toastOfTheRefusal());
+        self::assertSame($before, $this->roundRowsOf($ticketId));
+        self::assertNull($this->roundRow($ticketId, $draft)['number']);
     }
 
     #[Test]
