@@ -241,7 +241,7 @@ final class SaveScenariosTest extends WebTestCase
         $this->answer();
         $this->callTool($token, CreateNotebookUpload::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'mime' => 'image/png', 'bytes' => 2048, 'sha256' => str_repeat('a', 64)]);
         $this->answer();
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, 'title' => 'The cart', 'summary' => 'The total goes below 0.']);
         $this->answer();
         $this->callTool($token, ListMyNotebooks::NAME, []);
         $this->answer();

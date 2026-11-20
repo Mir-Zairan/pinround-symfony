@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
-use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextRequiredOverMcp;
 use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
@@ -36,9 +37,10 @@ use Psr\Clock\ClockInterface;
  * UploadCompletions in the gate's savepoint, so a refusal leaves it unused. A picture still processing is added as it
  * is, as the notebook page adds it. MCP has no Idempotency-Key, so the same call sent again, as after a lost answer,
  * finds the picture in the notebook and answers already_in_notebook, as add_report_screenshot does; it never adds a
- * second copy. Holds no state (ADR-0008).
+ * second copy. Over MCP the title and the summary are required (P14.T11); /api/v1 keeps them optional. Holds no state
+ * (ADR-0008).
  */
-final readonly class AddNotebookScreenshot implements AgentTool
+final readonly class AddNotebookScreenshot implements ScreenshotContextRequiredOverMcp
 {
     public const string NAME = 'add_notebook_screenshot';
     public const string AUDIT_TARGET_TYPE = 'notebook';
@@ -57,25 +59,56 @@ final readonly class AddNotebookScreenshot implements AgentTool
     ) {
     }
 
+    /**
+     * /api/v1's, where the title and the summary stay optional.
+     */
     public function definition(): Tool
+    {
+        return self::toolOf(self::inputSchema(), 'title?, summary?', '');
+    }
+
+    public function mcpDefinition(): Tool
+    {
+        return self::toolOf(ScreenshotContextArguments::requiredIn(self::inputSchema()), 'title, summary', ' '.ScreenshotContextArguments::RULE);
+    }
+
+    public function refuseMissingScreenshotContext(array $arguments): void
+    {
+        ScreenshotContextArguments::refuseMissingIn($arguments, '');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function inputSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The notebook_id create_notebook or list_my_notebooks gave.'],
+                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_notebook_upload gave for this notebook, after the file was PUT to its put_url.'],
+                'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
+                'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
+                'pins' => PlacedPinArguments::schema(),
+            ],
+            'required' => ['notebook', 'upload_id'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $inputSchema
+     * @param string               $pictureFields how the description writes the title and the summary
+     * @param string               $pictureRule   appended to the description
+     */
+    private static function toolOf(array $inputSchema, string $pictureFields, string $pictureRule): Tool
     {
         return new Tool(
             name: self::NAME,
             title: 'Add a screenshot to a notebook',
-            inputSchema: [
-                'type' => 'object',
-                'properties' => [
-                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The notebook_id create_notebook or list_my_notebooks gave.'],
-                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_notebook_upload gave for this notebook, after the file was PUT to its put_url.'],
-                    'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
-                    'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                    'pins' => PlacedPinArguments::schema(),
-                ],
-                'required' => ['notebook', 'upload_id'],
-                'additionalProperties' => false,
-            ],
+            inputSchema: $inputSchema,
             description: 'Adds a picture you uploaded with create_notebook_upload at the end of one of your own'
-                .' notebooks: {notebook, upload_id, title?, summary?, pins?: [{x_pct, y_pct, note}]}. A notebook holds at'
+                .' notebooks: {notebook, upload_id, '.$pictureFields.', pins?: [{x_pct, y_pct, note}]}.'.$pictureRule.' A notebook holds at'
                 .' most '.Notebooks::MAX_SCREENSHOTS.' pictures; a picture in it already is not added twice, so the same'
                 .' call sent again answers status already_in_notebook and changes nothing. A picture still being'
                 .' processed is added and shows once it is ready. A rejected picture is refused. Answers notebook_id,'

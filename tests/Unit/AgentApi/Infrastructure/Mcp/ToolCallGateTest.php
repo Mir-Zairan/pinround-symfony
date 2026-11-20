@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp;
 
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -23,6 +24,8 @@ final class ToolCallGateTest extends TestCase
 {
     private const string SHOP_42 = '019a5f00-0000-7000-8000-00000000e042';
     private const string TICKET_VIEW = 'TICKET_VIEW';
+    private const string OMARS_DRAFT = '019a5f00-0000-7000-8000-00000000e741';
+    private const string ROUND_EDIT = 'ROUND_EDIT';
 
     #[Test]
     public function aTokenWithoutTheToolsScopeIsRefusedBeforeAnythingElseRuns(): void
@@ -71,6 +74,96 @@ final class ToolCallGateTest extends TestCase
 
         self::assertSame(1, $tool->calls);
         $this->assertOneRow($fixture, 'ok', ToolCallAuditor::TOOL_TARGET_TYPE, null);
+    }
+
+    /**
+     * The summary is left out, so the reason names it, not the title before it.
+     */
+    #[Test]
+    public function overMcpAPictureWithoutASummaryIsRefusedWithTheReasonBeforeItsTargetIsLookedUpAndNothingIsWritten(): void
+    {
+        $fixture = new GateFixture(scopes: ['rounds:write'], grants: [[self::ROUND_EDIT, self::OMARS_DRAFT]]);
+        $tool = new ScriptedPictureTool($fixture, self::omarsDraft());
+
+        $refusal = $this->refusalOf(static fn () => $fixture->gate->callOverMcp($tool, ['upload_id' => 'u1', 'title' => 'Cart']));
+
+        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
+        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, '/summary')), $refusal->getMessage());
+        self::assertSame([0, 0], [$tool->targetLookups, $tool->calls]);
+        self::assertSame([], $fixture->voterQuestions);
+        self::assertSame([], $fixture->writtenLabels());
+        self::assertSame([[ToolCallAuditor::TOOL_TARGET_TYPE, null, ['tool' => ScriptedPictureTool::NAME, 'outcome' => 'invalid_input']]], self::targetsAndDataOf($fixture));
+    }
+
+    /**
+     * A blank title passes the schema's minLength, so only the gate's own check can refuse it.
+     */
+    #[Test]
+    public function overMcpABlankTitleIsRefusedThoughItPassesTheStricterSchema(): void
+    {
+        $fixture = new GateFixture(scopes: ['rounds:write'], grants: [[self::ROUND_EDIT, self::OMARS_DRAFT]]);
+        $tool = new ScriptedPictureTool($fixture, self::omarsDraft());
+
+        $refusal = $this->refusalOf(static fn () => $fixture->gate->callOverMcp($tool, ['upload_id' => 'u1', 'title' => "\r\n ", 'summary' => 'The total.']));
+
+        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, '/title')), $refusal->getMessage());
+        self::assertSame([0, 0], [$tool->targetLookups, $tool->calls]);
+        self::assertSame([], $fixture->writtenLabels());
+    }
+
+    /**
+     * The scope is checked first, so a token without it learns nothing of the arguments.
+     */
+    #[Test]
+    public function overMcpATokenWithoutTheScopeIsRefusedForItsScopeBeforeThePictureIsRead(): void
+    {
+        $fixture = new GateFixture(scopes: ['read'], grants: [[self::ROUND_EDIT, self::OMARS_DRAFT]]);
+        $tool = new ScriptedPictureTool($fixture, self::omarsDraft());
+
+        $refusal = $this->refusalOf(static fn () => $fixture->gate->callOverMcp($tool, ['upload_id' => 'u1']));
+
+        self::assertSame(\sprintf(ToolRefusal::MISSING_SCOPE, 'rounds:write'), $refusal->getMessage());
+        self::assertSame([], $fixture->writtenLabels());
+    }
+
+    #[Test]
+    public function overMcpAPictureWithCrLfAndMultibyteTextRunsAndWritesAnOkRow(): void
+    {
+        $fixture = new GateFixture(scopes: ['rounds:write'], grants: [[self::ROUND_EDIT, self::OMARS_DRAFT]]);
+        $tool = new ScriptedPictureTool($fixture, self::omarsDraft());
+
+        $fixture->gate->callOverMcp($tool, ['upload_id' => 'u1', 'title' => "Cart\r\nPanier · 価格", 'summary' => "Der Gesamtbetrag ist doppelt.\r\n合計が二重です。"]);
+
+        self::assertSame([1, 1], [$tool->targetLookups, $tool->calls]);
+        self::assertSame(['picture added'], $fixture->writtenLabels());
+        self::assertSame([['round', self::OMARS_DRAFT, ['tool' => ScriptedPictureTool::NAME, 'outcome' => 'ok']]], self::targetsAndDataOf($fixture));
+    }
+
+    /**
+     * call() serves /api/v1, where the browser extension may leave both out (P14.T11).
+     */
+    #[Test]
+    public function outsideMcpTheSamePictureToolRunsWithoutATitleOrASummary(): void
+    {
+        $fixture = new GateFixture(scopes: ['rounds:write'], grants: [[self::ROUND_EDIT, self::OMARS_DRAFT]]);
+        $tool = new ScriptedPictureTool($fixture, self::omarsDraft());
+
+        $fixture->gate->call($tool, ['upload_id' => 'u1']);
+
+        self::assertSame(1, $tool->calls);
+        self::assertSame(['picture added'], $fixture->writtenLabels());
+    }
+
+    #[Test]
+    public function overMcpAToolWithoutPicturesRunsAsCallRunsIt(): void
+    {
+        $fixture = new GateFixture(grants: [[self::TICKET_VIEW, self::SHOP_42]]);
+        $tool = $this->toolOnShop42('read');
+
+        $fixture->gate->callOverMcp($tool, ['ticket' => 'SHOP-42']);
+
+        self::assertSame([1, 1], [$tool->targetLookups, $tool->calls]);
+        $this->assertOneRow($fixture, 'ok', 'ticket', self::SHOP_42);
     }
 
     #[Test]
@@ -434,6 +527,19 @@ final class ToolCallGateTest extends TestCase
             [GateFixture::ACME_FOODS, ActorKind::Token, GateFixture::OMAR, GateFixture::OMARS_TOKEN, ToolCallAuditor::ACTION, $targetType, $targetId, ['tool' => ScriptedTool::NAME, 'outcome' => $outcome]],
             self::rowOf($entry),
         );
+    }
+
+    private static function omarsDraft(): ToolTarget
+    {
+        return new ToolTarget(self::ROUND_EDIT, self::OMARS_DRAFT, 'round', self::OMARS_DRAFT);
+    }
+
+    /**
+     * @return list<array{?string, ?string, array<string, mixed>}> each audit row's target type, target id and data
+     */
+    private static function targetsAndDataOf(GateFixture $fixture): array
+    {
+        return array_map(static fn (AuditEntry $entry): array => [$entry->targetType, $entry->targetId, $entry->data], $fixture->auditLog->entries);
     }
 
     /**

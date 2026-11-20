@@ -12,6 +12,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Mcp\Capability\Discovery\SchemaValidator;
 use Mcp\Schema\Result\CallToolResult;
+use Mcp\Schema\Tool;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
@@ -52,12 +53,44 @@ final readonly class ToolCallGate
      */
     public function call(AgentTool $tool, array $arguments): CallToolResult
     {
+        return $this->run($tool, $tool->definition(), $arguments, null);
+    }
+
+    /**
+     * As call(), for a tools/call of the MCP server: a ScreenshotContextRequiredOverMcp tool is checked against its
+     * mcpDefinition(), after its refuseMissingScreenshotContext(), so a picture without a title or a summary is refused
+     * as invalid input before anything runs (P14.T11). Any other tool runs as call() runs it.
+     *
+     * @param array<string, mixed> $arguments what the client sent, unchecked
+     *
+     * @throws ToolRefusal     as call()
+     * @throws \LogicException as call()
+     * @throws \Throwable      as call()
+     */
+    public function callOverMcp(AgentTool $tool, array $arguments): CallToolResult
+    {
+        if (!$tool instanceof ScreenshotContextRequiredOverMcp) {
+            return $this->call($tool, $arguments);
+        }
+
+        return $this->run($tool, $tool->mcpDefinition(), $arguments, $tool->refuseMissingScreenshotContext(...));
+    }
+
+    /**
+     * @param array<string, mixed>                        $arguments
+     * @param (\Closure(array<string, mixed>): void)|null $refuseIncompleteInput runs after the scope check, before
+     *                                                                           the input schema
+     */
+    private function run(AgentTool $tool, Tool $definition, array $arguments, ?\Closure $refuseIncompleteInput): CallToolResult
+    {
         [$access, $userId] = $this->callerOf();
-        $definition = $tool->definition();
 
         try {
             if (!$access->hasScope($tool->requiredScope())) {
                 throw ToolRefusal::missingScope($tool->requiredScope());
+            }
+            if (null !== $refuseIncompleteInput) {
+                $refuseIncompleteInput($arguments);
             }
             $this->refuseInvalidInput($arguments, $definition->inputSchema);
         } catch (ToolRefusal $refusal) {

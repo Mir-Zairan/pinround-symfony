@@ -9,7 +9,8 @@ use Mcp\Capability\RegistryInterface;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 
 /**
- * Puts each AgentTool's definition in the MCP server's registry, for tools/list. The bundle tags it mcp.loader. The
+ * Puts each AgentTool's definition in the MCP server's registry, for tools/list: the mcpDefinition() of a
+ * ScreenshotContextRequiredOverMcp tool, the definition() of any other. The bundle tags it mcp.loader. The
  * registry's handler for each tool only refuses: GatedToolCallHandler answers every tools/call before the SDK's own
  * handler could run it. Holds no state (ADR-0008).
  */
@@ -31,7 +32,7 @@ final readonly class AgentToolLoader implements LoaderInterface
     {
         $loadedNames = [];
         foreach ($this->tools as $tool) {
-            $definition = $tool->definition();
+            $definition = $tool instanceof ScreenshotContextRequiredOverMcp ? $tool->mcpDefinition() : $tool->definition();
             if (isset($loadedNames[$definition->name])) {
                 throw new \LogicException(\sprintf('Two MCP tools are named "%s".', $definition->name));
             }
