@@ -393,6 +393,94 @@ final class RoundTest extends TestCase
         self::assertFalse($roundOf()->isFindingsFor(new UserId(self::OMAR)));
     }
 
+    /**
+     * Omar is the assignee unless a case says nobody is; "Share now" is a share outside a move, which records no decision.
+     *
+     * @return iterable<string, array{\Closure(): Round, string, bool, string|null, bool}> the round, the mover, whether
+     *                                                                                     it was their turn, the assignee,
+     *                                                                                     and whether the move closes it
+     */
+    public static function movesAndWhetherTheyCloseTheRound(): iterable
+    {
+        $miasFindings = static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Open);
+        $omarsSharedNow = static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, 3, RoundState::Open);
+        $omarsSharedInAMove = static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, 3, RoundState::Open, false, DraftDecision::Shared);
+        $lenasReview = static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open);
+
+        yield 'Lena moves on her turn: Mia\'s findings' => [$miasFindings, self::LENA, true, self::OMAR, true];
+        yield 'Mia moves on her turn: Lena\'s review round' => [$lenasReview, self::MIA, true, self::OMAR, true];
+        yield 'Mia moves on her turn: Omar\'s round shared now' => [$omarsSharedNow, self::MIA, true, self::OMAR, true];
+        yield 'the assignee moves outside his turn: Mia\'s findings' => [$miasFindings, self::OMAR, false, self::OMAR, true];
+        yield 'Omar moves on his turn: his round shared in an earlier move' => [$omarsSharedInAMove, self::OMAR, true, self::OMAR, true];
+
+        yield 'Omar moves on his turn: his own round shared now' => [$omarsSharedNow, self::OMAR, true, self::OMAR, false];
+        yield 'the assignee moves outside his turn: his own round shared now' => [$omarsSharedNow, self::OMAR, false, self::OMAR, false];
+        yield 'the assignee moves outside his turn: his round shared in an earlier move, a self-check' => [$omarsSharedInAMove, self::OMAR, false, self::OMAR, false];
+        yield 'the assignee moves outside his turn: Lena\'s review round' => [$lenasReview, self::OMAR, false, self::OMAR, false];
+        yield 'Lena moves outside her turn: Mia\'s findings for Omar' => [$miasFindings, self::LENA, false, self::OMAR, false];
+        yield 'Omar moves outside his turn, nobody has the ticket: Mia\'s draft' => [$miasFindings, self::OMAR, false, null, false];
+        yield 'Omar moves on his turn: Mia\'s closed findings' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Closed), self::OMAR, true, self::OMAR, false];
+        yield 'Omar moves on his turn: Mia\'s unshared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, null, RoundState::Open), self::OMAR, true, self::OMAR, false];
+        yield 'Omar moves on his turn: Round 0' => [static fn (): Round => self::report([self::screenshot(0)]), self::OMAR, true, self::OMAR, false];
+        yield 'Omar moves on his turn: the open checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open), self::OMAR, true, self::OMAR, false];
+    }
+
+    /**
+     * @param \Closure(): Round $roundOf
+     */
+    #[Test]
+    #[DataProvider('movesAndWhetherTheyCloseTheRound')]
+    public function aMoveClosesAnOpenSharedRoundOnTheMoversTurnOrTheAssigneesFindingsButNotARoundTheMoverSharedNow(\Closure $roundOf, string $moverId, bool $isMoversTurn, ?string $assigneeId, bool $isClosed): void
+    {
+        $round = $roundOf();
+        $before = self::snapshot($round);
+
+        self::assertSame($isClosed, $round->isClosedByMoveOf(new UserId($moverId), $isMoversTurn, null === $assigneeId ? null : new UserId($assigneeId)));
+        self::assertSame($before, self::snapshot($round), 'Asking closes nothing.');
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Round, string, string|null, bool}> the round, the sharer, the assignee,
+     *                                                                               and whether the share closes it
+     */
+    public static function sharesAndWhetherTheyCloseTheRound(): iterable
+    {
+        $miasFindings = static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Open);
+
+        yield 'the assignee shares over Mia\'s findings' => [$miasFindings, self::OMAR, self::OMAR, true];
+        yield 'Lena shares over Mia\'s findings for Omar' => [$miasFindings, self::LENA, self::OMAR, false];
+        yield 'Omar shares over Mia\'s draft, nobody has the ticket' => [$miasFindings, self::OMAR, null, false];
+        yield 'the assignee shares over Mia\'s closed findings' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Closed), self::OMAR, self::OMAR, false];
+        yield 'the assignee shares over his own shared round' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, 3, RoundState::Open), self::OMAR, self::OMAR, false];
+        yield 'the assignee shares over Lena\'s review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open), self::OMAR, self::OMAR, false];
+    }
+
+    /**
+     * @param \Closure(): Round $roundOf
+     */
+    #[Test]
+    #[DataProvider('sharesAndWhetherTheyCloseTheRound')]
+    public function onlyTheAssigneesShareClosesAnOpenFindingsRound(\Closure $roundOf, string $sharerId, ?string $assigneeId, bool $isClosed): void
+    {
+        $round = $roundOf();
+        $before = self::snapshot($round);
+
+        self::assertSame($isClosed, $round->isClosedByShareOf(new UserId($sharerId), null === $assigneeId ? null : new UserId($assigneeId)));
+        self::assertSame($before, self::snapshot($round), 'Asking closes nothing.');
+    }
+
+    #[Test]
+    public function findingsAreReadyForTheAssigneeAndAnyOtherRoundForNobodyReviewKnows(): void
+    {
+        $omar = new UserId(self::OMAR);
+        $miasFindings = self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Open);
+
+        self::assertEquals($omar, $miasFindings->findingsReadyFor($omar));
+        self::assertNull($miasFindings->findingsReadyFor(null), 'Nobody has the ticket.');
+        self::assertNull(self::storedRound(RoundKind::Draft, self::OMAR, 3, RoundState::Open)->findingsReadyFor($omar), 'The assignee\'s own shared round is a self-check.');
+        self::assertNull(self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open)->findingsReadyFor($omar), 'A review round waits for whoever\'s turn it is.');
+    }
+
     #[Test]
     public function aScreenshotIsAddedWithNoTextPinsOrVerdictAndTheVersionGoesUp(): void
     {
@@ -1042,7 +1130,7 @@ final class RoundTest extends TestCase
     /**
      * A round as a read gives it at version 1, with one screenshot; shared exactly when it has a number.
      */
-    private static function storedRound(RoundKind $kind, string $ownerId, ?int $number, RoundState $state, bool $isDeleted = false): Round
+    private static function storedRound(RoundKind $kind, string $ownerId, ?int $number, RoundState $state, bool $isDeleted = false, ?DraftDecision $decision = null): Round
     {
         $createdAt = new \DateTimeImmutable('2026-03-04 10:00:00+00:00');
 
@@ -1059,8 +1147,8 @@ final class RoundTest extends TestCase
             [self::screenshot(0)],
             $createdAt,
             $isDeleted ? new \DateTimeImmutable('2026-03-05 12:00:00+00:00') : null,
-            null,
-            null,
+            $decision,
+            null === $decision ? null : new \DateTimeImmutable('2026-03-05 11:15:00+00:00'),
         );
     }
 

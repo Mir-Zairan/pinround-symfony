@@ -8,7 +8,7 @@ How tickets move: the five groups, steps, policies, rules, the verb buttons, who
 - [Five groups and core steps](#five-groups-and-core-steps) — the fixed groups and the eight core steps.
 - [Company steps, team steps and the step policy](#company-steps-team-steps-and-the-step-policy) — who may add steps, and where.
 - [Rules (guards)](#rules-guards) — the three rules and how they are coded.
-- [Transition catalogue](#transition-catalogue) — every verb: from, to, who, guards, side effects, events.
+- [Transition catalogue](#transition-catalogue) — every verb: from, to, who, guards, side effects, events; which moves close the open shared round.
 - [State diagram](#state-diagram) — the core steps and verbs as a picture.
 - [Whose turn](#whose-turn) — the exact rules, in order.
 - [Now and Next sentences](#now-and-next-sentences) — the exact sentence for each step.
@@ -123,6 +123,7 @@ New rules are added as new guard classes plus a column in `wf_rule_set`, plus an
 Rules for every move:
 
 - **The draft-round question follows the person, not the verb.** Any verb or Move to by someone who owns an undecided draft round with a screenshot on the ticket asks "Share your draft round?" first ([ADR-0017](../03-adr/0017-private-draft-rounds.md)); a give asks nothing. Since [ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md) that owner can be the tester or the reviewer, so "Needs changes" and "Ask for changes" ask too. The Side effects column names it only on the assignee's hand-off verbs.
+- **A move can close the open shared round** ([ADR-0048](../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md)). In the move's transaction, after the ticket is saved and before a share in the same move, `MoveTicket` calls `ShareDraftQuestion::closeRoundsOnMove` with `MoveFacts`: the mover, the assignee, whether the move is lead-only (a verb only the Lead may use, or Move to another step…, from Workflow's `Decision::isLeadOnlyMove`) and whether it was the mover's turn before the move (`TurnRules`). A lead-only move closes no round, whoever makes it. Any other move by the person whose turn it was closes each open shared round of the ticket, except a round that person shared with "Share now"; the assignee's move also closes an open findings round outside their turn. A move by anyone else closes nothing. Because the close comes first, a hand-off that closes the open round may share the mover's draft in the same move as the next number; when a round stays open, the draft question says so and a share in that move is refused with the round's reason, and the move rolls back.
 - **No button while a question is open.** The ticket is paused; the box says "Paused until Mia answers the question below."
 - **Previous step is remembered** (`tkt_ticket.previous_step_id`, and in the history `tkt_ticket_event.from_step`), so the "go on" verbs return to it.
 - **Side effects on every move** (inside the same transaction): reproject the turn row; write `TicketMoved` to the outbox; auto-clear the actor's own pings on this ticket ([realtime-and-notifications.md](realtime-and-notifications.md)); record the move for the activity list.

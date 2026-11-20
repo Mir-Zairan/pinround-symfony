@@ -25,7 +25,10 @@ The product owner accepted these decisions in a session on 2026-11-20, after tes
 four points the product owner decided that day: a findings round closes when the assignee moves the ticket on; only a
 move-on verb closes a round, and the lead-only verbs "Put on hold", "Move to another step…" and "Go on" never do, whoever uses
 them, also when the lead is the person the round is ready for; after a lead-only move, whoever's turn it is now closes
-the round when they move the ticket on; and the confirmation test for a lead who is also the reviewer.
+the round when they move the ticket on; and the confirmation test for a lead who is also the reviewer. The product
+owner confirmed two more points on 2026-11-21, also before merge: "Input given · go on" and "Move on to <next core
+step>" used by the person whose turn it is close an open round; and any move-on hand-off that closes the open round may
+share the mover's draft in the same move, close first, then number.
 
 It supersedes in part:
 
@@ -102,8 +105,8 @@ does not close them.
 - **A move-on verb is any verb of the
   [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue) that is not lead-only, used by
   whoever's turn it is now**: "Send to code review", "Send to testing", "Approve code", "Ask for changes", "Pass it",
-  "Needs changes", "Input given · go on", "Move on to <next core step>" and the others that are not lead-only (follows
-  from the product owner's rule of 2026-11-21; the product owner's confirmation is owed). For example, Round 2 is ready
+  "Needs changes", "Input given · go on", "Move on to <next core step>" and the others that are not lead-only (product
+  owner, confirmed 2026-11-21). For example, Round 2 is ready
   for Mia in the team's Checking step; her "Move on to Testing" closes it. The same verb used by a lead whose turn it
   is not leaves the round open.
 - **Only the person whose turn it is closes it, and only with a move-on verb** (product owner, 2026-11-21). A move by
@@ -113,8 +116,9 @@ does not close them.
   code" closes it.
 - **After a lead-only move, whoever's turn it is now closes it** (product owner, 2026-11-21). When a lead moves the
   ticket past the turn of the person a round is ready for, the round stays open, and the person whose turn it is in
-  the new step closes it when they move the ticket on. For example, Round 2 is ready for Lena at code review; Raj
-  moves the ticket to Testing; Round 2 stays open; Mia's "Pass it" closes it, and Omar can then share Round 3.
+  the new step closes it when they move the ticket on. For example, Round 2 is ready for Lena at code review; Lena, as
+  lead, moves the ticket to Testing with "Move to another step…"; Round 2 stays open; Mia's "Pass it" closes it, and
+  Omar can then share Round 3.
 - A **findings round** ([ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md)) is ready for the assignee. It
   closes when **the assignee moves the ticket on**, with a move-on verb, like any other round (product owner,
   2026-11-21); after a lead-only move, when whoever's turn it is now moves it on. That holds also when the assignee
@@ -123,10 +127,9 @@ does not close them.
 - A tester's "Needs changes" with a draft does both in one move: it closes the open round with her verdict, then
   shares her draft as "Round N · findings by Mia".
 - **Any move-on hand-off that closes the open round may share the mover's draft in the same move**, the same way:
-  close first, then number, in one transaction (follows from the product owner's rule of 2026-11-21; the product
-  owner's confirmation is owed). For example, Round 2 is ready for Lena at code review; Raj moves the ticket back to In
-  progress; Round 2 stays open; Omar's "Send to code review" with a draft closes Round 2 and shares Omar's draft as
-  Round 3.
+  close first, then number, in one transaction (product owner, confirmed 2026-11-21). For example, Round 2 is ready for
+  Lena at code review; Lena, as lead, moves the ticket back to In progress with "Move to another step…"; Round 2 stays
+  open; Omar's "Send to code review" with a draft closes Round 2 and shares Omar's draft as Round 3.
 
 **Share rules.** On every path (the hand-off dialog, "Share now", MCP and REST):
 
@@ -180,10 +183,10 @@ ticket that is not a findings round. An open findings round closes on the assign
   and move" and no new screenshots, and Round 3 · findings by Mia closes with nothing new shared; a test where Round 2
   is ready for Lena, who is both lead and reviewer, her "Put on hold" leaves Round 2 open and a share is still refused,
   and later, back in Code review, her "Approve code" closes Round 2; a test where Round 2 is ready for Lena at code
-  review, Raj moves the ticket to Testing, Round 2 stays open and a share is still refused, then Mia's "Pass it" closes
-  Round 2 and Omar's next share numbers Round 3; a test where Round 2 is ready for Lena at code review, Raj moves the
-  ticket back to In progress, Round 2 stays open, then Omar's "Send to code review" with a draft closes Round 2 and
-  shares his draft as Round 3 in one move.
+  review, Lena as lead moves the ticket to Testing, Round 2 stays open and a share is still refused, then Mia's "Pass
+  it" closes Round 2 and Omar's next share numbers Round 3; a test where Round 2 is ready for Lena at code review, Lena
+  as lead moves the ticket back to In progress, Round 2 stays open, then Omar's "Send to code review" with a draft
+  closes Round 2 and shares his draft as Round 3 in one move.
 - P14.T6: domain, migration, repository and isolation tests for `retake_of`; a sixth try is refused and nothing is
   stored; `retake_of` pointing at another round, another person's draft or another organization answers 404; after
   share the round holds one screenshot per chain, the latest try.
