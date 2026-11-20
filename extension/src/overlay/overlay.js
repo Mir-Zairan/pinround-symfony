@@ -152,6 +152,58 @@
             handler(event);
         }
     };
+    // Chrome hands a textarea's typed, pasted and composed text in data, and at a composition's beforeinput the
+    // selection spans the composed text the new one replaces.
+    const INSERTING_KINDS = new Set(['insertText', 'insertFromPaste', 'insertCompositionText', 'insertLineBreak', 'insertParagraph']);
+    const DELETING_BACKWARD_KINDS = new Set(['deleteContentBackward', 'deleteWordBackward', 'deleteSoftLineBackward', 'deleteHardLineBackward']);
+    const DELETING_FORWARD_KINDS = new Set(['deleteContentForward', 'deleteWordForward', 'deleteSoftLineForward', 'deleteHardLineForward', 'deleteByCut', 'deleteContent']);
+    // Chrome cuts text at a field's maxLength, but never between the two halves of a surrogate pair.
+    const fittingText = (text, room) => {
+        if (text.length <= room) {
+            return text;
+        }
+        const cut = text.slice(0, Math.max(0, room));
+        const lastCode = cut.charCodeAt(cut.length - 1);
+
+        return lastCode >= 0xD800 && lastCode <= 0xDBFF ? cut.slice(0, -1) : cut;
+    };
+
+    /**
+     * What a trusted beforeinput of this kind does to the field, or null for a kind with no model here. intended is the
+     * field's whole value after the edit, and null for a deletion with nothing selected, whose length is not known.
+     */
+    function personEditOf(inputType, data, field) {
+        const before = field.value.slice(0, field.selectionStart);
+        const after = field.value.slice(field.selectionEnd);
+        const isBackward = DELETING_BACKWARD_KINDS.has(inputType);
+        if (INSERTING_KINDS.has(inputType)) {
+            const isLineBreak = 'insertLineBreak' === inputType || 'insertParagraph' === inputType;
+            // A textarea's value holds every line break as \n.
+            const text = isLineBreak ? '\n' : (data ?? '').replace(/\r\n?/g, '\n');
+            const inserted = fittingText(text, field.maxLength - before.length - after.length);
+
+            return { before, after, isBackward, intended: before + inserted + after, caret: before.length + inserted.length };
+        }
+        if (!isBackward && !DELETING_FORWARD_KINDS.has(inputType)) {
+            return null;
+        }
+        const hasSelection = before.length + after.length < field.value.length;
+
+        return { before, after, isBackward, intended: hasSelection ? before + after : null, caret: before.length };
+    }
+
+    // With nothing selected, a deletion keeps all of the text on the caret's other side and the start (backward) or
+    // the end (forward) of the text on its own side.
+    function isDeletionBy(edit, value) {
+        if (value.length >= edit.before.length + edit.after.length) {
+            return false;
+        }
+        if (edit.isBackward) {
+            return value.endsWith(edit.after) && edit.before.startsWith(value.slice(0, value.length - edit.after.length));
+        }
+
+        return value.startsWith(edit.before) && edit.after.endsWith(value.slice(edit.before.length));
+    }
 
     const host = document.createElement('pinround-overlay');
     const shadow = host.attachShadow({ mode: 'closed' });
@@ -317,21 +369,23 @@
         }
     }));
     // The page's document.execCommand writes into the focused field with a trusted input event, but with no beforeinput
-    // first, as typing, pasting and composing have. So a note takes an input only when it is the first after a trusted
-    // beforeinput, in that task, of the same kind, and with its text or a piece of it (Chrome splits text at line breaks
-    // into several inputs, and cuts it at maxLength); any other input is undone. That also keeps out an execCommand the
-    // page runs from its capture-phase input listener while the person's input is under way. The beforeinput is heard
+    // first, as typing, pasting and composing have. So at the person's trusted beforeinput the note keeps the field's
+    // value and selection, and until that task ends takes an input only when the field holds exactly what the person's
+    // edit makes of them. Anything else, such as the page replaying the key over the whole note from its capture-phase
+    // input listener or a timer, is overwritten with that result, or with the note as it was when the result is not
+    // known in full. Kinds with no model here (undo, redo, drop, a spelling fix) are undone. The beforeinput is heard
     // on the shadow root, where it stops, so no page listener runs after it: one the page cancelled lets nothing in.
-    // Two gaps stay until the note editor moves into an iframe of the extension: after a beforeinput that brings no
-    // input (Backspace at the start of the note, a key into a full one), an execCommand of that kind and text that the
-    // page queued for the same task still counts; and a deletion the page adds to the person's own goes through.
-    /** @type {null|{inputType: string, text: string}} */
+    // Two gaps stay until the note editor moves into an iframe of the extension: with nothing selected, a deletion is
+    // only held to the text on the caret's side it deletes from, so the page can delete more of that side during it;
+    // and the selection is kept as it is at the beforeinput, so a page that selects the whole note (execCommand
+    // selectAll) from its capture-phase keydown or beforeinput listener has the person's key replace it.
+    /** @type {null|{before: string, after: string, isBackward: boolean, intended: null|string, caret: number}} */
     let personEdit = null;
     shadow.addEventListener('beforeinput', (event) => {
         if (noteField !== event.target || !event.isTrusted || event.defaultPrevented) {
             return;
         }
-        const edit = { inputType: event.inputType, text: event.data ?? '' };
+        const edit = personEditOf(event.inputType, event.data, noteField);
         personEdit = edit;
         setTimeout(() => {
             if (personEdit === edit) {
@@ -339,14 +393,19 @@
             }
         }, 0);
     });
-    noteField.addEventListener('input', (event) => {
-        const edit = personEdit;
-        personEdit = null;
-        const isPersonEdit = null !== edit && null !== editing && edit.inputType === event.inputType && (null === event.data || edit.text.includes(event.data));
-        if (!isPersonEdit) {
-            noteField.value = editing?.pin.note ?? '';
+    noteField.addEventListener('input', () => {
+        if (null === editing) {
+            noteField.value = '';
 
             return;
+        }
+        const edit = personEdit;
+        const isPersonResult = null !== edit && (noteField.value === edit.intended || (null === edit.intended && isDeletionBy(edit, noteField.value)));
+        if (!isPersonResult && null !== edit && null !== edit.intended) {
+            noteField.value = edit.intended;
+            noteField.setSelectionRange(edit.caret, edit.caret);
+        } else if (!isPersonResult) {
+            noteField.value = editing.pin.note;
         }
         editing.pin.note = noteField.value;
         labelPins();
