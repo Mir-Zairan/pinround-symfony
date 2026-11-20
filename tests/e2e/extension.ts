@@ -212,12 +212,26 @@ export interface StubReportDraft {
   screenshots: StubScreenshot[];
 }
 
+/** A step as save_scenarios keeps it (docs/api/scenario.v1.json): `type`, `say`, and the fields of its type. */
+export type StubScenarioStep = Record<string, string | Record<string, string>>;
+
+export interface StubScenario {
+  title: string;
+  why: string;
+  setup: string;
+  start_url: string;
+  steps: StubScenarioStep[];
+}
+
 export interface StubNotebook {
   notebook_id: string;
   title: string;
   owner: string;
   last_used_at: string;
+  /** Starts at 1 and goes up with each picture added, as each save does in pinround. */
+  version: number;
   screenshots: StubScreenshot[];
+  scenarios: StubScenario[];
 }
 
 /** One request to pinround's API as the stub got it, with the status it answered; null when the answer was lost. */
@@ -234,7 +248,7 @@ export interface PinroundStubSeed {
   projects?: string[];
   tickets?: StubTicket[];
   /** `owner` defaults to the paired person; another owner's notebook is never listed and answers 404. */
-  notebooks?: Array<Omit<StubNotebook, 'owner' | 'screenshots'> & Partial<Pick<StubNotebook, 'owner' | 'screenshots'>>>;
+  notebooks?: Array<Omit<StubNotebook, 'owner' | 'version' | 'screenshots' | 'scenarios'> & Partial<Pick<StubNotebook, 'owner' | 'version' | 'screenshots' | 'scenarios'>>>;
   reportDrafts?: StubReportDraft[];
 }
 
@@ -256,7 +270,20 @@ export interface PinroundStub {
 type StubAnswer = [number, Record<string, unknown>];
 
 const stubWrapped = (text: string) => `<untrusted_text>${text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</untrusted_text>`;
-const stubMissingScope = (scope: string): StubAnswer => [403, { error: `This token does not have the "${scope}" scope. Make a token with it in Settings.`, outcome: 'missing_scope' }];
+/** A scenario as GetNotebook answers it: its four texts, then its steps with every value wrapped but a step's `type`. */
+const stubWrappedScenario = (scenario: StubScenario) => ({
+  title: stubWrapped(scenario.title),
+  why: stubWrapped(scenario.why),
+  setup: stubWrapped(scenario.setup),
+  start_url: stubWrapped(scenario.start_url),
+  steps: scenario.steps.map((step) => Object.fromEntries(Object.entries(step).map(([field, value]) => {
+    if (field === 'type') {
+      return [field, value];
+    }
+    return [field, typeof value === 'string' ? stubWrapped(value) : Object.fromEntries(Object.entries(value).map(([part, text]) => [part, stubWrapped(text)]))];
+  }))),
+});
+const stubMissingScope =(scope: string): StubAnswer => [403, { error: `This token does not have the "${scope}" scope. Make a token with it in Settings.`, outcome: 'missing_scope' }];
 const stubNotFound = (): StubAnswer => [404, { error: STUB_NOT_FOUND_TEXT, outcome: 'not_found' }];
 const stubRefused = (reason: string): StubAnswer => [422, { error: reason, outcome: 'refused' }];
 const stubInvalidInput = (problem: string): StubAnswer => [422, { error: `The arguments do not match the input schema of this tool: ${problem}`, outcome: 'invalid_input' }];
@@ -285,7 +312,7 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
     storedPictures: [],
     uploads: new Map(),
     reportDrafts: new Map(reportDrafts.map((draft) => [draft.id, structuredClone(draft)])),
-    notebooks: new Map(notebooks.map((notebook) => [notebook.notebook_id, { owner: STUB_PERSON, screenshots: [], ...structuredClone(notebook) }])),
+    notebooks: new Map(notebooks.map((notebook) => [notebook.notebook_id, { owner: STUB_PERSON, version: 1, screenshots: [], scenarios: [], ...structuredClone(notebook) }])),
     myReportDrafts: () => [...stub.reportDrafts.values()].filter((draft) => draft.owner === STUB_PERSON),
     loseAnswerTo: (pathname) => {
       lostAnswers.add(pathname);
@@ -331,7 +358,7 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
         .sort((one, other) => other.last_used_at.localeCompare(one.last_used_at) || other.notebook_id.localeCompare(one.notebook_id));
       return [200, {
         untrusted_text_notice: STUB_UNTRUSTED_TEXT_NOTICE,
-        notebooks: mine.slice(0, STUB_NOTEBOOKS_PER_PAGE).map((notebook) => ({ notebook_id: notebook.notebook_id, title: stubWrapped(notebook.title), screenshot_count: notebook.screenshots.length, scenario_count: 0, last_used_at: notebook.last_used_at })),
+        notebooks: mine.slice(0, STUB_NOTEBOOKS_PER_PAGE).map((notebook) => ({ notebook_id: notebook.notebook_id, title: stubWrapped(notebook.title), screenshot_count: notebook.screenshots.length, scenario_count: notebook.scenarios.length, last_used_at: notebook.last_used_at })),
         next_cursor: mine.length > STUB_NOTEBOOKS_PER_PAGE ? 'page-2' : null,
       }];
     }
@@ -344,7 +371,7 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
         return stubRefused('Give the notebook a title.');
       }
       const notebookId = newId('nb');
-      stub.notebooks.set(notebookId, { notebook_id: notebookId, title, owner: STUB_PERSON, last_used_at: '2026-03-02T09:00:00+00:00', screenshots: [] });
+      stub.notebooks.set(notebookId, { notebook_id: notebookId, title, owner: STUB_PERSON, last_used_at: '2026-03-02T09:00:00+00:00', version: 1, screenshots: [], scenarios: [] });
       return [201, { notebook_id: notebookId }];
     }
     if (method === 'POST' && pathname === '/api/v1/uploads') {
@@ -401,6 +428,32 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
       usedUploads.add(String(body.upload_id));
       return [200, { draft_id: draft.id, media_id: `media-${body.upload_id}`, status: 'added', screenshot_count: draft.screenshots.length }];
     }
+    const oneNotebook = /^\/api\/v1\/notebooks\/([^/]+)$/.exec(pathname);
+    if (method === 'GET' && oneNotebook !== null) {
+      if (!scopes.includes('read')) {
+        return stubMissingScope('read');
+      }
+      const notebook = stub.notebooks.get(decodeURIComponent(oneNotebook[1]));
+      if (notebook === undefined || notebook.owner !== STUB_PERSON) {
+        return stubNotFound();
+      }
+      return [200, {
+        untrusted_text_notice: STUB_UNTRUSTED_TEXT_NOTICE,
+        notebook_id: notebook.notebook_id,
+        title: stubWrapped(notebook.title),
+        version: notebook.version,
+        last_used_at: notebook.last_used_at,
+        screenshots: notebook.screenshots.map((screenshot, position) => ({
+          media_id: `media-${screenshot.upload_id}`,
+          position,
+          image: { status: 'ready', url: `${STUB_STORAGE_ORIGIN}/media-${screenshot.upload_id}/view?signature=1` },
+          title: screenshot.title === null ? null : stubWrapped(screenshot.title),
+          summary: screenshot.summary === null ? null : stubWrapped(screenshot.summary),
+          pins: screenshot.pins.map((pin, index) => ({ number: index + 1, x_pct: pin.x_pct, y_pct: pin.y_pct, note: stubWrapped(pin.note) })),
+        })),
+        scenarios: notebook.scenarios.map(stubWrappedScenario),
+      }];
+    }
     const notebookRoute = /^\/api\/v1\/notebooks\/([^/]+)\/(uploads|screenshots)$/.exec(pathname);
     if (method === 'POST' && notebookRoute !== null) {
       if (!scopes.includes('notebooks:write')) {
@@ -423,6 +476,7 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
         return stubRefused(STUB_NOTEBOOK_FULL_TEXT);
       }
       notebook.screenshots.push(screenshotOf(body));
+      notebook.version += 1;
       notebook.last_used_at = '2026-03-02T10:00:00+00:00';
       return [200, { notebook_id: notebook.notebook_id, media_id: `media-${body.upload_id}`, status: 'added', screenshot_count: notebook.screenshots.length }];
     }
