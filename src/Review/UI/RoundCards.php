@@ -11,9 +11,11 @@ use App\Organization\Api\MemberNameQueries;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
+use App\Review\Api\VerdictCommands;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Checklist\ChecklistCard;
 use App\Review\UI\Checklist\ChecklistCards;
+use App\Review\UI\RoundPage\EarlierPinRow;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -26,7 +28,7 @@ use App\Ticketing\Api\TicketVisibility;
  * is a row that opens its own page. The checklist round shows its rows, and a findings round its check items under its
  * pictures, through ChecklistCards, read only when the ticket has a checklist round or a shared draft. The viewer's own
  * unshared draft is the exception: its card shows every picture (the domain caps them), so its editor can reach each
- * one. forDraft builds that one card alone.
+ * one, as one screenshot per chain of tries with its earlier tries (ADR-0048). forDraft builds that one card alone.
  */
 final readonly class RoundCards
 {
@@ -135,26 +137,30 @@ final readonly class RoundCards
         }
 
         $pictureLimit = self::pictureLimitOf($round);
+        $chains = self::shownChainsOf($round);
         $screenshots = [];
         $pinCount = 0;
         $looksRightCount = 0;
-        foreach ($round->screenshots as $screenshot) {
-            $shownPins = self::shownPinsOf($screenshot);
-            $pinCount += \count($shownPins);
-            if (self::LOOKS_RIGHT === $screenshot->verdict) {
+        foreach ($chains as $chainIndex => $tries) {
+            $latestTry = $tries[\count($tries) - 1];
+            $pinCount += \count(self::shownPinsOf($latestTry));
+            if (self::LOOKS_RIGHT === $latestTry->verdict) {
                 ++$looksRightCount;
             }
             if (null === $pictureLimit || \count($screenshots) < $pictureLimit) {
-                $screenshots[] = $this->cardScreenshotOf($round, $screenshot, $images[$screenshot->mediaId] ?? null, $shownPins);
+                // The owner's draft numbers its chains; a shared round keeps the numbers of its stored positions, which
+                // ChecklistCard's pin labels use too.
+                $number = $round->isUnsharedDraft() ? $chainIndex + 1 : $latestTry->position + 1;
+                $screenshots[] = $this->cardScreenshotOf($round, $tries, $number, $images);
             }
         }
-        $notShown = \count($round->screenshots) - \count($screenshots);
+        $notShown = \count($chains) - \count($screenshots);
         $moreNote = 0 === $notShown ? null : (1 === $notShown ? '1 more screenshot is not shown.' : \sprintf('%d more screenshots are not shown.', $notShown));
 
         if (self::REPORT === $round->kind) {
             return new RoundCard($round->id, $domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
         }
-        $status = [] === $round->screenshots ? null : \sprintf('%d of %d look right', $looksRightCount, \count($round->screenshots));
+        $status = [] === $chains ? null : \sprintf('%d of %d look right', $looksRightCount, \count($chains));
         $emptyNote = [] === $round->screenshots ? self::EMPTY_DRAFT_NOTE : null;
         if ($round->isUnsharedDraft()) {
             return new RoundCard($round->id, $domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
@@ -195,31 +201,107 @@ final readonly class RoundCards
     }
 
     /**
-     * @param list<PinView> $pins
+     * The latest try of a chain; in a draft with its earlier tries, each with its pins as rows to mark.
+     *
+     * @param non-empty-list<RoundScreenshotView> $tries  by position, the latest last
+     * @param int                                 $number the "Screenshot n" of the chain, from 1
+     * @param array<string, MediaImage>           $images by media id
      */
-    private function cardScreenshotOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image, array $pins): RoundCardScreenshot
+    private function cardScreenshotOf(RoundView $round, array $tries, int $number, array $images): RoundCardScreenshot
     {
-        $view = $this->screenshotViewOf($round, $screenshot, $image, $pins);
+        $tryCount = \count($tries);
+        $latestTry = $tries[$tryCount - 1];
         if (RoundView::DRAFT !== $round->kind) {
-            return new RoundCardScreenshot($screenshot->id, $view);
+            return new RoundCardScreenshot($latestTry->id, $this->screenshotViewOf($round, $latestTry, $number, $images));
         }
+        $earlierTries = [];
+        foreach (\array_slice($tries, 0, -1) as $index => $earlierTry) {
+            $earlierTries[] = $this->draftScreenshotOf($round, $earlierTry, $number, $images, $index + 1, $tryCount, [], self::earlierPinRowsOf($earlierTry, $tryCount));
+        }
+
+        return $this->draftScreenshotOf($round, $latestTry, $number, $images, $tryCount, $tryCount, $earlierTries, []);
+    }
+
+    /**
+     * @param array<string, MediaImage> $images       by media id
+     * @param list<RoundCardScreenshot> $earlierTries
+     * @param list<EarlierPinRow>       $pinRows
+     */
+    private function draftScreenshotOf(RoundView $round, RoundScreenshotView $screenshot, int $number, array $images, int $tryNumber, int $tryCount, array $earlierTries, array $pinRows): RoundCardScreenshot
+    {
         [$verdictLabel, $verdictClass] = match ($screenshot->verdict) {
             self::LOOKS_RIGHT => [RoundCardScreenshot::LOOKS_RIGHT, 'verdict-tag--looks-right'],
             self::NOT_RIGHT => [RoundCardScreenshot::NOT_RIGHT, 'verdict-tag--not-right'],
             default => [RoundCardScreenshot::NO_VERDICT, 'verdict-tag--none'],
         };
 
-        return new RoundCardScreenshot($screenshot->id, $view, \sprintf('Screenshot %d', $screenshot->position + 1), $verdictLabel, $verdictClass);
+        return new RoundCardScreenshot(
+            $screenshot->id,
+            $this->screenshotViewOf($round, $screenshot, $number, $images),
+            \sprintf('Screenshot %d', $number),
+            $verdictLabel,
+            $verdictClass,
+            $tryNumber,
+            $tryCount,
+            $earlierTries,
+            $pinRows,
+        );
     }
 
     /**
-     * @param list<PinView> $pins
+     * @param int $tryCount the tries of its chain, which the latest try's "Fixed on try N" names
+     *
+     * @return list<EarlierPinRow> the pins of an earlier try but the AI's that were dismissed, by number
      */
-    private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, ?MediaImage $image, array $pins): ScreenshotView
+    private static function earlierPinRowsOf(RoundScreenshotView $earlierTry, int $tryCount): array
     {
-        $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $screenshot->position + 1, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
+        $rows = [];
+        foreach ($earlierTry->pins as $pin) {
+            if (self::DISMISSED === $pin->aiState) {
+                continue;
+            }
+            [$verdictLabel, $verdictClass, $isChecked] = match ($pin->verdict) {
+                VerdictCommands::PIN_FIXED => [\sprintf(RoundCardScreenshot::PIN_FIXED_ON_TRY, $tryCount), 'verdict-tag--looks-right', true],
+                VerdictCommands::PIN_STILL_WRONG => [RoundCardScreenshot::PIN_STILL_WRONG, 'verdict-tag--not-right', true],
+                default => [RoundCardScreenshot::PIN_NOT_CHECKED, 'verdict-tag--none', false],
+            };
+            $rows[] = new EarlierPinRow($pin->id, $pin->number, $pin->note, null, $verdictLabel, $verdictClass, $isChecked);
+        }
 
-        return self::viewOfPicture('screenshot-'.$screenshot->id, $altText, $screenshot->title, $screenshot->summary, $image, $pins);
+        return $rows;
+    }
+
+    /**
+     * @param int                       $number the "Screenshot n" of its chain, from 1
+     * @param array<string, MediaImage> $images by media id
+     */
+    private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, int $number, array $images): ScreenshotView
+    {
+        $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $number, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
+
+        return self::viewOfPicture('screenshot-'.$screenshot->id, $altText, $screenshot->title, $screenshot->summary, $images[$screenshot->mediaId] ?? null, self::shownPinsOf($screenshot));
+    }
+
+    /**
+     * The owner's unshared draft shows each chain with every try (ADR-0048). Any other round shows what the team sees,
+     * the latest try of each chain by position, each as a chain of its own: RoundQueries lists only those for a shared
+     * round on the ticket, but every try for its owner's draftOf.
+     *
+     * @return list<non-empty-list<RoundScreenshotView>> each chain's tries by position, the latest last
+     */
+    private static function shownChainsOf(RoundView $round): array
+    {
+        $chains = [];
+        foreach ($round->screenshots as $screenshot) {
+            $chains[$screenshot->retakeOf ?? $screenshot->id][] = $screenshot;
+        }
+        if ($round->isUnsharedDraft()) {
+            return array_values($chains);
+        }
+        $latestTries = array_map(static fn (array $tries): RoundScreenshotView => $tries[\count($tries) - 1], array_values($chains));
+        usort($latestTries, static fn (RoundScreenshotView $one, RoundScreenshotView $other): int => $one->position <=> $other->position);
+
+        return array_map(static fn (RoundScreenshotView $latestTry): array => [$latestTry], $latestTries);
     }
 
     /**
@@ -301,8 +383,11 @@ final readonly class RoundCards
                 continue;
             }
             $pictureLimit = self::pictureLimitOf($round);
-            foreach (null === $pictureLimit ? $round->screenshots : \array_slice($round->screenshots, 0, $pictureLimit) as $screenshot) {
-                $mediaIds[$screenshot->mediaId] = true;
+            $chains = self::shownChainsOf($round);
+            foreach (null === $pictureLimit ? $chains : \array_slice($chains, 0, $pictureLimit) as $tries) {
+                foreach ($tries as $screenshot) {
+                    $mediaIds[$screenshot->mediaId] = true;
+                }
             }
         }
         $images = [];

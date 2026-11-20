@@ -1,5 +1,6 @@
 {#- The owner's private draft inside its card (DraftRoundEditor, a live component): the card header with the status line, the screenshots with
-    their verdict, texts and pins, and "Add screenshot". Each change is one live action. The upload block and the pins of a
+    their verdict, texts and pins, and "Add screenshot"; a retaken screenshot with its try switch, an earlier try read-only
+    but for its pin marks. Each change is one live action. The upload block and the pins of a
     ready picture are data-live-ignore: the browser owns them, so a re-render never wipes an upload's progress or a pin
     being moved. -#}
 {% set card = this.draftCard %}
@@ -29,47 +30,85 @@
                 <p class="round-card__empty">{{ constant('App\\Review\\UI\\Component\\DraftRoundEditor::EMPTY_NOTE') }}</p>
             {% endif %}
 
-            {% for item in card.screenshots %}
-                <section class="round-card__screenshot draft-shot" id="{{ item.view.domId }}-editor" data-screenshot-id="{{ item.screenshotId }}" aria-label="{{ item.label }}">
+            {% for chain in card.screenshots %}
+                {#- item is the try shown: the latest unless the owner switched to an earlier one. -#}
+                {% set item = this.shownTryOf(chain) %}
+                <section class="round-card__screenshot draft-shot" id="{{ chain.view.domId }}-editor" data-screenshot-id="{{ item.screenshotId }}" aria-label="{{ item.label }}">
                     <p class="round-card__screenshot-label">
                         <span>{{ item.label }}</span>
+                        {% if item.tryLabel is not null %}<span data-try-label>{{ item.tryLabel }}</span>{% endif %}
                         <twig:Tag class="verdict-tag {{ item.verdictClass }}">{{ item.verdictLabel }}</twig:Tag>
                     </p>
-                    <div class="draft-shot__verdict" role="group" aria-label="Verdict for {{ item.label }}">
-                        {% set looksRight = constant('App\\Review\\Api\\RoundCommands::VERDICT_LOOKS_RIGHT') %}
-                        {% set notRightYet = constant('App\\Review\\Api\\RoundCommands::VERDICT_NOT_RIGHT_YET') %}
-                        <twig:Chip :pressed="item.looksRight" data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.looksRight ? '' : looksRight }}">Looks right</twig:Chip>
-                        <twig:Chip :pressed="item.isNotRightYet" data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.isNotRightYet ? '' : notRightYet }}">Not right yet</twig:Chip>
-                    </div>
-
-                    <div class="pin-placer" id="{{ item.view.domId }}-placer"{% if item.view.isReady %} data-live-ignore{% endif %}
-                        data-controller="pin-placer"
-                        data-pin-placer-note-max-value="{{ this.noteMaxLength }}"
-                        data-pin-placer-note-placeholder-value="{{ constant('App\\Review\\UI\\Component\\DraftRoundEditor::NOTE_PLACEHOLDER') }}"
-                        data-action="click->pin-placer#onClick keydown->pin-placer#onKeydown input->pin-placer#onInput focusin->pin-placer#onFocusin pointerdown->pin-placer#onPointerdown pointermove->pin-placer#onPointermove pointerup->pin-placer#onPointerend pointercancel->pin-placer#onPointerend"
-                    >
-                        <twig:Screenshot :view="this.pictureOf(item)" :headingLevel="4" loading="lazy" />
-                        <button type="button" class="btn btn-outline pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</button>
-                        <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
-                        <twig:PinList :view="item.view" :isEditable="true" :notePlaceholder="constant('App\\Review\\UI\\Component\\DraftRoundEditor::NOTE_PLACEHOLDER')" />
-                        <div hidden data-pin-placer-target="fields"></div>
-                    </div>
-
-                    <div class="draft-shot__texts" data-action="change->draft-round-editor#saveText">
-                        <div class="screenshot-report__field">
-                            <label class="screenshot-report__label" for="{{ item.view.domId }}-title">Picture title · optional</label>
-                            <input class="screenshot-report__input" id="{{ item.view.domId }}-title" type="text" data-field="title" value="{{ item.view.title }}" maxlength="{{ this.titleMaxLength }}">
+                    {% if chain.tryCount > 1 %}
+                        <div class="draft-shot__verdict" role="group" aria-label="Tries of {{ chain.label }}" data-try-switch>
+                            {% for try in chain.tries %}
+                                <twig:Chip :pressed="try.screenshotId is same as(item.screenshotId)" data-action="live#action" data-live-action-param="showTry" data-live-screenshot-id-param="{{ try.screenshotId }}">Try {{ try.tryNumber }}</twig:Chip>
+                            {% endfor %}
                         </div>
-                        <div class="screenshot-report__field">
-                            <label class="screenshot-report__label" for="{{ item.view.domId }}-summary">Picture summary · optional</label>
-                            <textarea class="screenshot-report__input" id="{{ item.view.domId }}-summary" rows="3" data-field="summary" maxlength="{{ this.summaryMaxLength }}">{{ item.view.summary }}</textarea>
+                    {% endif %}
+                    {% if not item.isLatestTry %}
+                        <twig:Screenshot :view="item.view" :headingLevel="4" loading="lazy" />
+                        {% if item.pinRows is empty %}
+                            <p class="round-card__empty">This try has no pins.</p>
+                        {% else %}
+                            {% set fixed = constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') %}
+                            {% set stillWrong = constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') %}
+                            <ol class="round-panel__pins" aria-label="Pins of try {{ item.tryNumber }}">
+                                {% for row in item.pinRows %}
+                                    {% set noteId = item.view.domId ~ '-pin-' ~ row.id %}
+                                    <li class="round-panel__pin" value="{{ row.number }}" data-pin-id="{{ row.id }}">
+                                        <span class="pin-list__number">{{ row.number }}</span>
+                                        <p class="round-panel__note" id="{{ noteId }}">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
+                                        <twig:Tag class="verdict-tag {{ row.verdictClass }}">{{ row.verdictLabel }}</twig:Tag>
+                                        <div class="round-panel__pin-form" role="group" aria-label="Mark pin {{ row.number }}">
+                                            <twig:Chip :pressed="item.isPinFixed(row)" aria-describedby="{{ noteId }}" data-action="live#action" data-live-action-param="setPinVerdict" data-live-pin-id-param="{{ row.id }}" data-live-verdict-param="{{ item.isPinFixed(row) ? '' : fixed }}">{{ item.pinFixedLabel }}</twig:Chip>
+                                            <twig:Chip :pressed="item.isPinStillWrong(row)" aria-describedby="{{ noteId }}" data-action="live#action" data-live-action-param="setPinVerdict" data-live-pin-id-param="{{ row.id }}" data-live-verdict-param="{{ item.isPinStillWrong(row) ? '' : stillWrong }}">{{ constant('App\\Review\\UI\\RoundCardScreenshot::PIN_STILL_WRONG') }}</twig:Chip>
+                                        </div>
+                                    </li>
+                                {% endfor %}
+                            </ol>
+                        {% endif %}
+                        <div class="draft-shot__actions">
+                            <button type="button" class="btn btn-text btn-sm draft-shot__remove"
+                                data-action="live#action" data-live-action-param="removeScreenshot" data-live-screenshot-id-param="{{ item.screenshotId }}">Remove this try</button>
                         </div>
-                    </div>
+                    {% else %}
+                        <div class="draft-shot__verdict" role="group" aria-label="Verdict for {{ item.label }}">
+                            {% set looksRight = constant('App\\Review\\Api\\RoundCommands::VERDICT_LOOKS_RIGHT') %}
+                            {% set notRightYet = constant('App\\Review\\Api\\RoundCommands::VERDICT_NOT_RIGHT_YET') %}
+                            <twig:Chip :pressed="item.looksRight" data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.looksRight ? '' : looksRight }}">Looks right</twig:Chip>
+                            <twig:Chip :pressed="item.isNotRightYet" data-action="live#action" data-live-action-param="setVerdict" data-live-screenshot-id-param="{{ item.screenshotId }}" data-live-verdict-param="{{ item.isNotRightYet ? '' : notRightYet }}">Not right yet</twig:Chip>
+                        </div>
 
-                    <div class="draft-shot__actions">
-                        <button type="button" class="btn btn-text btn-sm draft-shot__remove"
-                            data-action="live#action" data-live-action-param="removeScreenshot" data-live-screenshot-id-param="{{ item.screenshotId }}">Remove screenshot</button>
-                    </div>
+                        <div class="pin-placer" id="{{ item.view.domId }}-placer"{% if item.view.isReady %} data-live-ignore{% endif %}
+                            data-controller="pin-placer"
+                            data-pin-placer-note-max-value="{{ this.noteMaxLength }}"
+                            data-pin-placer-note-placeholder-value="{{ constant('App\\Review\\UI\\Component\\DraftRoundEditor::NOTE_PLACEHOLDER') }}"
+                            data-action="click->pin-placer#onClick keydown->pin-placer#onKeydown input->pin-placer#onInput focusin->pin-placer#onFocusin pointerdown->pin-placer#onPointerdown pointermove->pin-placer#onPointermove pointerup->pin-placer#onPointerend pointercancel->pin-placer#onPointerend"
+                        >
+                            <twig:Screenshot :view="this.pictureOf(item)" :headingLevel="4" loading="lazy" />
+                            <button type="button" class="btn btn-outline pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</button>
+                            <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
+                            <twig:PinList :view="item.view" :isEditable="true" :notePlaceholder="constant('App\\Review\\UI\\Component\\DraftRoundEditor::NOTE_PLACEHOLDER')" />
+                            <div hidden data-pin-placer-target="fields"></div>
+                        </div>
+
+                        <div class="draft-shot__texts" data-action="change->draft-round-editor#saveText">
+                            <div class="screenshot-report__field">
+                                <label class="screenshot-report__label" for="{{ item.view.domId }}-title">Picture title · optional</label>
+                                <input class="screenshot-report__input" id="{{ item.view.domId }}-title" type="text" data-field="title" value="{{ item.view.title }}" maxlength="{{ this.titleMaxLength }}">
+                            </div>
+                            <div class="screenshot-report__field">
+                                <label class="screenshot-report__label" for="{{ item.view.domId }}-summary">Picture summary · optional</label>
+                                <textarea class="screenshot-report__input" id="{{ item.view.domId }}-summary" rows="3" data-field="summary" maxlength="{{ this.summaryMaxLength }}">{{ item.view.summary }}</textarea>
+                            </div>
+                        </div>
+
+                        <div class="draft-shot__actions">
+                            <button type="button" class="btn btn-text btn-sm draft-shot__remove"
+                                data-action="live#action" data-live-action-param="removeScreenshot" data-live-screenshot-id-param="{{ item.screenshotId }}">{{ item.tryCount > 1 ? 'Remove this try' : 'Remove screenshot' }}</button>
+                        </div>
+                    {% endif %}
                 </section>
             {% endfor %}
             {% if card.moreScreenshotsNote is not null %}
