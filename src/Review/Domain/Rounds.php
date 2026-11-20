@@ -60,6 +60,18 @@ interface Rounds
     public function nextFreeNumberOf(TicketId $ticketId): int;
 
     /**
+     * The ticket's open shared rounds (Round::isOpenSharedRound) with their screenshots and pins, by number: at most
+     * one under ADR-0048, more on a ticket from before it. Holds the ticket's round numbers as nextFreeNumberOf does,
+     * then locks these rows, both until the transaction ends, so of two requests that check "no open round" and then
+     * share, the second waits here and then sees the first one's share.
+     *
+     * @return list<Round>
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function openSharedRoundsOf(TicketId $ticketId): array;
+
+    /**
      * Writes the changes of a round read with get() or added, over the version it was read at, all or nothing: the
      * round's number, share time, state, version, decision and deletion, and its screenshots and pins (new ones added,
      * changed ones updated, missing ones removed). A screenshot keeps its position and a pin its number; new ones

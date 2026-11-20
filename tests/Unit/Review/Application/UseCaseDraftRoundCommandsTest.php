@@ -1073,6 +1073,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
         $this->rounds->add(self::draftOn(self::BETA_BAKERY_DRAFT, self::BETA_BAKERY, self::TICKET, self::LENA));
         $betaShared = self::draftOn(self::BETA_BAKERY_SHARED_ROUND, self::BETA_BAKERY, self::TICKET, self::OMAR);
+        $betaShared->addScreenshot(new UserId(self::OMAR), new ScreenshotId('0197a3c0-0000-7000-8000-000000000a07'), self::OMARS_MEDIA);
         $betaShared->share(new UserId(self::OMAR), 9, self::at());
         $this->rounds->add($betaShared);
 
@@ -1087,6 +1088,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         $this->rounds->add($full);
 
         $omarsSharedElsewhere = self::draftOn(self::OMARS_SHARED_ROUND, self::ACME_FOODS, self::OTHER_TICKET, self::OMAR);
+        $omarsSharedElsewhere->addScreenshot(new UserId(self::OMAR), new ScreenshotId('0197a3c0-0000-7000-8000-000000000a08'), self::OMARS_MEDIA);
         $omarsSharedElsewhere->share(new UserId(self::OMAR), 7, self::at());
         $this->rounds->add($omarsSharedElsewhere);
     }

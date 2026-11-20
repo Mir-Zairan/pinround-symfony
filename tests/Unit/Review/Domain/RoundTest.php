@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Review\Domain;
 
 use App\Review\Domain\DraftDecision;
+use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
@@ -28,6 +29,7 @@ final class RoundTest extends TestCase
     private const string TICKET = '0197a3c0-0000-7000-8000-000000001001';
     private const string LENA = '0197a3c0-0000-7000-8000-000000000b01';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000000b02';
+    private const string MIA = '0197a3c0-0000-7000-8000-000000000b03';
     private const string MEDIA = '0197a3c0-0000-7000-8000-000000000d01';
     private const string NEW_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000c99';
     private const string UNKNOWN_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000c77';
@@ -120,7 +122,7 @@ final class RoundTest extends TestCase
     #[Test]
     public function theOwnerSharesADraftAsTheGivenNumberAndTheVersionGoesUp(): void
     {
-        $draft = self::draft();
+        $draft = self::draftWithScreenshots(1);
         $sharedAt = new \DateTimeImmutable('2026-03-05 11:15:00+00:00');
 
         $draft->share(new UserId(self::OMAR), 1, $sharedAt);
@@ -137,7 +139,7 @@ final class RoundTest extends TestCase
     public function aDraftCannotBeSharedAsRoundZeroOrBelow(): void
     {
         foreach ([0, -1] as $number) {
-            $draft = self::draft();
+            $draft = self::draftWithScreenshots(1);
             $before = self::snapshot($draft);
 
             try {
@@ -154,7 +156,7 @@ final class RoundTest extends TestCase
     #[Test]
     public function aDraftCannotBeSharedTwiceAndKeepsItsFirstNumber(): void
     {
-        $draft = self::draft();
+        $draft = self::draftWithScreenshots(1);
         $firstSharedAt = new \DateTimeImmutable('2026-03-05 11:15:00+00:00');
         $draft->share(new UserId(self::OMAR), 1, $firstSharedAt);
 
@@ -173,7 +175,7 @@ final class RoundTest extends TestCase
     #[Test]
     public function onlyTheOwnerCanShareADraft(): void
     {
-        $draft = self::draft();
+        $draft = self::draftWithScreenshots(1);
         $before = self::snapshot($draft);
 
         try {
@@ -190,7 +192,7 @@ final class RoundTest extends TestCase
     #[Test]
     public function aDeletedDraftCannotBeSharedAndStaysDeleted(): void
     {
-        $draft = self::draft();
+        $draft = self::draftWithScreenshots(1);
         $draft->delete(new UserId(self::OMAR), new \DateTimeImmutable('2026-03-04 12:00:00+00:00'));
         $before = self::snapshot($draft);
 
@@ -220,6 +222,175 @@ final class RoundTest extends TestCase
         self::assertSame(0, $report->number());
         self::assertSame($reportedAt, $report->sharedAt());
         self::assertSame(1, $report->version());
+    }
+
+    #[Test]
+    public function aDraftWithNoScreenshotCannotBeSharedAndStaysUnsharedAndUnnumbered(): void
+    {
+        $draft = self::draft();
+        $before = self::snapshot($draft);
+
+        try {
+            $draft->share(new UserId(self::OMAR), 2, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
+            self::fail('An empty draft was shared.');
+        } catch (DraftHasNoScreenshots $refused) {
+            self::assertSame('Add a screenshot before you share.', $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($draft));
+        self::assertTrue($draft->isUnsharedDraft());
+        self::assertNull($draft->number());
+        self::assertNull($draft->sharedAt());
+    }
+
+    #[Test]
+    public function aDraftWhoseOnlyScreenshotWasRemovedCannotBeShared(): void
+    {
+        $draft = self::draftWithScreenshots(1);
+        $draft->removeScreenshot(new UserId(self::OMAR), self::screenshotId(0));
+
+        $this->expectException(DraftHasNoScreenshots::class);
+        $this->expectExceptionMessage('Add a screenshot before you share.');
+
+        $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
+    }
+
+    #[Test]
+    public function closingASharedDraftClosesItKeepsItsNumberAndTheVersionGoesUp(): void
+    {
+        $draft = self::draftWithScreenshots(1);
+        $sharedAt = new \DateTimeImmutable('2026-03-05 11:15:00+00:00');
+        $draft->share(new UserId(self::OMAR), 2, $sharedAt);
+        self::assertTrue($draft->isOpenSharedRound());
+
+        $draft->close();
+
+        self::assertSame(RoundState::Closed, $draft->state());
+        self::assertFalse($draft->isOpenSharedRound());
+        self::assertSame([2, $sharedAt, 3, null], [$draft->number(), $draft->sharedAt(), $draft->version(), $draft->deletedAt()]);
+        self::assertCount(1, $draft->screenshots());
+    }
+
+    #[Test]
+    public function closingAnOpenReviewRoundClosesIt(): void
+    {
+        $review = self::storedRound(RoundKind::Review, self::OMAR, 3, RoundState::Open);
+
+        $review->close();
+
+        self::assertSame(RoundState::Closed, $review->state());
+        self::assertSame(2, $review->version());
+        self::assertSame(1, $review->savedVersion());
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Round, string}>
+     */
+    public static function roundsThatCannotBeClosed(): iterable
+    {
+        $notShared = 'Only a shared round is closed when the ticket moves on.';
+        yield 'an unshared draft' => [static fn (): Round => self::draftWithScreenshots(1), $notShared];
+        yield 'a deleted draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, null, RoundState::Closed, true), $notShared];
+        yield 'Round 0' => [static fn (): Round => self::report([self::screenshot(0)]), $notShared];
+        yield 'the checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open), $notShared];
+        yield 'a closed shared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 2, RoundState::Closed), 'This round is closed already.'];
+        yield 'a closed review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::OMAR, 3, RoundState::Closed), 'This round is closed already.'];
+    }
+
+    /**
+     * @param \Closure(): Round $roundOf
+     */
+    #[Test]
+    #[DataProvider('roundsThatCannotBeClosed')]
+    public function aRoundThatIsNotAnOpenSharedRoundIsNotClosedAndStaysAsItWas(\Closure $roundOf, string $reason): void
+    {
+        $round = $roundOf();
+        $before = self::snapshot($round);
+
+        try {
+            $round->close();
+            self::fail('The round was closed.');
+        } catch (\DomainException $refused) {
+            self::assertSame($reason, $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($round));
+    }
+
+    #[Test]
+    public function aSharedDraftCannotBeClosedTwice(): void
+    {
+        $draft = self::draftWithScreenshots(1);
+        $draft->share(new UserId(self::OMAR), 2, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
+        $draft->close();
+        $before = self::snapshot($draft);
+
+        try {
+            $draft->close();
+            self::fail('A closed round was closed again.');
+        } catch (\DomainException $refused) {
+            self::assertSame('This round is closed already.', $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($draft));
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Round, bool}>
+     */
+    public static function roundsAndWhetherTheyAreOpenSharedRounds(): iterable
+    {
+        yield 'an unshared draft' => [static fn (): Round => self::draftWithScreenshots(1), false];
+        yield 'a deleted draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, null, RoundState::Closed, true), false];
+        yield 'an open shared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, 2, RoundState::Open), true];
+        yield 'a closed shared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, 2, RoundState::Closed), false];
+        yield 'an open review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open), true];
+        yield 'a closed review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Closed), false];
+        yield 'Round 0, open' => [static fn (): Round => self::report([self::screenshot(0)]), false];
+        yield 'the checklist round, open' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open), false];
+    }
+
+    /**
+     * @param \Closure(): Round $roundOf
+     */
+    #[Test]
+    #[DataProvider('roundsAndWhetherTheyAreOpenSharedRounds')]
+    public function onlyAnOpenSharedDraftOrReviewRoundIsAnOpenSharedRound(\Closure $roundOf, bool $isOpenSharedRound): void
+    {
+        self::assertSame($isOpenSharedRound, $roundOf()->isOpenSharedRound());
+    }
+
+    #[Test]
+    public function aSharedDraftOfAnyoneButTheAssigneeIsFindingsForTheAssignee(): void
+    {
+        $miasFindings = self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Open);
+        $closedFindings = self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Closed);
+
+        self::assertTrue($miasFindings->isFindingsFor(new UserId(self::OMAR)));
+        self::assertTrue($closedFindings->isFindingsFor(new UserId(self::OMAR)));
+        self::assertFalse($miasFindings->isFindingsFor(new UserId(self::MIA)), 'The assignee\'s own shared draft is a self-check, not findings.');
+    }
+
+    /**
+     * @return iterable<string, array{\Closure(): Round}>
+     */
+    public static function roundsThatAreNeverFindings(): iterable
+    {
+        yield 'another person\'s unshared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, null, RoundState::Open)];
+        yield 'another person\'s deleted draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, null, RoundState::Closed, true)];
+        yield 'another person\'s review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open)];
+        yield 'another person\'s Round 0' => [static fn (): Round => self::report([self::screenshot(0)])];
+        yield 'the checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open)];
+    }
+
+    /**
+     * @param \Closure(): Round $roundOf
+     */
+    #[Test]
+    #[DataProvider('roundsThatAreNeverFindings')]
+    public function onlyASharedDraftIsFindings(\Closure $roundOf): void
+    {
+        self::assertFalse($roundOf()->isFindingsFor(new UserId(self::OMAR)));
     }
 
     #[Test]
@@ -646,7 +817,7 @@ final class RoundTest extends TestCase
     #[Test]
     public function theOwnerRecordsThatTheySharedAfterSharing(): void
     {
-        $draft = self::draft();
+        $draft = self::draftWithScreenshots(1);
         $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
         $decidedAt = new \DateTimeImmutable('2026-03-05 11:16:00+00:00');
 
@@ -759,7 +930,7 @@ final class RoundTest extends TestCase
     #[Test]
     public function aSharedDraftCannotBeKeptPrivate(): void
     {
-        $draft = self::draft();
+        $draft = self::draftWithScreenshots(1);
         $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
         $before = self::snapshot($draft);
 
@@ -866,6 +1037,31 @@ final class RoundTest extends TestCase
     private static function restoredDraft(RoundState $state, int $version = 1): Round
     {
         return Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), null, null, $state, $version, [self::screenshot(0)], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
+    }
+
+    /**
+     * A round as a read gives it at version 1, with one screenshot; shared exactly when it has a number.
+     */
+    private static function storedRound(RoundKind $kind, string $ownerId, ?int $number, RoundState $state, bool $isDeleted = false): Round
+    {
+        $createdAt = new \DateTimeImmutable('2026-03-04 10:00:00+00:00');
+
+        return Round::restored(
+            new RoundId(self::ROUND),
+            new OrganizationId(self::ACME_FOODS),
+            new TicketId(self::TICKET),
+            $kind,
+            new UserId($ownerId),
+            $number,
+            null === $number ? null : new \DateTimeImmutable('2026-03-05 11:15:00+00:00'),
+            $state,
+            1,
+            [self::screenshot(0)],
+            $createdAt,
+            $isDeleted ? new \DateTimeImmutable('2026-03-05 12:00:00+00:00') : null,
+            null,
+            null,
+        );
     }
 
     private static function screenshotId(int $position): ScreenshotId

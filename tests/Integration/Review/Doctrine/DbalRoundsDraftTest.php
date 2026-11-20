@@ -79,6 +79,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
     private const string REPORT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6136';
     private const string OTHER_TICKET_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6137';
     private const string OTHER_ORGANIZATION_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6138';
+    private const string OTHER_ORGANIZATION_SHARED_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6139';
 
     private const string FIRST_PIN = '0197a3c0-0000-7000-8000-0000000f6141';
     private const string SECOND_PIN = '0197a3c0-0000-7000-8000-0000000f6142';
@@ -735,6 +736,7 @@ final class DbalRoundsDraftTest extends KernelTestCase
         $openElsewhere->replacePins($lena, new ScreenshotId(self::OTHER_ORGANIZATION_SCREENSHOT), [Pin::placedBy(new PinId(self::OTHER_ORGANIZATION_PIN), 1, 1.0, 1.0, 'Elsewhere', $lena)]);
         $this->addCommitted($openElsewhere);
         $sharedElsewhere = self::draftOf(self::OTHER_ORGANIZATION_SHARED_DRAFT, self::OTHER_ORGANIZATION, self::TICKET, self::LENA);
+        $sharedElsewhere->addScreenshot($lena, new ScreenshotId(self::OTHER_ORGANIZATION_SHARED_SCREENSHOT), self::FIRST_MEDIA);
         $sharedElsewhere->share($lena, 9, new \DateTimeImmutable('2027-03-17 05:00:00+00:00'));
         $this->addCommitted($sharedElsewhere);
     }

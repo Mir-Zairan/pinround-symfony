@@ -37,7 +37,10 @@ final class InMemoryRounds implements Rounds
     /** @var list<string> the ticket ids nextFreeNumberOf was asked for, in order: each stands for the lock DbalRounds takes */
     public array $numberedTicketIds = [];
 
-    /** Rounds read whole, with their screenshots and pins (get, openUnsharedDraftOf), and saves that were stored. */
+    /** @var list<string> the ticket ids openSharedRoundsOf was asked for, in order: each stands for the number and row locks DbalRounds takes */
+    public array $lockedOpenRoundTicketIds = [];
+
+    /** Rounds read whole, with their screenshots and pins (get, openUnsharedDraftOf, openSharedRoundsOf), and saves that were stored. */
     public int $loadedRounds = 0;
     public int $savedRounds = 0;
 
@@ -131,6 +134,20 @@ final class InMemoryRounds implements Rounds
         }
 
         return $highest + 1;
+    }
+
+    public function openSharedRoundsOf(TicketId $ticketId): array
+    {
+        $organizationId = $this->requireTenant();
+        $this->lockedOpenRoundTicketIds[] = $ticketId->toString();
+        $openShared = array_values(array_filter(
+            $this->stored,
+            static fn (Round $existing): bool => $existing->organizationId()->equals($organizationId) && $existing->ticketId()->equals($ticketId) && $existing->isOpenSharedRound(),
+        ));
+        usort($openShared, static fn (Round $first, Round $second): int => $first->number() <=> $second->number());
+        $this->loadedRounds += \count($openShared);
+
+        return array_map(self::copyOf(...), $openShared);
     }
 
     public function save(Round $round, \DateTimeImmutable $savedAt): void

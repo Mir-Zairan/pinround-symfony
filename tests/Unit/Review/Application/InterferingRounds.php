@@ -79,6 +79,11 @@ final class InterferingRounds implements Rounds
         return $this->staleNextNumber ?? $this->inner->nextFreeNumberOf($ticketId);
     }
 
+    public function openSharedRoundsOf(TicketId $ticketId): array
+    {
+        return $this->inner->openSharedRoundsOf($ticketId);
+    }
+
     public function save(Round $round, \DateTimeImmutable $savedAt): void
     {
         $this->inner->save($round, $savedAt);

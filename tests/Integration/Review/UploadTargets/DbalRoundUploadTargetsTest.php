@@ -52,6 +52,7 @@ final class DbalRoundUploadTargetsTest extends KernelTestCase
     private const string MIA_REPORT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5231';
     private const string CLOSED_REPORT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5232';
     private const string OTHER_ORGANIZATION_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5233';
+    private const string LENA_SHARED_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5234';
     private const string MEDIA = '0197a3c0-0000-7000-8000-0000000f5241';
     private const string STARTED_AT = '2027-03-16 08:00:00+00:00';
 
@@ -59,6 +60,7 @@ final class DbalRoundUploadTargetsTest extends KernelTestCase
     {
         $this->roundRows()->removeAllOf(self::ACME_FOODS, self::OTHER_ORGANIZATION);
         $lenaSharedDraft = self::draft(self::LENA_SHARED_DRAFT, self::TICKET, self::LENA);
+        $lenaSharedDraft->addScreenshot(new UserId(self::LENA), new ScreenshotId(self::LENA_SHARED_DRAFT_SCREENSHOT), self::MEDIA);
         $lenaSharedDraft->share(new UserId(self::LENA), 1, new \DateTimeImmutable('2027-03-16 09:00:00+00:00'));
         foreach ([
             self::draft(self::OMAR_DRAFT, self::TICKET, self::OMAR),

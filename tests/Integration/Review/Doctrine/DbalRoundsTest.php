@@ -54,6 +54,8 @@ final class DbalRoundsTest extends KernelTestCase
     private const string OTHER_ORGANIZATION_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5134';
     private const string REFUSED_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5135';
     private const string THIRD_TICKET_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5136';
+    private const string SHARED_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5137';
+    private const string REFUSED_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5138';
     private const string FIRST_PIN = '0197a3c0-0000-7000-8000-0000000f5141';
     private const string SECOND_PIN = '0197a3c0-0000-7000-8000-0000000f5142';
     private const string THIRD_PIN = '0197a3c0-0000-7000-8000-0000000f5143';
@@ -238,10 +240,12 @@ final class DbalRoundsTest extends KernelTestCase
     public function aSharedDraftFreesTheOpenDraftSlotAndTakesItsNumber(): void
     {
         $sharedDraft = self::draft(self::OMAR_SHARED_DRAFT, self::TICKET, self::OMAR);
+        $sharedDraft->addScreenshot(new UserId(self::OMAR), new ScreenshotId(self::SHARED_DRAFT_SCREENSHOT), self::FIRST_MEDIA);
         $sharedDraft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable('2027-03-16 09:00:00+00:00'));
         $this->addCommitted($sharedDraft);
         $this->addCommitted(self::draft(self::OMAR_DRAFT, self::TICKET, self::OMAR));
         $secondRoundOne = self::draft(self::REFUSED_ROUND, self::TICKET, self::LENA);
+        $secondRoundOne->addScreenshot(new UserId(self::LENA), new ScreenshotId(self::REFUSED_DRAFT_SCREENSHOT), self::FIRST_MEDIA);
         $secondRoundOne->share(new UserId(self::LENA), 1, new \DateTimeImmutable('2027-03-16 09:05:00+00:00'));
 
         $refusal = $this->refusalOfAddingBefore($secondRoundOne, self::draft(self::LENA_DRAFT, self::TICKET, self::LENA));

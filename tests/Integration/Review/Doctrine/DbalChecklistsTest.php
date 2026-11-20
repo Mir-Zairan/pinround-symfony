@@ -52,6 +52,7 @@ final class DbalChecklistsTest extends KernelTestCase
     private const string FIRST_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5331';
     private const string SECOND_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5332';
     private const string OTHER_ORGANIZATION_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5333';
+    private const string MIA_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f5334';
     private const string FIRST_PIN = '0197a3c0-0000-7000-8000-0000000f5341';
     private const string SECOND_PIN = '0197a3c0-0000-7000-8000-0000000f5342';
     private const string THIRD_PIN = '0197a3c0-0000-7000-8000-0000000f5343';
@@ -189,6 +190,7 @@ final class DbalChecklistsTest extends KernelTestCase
     {
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $draft = Round::draft(new RoundId(self::MIA_DRAFT), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT));
+            $draft->addScreenshot(new UserId(self::MIA), new ScreenshotId(self::MIA_DRAFT_SCREENSHOT), self::MEDIA);
             $draft->share(new UserId(self::MIA), 1, new \DateTimeImmutable(self::CREATED_AT));
             $this->rounds()->add($draft);
         });

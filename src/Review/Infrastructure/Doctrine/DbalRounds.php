@@ -162,16 +162,29 @@ final readonly class DbalRounds implements Rounds
     public function nextFreeNumberOf(TicketId $ticketId): int
     {
         $organizationId = $this->requireTransactionAndTenant();
-        // An advisory lock, not a row lock: the number about to be taken has no row yet. Held to the end of the
-        // transaction, so the next caller's max() below runs after this one's share is committed.
-        $this->connection->executeStatement('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
-            \sprintf('rvw_round_number:%s:%s', $organizationId->toString(), $ticketId->toString()),
-        ]);
+        $this->lockRoundNumbersOf($organizationId, $ticketId);
 
         return self::integer($this->connection->fetchOne(
             'SELECT COALESCE(MAX(number), 0) + 1 FROM rvw_round WHERE organization_id = ? AND ticket_id = ?',
             [$organizationId->toString(), $ticketId->toString()],
         ), 'next number');
+    }
+
+    public function openSharedRoundsOf(TicketId $ticketId): array
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // The number lock first and the rows second, on every path, so two callers never hold one each and wait on the
+        // other. The row lock is still needed: a verdict locks the round row but takes no number lock.
+        $this->lockRoundNumbersOf($organizationId, $ticketId);
+        // Round::isOpenSharedRound's predicate; ORDER BY number locks the rows in one order whoever reads them.
+        $roundRows = $this->connection->fetchAllAssociative(
+            'SELECT '.self::ROUND_COLUMNS.' FROM rvw_round WHERE organization_id = ? AND ticket_id = ?'
+            ." AND kind IN ('review', 'draft') AND shared_at IS NOT NULL AND deleted_at IS NULL AND state = 'open'"
+            .' ORDER BY number FOR UPDATE',
+            [$organizationId->toString(), $ticketId->toString()],
+        );
+
+        return $this->roundsOf($organizationId, $roundRows);
     }
 
     public function save(Round $round, \DateTimeImmutable $savedAt): void
@@ -231,7 +244,7 @@ final readonly class DbalRounds implements Rounds
             ];
         }
         $storedPins = [];
-        foreach ($this->pinRowsOfRound($organizationId, $roundId) as $pinRow) {
+        foreach ($this->pinRowsOfRounds($organizationId, [$roundId]) as $pinRow) {
             $storedPins[self::text($pinRow['id'], 'id')] = self::pinFields($pinRow);
         }
 
@@ -291,11 +304,21 @@ final readonly class DbalRounds implements Rounds
         if ([] === $ids) {
             return;
         }
-        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
         $this->connection->executeStatement(
             \sprintf('DELETE FROM %s WHERE organization_id = ? AND id = ANY(CAST(? AS uuid[]))', $table),
-            [$organizationId, '{'.implode(',', $ids).'}'],
+            [$organizationId, self::uuidArray($ids)],
         );
+    }
+
+    /**
+     * An advisory lock, not a row lock: the number about to be taken has no row yet. Held to the end of the
+     * transaction, so the next caller's read runs after this one's share is committed.
+     */
+    private function lockRoundNumbersOf(OrganizationId $organizationId, TicketId $ticketId): void
+    {
+        $this->connection->executeStatement('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+            \sprintf('rvw_round_number:%s:%s', $organizationId->toString(), $ticketId->toString()),
+        ]);
     }
 
     /**
@@ -303,9 +326,24 @@ final readonly class DbalRounds implements Rounds
      */
     private function roundOf(OrganizationId $organizationId, array $roundRow): Round
     {
-        $roundId = self::text($roundRow['id'], 'id');
+        return $this->roundsOf($organizationId, [$roundRow])[0];
+    }
+
+    /**
+     * The rounds with their screenshots and pins in two more queries, however many rounds there are.
+     *
+     * @param list<array<string, mixed>> $roundRows
+     *
+     * @return list<Round> in the order of $roundRows
+     */
+    private function roundsOf(OrganizationId $organizationId, array $roundRows): array
+    {
+        if ([] === $roundRows) {
+            return [];
+        }
+        $roundIds = array_map(static fn (array $roundRow): string => self::text($roundRow['id'], 'id'), $roundRows);
         $pinsByScreenshot = [];
-        foreach ($this->pinRowsOfRound($organizationId->toString(), $roundId) as $pinRow) {
+        foreach ($this->pinRowsOfRounds($organizationId->toString(), $roundIds) as $pinRow) {
             $pinsByScreenshot[self::text($pinRow['screenshot_id'], 'screenshot_id')][] = Pin::restored(
                 new PinId(self::text($pinRow['id'], 'id')),
                 self::integer($pinRow['number'], 'number'),
@@ -319,10 +357,14 @@ final readonly class DbalRounds implements Rounds
                 self::enumOrNull(PinVerdict::class, $pinRow['verdict'], 'verdict'),
             );
         }
-        $screenshots = array_map(static function (array $screenshotRow) use ($pinsByScreenshot): Screenshot {
+        $screenshotsByRound = [];
+        foreach ($this->connection->fetchAllAssociative(
+            'SELECT round_id, id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot'
+            .' WHERE organization_id = ? AND round_id = ANY(CAST(? AS uuid[])) ORDER BY round_id, position',
+            [$organizationId->toString(), self::uuidArray($roundIds)],
+        ) as $screenshotRow) {
             $screenshotId = self::text($screenshotRow['id'], 'id');
-
-            return Screenshot::restored(
+            $screenshotsByRound[self::text($screenshotRow['round_id'], 'round_id')][] = Screenshot::restored(
                 new ScreenshotId($screenshotId),
                 self::text($screenshotRow['media_id'], 'media_id'),
                 self::integer($screenshotRow['position'], 'position'),
@@ -332,13 +374,10 @@ final readonly class DbalRounds implements Rounds
                 self::enumOrNull(VariantLabel::class, $screenshotRow['variant_label'], 'variant_label'),
                 self::enumOrNull(ScreenshotVerdict::class, $screenshotRow['verdict'], 'verdict'),
             );
-        }, $this->connection->fetchAllAssociative(
-            'SELECT id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot WHERE organization_id = ? AND round_id = ? ORDER BY position',
-            [$organizationId->toString(), $roundId],
-        ));
+        }
 
-        return Round::restored(
-            new RoundId($roundId),
+        return array_map(static fn (array $roundRow): Round => Round::restored(
+            new RoundId(self::text($roundRow['id'], 'id')),
             new OrganizationId(self::text($roundRow['organization_id'], 'organization_id')),
             new TicketId(self::text($roundRow['ticket_id'], 'ticket_id')),
             RoundKind::from(self::text($roundRow['kind'], 'kind')),
@@ -347,27 +386,39 @@ final readonly class DbalRounds implements Rounds
             self::timeOrNull($roundRow['shared_at'], 'shared_at'),
             RoundState::from(self::text($roundRow['state'], 'state')),
             self::integer($roundRow['version'], 'version'),
-            $screenshots,
+            $screenshotsByRound[self::text($roundRow['id'], 'id')] ?? [],
             self::timeOrNull($roundRow['created_at'], 'created_at') ?? throw new \LogicException('A round created_at from the database is null.'),
             self::timeOrNull($roundRow['deleted_at'], 'deleted_at'),
             self::enumOrNull(DraftDecision::class, $roundRow['decision'], 'decision'),
             self::timeOrNull($roundRow['decided_at'], 'decided_at'),
-        );
+        ), $roundRows);
     }
 
     /**
      * Served by rvw_screenshot_round_id_position_key and rvw_pin_screenshot_id_number_key.
      *
+     * @param non-empty-list<string> $roundIds
+     *
      * @return list<array<string, mixed>>
      */
-    private function pinRowsOfRound(string $organizationId, string $roundId): array
+    private function pinRowsOfRounds(string $organizationId, array $roundIds): array
     {
         return $this->connection->fetchAllAssociative(
             'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id'
             .' FROM rvw_pin AS pin JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = pin.organization_id AND screenshot.id = pin.screenshot_id'
-            .' WHERE screenshot.organization_id = ? AND screenshot.round_id = ? ORDER BY pin.number',
-            [$organizationId, $roundId],
+            .' WHERE screenshot.organization_id = ? AND screenshot.round_id = ANY(CAST(? AS uuid[])) ORDER BY pin.screenshot_id, pin.number',
+            [$organizationId, self::uuidArray($roundIds)],
         );
+    }
+
+    /**
+     * pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
+     *
+     * @param list<string> $ids
+     */
+    private static function uuidArray(array $ids): string
+    {
+        return '{'.implode(',', $ids).'}';
     }
 
     /**

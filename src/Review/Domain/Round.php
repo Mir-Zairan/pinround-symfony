@@ -109,8 +109,9 @@ final class Round
      *
      * @param int $number the next free round number of the ticket, which the caller reads; from 1, as 0 is the report
      *
-     * @throws \DomainException when the round is not a draft, was deleted, is shared already, the sharer is not its
-     *                          owner or the number is below 1; the round stays as it was
+     * @throws DraftHasNoScreenshots when the owner's draft holds no screenshot (ADR-0048); the round stays as it was
+     * @throws \DomainException      when the round is not a draft, was deleted, is shared already, the sharer is not
+     *                               its owner or the number is below 1; the round stays as it was
      */
     public function share(UserId $sharerId, int $number, \DateTimeImmutable $sharedAt): void
     {
@@ -125,6 +126,9 @@ final class Round
         }
         if (!$sharerId->equals($this->ownerId)) {
             throw new \DomainException('Only the person who owns a draft round can share it.');
+        }
+        if ([] === $this->screenshots) {
+            throw new DraftHasNoScreenshots();
         }
         if ($number < 1) {
             throw new \DomainException('A shared draft round gets a number from 1; Round 0 is the report.');
@@ -299,6 +303,28 @@ final class Round
         ++$this->version;
     }
 
+    /**
+     * Closes a shared round when the person whose turn it is moves the ticket on, or when the assignee shares the
+     * next round over a findings round (ADR-0048); its verdicts no longer change. Who may close it is the caller's
+     * rule.
+     *
+     * @throws \DomainException when the round is not a shared review round or shared draft (Round 0, the checklist
+     *                          round and an unshared or deleted draft are not), or is closed already; the round stays
+     *                          as it was
+     */
+    public function close(): void
+    {
+        if (!$this->isSharedRound()) {
+            throw new \DomainException('Only a shared round is closed when the ticket moves on.');
+        }
+        if (RoundState::Open !== $this->state) {
+            throw new \DomainException('This round is closed already.');
+        }
+
+        $this->state = RoundState::Closed;
+        ++$this->version;
+    }
+
     public function id(): RoundId
     {
         return $this->id;
@@ -340,6 +366,24 @@ final class Round
     public function isUnsharedDraft(): bool
     {
         return RoundKind::Draft === $this->kind && null === $this->sharedAt;
+    }
+
+    /**
+     * An open hand-off round, which blocks every other share on the ticket until it closes (ADR-0048). Round 0 and the
+     * checklist round never are.
+     */
+    public function isOpenSharedRound(): bool
+    {
+        return $this->isSharedRound() && RoundState::Open === $this->state;
+    }
+
+    /**
+     * Whether the round is findings for $assigneeId (ADR-0044): a shared draft of anyone else, as FindingsChecklist
+     * has it. Open or closed alike.
+     */
+    public function isFindingsFor(UserId $assigneeId): bool
+    {
+        return RoundKind::Draft === $this->kind && $this->isSharedRound() && !$this->ownerId->equals($assigneeId);
     }
 
     public function state(): RoundState
@@ -420,6 +464,15 @@ final class Round
         if (RoundState::Open !== $this->state) {
             throw new \DomainException('This draft round is closed.');
         }
+    }
+
+    /**
+     * A hand-off with a number from 1: a review round, or a draft that was shared, which delete() never touches.
+     * ReviewedRound takes verdicts on the same rounds.
+     */
+    private function isSharedRound(): bool
+    {
+        return \in_array($this->kind, [RoundKind::Review, RoundKind::Draft], true) && null !== $this->sharedAt;
     }
 
     /**

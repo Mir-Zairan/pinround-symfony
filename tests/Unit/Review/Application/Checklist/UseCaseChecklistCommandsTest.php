@@ -127,6 +127,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     public function aChecklistGoesPastARoundTheTicketHasShared(): void
     {
         $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::OMAR), new \DateTimeImmutable(self::REPORTED_AT));
+        $draft->addScreenshot(new UserId(self::OMAR), $this->rounds->nextScreenshotIdentity(), self::MEDIA);
         $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable(self::REPORTED_AT));
         $this->rounds->add($draft);
 

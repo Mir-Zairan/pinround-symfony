@@ -9,7 +9,9 @@ use App\Review\Domain\DraftFacts;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
+use App\Review\Domain\RoundKind;
 use App\Review\Domain\RoundSlotTaken;
+use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchGuard;
@@ -216,7 +218,7 @@ final class InMemoryRoundsTest extends TestCase
     public function aSharedOrDeletedDraftIsNotTheOpenDraftAndFreesTheSlotForANewOne(): void
     {
         $rounds = self::roundsOf(self::ACME_FOODS);
-        $rounds->add(self::draft($rounds, self::OMAR));
+        $rounds->add(self::draftWithAScreenshot($rounds, self::OMAR));
         $ticket = new TicketId(self::TICKET);
         $owner = new UserId(self::OMAR);
 
@@ -249,7 +251,7 @@ final class InMemoryRoundsTest extends TestCase
         $rounds->add(self::report($rounds, self::TICKET));
         self::assertSame(1, $rounds->nextFreeNumberOf($ticket));
 
-        $rounds->add(self::draft($rounds, self::OMAR));
+        $rounds->add(self::draftWithAScreenshot($rounds, self::OMAR));
         self::assertSame(1, $rounds->nextFreeNumberOf($ticket));
 
         $draft = $rounds->openUnsharedDraftOf($ticket, new UserId(self::OMAR));
@@ -260,6 +262,36 @@ final class InMemoryRoundsTest extends TestCase
         self::assertSame(2, $rounds->nextFreeNumberOf($ticket));
         self::assertSame(1, $rounds->nextFreeNumberOf(new TicketId(self::OTHER_TICKET)));
         self::assertSame([self::TICKET, self::TICKET, self::TICKET, self::TICKET, self::OTHER_TICKET], $rounds->numberedTicketIds);
+    }
+
+    #[Test]
+    public function theOpenSharedRoundsAreTheTenantsOpenReviewRoundsAndSharedDraftsOfTheTicketByNumber(): void
+    {
+        $rounds = self::roundsOf(self::ACME_FOODS);
+        $ticket = new TicketId(self::TICKET);
+        $rounds->add(self::report($rounds, self::TICKET));
+        $rounds->add(self::stored($rounds, RoundKind::Checklist, self::TICKET, self::LENA, 1, RoundState::Open));
+        // Added before the review round it comes after, so the order is the number's.
+        $omarsShared = self::stored($rounds, RoundKind::Draft, self::TICKET, self::OMAR, 3, RoundState::Open);
+        $rounds->add($omarsShared);
+        $review = self::stored($rounds, RoundKind::Review, self::TICKET, self::LENA, 2, RoundState::Open);
+        $rounds->add($review);
+        $rounds->add(self::stored($rounds, RoundKind::Draft, self::TICKET, self::MIA, 4, RoundState::Closed));
+        $rounds->add(self::draftWithAScreenshot($rounds, self::LENA));
+        $rounds->add(self::stored($rounds, RoundKind::Draft, self::OTHER_TICKET, self::OMAR, 1, RoundState::Open));
+        $otherTenant = new InMemoryRounds(self::tenant(self::BETA_BAKERY));
+        $otherTenant->stored = $rounds->stored;
+
+        $openShared = $rounds->openSharedRoundsOf($ticket);
+
+        self::assertSame(
+            [$review->id()->toString(), $omarsShared->id()->toString()],
+            array_map(static fn (Round $round): string => $round->id()->toString(), $openShared),
+        );
+        self::assertSame([], $otherTenant->openSharedRoundsOf($ticket));
+        self::assertSame([self::TICKET], $rounds->lockedOpenRoundTicketIds);
+        $openShared[0]->close();
+        self::assertSame(RoundState::Open, $rounds->openSharedRoundsOf($ticket)[0]->state(), 'A read hands out a copy; only save() stores a change.');
     }
 
     #[Test]
@@ -344,8 +376,8 @@ final class InMemoryRoundsTest extends TestCase
     {
         $rounds = self::roundsOf(self::ACME_FOODS);
         $ticket = new TicketId(self::TICKET);
-        $rounds->add(self::draft($rounds, self::OMAR));
-        $rounds->add(self::draft($rounds, self::LENA));
+        $rounds->add(self::draftWithAScreenshot($rounds, self::OMAR));
+        $rounds->add(self::draftWithAScreenshot($rounds, self::LENA));
         $omars = $rounds->openUnsharedDraftOf($ticket, new UserId(self::OMAR));
         $lenas = $rounds->openUnsharedDraftOf($ticket, new UserId(self::LENA));
         self::assertNotNull($omars);
@@ -359,7 +391,7 @@ final class InMemoryRoundsTest extends TestCase
             self::fail('Two rounds took one number.');
         } catch (RoundSlotTaken) {
             self::assertNull($rounds->get($lenas->id())?->number());
-            self::assertSame(1, $rounds->get($lenas->id())?->version());
+            self::assertSame($lenas->savedVersion(), $rounds->get($lenas->id())?->version());
         }
     }
 
@@ -418,5 +450,39 @@ final class InMemoryRoundsTest extends TestCase
     private static function draft(InMemoryRounds $rounds, string $ownerId): Round
     {
         return Round::draft($rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId($ownerId), new \DateTimeImmutable('2026-03-04 10:00:00+00:00'));
+    }
+
+    /**
+     * A round of Acme Foods as a read gives it, with one screenshot; shared exactly when it has a number.
+     */
+    private static function stored(InMemoryRounds $rounds, RoundKind $kind, string $ticketId, string $ownerId, ?int $number, RoundState $state): Round
+    {
+        return Round::restored(
+            $rounds->nextIdentity(),
+            new OrganizationId(self::ACME_FOODS),
+            new TicketId($ticketId),
+            $kind,
+            new UserId($ownerId),
+            $number,
+            null === $number ? null : new \DateTimeImmutable('2026-03-05 08:00:00+00:00'),
+            $state,
+            1,
+            [Screenshot::of($rounds->nextScreenshotIdentity(), self::MEDIA, 0, null, null, [])],
+            new \DateTimeImmutable('2026-03-04 10:00:00+00:00'),
+            null,
+            null,
+            null,
+        );
+    }
+
+    /**
+     * A draft that may be shared, as one with no screenshot may not.
+     */
+    private static function draftWithAScreenshot(InMemoryRounds $rounds, string $ownerId): Round
+    {
+        $draft = self::draft($rounds, $ownerId);
+        $draft->addScreenshot(new UserId($ownerId), $rounds->nextScreenshotIdentity(), self::MEDIA);
+
+        return $draft;
     }
 }

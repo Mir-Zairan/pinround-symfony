@@ -104,6 +104,7 @@ final class InMemoryChecklistsTest extends TestCase
     {
         $this->addReport();
         $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT));
+        $draft->addScreenshot(new UserId(self::MIA), $this->rounds->nextScreenshotIdentity(), self::MEDIA);
         $draft->share(new UserId(self::MIA), 1, new \DateTimeImmutable(self::CREATED_AT));
         $this->rounds->add($draft);
 
