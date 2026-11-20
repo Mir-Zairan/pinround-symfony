@@ -94,9 +94,9 @@
                         <div class="report__chip-row">
                             <label class="chip report__chip">
                                 <input class="visually-hidden" type="radio" name="assignee_id" value=""{% if input.assigneeId == '' %} checked{% endif %}{% if team.id.toString != input.teamId %} disabled{% endif %}>
-                                The team ({{ team.leadFirstName }} decides)
+                                The team ({{ team.giveTo.leadFirstName }} decides)
                             </label>
-                            {% for person in team.giveTo %}
+                            {% for person in team.giveTo.people %}
                                 <label class="chip report__chip">
                                     <input class="visually-hidden" type="radio" name="assignee_id" value="{{ person.id }}"{% if person.id == input.assigneeId and team.id.toString == input.teamId %} checked{% endif %}{% if team.id.toString != input.teamId %} disabled{% endif %}>
                                     {{ person.label }}

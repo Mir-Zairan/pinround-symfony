@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\SharedKernel\Domain\TeamId;
+use App\Ticketing\Api\ReportGiveTo;
 use App\Ticketing\Api\TeamProjectChoice;
 
 /**
@@ -13,19 +14,20 @@ use App\Ticketing\Api\TeamProjectChoice;
 final readonly class ReportTeamChoice
 {
     /**
-     * @param bool                                   $isOwn         the reporter has a role in it, so "Give it to" shows
-     * @param string|null                            $leadFirstName for "The team (Lena decides)"; null when not the reporter's team
-     * @param list<array{id: string, label: string}> $giveTo        up to four non-tester people, least loaded first; the
-     *                                                              reporter's label is "<first> (you)"
-     * @param non-empty-list<TeamProjectChoice>      $projects      the team's projects, the first is the default
+     * @param ReportGiveTo|null                 $giveTo   null when the reporter has no role in the team, so "Give it to"
+     *                                                    does not show
+     * @param non-empty-list<TeamProjectChoice> $projects the team's projects, the first is the default
      */
     public function __construct(
         public TeamId $id,
         public string $name,
-        public bool $isOwn,
-        public ?string $leadFirstName,
-        public array $giveTo,
+        public ?ReportGiveTo $giveTo,
         public array $projects,
     ) {
+    }
+
+    public function isOwn(): bool
+    {
+        return null !== $this->giveTo;
     }
 }

@@ -309,6 +309,9 @@ The system shall use these fixed orders and thresholds:
 
 **FR-INT-01 — Anyone can report** · Must · 🏁 (simple create form) · Prototype: `Main › Report a problem`
 Every user with any team role, and every user of the org, can open "Report a problem".
+Send on a report draft ([FR-MCP-12](#mcp--mcp-server-and-agent-api)) offers the same "Give it to" for the draft's project team as FR-INT-05 does: "The team (<lead> decides)" (the default) or one of the people Report a problem offers.
+- Accept: Given Mia is in Shop, When she sends her report draft with "Give it to" Omar, Then the ticket starts in To do with Omar as assignee; with "The team (Lena decides)" it has no assignee and Lena plans it.
+- Accept: a person "Give it to" does not offer (someone outside the project's team, a tester, or anyone when the sender is in no role of that team) is refused with "Pick someone from the list, or the team."; no ticket is made and the draft stays as it was.
 
 **FR-INT-02 — Created immediately** · Must · 🏁 · Prototype: `Main › Report a problem` → ticket
 "Create ticket" creates the ticket at once (no approval). The user lands on the new ticket; toast "Ticket SHOP-88 made. Lena takes a quick look." or "… Nobody needs to check it."

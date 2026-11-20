@@ -17,6 +17,9 @@ use App\Review\Api\ScreenshotWithPins;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
+use App\Ticketing\Api\ProjectQueries;
+use App\Ticketing\Api\ReportGiveTo;
+use App\Ticketing\Api\ReportGiveToQueries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -30,7 +33,8 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * The pages read in the request transaction. Save, Send and Delete run without it, each in a transaction of its own, so
  * a refusal leaves nothing and the toast is set only once the change is committed. Send needs ReportDraftPermission
- * SEND, which a personal access token never has.
+ * SEND, which a personal access token never has. The page offers Report a problem's "Give it to" for the project's
+ * team (P14.T9); ReportDrafts::send refuses a person it does not offer.
  */
 final class ReportDraftController extends AbstractController
 {
@@ -41,6 +45,8 @@ final class ReportDraftController extends AbstractController
     public const string DELETE_ROUTE = 'review_report_draft_delete';
     public const string CSRF_FIELD = '_csrf_token';
     public const string VERSION_FIELD = 'version';
+    /** "Give it to": a person's id, or empty for the team, as Report a problem posts it. */
+    public const string ASSIGNEE_FIELD = 'assignee_id';
     public const string SAVED = 'Report draft saved.';
     /** With the new ticket's key. */
     public const string SENT = 'Sent. It is ticket %s now.';
@@ -64,6 +70,8 @@ final class ReportDraftController extends AbstractController
         private readonly Transactions $transactions,
         private readonly ScreenshotWithPinsViews $screenshotViews,
         private readonly ClockInterface $clock,
+        private readonly ProjectQueries $projectQueries,
+        private readonly ReportGiveToQueries $reportGiveToQueries,
     ) {
     }
 
@@ -129,8 +137,9 @@ final class ReportDraftController extends AbstractController
                 $this->refuseAnExpiredForm($draft->id, $request);
                 $postedVersion = $request->request->getInt(self::VERSION_FIELD);
                 $this->reportDrafts->update($draft->id, $draft->ownerId, $postedVersion, self::postedContentOf($draft, $request), $now);
+                $assigneeId = $request->request->getString(self::ASSIGNEE_FIELD);
 
-                return $this->reportDrafts->send($draft->id, $draft->ownerId, $postedVersion + 1, $now);
+                return $this->reportDrafts->send($draft->id, $draft->ownerId, $postedVersion + 1, '' === $assigneeId ? null : $assigneeId, $now);
             });
         } catch (ReportDraftRefused $refused) {
             return $this->renderRefusedForm($id, $request, $refused);
@@ -285,7 +294,24 @@ final class ReportDraftController extends AbstractController
             'title' => $postedForm?->request->getString('title') ?? $draft->title,
             'detail' => $postedForm?->request->getString('detail') ?? $draft->detail,
             'postedScreenshots' => $postedForm?->request->all('screenshots'),
+            'giveTo' => $this->giveToOf($draft),
+            'assigneeId' => $postedForm?->request->getString(self::ASSIGNEE_FIELD) ?? '',
             'csrfId' => self::csrfIdOf($draft->id),
         ], new Response(null, $status));
+    }
+
+    /**
+     * The "Give it to" Report a problem shows for the project's team, or null when the person has no role in it or the
+     * project lost its team, so Send gives the report to the team.
+     */
+    private function giveToOf(ReportDraftView $draft): ?ReportGiveTo
+    {
+        $teamId = $this->projectQueries->projectByKey($draft->projectKey)?->teamId();
+        if (null === $teamId) {
+            return null;
+        }
+        $actor = $this->actor();
+
+        return $this->reportGiveToQueries->giveToOf($actor->organizationId(), $actor->userId(), $teamId);
     }
 }

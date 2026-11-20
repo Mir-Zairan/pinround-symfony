@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Organization\Api\ActorContext;
+use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Api\TeamQueries;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
+use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AssigneeTicketCounts;
 use App\Ticketing\Api\ProjectQueries;
+use App\Ticketing\Api\ReportGiveTo;
+use App\Ticketing\Api\ReportGiveToQueries;
 use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketVisibilities;
 
@@ -18,9 +23,10 @@ use App\Ticketing\Api\TicketVisibilities;
  * The choices of Report a problem's "Where it goes" (report-a-problem.md): every team that owns a project, the
  * reporter's own teams first; for an own team, "Give it to" up to four people who are not testers, those with the fewest
  * open tickets first. Reads under row-level security: one query for the teams, one for the projects, one for the
- * counts, and the cached team people (no query on a hit) of the reporter's own teams only.
+ * counts, and the cached team people (no query on a hit) of the reporter's own teams only. A report draft's Send offers
+ * the same "Give it to" through giveToOf.
  */
-final readonly class ReportFormChoices
+final readonly class ReportFormChoices implements ReportGiveToQueries
 {
     public const int MAX_GIVE_TO = 4;
 
@@ -30,6 +36,7 @@ final readonly class ReportFormChoices
         private TeamPeopleQueries $teamPeopleQueries,
         private AssigneeTicketCounts $assigneeTicketCounts,
         private TicketVisibilities $ticketVisibilities,
+        private MembershipQueries $membershipQueries,
     ) {
     }
 
@@ -54,11 +61,21 @@ final readonly class ReportFormChoices
             if ($actor->roles()->isInTeam($summary->id())) {
                 $own[] = [$summary, $projects];
             } else {
-                $others[] = new ReportTeamChoice($summary->id(), $summary->name(), false, null, [], $projects);
+                $others[] = new ReportTeamChoice($summary->id(), $summary->name(), null, $projects);
             }
         }
 
         return [...$this->withPeople($actor, $own), ...$others];
+    }
+
+    public function giveToOf(OrganizationId $organizationId, UserId $reporter, TeamId $teamId): ?ReportGiveTo
+    {
+        if (!$this->membershipQueries->rolesOf($reporter, $organizationId)->isInTeam($teamId)) {
+            return null;
+        }
+        $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
+
+        return self::giveToAmong($reporter, $people, $this->openTicketCountsOf($organizationId, $reporter, $people));
     }
 
     /**
@@ -72,29 +89,51 @@ final readonly class ReportFormChoices
             return [];
         }
         $peopleByTeam = [];
-        $everyone = [];
         foreach ($ownTeams as [$summary]) {
             // Cached per team (CachedTeamPeopleQueries), so this costs no query on a hit; a reporter is in few teams.
             $peopleByTeam[$summary->id()->toString()] = $this->teamPeopleQueries->namedPossibleAssigneesOf($summary->id());
-            foreach ($peopleByTeam[$summary->id()->toString()] as $person) {
-                $everyone[$person->userId->toString()] = $person->userId;
-            }
         }
-        $counts = $this->assigneeTicketCounts->openTicketsAssignedTo($this->ticketVisibilities->of($actor->organizationId(), $actor->userId()), array_values($everyone), null);
+        $counts = $this->openTicketCountsOf($actor->organizationId(), $actor->userId(), array_merge(...array_values($peopleByTeam)));
 
         $choices = [];
         foreach ($ownTeams as [$summary, $projects]) {
-            $people = $peopleByTeam[$summary->id()->toString()];
-            $lead = ReportTeamPeople::leadOf($people);
-            $candidates = ReportTeamPeople::giveToPeopleOf($people);
-            usort($candidates, static fn (PossibleAssignee $first, PossibleAssignee $second): int => [$counts[$first->userId->toString()] ?? 0, $first->displayName, $first->userId->toString()] <=> [$counts[$second->userId->toString()] ?? 0, $second->displayName, $second->userId->toString()]);
-            $giveTo = array_map(
-                static fn (PossibleAssignee $person): array => ['id' => $person->userId->toString(), 'label' => $person->userId->equals($actor->userId()) ? $person->firstName.' (you)' : $person->firstName],
-                \array_slice($candidates, 0, self::MAX_GIVE_TO),
-            );
-            $choices[] = new ReportTeamChoice($summary->id(), $summary->name(), true, $lead?->firstName, $giveTo, $projects);
+            $giveTo = self::giveToAmong($actor->userId(), $peopleByTeam[$summary->id()->toString()], $counts);
+            $choices[] = new ReportTeamChoice($summary->id(), $summary->name(), $giveTo, $projects);
         }
 
         return $choices;
+    }
+
+    /**
+     * One query for every given person, each counted once.
+     *
+     * @param list<PossibleAssignee> $people
+     *
+     * @return array<string, int> by user id
+     */
+    private function openTicketCountsOf(OrganizationId $organizationId, UserId $reporter, array $people): array
+    {
+        $everyone = [];
+        foreach ($people as $person) {
+            $everyone[$person->userId->toString()] = $person->userId;
+        }
+
+        return $this->assigneeTicketCounts->openTicketsAssignedTo($this->ticketVisibilities->of($organizationId, $reporter), array_values($everyone), null);
+    }
+
+    /**
+     * @param list<PossibleAssignee> $people one team's
+     * @param array<string, int>     $counts open tickets by user id
+     */
+    private static function giveToAmong(UserId $reporter, array $people, array $counts): ReportGiveTo
+    {
+        $candidates = ReportTeamPeople::giveToPeopleOf($people);
+        usort($candidates, static fn (PossibleAssignee $first, PossibleAssignee $second): int => [$counts[$first->userId->toString()] ?? 0, $first->displayName, $first->userId->toString()] <=> [$counts[$second->userId->toString()] ?? 0, $second->displayName, $second->userId->toString()]);
+        $offered = array_map(
+            static fn (PossibleAssignee $person): array => ['id' => $person->userId->toString(), 'label' => $person->userId->equals($reporter) ? $person->firstName.' (you)' : $person->firstName],
+            \array_slice($candidates, 0, self::MAX_GIVE_TO),
+        );
+
+        return new ReportGiveTo(ReportTeamPeople::leadOf($people)?->firstName, $offered);
     }
 }

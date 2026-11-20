@@ -27,6 +27,7 @@ use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Unit\Review\Application\InMemoryUploadedMedia;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
+use App\Ticketing\Api\ReportGiveToQueries;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketKeyQueries;
 use Doctrine\DBAL\Connection;
@@ -321,6 +322,7 @@ final class UseCaseReportDraftsTest extends KernelTestCase
             new PicturesToKeep(new InMemoryUploadedMedia($tenantContext, $uploads)),
             $tenantContext,
             $draftRoundContents ?? self::createStub(DraftRoundContents::class),
+            self::createStub(ReportGiveToQueries::class),
         );
     }
 
