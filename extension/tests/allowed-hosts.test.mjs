@@ -231,6 +231,29 @@ test('two adds at once both stay: neither write drops the other', async () => {
     assert.deepEqual(await storedOf(storage, ALLOWED_HOSTS_KEY), ['http://localhost:3000', 'http://localhost:4000']);
 });
 
+test('two removes at once both take: both entries go and the answers of both hosts are forgotten', async () => {
+    const storage = fakeBrowser().storage.local;
+    for (const entry of ['http://localhost:3000', 'http://localhost:4000', 'https://shop.acme-foods.test']) {
+        await addAllowedHost(storage, entry);
+    }
+    for (const url of ['http://localhost:3000/', 'http://localhost:4000/', 'https://shop.acme-foods.test/']) {
+        await confirmSite(storage, siteOf(url));
+    }
+
+    await Promise.all([removeAllowedHost(storage, 'http://localhost:3000'), removeAllowedHost(storage, 'http://localhost:4000')]);
+
+    assert.deepEqual(await storedOf(storage, ALLOWED_HOSTS_KEY), ['https://shop.acme-foods.test']);
+    assert.deepEqual(await storedOf(storage, CONFIRMED_HOSTS_KEY), ['https://shop.acme-foods.test:443']);
+});
+
+test('two "Play anyway" answers at once are both kept', async () => {
+    const storage = fakeBrowser().storage.local;
+
+    await Promise.all([confirmSite(storage, siteOf('http://localhost:3000/')), confirmSite(storage, siteOf('http://localhost:4000/'))]);
+
+    assert.deepEqual(await storedOf(storage, CONFIRMED_HOSTS_KEY), ['http://localhost:3000', 'http://localhost:4000']);
+});
+
 test('stored entries this version cannot read are left out, and a stored list past the cap is read only up to it', async () => {
     const storage = fakeBrowser().storage.local;
     await storage.set({ [ALLOWED_HOSTS_KEY]: ['http://localhost:*', 'ftp://localhost', 7, null, 'https://shop.acme-foods.test'] });
