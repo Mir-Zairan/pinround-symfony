@@ -21,10 +21,13 @@ final readonly class HomeQueriesService implements HomeQueries
     {
     }
 
-    public function whoseTurn(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after): WhoseTurnPage
+    public function whoseTurn(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, ?string $searchText = null): WhoseTurnPage
     {
         if (null !== $projectId && !ListFilter::isCanonicalUuid($projectId)) {
             throw new \InvalidArgumentException('Whose turn is read in a project given by its canonical lowercase uuid.');
+        }
+        if (null !== $searchText && !ListFilter::isSearchText($searchText)) {
+            throw new \InvalidArgumentException('Whose turn is searched with a trimmed text of 1 to 200 characters, valid UTF-8 without NUL.');
         }
         if (null !== $openedGroup && !self::isGroupKey($openedGroup)) {
             throw new \InvalidArgumentException('The opened whose-turn group is a user id or a label of at most 100 characters.');
@@ -33,7 +36,7 @@ final readonly class HomeQueriesService implements HomeQueries
             throw new \InvalidArgumentException('A whose-turn cursor\'s label has at most 100 characters.');
         }
 
-        $read = $this->whoseTurnRows->groupedRowsOf($viewer, $projectId, $openedGroup, $after, self::GROUPS_PER_PAGE + 1);
+        $read = $this->whoseTurnRows->groupedRowsOf($viewer, $projectId, $openedGroup, $after, self::GROUPS_PER_PAGE + 1, $searchText);
         $groups = $read['groups'];
         $viewerId = $viewer->viewerId;
         $isViewers = static fn (TurnGroup $group): bool => null !== $group->turnUserId && $group->turnUserId->equals($viewerId);
@@ -51,7 +54,7 @@ final readonly class HomeQueriesService implements HomeQueries
             $nextCursor = TurnGroupCursor::after($groups[self::GROUPS_PER_PAGE - 1]);
         }
 
-        return new WhoseTurnPage([...$viewersGroups, ...$groups], $read['ticketCount'], $nextCursor);
+        return new WhoseTurnPage([...$viewersGroups, ...$groups], $read['ticketCount'], $nextCursor, $read['isSearchCapped']);
     }
 
     private static function isGroupKey(string $groupKey): bool

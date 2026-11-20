@@ -18,6 +18,7 @@ use App\Tests\Integration\ReadsSentSql;
 use App\Tests\Integration\Tenancy\OwnConnectionTransactions;
 use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
+use App\Workflow\Api\StepQueries;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
@@ -238,7 +239,7 @@ final class DbalWhoseTurnRowsTest extends KernelTestCase
         $groups = new OwnConnectionTransactions($this->connection(), $this->tenantContext())->rolledBackUnderAnotherContext(
             self::BETA_BAKERY,
             self::ACME_FOODS,
-            fn (Connection $connection): array => new DbalWhoseTurnRows($connection, $this->tenantContext())
+            fn (Connection $connection): array => new DbalWhoseTurnRows($connection, $this->tenantContext(), self::getContainer()->get(StepQueries::class))
                 ->groupedRowsOf(self::lena(), null, null, null, 21)['groups'],
         );
 
