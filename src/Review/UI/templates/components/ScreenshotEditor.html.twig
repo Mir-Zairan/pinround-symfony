@@ -1,0 +1,93 @@
+{#- Tabs pattern: each thumbnail is a tab of its screenshot's panel; arrow keys, Home and End move between them. Hidden
+    panels keep their fields, so the form posts every screenshot. A kept screenshot's remove field is disabled, so it
+    posts nothing, as an unticked box did. -#}
+<div{{ attributes.defaults({class: 'screenshot-editor', id: this.fieldId}) }}
+    data-controller="screenshot-editor"
+    data-action="input->screenshot-editor#describePin">
+    {% if this.items is empty and this.canAdd %}
+        <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\ScreenshotEditor::EMPTY_MESSAGE')">
+            <twig:block name="action"><twig:Button variant="outline" class="screenshot-editor__add" data-action="screenshot-editor#add">Add screenshot</twig:Button></twig:block>
+        </twig:EmptyState>
+    {% elseif this.items is empty %}
+        <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\ScreenshotEditor::NO_SCREENSHOTS')" />
+    {% else %}
+        {% for item in this.items %}
+            {% set index = loop.index0 %}
+            {% set domId = item.view.domId %}
+            <section class="screenshot-editor__panel" id="{{ this.panelId(index) }}" role="tabpanel" aria-labelledby="{{ this.tabId(index) }}"
+                data-screenshot-editor-target="panel"{% if not loop.first %} hidden{% endif %}>
+                {% if item.fieldNames.remove is not null %}
+                    <input type="hidden" name="{{ item.fieldNames.remove }}" value="1" data-screenshot-editor-target="removeField"{% if not item.isRemoved %} disabled{% endif %}>
+                {% endif %}
+                <div class="screenshot-editor__kept"{% if item.isRemoved %} hidden{% endif %}>
+                    <div class="screenshot-editor__stage">
+                        {% if item.fieldNames.placesPins %}
+                            <div class="pin-placer" id="{{ domId }}-placer"
+                                data-controller="pin-placer"
+                                data-pin-placer-note-max-value="{{ this.noteMaxLength }}"
+                                data-pin-placer-note-placeholder-value="{{ this.notePlaceholder }}"
+                                data-action="click->pin-placer#onClick keydown->pin-placer#onKeydown input->pin-placer#onInput focusin->pin-placer#onFocusin pointerdown->pin-placer#onPointerdown pointermove->pin-placer#onPointermove pointerup->pin-placer#onPointerend pointercancel->pin-placer#onPointerend"
+                            >
+                                <p class="screenshot-editor__hint">Click on the screenshot to drop a pin. Then say what is wrong at that pin.</p>
+                                <twig:Screenshot :view="item.picture" />
+                                <twig:Button variant="outline" class="pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</twig:Button>
+                                <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
+                                <twig:PinList :view="item.picture" :isEditable="true" :notePlaceholder="this.notePlaceholder" />
+                                <div hidden data-pin-placer-target="fields"></div>
+                            </div>
+                        {% else %}
+                            <twig:Screenshot :view="item.picture" :loading="loop.first ? null : 'lazy'" />
+                            {% if item.picture.pins is not empty %}
+                                <ol class="pin-list" aria-label="Pins">
+                                    {% for pin in item.picture.pins %}
+                                        <li class="pin-list__item" value="{{ pin.number }}" data-pin-number="{{ pin.number }}">
+                                            <span class="pin-list__number">{{ pin.number }}</span>
+                                            <textarea class="pin-list__note" name="{{ item.fieldNames.pinNoteNameOf(loop.index0) }}" rows="2" maxlength="{{ this.noteMaxLength }}"
+                                                aria-label="Note for pin {{ pin.number }}" placeholder="{{ this.notePlaceholder }}"
+                                                data-screenshot-editor-pin-note>{{ pin.note }}</textarea>
+                                        </li>
+                                    {% endfor %}
+                                </ol>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    <div class="screenshot-editor__side">
+                        <label class="screenshot-editor__label" for="{{ domId }}-title">Picture title · optional</label>
+                        <input class="text-field screenshot-editor__input" id="{{ domId }}-title" type="text" name="{{ item.fieldNames.title }}" value="{{ item.view.title }}" maxlength="{{ this.titleMaxLength }}">
+                        <label class="screenshot-editor__label" for="{{ domId }}-summary">What this picture shows · optional</label>
+                        <textarea class="text-field" id="{{ domId }}-summary" name="{{ item.fieldNames.summary }}" rows="4" maxlength="{{ this.summaryMaxLength }}">{{ item.view.summary }}</textarea>
+                        <twig:Button variant="text" class="screenshot-editor__remove" data-action="screenshot-editor#remove">Remove screenshot</twig:Button>
+                    </div>
+                </div>
+                <div class="screenshot-editor__removed"{% if not item.isRemoved %} hidden{% endif %}>
+                    <p>Removed. It goes when you save.</p>
+                    <twig:Button variant="outline" data-action="screenshot-editor#keep">Keep it</twig:Button>
+                </div>
+            </section>
+        {% endfor %}
+
+        <div class="screenshot-editor__strip">
+            <div class="screenshot-editor__thumbs" role="tablist" aria-label="Screenshots" data-action="keydown->screenshot-editor#moveBetweenTabs">
+                {% for item in this.items %}
+                    {% set index = loop.index0 %}
+                    <button type="button" role="tab" class="screenshot-editor__thumb{% if item.isRemoved %} screenshot-editor__thumb--removed{% endif %}"
+                        id="{{ this.tabId(index) }}" aria-controls="{{ this.panelId(index) }}"
+                        aria-selected="{{ loop.first ? 'true' : 'false' }}" tabindex="{{ loop.first ? '0' : '-1' }}"
+                        data-screenshot-editor-target="tab" data-action="screenshot-editor#show">
+                        {% if item.view.isReady %}
+                            <img class="screenshot-editor__thumb-image" src="{{ item.view.imageUrl }}" alt="" width="{{ item.view.width }}" height="{{ item.view.height }}" loading="lazy" decoding="async">
+                        {% else %}
+                            <span class="screenshot-editor__thumb-placeholder" aria-hidden="true"></span>
+                        {% endif %}
+                        <span class="screenshot-editor__thumb-label"><span class="visually-hidden">Screenshot </span>{{ loop.index }}<span class="visually-hidden"> of {{ loop.length }}</span></span>
+                        <span class="screenshot-editor__thumb-state" data-screenshot-editor-target="tabState">{% if item.isRemoved %}Removed{% endif %}</span>
+                    </button>
+                {% endfor %}
+            </div>
+            {% if this.canAdd %}
+                <twig:Button variant="outline" class="screenshot-editor__add" data-action="screenshot-editor#add">Add screenshot</twig:Button>
+            {% endif %}
+        </div>
+    {% endif %}
+    <p class="screenshot-editor__status" role="status" data-screenshot-editor-target="status"></p>
+</div>
