@@ -7,15 +7,13 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\ToolUploadCompletion;
 use App\Identity\Api\CurrentUser;
-use App\Media\Api\CompletedUpload;
 use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadCompletions;
-use App\Media\Api\UploadIntentNotFound;
-use App\Media\Api\UploadRefused;
-use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundCommands;
@@ -53,9 +51,6 @@ final readonly class AddScreenshot implements AgentTool
     public const string PICTURE_REJECTED = 'The picture was rejected: it is not a PNG, JPEG or WebP screenshot we can read, or it is too big. Upload another one with create_upload.';
     public const string UPLOAD_EXPIRED = 'This upload expired before it was added. Begin a new one with create_upload.';
 
-    /** A ticket key or an id is far shorter; the cap only keeps a lookup from reading megabytes. */
-    private const int MAX_KEY_OR_ID_LENGTH = 64;
-
     public function __construct(
         private CurrentUser $currentUser,
         private TicketKeyQueries $ticketKeyQueries,
@@ -75,8 +70,8 @@ final readonly class AddScreenshot implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
-                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => 'The upload_id create_upload gave, after the file was PUT to its put_url.'],
+                    'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
+                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_upload gave, after the file was PUT to its put_url.'],
                     'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                     'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'pins' => PlacedPinArguments::schema(),
@@ -112,9 +107,9 @@ final readonly class AddScreenshot implements AgentTool
      */
     public function targetOf(array $arguments): ToolTarget
     {
-        $ticketId = $this->ticketKeyQueries->idOf(self::stringAt($arguments, 'key')) ?? throw ToolRefusal::notFound();
+        $ticketId = $this->ticketKeyQueries->idOf(ToolArguments::stringAt($arguments, 'key', self::NAME)) ?? throw ToolRefusal::notFound();
         $this->ticketVisibilityCheck->refuseUnlessVisible($ticketId);
-        $uploadTarget = $this->uploadCompletions->targetOf($this->ticketVisibilityCheck->callerOrganizationId(), $this->callerId(), self::stringAt($arguments, 'upload_id'));
+        $uploadTarget = $this->uploadCompletions->targetOf($this->ticketVisibilityCheck->callerOrganizationId(), $this->callerId(), ToolArguments::stringAt($arguments, 'upload_id', self::NAME));
         if (null === $uploadTarget || DraftScreenshotCommands::UPLOAD_TARGET_KIND !== $uploadTarget->kind) {
             throw ToolRefusal::notFound();
         }
@@ -144,8 +139,8 @@ final readonly class AddScreenshot implements AgentTool
         if (!$round->isUnsharedDraft) {
             throw ToolRefusal::readOnly();
         }
-        $uploadId = self::stringAt($arguments, 'upload_id');
-        $picture = $this->completedUploadOf($uploadId);
+        $uploadId = ToolArguments::stringAt($arguments, 'upload_id', self::NAME);
+        $picture = ToolUploadCompletion::completed($this->uploadCompletions, $this->ticketVisibilityCheck->callerOrganizationId(), $this->callerId(), $uploadId, $this->clock->now(), self::UPLOAD_EXPIRED);
 
         return match ($picture->status) {
             MediaImageStatus::Pending => self::answerOf(['upload_id' => $picture->mediaId, 'status' => self::PROCESSING, 'message' => self::STILL_PROCESSING]),
@@ -155,28 +150,13 @@ final readonly class AddScreenshot implements AgentTool
     }
 
     /**
-     * @throws ToolRefusal not found when Media does not find the caller's intent or its target now refuses them; a
-     *                     plain refusal when it expired unused
-     */
-    private function completedUploadOf(string $uploadId): CompletedUpload
-    {
-        try {
-            return $this->uploadCompletions->completeInTransaction($this->ticketVisibilityCheck->callerOrganizationId(), $this->callerId(), $uploadId, $this->clock->now());
-        } catch (UploadIntentNotFound|UploadTargetDenied) {
-            throw ToolRefusal::notFound();
-        } catch (UploadRefused) {
-            throw ToolRefusal::refused(self::UPLOAD_EXPIRED);
-        }
-    }
-
-    /**
      * @param array<string, mixed> $arguments
      *
      * @throws ToolRefusal as call() says, for Review's refusal
      */
     private function addOnce(array $arguments, string $roundId, string $mediaId): CallToolResult
     {
-        $screenshot = new ScreenshotWithPins($mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
+        $screenshot = new ScreenshotWithPins($mediaId, ToolArguments::optionalStringAt($arguments, 'title', self::NAME), ToolArguments::optionalStringAt($arguments, 'summary', self::NAME), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
         try {
             $added = $this->draftScreenshotCommands->addDraftScreenshotOnce($roundId, $this->callerId(), $screenshot, $this->clock->now());
         } catch (RoundRefused $refused) {
@@ -222,26 +202,5 @@ final readonly class AddScreenshot implements AgentTool
     private function callerId(): UserId
     {
         return $this->currentUser->id() ?? throw new \LogicException('add_screenshot ran without a user.');
-    }
-
-    /**
-     * @param array<string, mixed> $arguments valid against the input schema
-     */
-    private static function stringAt(array $arguments, string $name): string
-    {
-        return self::optionalStringAt($arguments, $name) ?? throw new \LogicException(\sprintf('The input schema lets add_screenshot run only with "%s".', $name));
-    }
-
-    /**
-     * @param array<string, mixed> $arguments valid against the input schema
-     */
-    private static function optionalStringAt(array $arguments, string $name): ?string
-    {
-        $value = $arguments[$name] ?? null;
-        if (null !== $value && !\is_string($value)) {
-            throw new \LogicException(\sprintf('The input schema lets add_screenshot run only with "%s" as a string.', $name));
-        }
-
-        return $value;
     }
 }

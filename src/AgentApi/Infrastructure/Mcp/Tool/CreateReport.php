@@ -7,17 +7,16 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\ToolUploadCompletion;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\CompletedUpload;
 use App\Media\Api\MediaImageStatus;
 use App\Media\Api\MediaPermission;
 use App\Media\Api\UploadCompletions;
-use App\Media\Api\UploadIntentNotFound;
-use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTarget;
-use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftRefused;
@@ -51,7 +50,6 @@ final readonly class CreateReport implements AgentTool
     public const string NEXT_STEP = 'Saved as a private report draft. Open it in pinround, check it and press Send to make the ticket.';
 
     private const int MAX_PROJECT_KEY_LENGTH = 20;
-    private const int MAX_UPLOAD_ID_LENGTH = 64;
     private const int MAX_REPORT_TITLE_LENGTH = 200;
     private const int MAX_DETAIL_LENGTH = 50000;
 
@@ -84,7 +82,7 @@ final readonly class CreateReport implements AgentTool
                         'items' => [
                             'type' => 'object',
                             'properties' => [
-                                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_UPLOAD_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
+                                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
                                 'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                                 'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
                                 'pins' => PlacedPinArguments::schema(),
@@ -184,13 +182,8 @@ final readonly class CreateReport implements AgentTool
         if (null === $begunFor || $begunFor->kind !== $reportTarget->kind || $begunFor->id !== $reportTarget->id) {
             throw ToolRefusal::notFound();
         }
-        try {
-            return $this->uploadCompletions->completeInTransaction($organizationId, $callerId, $uploadId, $now);
-        } catch (UploadIntentNotFound|UploadTargetDenied) {
-            throw ToolRefusal::notFound();
-        } catch (UploadRefused) {
-            throw ToolRefusal::refused(self::UPLOAD_EXPIRED);
-        }
+
+        return ToolUploadCompletion::completed($this->uploadCompletions, $organizationId, $callerId, $uploadId, $now, self::UPLOAD_EXPIRED);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\Identity\Api\CurrentApiToken;
@@ -55,7 +56,7 @@ final readonly class CreateNotebookUpload implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => GetNotebook::MAX_NOTEBOOK_ID_LENGTH, 'description' => 'The notebook_id create_notebook or list_my_notebooks gave.'],
+                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The notebook_id create_notebook or list_my_notebooks gave.'],
                     'mime' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_MIME_LENGTH, 'description' => 'The file type: image/png, image/jpeg or image/webp.'],
                     'bytes' => ['type' => 'integer', 'description' => 'The exact size of the file in bytes, at most 15 MB.'],
                     // maxLength too: a validator that reads the pattern as PCRE would let a trailing newline past $.

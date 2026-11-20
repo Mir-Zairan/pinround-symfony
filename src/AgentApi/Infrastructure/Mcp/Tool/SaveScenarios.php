@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\AgentApi\Infrastructure\Mcp\UntrustedText;
@@ -46,7 +47,7 @@ final readonly class SaveScenarios implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => GetNotebook::MAX_NOTEBOOK_ID_LENGTH, 'description' => 'The notebook_id list_my_notebooks gave.'],
+                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The notebook_id list_my_notebooks gave.'],
                     'scenarios' => ['type' => 'array', 'description' => \sprintf('At most %d scenarios in scenario.v1.json\'s format, in the order to show them. An empty list removes them all.', Notebooks::MAX_SCENARIOS)],
                 ],
                 'required' => ['notebook', 'scenarios'],

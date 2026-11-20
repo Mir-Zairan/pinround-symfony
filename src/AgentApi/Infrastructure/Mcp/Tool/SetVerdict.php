@@ -6,6 +6,7 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\Identity\Api\CurrentUser;
@@ -55,8 +56,6 @@ final readonly class SetVerdict implements AgentTool
     public const array VERDICT_LABELS = [self::LOOKS_RIGHT => 'Looks right', self::NOT_RIGHT_YET => 'Not right yet'];
 
     private const array ROUND_VERDICTS = [self::LOOKS_RIGHT => RoundCommands::VERDICT_LOOKS_RIGHT, self::NOT_RIGHT_YET => RoundCommands::VERDICT_NOT_RIGHT_YET];
-    /** A ticket key or an id is far shorter; the cap only keeps a lookup from reading megabytes. */
-    private const int MAX_KEY_OR_ID_LENGTH = 64;
 
     public function __construct(
         private CurrentUser $currentUser,
@@ -77,7 +76,7 @@ final readonly class SetVerdict implements AgentTool
      */
     public function definition(): Tool
     {
-        $idOf = static fn (string $description): array => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => $description];
+        $idOf = static fn (string $description): array => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => $description];
 
         return new Tool(
             name: self::NAME,

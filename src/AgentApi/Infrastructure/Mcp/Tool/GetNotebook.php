@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\AgentApi\Infrastructure\Mcp\UntrustedText;
@@ -37,9 +38,6 @@ final readonly class GetNotebook implements AgentTool
     /** The variant get_round_notes shows too (RoundCards::VARIANT, which this module may not read). */
     public const string IMAGE_VARIANT = 'view';
 
-    /** A notebook id is 36 characters; the cap only keeps a lookup from reading megabytes. */
-    public const int MAX_NOTEBOOK_ID_LENGTH = 64;
-
     /** The one step field ScenarioRules keeps to a fixed list of codes, so it is no text a person wrote. */
     private const string STEP_TYPE_FIELD = 'type';
 
@@ -59,7 +57,7 @@ final readonly class GetNotebook implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_NOTEBOOK_ID_LENGTH, 'description' => 'The notebook_id list_my_notebooks gave.'],
+                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The notebook_id list_my_notebooks gave.'],
                 ],
                 'required' => ['notebook'],
                 'additionalProperties' => false,

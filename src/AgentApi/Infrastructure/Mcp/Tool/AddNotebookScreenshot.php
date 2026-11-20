@@ -6,16 +6,14 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\ToolUploadCompletion;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
-use App\Media\Api\CompletedUpload;
 use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadCompletions;
-use App\Media\Api\UploadIntentNotFound;
-use App\Media\Api\UploadRefused;
-use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\NotebookPermission;
 use App\Review\Api\NotebookRefused;
 use App\Review\Api\Notebooks;
@@ -50,9 +48,6 @@ final readonly class AddNotebookScreenshot implements AgentTool
     public const string PICTURE_REJECTED = 'The picture was rejected: it is not a PNG, JPEG or WebP screenshot we can read, or it is too big. Upload another one with create_notebook_upload.';
     public const string UPLOAD_EXPIRED = 'This upload expired before it was added. Begin a new one with create_notebook_upload.';
 
-    /** An upload id is 36 characters; the cap only keeps a lookup from reading megabytes. */
-    private const int MAX_UPLOAD_ID_LENGTH = 64;
-
     public function __construct(
         private CurrentApiToken $currentApiToken,
         private CurrentUser $currentUser,
@@ -70,8 +65,8 @@ final readonly class AddNotebookScreenshot implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => GetNotebook::MAX_NOTEBOOK_ID_LENGTH, 'description' => 'The notebook_id create_notebook or list_my_notebooks gave.'],
-                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_UPLOAD_ID_LENGTH, 'description' => 'The upload_id create_notebook_upload gave for this notebook, after the file was PUT to its put_url.'],
+                    'notebook' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The notebook_id create_notebook or list_my_notebooks gave.'],
+                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_notebook_upload gave for this notebook, after the file was PUT to its put_url.'],
                     'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                     'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'pins' => PlacedPinArguments::schema(),
@@ -103,8 +98,8 @@ final readonly class AddNotebookScreenshot implements AgentTool
      */
     public function targetOf(array $arguments): ToolTarget
     {
-        $notebook = $this->notebooks->get(self::stringAt($arguments, 'notebook')) ?? throw ToolRefusal::notFound();
-        $begunFor = $this->uploadCompletions->targetOf($this->organizationId(), $this->callerId(), self::stringAt($arguments, 'upload_id'));
+        $notebook = $this->notebooks->get(ToolArguments::stringAt($arguments, 'notebook', self::NAME)) ?? throw ToolRefusal::notFound();
+        $begunFor = $this->uploadCompletions->targetOf($this->organizationId(), $this->callerId(), ToolArguments::stringAt($arguments, 'upload_id', self::NAME));
         if (null === $begunFor || Notebooks::UPLOAD_TARGET_KIND !== $begunFor->kind || strtolower($begunFor->id) !== $notebook->id) {
             throw ToolRefusal::notFound();
         }
@@ -125,11 +120,11 @@ final readonly class AddNotebookScreenshot implements AgentTool
         if (!$notebook instanceof NotebookView) {
             throw new \LogicException('add_notebook_screenshot runs on the notebook its targetOf() found.');
         }
-        $picture = $this->completedUploadOf(self::stringAt($arguments, 'upload_id'));
+        $picture = ToolUploadCompletion::completed($this->uploadCompletions, $this->organizationId(), $this->callerId(), ToolArguments::stringAt($arguments, 'upload_id', self::NAME), $this->clock->now(), self::UPLOAD_EXPIRED);
         if (MediaImageStatus::Rejected === $picture->status) {
             throw ToolRefusal::refused(self::PICTURE_REJECTED);
         }
-        $screenshot = new ScreenshotWithPins($picture->mediaId, self::optionalStringAt($arguments, 'title'), self::optionalStringAt($arguments, 'summary'), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
+        $screenshot = new ScreenshotWithPins($picture->mediaId, ToolArguments::optionalStringAt($arguments, 'title', self::NAME), ToolArguments::optionalStringAt($arguments, 'summary', self::NAME), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
         try {
             $added = $this->notebooks->addScreenshot($notebook->id, $screenshot, $this->clock->now());
         } catch (NotebookRefused $refused) {
@@ -150,21 +145,6 @@ final readonly class AddNotebookScreenshot implements AgentTool
     }
 
     /**
-     * @throws ToolRefusal not found when Media does not find the caller's intent or its target now refuses them; a
-     *                     plain refusal when it expired unused
-     */
-    private function completedUploadOf(string $uploadId): CompletedUpload
-    {
-        try {
-            return $this->uploadCompletions->completeInTransaction($this->organizationId(), $this->callerId(), $uploadId, $this->clock->now());
-        } catch (UploadIntentNotFound|UploadTargetDenied) {
-            throw ToolRefusal::notFound();
-        } catch (UploadRefused) {
-            throw ToolRefusal::refused(self::UPLOAD_EXPIRED);
-        }
-    }
-
-    /**
      * @throws \LogicException when the request has no token, which the api_token firewall never lets through
      */
     private function organizationId(): OrganizationId
@@ -178,26 +158,5 @@ final readonly class AddNotebookScreenshot implements AgentTool
     private function callerId(): UserId
     {
         return $this->currentUser->id() ?? throw new \LogicException('add_notebook_screenshot ran without a user.');
-    }
-
-    /**
-     * @param array<string, mixed> $arguments valid against the input schema
-     */
-    private static function stringAt(array $arguments, string $name): string
-    {
-        return self::optionalStringAt($arguments, $name) ?? throw new \LogicException(\sprintf('The input schema lets add_notebook_screenshot run only with "%s".', $name));
-    }
-
-    /**
-     * @param array<string, mixed> $arguments valid against the input schema
-     */
-    private static function optionalStringAt(array $arguments, string $name): ?string
-    {
-        $value = $arguments[$name] ?? null;
-        if (null !== $value && !\is_string($value)) {
-            throw new \LogicException(\sprintf('The input schema lets add_notebook_screenshot run only with "%s" as a string.', $name));
-        }
-
-        return $value;
     }
 }
