@@ -138,6 +138,68 @@ final class RoundTest extends TestCase
         self::assertSame(1, $draft->savedVersion());
     }
 
+    /**
+     * Chain A is screenshots 0, 2 and 3 (try 3 last), B at 1 was never retaken, chain C is 4 and 5. Try 1 of A and of C
+     * carry pins, which must not reach the team, and A's try 3 carries its own.
+     */
+    #[Test]
+    public function aShareKeepsOnlyTheLatestTryOfEachScreenshotAtItsPositionAsAFirstTryWithItsOwnPins(): void
+    {
+        $draft = self::draftWithTries();
+
+        $draft->share(new UserId(self::OMAR), 2, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
+
+        self::assertSame(
+            [[1, null, []], [3, null, [2]], [5, null, []]],
+            array_map(static fn (Screenshot $screenshot): array => [
+                $screenshot->position(),
+                $screenshot->retakeOf()?->toString(),
+                array_map(static fn (Pin $pin): int => $pin->number(), $screenshot->pins()),
+            ], $draft->screenshots()),
+        );
+        self::assertSame(
+            [self::screenshotId(1)->toString(), self::screenshotId(3)->toString(), self::screenshotId(5)->toString()],
+            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $draft->screenshots()),
+        );
+        self::assertSame([[1, 1, 1], [3, 1, 1], [5, 1, 1]], self::triesOf($draft), 'One try per screenshot in the shared round.');
+        self::assertSame(2, $draft->version(), 'The share is one change.');
+    }
+
+    #[Test]
+    public function aShareOfADraftWithNoRetakeKeepsEveryScreenshot(): void
+    {
+        $draft = self::draftWithScreenshots(3);
+        $before = $draft->screenshots();
+        self::assertCount(3, $before);
+
+        $draft->share(new UserId(self::OMAR), 2, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
+
+        self::assertEquals($before, $draft->screenshots(), 'Every screenshot stays, with all it had.');
+    }
+
+    #[Test]
+    public function aRefusedShareKeepsEveryTry(): void
+    {
+        $refusals = [
+            [self::OMAR, 0, 'A shared draft round gets a number from 1; Round 0 is the report.'],
+            [self::LENA, 2, 'Only the person who owns a draft round can share it.'],
+        ];
+        foreach ($refusals as [$sharerId, $number, $reason]) {
+            $draft = self::draftWithTries();
+            $before = self::snapshot($draft);
+            self::assertCount(6, $draft->screenshots());
+
+            try {
+                $draft->share(new UserId($sharerId), $number, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
+                self::fail('The share was accepted.');
+            } catch (\DomainException $refused) {
+                self::assertSame($reason, $refused->getMessage());
+            }
+
+            self::assertSame($before, self::snapshot($draft));
+        }
+    }
+
     #[Test]
     public function aDraftCannotBeSharedAsRoundZeroOrBelow(): void
     {
@@ -1306,6 +1368,25 @@ final class RoundTest extends TestCase
         }
 
         return Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), null, null, RoundState::Open, 1, $screenshots, new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
+    }
+
+    /**
+     * Omar's draft with chain A (0, 2, 3), B (1) and chain C (4, 5); pin 1 on A's try 1, pin 2 on A's try 3 and pin 3 on
+     * C's try 1; read back at version 1.
+     */
+    private static function draftWithTries(): Round
+    {
+        $draft = self::draftWithScreenshots(2);
+        $owner = new UserId(self::OMAR);
+        $draft->replacePins($owner, self::screenshotId(0), [self::pin(1)]);
+        $draft->addScreenshot($owner, self::screenshotId(2), self::MEDIA, self::screenshotId(0));
+        $draft->addScreenshot($owner, self::screenshotId(3), self::MEDIA, self::screenshotId(2));
+        $draft->replacePins($owner, self::screenshotId(3), [self::pin(2)]);
+        $draft->addScreenshot($owner, self::screenshotId(4), self::MEDIA);
+        $draft->replacePins($owner, self::screenshotId(4), [self::pin(3)]);
+        $draft->addScreenshot($owner, self::screenshotId(5), self::MEDIA, self::screenshotId(4));
+
+        return Round::restored($draft->id(), $draft->organizationId(), $draft->ticketId(), RoundKind::Draft, $owner, null, null, RoundState::Open, 1, $draft->screenshots(), $draft->createdAt(), null, null, null);
     }
 
     /**

@@ -6,8 +6,11 @@ namespace App\Tests\Unit\Review\Application;
 
 use App\Media\Api\MediaImageStatus;
 use App\Review\Api\RoundRefused;
+use App\Review\Application\DraftRoundAsRead;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
+use App\Review\Domain\Pin;
+use App\Review\Domain\PinId;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
@@ -125,6 +128,77 @@ final class UseCaseRoundCommandsShareTest extends TestCase
         self::assertSame(self::without($before, self::OMARS_DRAFT), self::without($this->snapshot(), self::OMARS_DRAFT), 'No other round changed, the open checklist round neither.');
         self::assertSame([self::TICKET], $this->rounds->lockedOpenRoundTicketIds);
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
+    }
+
+    /**
+     * ADR-0048: the team sees the latest try of each screenshot. Omar's draft holds its seeded screenshot (S) and
+     * chain A of three tries, added after S, with a pin on A's try 1 that must not reach the team.
+     */
+    #[Test]
+    public function theSharedRoundHoldsOnlyTheLatestTryOfEachScreenshotInPositionOrder(): void
+    {
+        [$seeded, , , $tryThree] = $this->addChainOfThreeTriesToOmarsDraft();
+        self::assertCount(4, $this->storedRound(self::OMARS_DRAFT)->screenshots());
+
+        $number = $this->inTransaction(fn (): int => $this->commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()));
+
+        self::assertSame(3, $number);
+        $shared = $this->storedRound(self::OMARS_DRAFT);
+        self::assertSame(
+            [[$seeded, 0, null], [$tryThree, 3, null]],
+            array_map(static fn (Screenshot $screenshot): array => [$screenshot->id()->toString(), $screenshot->position(), $screenshot->retakeOf()?->toString()], $shared->screenshots()),
+        );
+        self::assertSame([], array_merge(...array_map(static fn (Screenshot $screenshot): array => $screenshot->pins(), $shared->screenshots())), 'Try 1\'s pin left with try 1.');
+        self::assertSame([[self::OMARS_DRAFT, '2026-03-04 09:30:00']], $this->checklistCommands->findingsCreated);
+    }
+
+    #[Test]
+    public function aShareAtHandOffAlsoHoldsOnlyTheLatestTry(): void
+    {
+        [$seeded, , , $tryThree] = $this->addChainOfThreeTriesToOmarsDraft();
+
+        $this->inTransaction(fn (): int => $this->commands->shareDraftAtHandOff(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()));
+
+        self::assertSame(
+            [$seeded, $tryThree],
+            array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $this->storedRound(self::OMARS_DRAFT)->screenshots()),
+        );
+    }
+
+    #[Test]
+    public function aRefusedShareKeepsEveryTryInTheDraft(): void
+    {
+        $tries = $this->addChainOfThreeTriesToOmarsDraft();
+        $this->addOpenRound(self::OPEN_ROUND, RoundKind::Review, self::OMAR, 3);
+
+        $this->assertRefusedAndNothingSaved(
+            'Round 3 is still open. Wait for its verdict before you share.',
+            fn () => $this->commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at()),
+        );
+
+        self::assertSame($tries, array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $this->storedRound(self::OMARS_DRAFT)->screenshots()));
+    }
+
+    /**
+     * Until the share, the earlier tries are the owner's own: Omar reads all of them, Mia reads none, and deleting the
+     * draft takes them with it.
+     */
+    #[Test]
+    public function theEarlierTriesStayReadableToTheOwnerOnlyAndGoWhenTheDraftIsDeleted(): void
+    {
+        $this->addChainOfThreeTriesToOmarsDraft();
+
+        $read = $this->inTransaction(fn (): DraftRoundAsRead => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::OMAR)));
+        self::assertCount(4, $read->screenshots);
+        self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::MIA))));
+
+        $this->inTransaction(function (): void {
+            $this->commands->deleteDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at());
+        });
+
+        self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::OMAR))));
+        self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at())));
+        self::assertNull($this->storedRound(self::OMARS_DRAFT)->number(), 'A deleted draft never reaches the team.');
     }
 
     #[Test]
@@ -452,6 +526,42 @@ final class UseCaseRoundCommandsShareTest extends TestCase
         $this->inTransaction(function () use ($roundId, $kind, $ownerId, $number): void {
             $this->rounds->add($this->stored($roundId, self::ACME_FOODS, self::TICKET, $kind, $ownerId, $number, RoundState::Open));
         });
+    }
+
+    /**
+     * Adds chain A to Omar's draft: try 1 with a pin, then tries 2 and 3, each a retake of the try before.
+     *
+     * @return array{string, string, string, string} the ids of the seeded screenshot and of A's tries 1 to 3, by position
+     */
+    private function addChainOfThreeTriesToOmarsDraft(): array
+    {
+        $omar = new UserId(self::OMAR);
+        $tryIds = array_map(static fn (int $try): ScreenshotId => new ScreenshotId(\sprintf('0197a3c0-0000-7000-8000-000000002c%02x', $try)), [1, 2, 3]);
+        $this->inTransaction(function () use ($omar, $tryIds): void {
+            $draft = $this->rounds->get(new RoundId(self::OMARS_DRAFT)) ?? throw new \LogicException('Omar\'s draft is seeded.');
+            $draft->addScreenshot($omar, $tryIds[0], self::MEDIA);
+            $draft->replacePins($omar, $tryIds[0], [Pin::placedBy(new PinId('0197a3c0-0000-7000-8000-000000002c11'), 1, 30.0, 40.0, 'Total is cut off', $omar)]);
+            $draft->addScreenshot($omar, $tryIds[1], self::MEDIA, $tryIds[0]);
+            $draft->addScreenshot($omar, $tryIds[2], self::MEDIA, $tryIds[1]);
+            $this->rounds->save($draft, self::earlier());
+        });
+        $screenshotIds = array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $this->storedRound(self::OMARS_DRAFT)->screenshots());
+        self::assertCount(4, $screenshotIds);
+
+        return [$screenshotIds[0], $screenshotIds[1], $screenshotIds[2], $screenshotIds[3]];
+    }
+
+    /**
+     * @param \Closure(): mixed $command
+     */
+    private function refusalOf(\Closure $command): string
+    {
+        try {
+            $this->inTransaction($command);
+        } catch (RoundRefused $refused) {
+            return $refused->getMessage();
+        }
+        self::fail('The command was not refused.');
     }
 
     /**
