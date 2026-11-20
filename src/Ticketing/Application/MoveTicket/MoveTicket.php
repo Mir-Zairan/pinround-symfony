@@ -17,6 +17,7 @@ use App\Ticketing\Api\DraftChoice;
 use App\Ticketing\Api\DraftDecisionNeeded;
 use App\Ticketing\Api\Event\TicketAssigned;
 use App\Ticketing\Api\Event\TicketMoved;
+use App\Ticketing\Api\MoveFacts;
 use App\Ticketing\Api\MoveRefused;
 use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\ShareDraftQuestion;
@@ -42,6 +43,7 @@ use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
 use App\Workflow\Api\TurnPeopleChoice;
+use App\Workflow\Api\TurnRules;
 
 /**
  * The use case behind {@see TicketCommands::move} and {@see TicketCommands::moveTo}, which carry the contract.
@@ -74,6 +76,7 @@ final readonly class MoveTicket
         private TurnPeopleChoice $turnPeopleChoice,
         private PingClearing $pingClearing,
         private ShareDraftQuestion $shareDraftQuestion,
+        private TurnRules $turnRules,
     ) {
     }
 
@@ -86,7 +89,8 @@ final readonly class MoveTicket
      *                                rolls back
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb, the verb is give_it_to
      *                                (which {@see self::giveTo} takes), or it leads to Needs input and the reporter is no
-     *                                member of the organization
+     *                                member of the organization; or $draftChoice is Share and a shared round stays open
+     *                                after the move's close, when the move is written, so the caller rolls back
      * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft on the ticket
      */
     public function move(OrganizationId $organizationId, UserId $actor, string $key, string $verb, int $expectedVersion, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
@@ -100,7 +104,7 @@ final readonly class MoveTicket
         $allowed = $this->allowedVerbMoveOf($ticket, $teamId, $team, $actor, $verb);
         $waitingOn = self::NEEDS_INPUT === $allowed->target->coreCode() ? $this->waitingOnReporter($ticket) : null;
 
-        return $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts, $draftChoice);
+        return $this->moveAndRecord($ticket, $team, $allowed->before, $actor, $allowed->target, $waitingOn, $verb, $at, $allowed->waitingTurns, $allowed->teamFacts, $allowed->isLeadOnlyMove, $draftChoice);
     }
 
     /**
@@ -171,6 +175,7 @@ final readonly class MoveTicket
             $waitingTurns,
             $teamFacts,
             $team->targetStepOf($decision->moveTarget ?? throw new \LogicException('An allowed decision has a move target.')),
+            $decision->isLeadOnlyMove,
         );
     }
 
@@ -184,7 +189,7 @@ final readonly class MoveTicket
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team, is its step now,
      *                                the policy refuses it, a waiting-on is given for a step other than Needs input,
      *                                or the person to wait on (the reporter when nobody is named) is no member of the
-     *                                organization
+     *                                organization; or as move does for a share
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is not one line of at
      *                                most 100 characters
      * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft on the ticket
@@ -231,7 +236,7 @@ final readonly class MoveTicket
         };
         $waitingTurns = $this->waitingTurnsOf($before);
 
-        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns), $draftChoice);
+        return $this->moveAndRecord($ticket, $team, $before, $actor, $target, $waitingOn, null, $at, $waitingTurns, self::teamFactsOf($before, $waitingTurns), $decision->isLeadOnlyMove, $draftChoice);
     }
 
     /**
@@ -319,14 +324,19 @@ final readonly class MoveTicket
      * The reviewer or tester is stored on entering Code review or Testing (FR-WF-14), chosen from the same loads the
      * turn refresh gets, so the stored person, the turn row and who may approve are one person. Both moves change the
      * step, so both ask about the actor's undecided draft here, after every check of the move but the save, and decide
-     * it after the save (ADR-0017, hand-off); a give keeps its step or only leaves Backlog, and does not ask.
+     * it after the save (ADR-0017, hand-off); a give keeps its step or only leaves Backlog, and does not ask. Between
+     * the save and the draft's share, Review closes the shared rounds the move ends (ADR-0048: close first, then
+     * number), from whose turn it was before the move.
      *
-     * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
-     * @param TeamFacts                         $teamFacts    the team facts built from $before and $waitingTurns
+     * @param array<string, array<string, int>> $waitingTurns   the team's waiting reviews and tests already read for $before
+     * @param TeamFacts                         $teamFacts      the team facts built from $before and $waitingTurns
+     * @param bool                              $isLeadOnlyMove whether only the team's lead may make this move
      *
      * @return MoveResult the pings the move cleared and what it did with the actor's draft round
      *
      * @throws DraftDecisionNeeded when $draftChoice is null and the actor has an undecided draft on the ticket
+     * @throws MoveRefused         when $draftChoice is Share and a shared round stays open after the move's close; the
+     *                             move is written, so the caller rolls back
      */
     private function moveAndRecord(
         Ticket $ticket,
@@ -339,14 +349,22 @@ final readonly class MoveTicket
         \DateTimeImmutable $at,
         array $waitingTurns,
         TeamFacts $teamFacts,
+        bool $isLeadOnlyMove,
         ?DraftChoice $draftChoice,
     ): MoveResult {
         $fromStepId = $ticket->stepId();
         if ($target->id() === $fromStepId) {
             throw new MoveRefused(null);
         }
+        $moveFacts = new MoveFacts(
+            $actor,
+            $before->assigneeId,
+            $isLeadOnlyMove,
+            // A lead-only move closes no round whoever's turn it is, so the turn is worked out only for the others.
+            !$isLeadOnlyMove && $this->wasTurnOf($actor, $before, $teamFacts),
+        );
         if (null === $draftChoice) {
-            $draft = $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $actor);
+            $draft = $this->shareDraftQuestion->undecidedDraftOf($ticket->id(), $moveFacts);
             if (null !== $draft) {
                 throw new DraftDecisionNeeded($draft);
             }
@@ -365,6 +383,7 @@ final readonly class MoveTicket
         );
 
         $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        $this->shareDraftQuestion->closeRoundsOnMove($ticket->id(), $moveFacts, $at);
         if (null === $draftId) {
             return new MoveResult($clearedPingCount);
         }
@@ -374,6 +393,17 @@ final readonly class MoveTicket
         $this->shareDraftQuestion->keepPrivate($draftId, $actor, $at);
 
         return new MoveResult($clearedPingCount, DraftChoice::Keep);
+    }
+
+    /**
+     * From Workflow's turn rules on the facts the policy decided the move on, so the turn and the verbs it allowed
+     * agree, and no turn row is read.
+     */
+    private function wasTurnOf(UserId $actor, TicketTurnSnapshot $before, TeamFacts $teamFacts): bool
+    {
+        $turnUserId = $this->turnRules->turnFor(TurnInputs::ticketStateOf($before), $teamFacts)->userId;
+
+        return null !== $turnUserId && $turnUserId->equals($actor);
     }
 
     /**

@@ -19,6 +19,7 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Review\UI\Media\InMemoryTicketTurnQueries;
 use App\Tests\Unit\SharedKernel\Application\RecordingTenantSwitchGuard;
+use App\Ticketing\Api\MoveFacts;
 use App\Ticketing\Api\TicketChangedMeanwhile;
 use App\Ticketing\Api\UndecidedDraft;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -64,14 +65,14 @@ final class RoundShareDraftQuestionTest extends TestCase
             new ReportPictures(new InMemoryUploadedMedia($this->tenantContext, [])),
             new RecordingChecklistCommands(),
         );
-        $this->question = new RoundShareDraftQuestion($this->rounds, $commands);
+        $this->question = new RoundShareDraftQuestion($this->rounds, $commands, $commands);
         $this->seedRounds();
     }
 
     #[Test]
     public function theQuestionIsAboutTheOwnersDraftWithItsScreenshotCountAndTheNextRoundNumber(): void
     {
-        $draft = $this->question->undecidedDraftOf(new TicketId(self::TICKET), new UserId(self::OMAR));
+        $draft = $this->question->undecidedDraftOf(new TicketId(self::TICKET), self::moveBy(self::OMAR));
 
         self::assertEquals(new UndecidedDraft(self::OMARS_DRAFT, 2, 2), $draft, 'Mia\'s round 1 makes Omar\'s the second.');
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds, 'The number is read under the lock sharing takes.');
@@ -92,7 +93,7 @@ final class RoundShareDraftQuestionTest extends TestCase
     #[DataProvider('ownersWithNoQuestion')]
     public function thereIsNoQuestionWithoutAnUndecidedDraftWithAScreenshot(string $owner, string $ticketId): void
     {
-        self::assertNull($this->question->undecidedDraftOf(new TicketId($ticketId), new UserId($owner)));
+        self::assertNull($this->question->undecidedDraftOf(new TicketId($ticketId), self::moveBy($owner)));
         self::assertNull($this->question->undecidedDraftIdOf(new TicketId($ticketId), new UserId($owner)));
         self::assertSame([], $this->rounds->numberedTicketIds, 'No number is locked when nothing is asked.');
         self::assertSame(0, $this->rounds->loadedRounds, 'Only the draft\'s facts are read, not its screenshots and pins.');
@@ -110,12 +111,12 @@ final class RoundShareDraftQuestionTest extends TestCase
     public function aDecidedDraftIsNotAskedAboutAgain(): void
     {
         $omar = new UserId(self::OMAR);
-        $draft = $this->question->undecidedDraftOf(new TicketId(self::TICKET), $omar);
+        $draft = $this->question->undecidedDraftOf(new TicketId(self::TICKET), self::moveBy(self::OMAR));
         self::assertNotNull($draft);
         $this->question->keepPrivate($draft->roundId, $omar, self::at());
         $this->rounds->numberedTicketIds = [];
 
-        self::assertNull($this->question->undecidedDraftOf(new TicketId(self::TICKET), $omar));
+        self::assertNull($this->question->undecidedDraftOf(new TicketId(self::TICKET), self::moveBy(self::OMAR)));
         self::assertNull($this->question->undecidedDraftIdOf(new TicketId(self::TICKET), $omar));
         self::assertSame([], $this->rounds->numberedTicketIds, 'No number is locked for a decided draft.');
     }
@@ -292,18 +293,20 @@ final class RoundShareDraftQuestionTest extends TestCase
 
     private function questionOver(Rounds $rounds): RoundShareDraftQuestion
     {
-        return new RoundShareDraftQuestion($rounds, new UseCaseRoundCommands(
+        $commands = new UseCaseRoundCommands(
             $rounds,
             new InMemoryTicketTurnQueries([], new TicketId(self::BROKEN_TICKET)),
             $this->tenantContext,
             new ReportPictures(new InMemoryUploadedMedia($this->tenantContext, [])),
             new RecordingChecklistCommands(),
-        ));
+        );
+
+        return new RoundShareDraftQuestion($rounds, $commands, $commands);
     }
 
     private function undecidedDraftOfOmar(): UndecidedDraft
     {
-        return $this->question->undecidedDraftOf(new TicketId(self::TICKET), new UserId(self::OMAR)) ?? throw new \LogicException('Omar has an undecided draft.');
+        return $this->question->undecidedDraftOf(new TicketId(self::TICKET), self::moveBy(self::OMAR)) ?? throw new \LogicException('Omar has an undecided draft.');
     }
 
     /**
@@ -371,6 +374,14 @@ final class RoundShareDraftQuestionTest extends TestCase
     private static function draftOn(string $roundId, string $ticketId, string $ownerId): Round
     {
         return Round::draft(new RoundId($roundId), new OrganizationId(self::ACME_FOODS), new TicketId($ticketId), new UserId($ownerId), new \DateTimeImmutable('2026-03-03 08:00:00+00:00'));
+    }
+
+    /**
+     * A move-on verb by $moverId on a ticket nobody has, when it is not their turn, so it closes no round.
+     */
+    private static function moveBy(string $moverId): MoveFacts
+    {
+        return new MoveFacts(new UserId($moverId), null, false, false);
     }
 
     private static function at(): \DateTimeImmutable

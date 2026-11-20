@@ -34,10 +34,11 @@ use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketTurnQueries;
 
 /**
- * RoundCommands, DraftScreenshotCommands and DraftRoundContents on the Round aggregate; the contracts are on
- * {@see RoundCommands}, {@see DraftScreenshotCommands} and {@see DraftRoundContents}.
+ * RoundCommands, DraftScreenshotCommands, DraftRoundContents and LockedRoundClosing on the Round aggregate; the
+ * contracts are on {@see RoundCommands}, {@see DraftScreenshotCommands}, {@see DraftRoundContents} and
+ * {@see LockedRoundClosing}.
  */
-final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands, DraftRoundContents
+final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands, DraftRoundContents, LockedRoundClosing
 {
     public function __construct(
         private Rounds $rounds,
@@ -301,21 +302,17 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         }
         $assigneeId = ($this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.'))->assigneeId;
         foreach ($openRounds as $openRound) {
-            $isFindingsForAssignee = null !== $assigneeId && $openRound->isFindingsFor($assigneeId);
-            if (!$isFindingsForAssignee || !$sharerId->equals($assigneeId)) {
+            if (!$openRound->isClosedByShareOf($sharerId, $assigneeId)) {
                 $number = $openRound->number() ?? throw new \LogicException('An open shared round has a number.');
 
-                throw RoundRefused::roundStillOpen($number, $isFindingsForAssignee ? $assigneeId : null);
+                throw RoundRefused::roundStillOpen($number, $openRound->findingsReadyFor($assigneeId));
             }
         }
 
         return $openRounds;
     }
 
-    /**
-     * @throws \LogicException when the round cannot be closed or saved, which the row lock it was read under rules out
-     */
-    private function closeLockedRound(Round $round, \DateTimeImmutable $closedAt): void
+    public function closeLockedRound(Round $round, \DateTimeImmutable $closedAt): void
     {
         try {
             $round->close();

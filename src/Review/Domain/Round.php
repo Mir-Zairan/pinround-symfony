@@ -386,6 +386,49 @@ final class Round
         return RoundKind::Draft === $this->kind && $this->isSharedRound() && !$this->ownerId->equals($assigneeId);
     }
 
+    /**
+     * Whether a move-on verb by $moverId closes this round (ADR-0048): an open shared round closes when the person
+     * whose turn it is moves the ticket on, and a findings round also when the assignee does. A round its owner shared
+     * outside a move ("Share now") is not closed by that owner's own move. A lead-only move closes nothing, which is the
+     * caller's to know.
+     *
+     * @param bool        $isMoversTurn whether the ticket was $moverId's turn when they moved it
+     * @param UserId|null $assigneeId   the ticket's assignee; null when nobody has it
+     */
+    public function isClosedByMoveOf(UserId $moverId, bool $isMoversTurn, ?UserId $assigneeId): bool
+    {
+        if (!$this->isOpenSharedRound()) {
+            return false;
+        }
+        if ($this->ownerId->equals($moverId) && DraftDecision::Shared !== $this->decision) {
+            return false;
+        }
+
+        return $isMoversTurn || (null !== $assigneeId && $moverId->equals($assigneeId) && $this->isFindingsFor($assigneeId));
+    }
+
+    /**
+     * Whether $sharerId's share of the next round closes this one first (ADR-0048): an open findings round, when the
+     * assignee shares.
+     *
+     * @param UserId|null $assigneeId the ticket's assignee; null when nobody has it
+     */
+    public function isClosedByShareOf(UserId $sharerId, ?UserId $assigneeId): bool
+    {
+        return $this->isOpenSharedRound() && null !== $assigneeId && $sharerId->equals($assigneeId) && $this->isFindingsFor($assigneeId);
+    }
+
+    /**
+     * The assignee when this is their findings round, which is ready for them; null for any other round, which is
+     * ready for whoever's turn it is, a person Review does not know.
+     *
+     * @param UserId|null $assigneeId the ticket's assignee; null when nobody has it
+     */
+    public function findingsReadyFor(?UserId $assigneeId): ?UserId
+    {
+        return null !== $assigneeId && $this->isFindingsFor($assigneeId) ? $assigneeId : null;
+    }
+
     public function state(): RoundState
     {
         return $this->state;

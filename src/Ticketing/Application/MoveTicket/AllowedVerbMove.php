@@ -14,16 +14,18 @@ use App\Workflow\Api\TeamFacts;
 final readonly class AllowedVerbMove
 {
     /**
-     * @param TicketTurnSnapshot                $before       the ticket before the move
-     * @param array<string, array<string, int>> $waitingTurns the team's waiting turns, read once for the move
-     * @param TeamFacts                         $teamFacts    the team facts the policy decided on
-     * @param StepView                          $target       the team's step the verb leads to
+     * @param TicketTurnSnapshot                $before         the ticket before the move
+     * @param array<string, array<string, int>> $waitingTurns   the team's waiting turns, read once for the move
+     * @param TeamFacts                         $teamFacts      the team facts the policy decided on
+     * @param StepView                          $target         the team's step the verb leads to
+     * @param bool                              $isLeadOnlyMove whether only the team's lead may use the verb
      */
     public function __construct(
         public TicketTurnSnapshot $before,
         public array $waitingTurns,
         public TeamFacts $teamFacts,
         public StepView $target,
+        public bool $isLeadOnlyMove,
     ) {
     }
 }

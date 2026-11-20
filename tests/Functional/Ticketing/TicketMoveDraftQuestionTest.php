@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
 use App\Review\Api\RoundCommands;
+use App\Review\Application\LockedRoundClosing;
 use App\Review\Application\RoundShareDraftQuestion;
 use App\Review\Domain\Rounds;
 use App\SharedKernel\Application\TenantContext;
@@ -18,6 +19,7 @@ use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use App\Tests\Functional\Web\IssuesCsrfTokens;
 use App\Tests\Integration\Organization\TenantTransactions;
+use App\Ticketing\Api\MoveFacts;
 use App\Ticketing\Api\MoveResult;
 use App\Ticketing\Api\ShareDraftQuestion;
 use App\Ticketing\Api\TicketChangedMeanwhile;
@@ -767,7 +769,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
      */
     private function answerTheDraftQuestionThenRefuse(): \ArrayObject
     {
-        $realQuestion = new RoundShareDraftQuestion(self::getContainer()->get(Rounds::class), self::getContainer()->get(RoundCommands::class));
+        $realQuestion = new RoundShareDraftQuestion(self::getContainer()->get(Rounds::class), self::getContainer()->get(RoundCommands::class), self::getContainer()->get(LockedRoundClosing::class));
         /** @var \ArrayObject<string, int|bool> $written what the real share or keep returned or did, before the refusal */
         $written = new \ArrayObject();
         self::getContainer()->set(RoundShareDraftQuestion::class, new readonly class($realQuestion, $written) implements ShareDraftQuestion {
@@ -778,9 +780,14 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             {
             }
 
-            public function undecidedDraftOf(TicketId $ticketId, UserId $ownerId): ?UndecidedDraft
+            public function undecidedDraftOf(TicketId $ticketId, MoveFacts $move): ?UndecidedDraft
             {
-                return $this->realQuestion->undecidedDraftOf($ticketId, $ownerId);
+                return $this->realQuestion->undecidedDraftOf($ticketId, $move);
+            }
+
+            public function closeRoundsOnMove(TicketId $ticketId, MoveFacts $move, \DateTimeImmutable $at): void
+            {
+                $this->realQuestion->closeRoundsOnMove($ticketId, $move, $at);
             }
 
             public function undecidedDraftIdOf(TicketId $ticketId, UserId $ownerId): ?string

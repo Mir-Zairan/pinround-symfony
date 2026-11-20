@@ -52,6 +52,7 @@ use App\Workflow\Api\TicketState;
 use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
 use App\Workflow\Api\TurnPeopleChoice;
+use App\Workflow\Api\TurnRules;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -1684,6 +1685,7 @@ final class MoveTicketTest extends KernelTestCase
             $container->get(TurnPeopleChoice::class),
             $pingClearing,
             $shareDraftQuestion,
+            $container->get(TurnRules::class),
         );
     }
 

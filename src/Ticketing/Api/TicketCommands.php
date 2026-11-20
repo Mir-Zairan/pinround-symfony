@@ -70,6 +70,10 @@ interface TicketCommands
      * shares it or keeps it private as $draftChoice says, in the same transaction; nobody else's draft is touched. A
      * caller that does not ask the person, such as an API client, keeps the default: private (ADR-0017).
      *
+     * A move-on verb (not lead-only) closes, in the same transaction and before that share, the ticket's open shared
+     * round when it was the actor's turn, and a findings round also when the actor is the assignee, but not a round the
+     * actor shared outside a move (ADR-0048). The share in the same move is then numbered after the close.
+     *
      * @param string           $key             the ticket's key, for example "SHOP-12"
      * @param string           $verb            a Workflow verb's code, for example "start_work"
      * @param int              $expectedVersion the ticket's version the caller read
@@ -88,7 +92,9 @@ interface TicketCommands
      * @throws MoveRefused            when the ticket has no team, the policy refuses the verb to this person (with the
      *                                rule's note when one explains it), the target is not a step of the team, is the
      *                                ticket's step now, the verb is give_it_to (giveTo takes it), or it leads to Needs
-     *                                input and the reporter is no member of the organization; nothing is saved
+     *                                input and the reporter is no member of the organization; nothing is saved. Also when
+     *                                $draftChoice is Share and a shared round stays open after the move's close (the note
+     *                                is the round's reason): the move is written by then, so the caller rolls back
      * @throws DraftDecisionNeeded    when $draftChoice is null and the actor has an undecided draft with a screenshot on
      *                                the ticket, after every check above but the save; nothing is saved
      * @throws \LogicException        when no transaction is open
@@ -120,7 +126,7 @@ interface TicketCommands
     /**
      * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows
      * and event as move, with no verb. In Needs input the ticket waits on the person or label given, else its reporter.
-     * It shares or keeps private the actor's undecided draft round as move does.
+     * It shares or keeps private the actor's undecided draft round as move does. It is lead-only, so it closes no round.
      *
      * @param string           $stepId      the uuid of the step to move to
      * @param DraftChoice|null $draftChoice as move takes it
@@ -132,7 +138,8 @@ interface TicketCommands
      * @throws MoveRefused            when the ticket has no team, the step is not one of its team or is its step now, the
      *                                policy refuses the move (with the rule's note when one explains it), someone to
      *                                wait on is given for a step other than Needs input, or the person to wait on (the
-     *                                reporter when nobody is named) is no member of the organization; nothing is saved
+     *                                reporter when nobody is named) is no member of the organization; nothing is saved.
+     *                                Also for a share, as move does
      * @throws WaitingOnRefused       when both a person and a label are given, or the label is blank, over 100
      *                                characters or not one line; nothing is saved
      * @throws DraftDecisionNeeded    as move does, after every check above but the save; nothing is saved
