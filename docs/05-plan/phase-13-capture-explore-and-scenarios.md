@@ -209,7 +209,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - [ ] All P13 tasks ticked; the three journeys of the [outcome](#outcome) pass in Playwright (tester findings, report from a Claude Code check, notebook with scenarios). (Open: T9 and T10 are not ticked. The notebook journey passes against the real dev stack: `tests/e2e/extension-journey.spec.ts` "a capture makes "A new notebook" in the app, Claude Code saves three scenarios to it, and they play from the popup, their capture landing in the notebook".)
 - [ ] Privacy proven for tester drafts, report drafts and notebooks by voter, isolation and direct-URL tests.
 - [ ] No token path creates a ticket (count test per new tool and endpoint).
-- [x] The extension source has no `eval(` or `new Function`, enforced in CI. (`.github/workflows/ci.yml`, job `e2e`, step "Refuse eval( and new Function in the browser extension": `git grep` over every tracked file under `extension/`, source, tests and json, fails the build and names each file and line.)
+- [x] The extension source has no `eval(`, no `new Function` and no plain `Function(` call, enforced in CI. (`.github/workflows/ci.yml`, job `static`, step "Refuse eval(, new Function and Function( in the browser extension": `tests/shell/extension-code-from-text-check.sh` runs `git grep` over every tracked file under `extension/`, source, tests and json, fails the build and names each file and line; `extension-code-from-text-check-test.sh` proves it in the same step.)
 - [ ] Quality gates green; FR, data-model, modules, security and guide docs and their Index updated.
 
 ## Hand-off notes

@@ -17,7 +17,7 @@ env:
   COMPOSER_NO_INTERACTION: "1"
 
 jobs:
-  # Same commands as `composer qa`, minus the tests.
+  # The extension's code-from-text check, then the same commands as `composer qa`, minus the tests.
   static:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -25,6 +25,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Plain sh and git, so it runs before php-setup and a PHP setup failure cannot hide it.
+      - name: Refuse eval(, new Function and Function( in the browser extension
+        run: |
+          sh tests/shell/extension-code-from-text-check-test.sh
+          sh tests/shell/extension-code-from-text-check.sh
       - uses: ./.github/actions/php-setup
       - run: composer validate --strict
       - run: composer cs
@@ -273,27 +278,6 @@ jobs:
           node-version: "22.12"
           cache: npm
           cache-dependency-path: tests/e2e/package-lock.json
-      # The scenario player interprets data only (P13 design notes): no file the extension keeps may build code from
-      # text. `\beval` leaves words like `evaluate(` alone. git grep exits 1 on no match and above 1 when it fails.
-      - name: Refuse eval( and new Function in the browser extension
-        run: |
-          set +e
-          hits="$(git grep -nE -e '\beval[[:space:]]*\(' -e '\bnew[[:space:]]+Function\b' -- extension/)"
-          status=$?
-          set -e
-          if [ "$status" -eq 1 ]; then
-            echo "No eval( or new Function under extension/."
-            exit 0
-          fi
-          if [ "$status" -ne 0 ]; then
-            echo "::error::git grep could not search extension/ (exit $status)."
-            exit "$status"
-          fi
-          while IFS=: read -r file line _; do
-            echo "::error file=$file,line=$line::The browser extension must not use eval( or new Function: the scenario player interprets data only."
-          done <<< "$hits"
-          echo "$hits"
-          exit 1
       - name: Run the browser extension's unit tests
         run: node --test extension/tests/*.test.mjs
       - run: npm ci

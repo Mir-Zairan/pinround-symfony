@@ -107,7 +107,7 @@ A notebook's scenarios click and type on a page, so they play only on hosts you 
 - **Never pinround.** "Scenarios never play on pinround itself."
 - **Never a password field.** The player does not type into one: "The player never types into a password field. Type it yourself, then play on." It does not read one either: "The player never reads a password field. Look at it yourself, then play on."
 - **AI suggests, you play.** Claude Code only writes scenarios into your notebook. Nothing runs until you press **Play** or **Step**, and nothing runs on a new host until you press **Play anyway**.
-- **Data, never code.** A scenario is a list of steps the player reads. A step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. The extension holds no `eval(` or `new Function`, and the build fails if one appears.
+- **Data, never code.** A scenario is a list of steps the player reads. A step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. The extension holds no `eval(`, no `new Function` and no plain `Function(` call, and the build fails if a tracked file under `extension/` has one.
 - **Text from pinround is shown as text.** Titles, lines and notes never become part of the page or the popup's markup.
 - **A closed tab stops a run.** "The tab is closed. Open the scenario's page and play again." Nothing runs in another tab in its place.
 
