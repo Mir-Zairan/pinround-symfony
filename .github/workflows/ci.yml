@@ -171,7 +171,10 @@ jobs:
         with:
           context: .
           target: prod
+          # Loaded for the Caddy check below, which adapts this image's Caddyfile.
+          load: true
           push: false
+          tags: pinround-app:ci-prod
           build-args: |
             APP_UID=1000
             APP_GID=1000
@@ -202,6 +205,10 @@ jobs:
           -v "$PWD:/app" -w /app pinround-app:ci-libvips
           php vendor/bin/phpunit --group libvips --fail-on-skipped --fail-on-empty-test-suite
           tests/Integration/Media/Processing/VipsImageEncoderTest.php
+      # The Caddyfile imports /etc/caddy/dev.d/*.caddy, a folder only compose.yaml mounts: the prod image must load it
+      # with no HTTPS proxy to MinIO, and the dev image with the folder mounted must have that proxy on :9443.
+      - name: Check the Caddy config of the prod and dev images
+        run: sh tests/shell/caddy-config-check.sh pinround-app:ci-prod pinround-app:ci-libvips
 
   # The dev stack without mail (compose.ci.yaml), with MinIO and the media worker, then every Playwright spec but the
   # pixel compares. Runs on pull requests and on pushes to main only.
@@ -250,8 +257,9 @@ jobs:
           cache-from: type=gha,scope=e2e-minio
           cache-to: type=gha,scope=e2e-minio,mode=max
       # Starts minio, waits for it to be healthy, and makes the private bucket with CORS for https://localhost. The
-      # browser reaches it on the runner at http://localhost:9000, the OBJECT_STORAGE_PUBLIC_URL of .env.dev that
-      # presigned URLs are signed for; app and the workers reach it at http://minio:9000.
+      # browser reaches it on the runner at https://localhost:9443, Caddy's HTTPS proxy in the app container
+      # (compose.yaml publishes that port) and the OBJECT_STORAGE_PUBLIC_URL of .env.dev that presigned URLs are signed
+      # for; app and the workers reach it at http://minio:9000.
       - name: Start MinIO and make the bucket
         run: docker compose --env-file .env --env-file .env.dev run --rm minio-init
       # No mailpit or scheduler: see compose.ci.yaml. vendor/ and assets/vendor come from php-setup, so the entrypoint
