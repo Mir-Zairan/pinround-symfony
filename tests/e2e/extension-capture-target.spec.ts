@@ -1,4 +1,4 @@
-import type { BrowserContext, Page } from '@playwright/test';
+import type { BrowserContext, Locator, Page } from '@playwright/test';
 import path from 'node:path';
 import {
   ALL_TOKEN_SCOPES,
@@ -63,6 +63,17 @@ async function pinAndCapture(popup: Page, page: Page, note: string, [xFraction, 
 const postsOf = (stub: PinroundStub): StubRequest[] => stub.requests.filter((request) => request.method === 'POST');
 const routesOf = (requests: StubRequest[]) => requests.map((request) => [request.path, request.answerStatus]);
 const notesOf = (screenshots: StubScreenshot[]) => screenshots.map((screenshot) => screenshot.pins.map((pin) => pin.note));
+
+/** Presses the control with Enter after giving it the focus, as a keyboard user does. */
+async function pressWithKeyboard(control: Locator): Promise<void> {
+  await control.focus();
+  await control.press('Enter');
+}
+
+/** A press that hid its own control leaves the focus on "Capture this page" or the picker, never on the page's body. */
+async function expectFocusOnCaptureOrTarget(popup: Page): Promise<void> {
+  await expect.poll(() => popup.evaluate(() => document.activeElement?.id ?? '')).toMatch(/^(capture|target)$/);
+}
 
 async function newReportInSession(popup: Page): Promise<unknown> {
   return popup.evaluate(async () => {
@@ -205,14 +216,32 @@ test('"Done" opens the report draft pinround answered in a new tab and starts th
   const [draft] = stub.myReportDrafts();
 
   const draftTabOpened = context.waitForEvent('page');
-  await popup.getByRole('button', { name: 'Done' }).click();
+  await pressWithKeyboard(popup.getByRole('button', { name: 'Done' }));
   const draftTab = await draftTabOpened;
 
   await expect(draftTab).toHaveURL(`${PINROUND_TEST_ORIGIN}/report-drafts/${draft.id}`);
   await expect(popup.getByRole('status')).toHaveText('Report draft opened in pinround. Check it there and press Send.');
+  await expect(popup.getByRole('button', { name: 'Done' })).toBeHidden();
+  await expectFocusOnCaptureOrTarget(popup);
   expect(await newReportInSession(popup)).toBeUndefined();
   await expect(popup.getByLabel('Project key')).toBeEnabled();
   await expect(popup.getByLabel('Project key')).toHaveValue('');
+});
+
+test('"Start over" pressed from the keyboard forgets the report in the popup, hides itself and leaves the focus on a control in sight', async ({ context, testPage }) => {
+  const stub = await answerPinroundApi(context);
+  const popup = await pairedPopupFor(context, testPage);
+  await chooseNewReport(popup);
+  await pinAndCapture(popup, testPage, 'Total is wrong', [0.5, 0.5]);
+  await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
+
+  await pressWithKeyboard(popup.getByRole('button', { name: 'Start over' }));
+
+  await expect(popup.getByRole('status')).toHaveText('Started over. The report draft already made stays in pinround.');
+  await expect(popup.getByRole('button', { name: 'Start over' })).toBeHidden();
+  await expectFocusOnCaptureOrTarget(popup);
+  expect(await newReportInSession(popup)).toBeUndefined();
+  expect(stub.myReportDrafts()).toHaveLength(1);
 });
 
 test('"Send it again" after a lost answer re-sends the capture with its Idempotency-Key, makes one draft, and the next capture gets a new key', async ({ context, testPage }) => {
@@ -224,10 +253,11 @@ test('"Send it again" after a lost answer re-sends the capture with its Idempote
   await pinAndCapture(popup, testPage, 'Total is wrong', [0.5, 0.5]);
   await expect(popup.getByRole('status')).toHaveText(NOT_SENT);
   await expect(testPage.locator('pinround-overlay')).toHaveCount(1);
-  await popup.getByRole('button', { name: 'Send it again' }).click();
+  await pressWithKeyboard(popup.getByRole('button', { name: 'Send it again' }));
 
   await expect(popup.getByRole('status')).toHaveText(`${FIRST_REPORT_CAPTURE_SAVED} Press Escape on the page to drop its pins.`);
   await expect(popup.getByRole('button', { name: 'Send it again' })).toBeHidden();
+  await expectFocusOnCaptureOrTarget(popup);
   const reportPosts = postsOf(stub).filter((request) => request.path === '/api/v1/reports');
   expect(reportPosts.map((request) => request.answerStatus)).toEqual([null, 201]);
   expect(reportPosts[1].idempotencyKey).toMatch(IDEMPOTENCY_KEY_PATTERN);
