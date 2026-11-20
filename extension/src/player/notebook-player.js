@@ -220,8 +220,9 @@ export class NotebookPlayer {
         if (null !== tabRefusal) {
             return tabRefusal;
         }
-        // A tab still loading acts on its pendingUrl's page first, so that host is asked about too.
-        for (const site of uniqueSites([scenario.start_url, tab.url, tab.pendingUrl])) {
+        // A tab still loading acts on its pendingUrl's page first, so that host is asked about too. The go_to urls are
+        // asked about here, as a run cannot stop to ask, even though scenario-rules.js keeps them on start_url's host.
+        for (const site of uniqueSites([...scenarioUrls, tab.url, tab.pendingUrl])) {
             if (await isConfirmedSite(this.#storage, site)) {
                 continue;
             }

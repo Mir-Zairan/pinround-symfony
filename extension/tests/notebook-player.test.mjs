@@ -349,6 +349,18 @@ test('go_to opens its address through tabs.update, and the next step runs once t
     assert.deepEqual((await pageOf(fake)).stepsRun, ['Orders show']);
 });
 
+test('a go_to to a second allowed host is refused as broken before any host is asked about or any step runs', async () => {
+    const fake = fakeBrowser({ tabs: [SHOP_TAB] });
+    await addAllowedHost(fake.storage.local, 'http://localhost:*');
+    const otherShopUrl = 'http://localhost:3000/orders';
+    const goToOtherShop = scenario('Other shop', [click('Add jam'), { type: 'go_to', say: 'Open the other shop.', url: otherShopUrl }]);
+    const deps = { browser: fake, storage: fake.storage.local, pinroundOrigin: PINROUND_ORIGIN, activeTabId: async () => SHOP_TAB.id, askToPlay: async () => assert.fail('nothing to ask'), captureToNotebook: async () => assert.fail('no capture') };
+
+    assert.deepEqual(NotebookPlayer.of([goToOtherShop], deps), { refusal: NOTEBOOK_PLAYER_TEXTS.brokenScenarios(`Scenario 1, step 2: ${REFUSALS.goToOtherHost}`) });
+    assert.equal(await isConfirmedSite(fake.storage.local, siteOf(otherShopUrl)), false);
+    assert.equal(fake.tabUrl(SHOP_TAB.id), START_URL);
+});
+
 test('capture sends the scenario title and the say line to the notebook', async () => {
     const withCapture = scenario('Coupon <b> & tax', [{ type: 'capture', say: 'Keep the total.' }, click('Pay')]);
     const { player, captures } = await playerOf({ scenarios: [withCapture] });
