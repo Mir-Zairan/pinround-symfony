@@ -21,6 +21,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - Two-step login turned on for your account. Without it, **Make token** sends you to the two-step login setup page first.
 - Claude Code installed on your computer.
 - The address of your pinround app, for example `https://pinround.acme-foods.example`. Use the address you open in the browser. pinround answers `/mcp` only on its own public address; any other host name gets "400 Bad Request".
+- On the local dev stack (`https://localhost`): Node must trust Caddy's local certificate, or `/mcp` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. Copy it with `.claude/skills/pinround-setup/pinround-setup.sh trust-ca` and start Claude Code with `NODE_EXTRA_CA_CERTS=~/.config/pinround/caddy-root.crt`. The `/pinround-setup` skill does all of this guide for you.
 
 ## 1. Make a token
 1. In pinround, open the menu under your avatar and choose **API tokens** (the page is `/me/tokens`).

@@ -24,6 +24,8 @@ Run `make qa` (or `composer qa` inside the app container) to run every quality g
 
 Run `make help` to see every command.
 
+To set up everything with Claude Code instead — the stack, the demo people, the local certificate, Claude Code's pinround connection and the browser extension — run `/pinround-setup` in Claude Code in this repo. It stops for the four steps only you can do in the browser.
+
 ## Why it exists
 
 - A lead should not lose a morning finding out what waits on them. Home shows the top 5, with the reason for each.
