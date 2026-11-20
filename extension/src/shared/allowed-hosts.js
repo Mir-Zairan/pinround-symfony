@@ -204,6 +204,17 @@ export async function loadAllowedHosts(storage) {
     return entries;
 }
 
+// Each change reads a list, changes it and writes it back. Two changes at once from one page, such as two quick presses,
+// would both read the same list and the later write would drop the earlier change, so they take turns per storage area.
+const lastChangeOf = new WeakMap();
+
+function inTurn(storage, change) {
+    const turn = (lastChangeOf.get(storage) ?? Promise.resolve()).then(change);
+    lastChangeOf.set(storage, turn.catch(() => undefined));
+
+    return turn;
+}
+
 async function saveAllowedHosts(storage, entries) {
     await storage.set({ [ALLOWED_HOSTS_KEY]: entries.map(allowedHostText) });
 }
@@ -215,17 +226,20 @@ async function saveAllowedHosts(storage, entries) {
  */
 export async function addAllowedHost(storage, typed) {
     const entry = allowedHostOf(typed);
-    const entries = await loadAllowedHosts(storage);
-    if (entries.some((listed) => allowedHostText(listed) === allowedHostText(entry))) {
-        throw new AllowedHostError(HOST_REFUSALS.alreadyListed);
-    }
-    if (entries.length >= MAX_ALLOWED_HOSTS) {
-        throw new AllowedHostError(HOST_REFUSALS.listFull);
-    }
-    const added = [...entries, entry];
-    await saveAllowedHosts(storage, added);
 
-    return added;
+    return inTurn(storage, async () => {
+        const entries = await loadAllowedHosts(storage);
+        if (entries.some((listed) => allowedHostText(listed) === allowedHostText(entry))) {
+            throw new AllowedHostError(HOST_REFUSALS.alreadyListed);
+        }
+        if (entries.length >= MAX_ALLOWED_HOSTS) {
+            throw new AllowedHostError(HOST_REFUSALS.listFull);
+        }
+        const added = [...entries, entry];
+        await saveAllowedHosts(storage, added);
+
+        return added;
+    });
 }
 
 /**
@@ -236,17 +250,19 @@ export async function addAllowedHost(storage, typed) {
  * @returns {Promise<AllowedHost[]>} the list left
  */
 export async function removeAllowedHost(storage, text) {
-    const left = (await loadAllowedHosts(storage)).filter((entry) => allowedHostText(entry) !== text);
-    await saveAllowedHosts(storage, left);
-    const confirmed = await loadConfirmedSiteKeys(storage);
-    const stillAllowed = confirmed.filter((key) => {
-        const site = siteOf(`${key}/`);
+    return inTurn(storage, async () => {
+        const left = (await loadAllowedHosts(storage)).filter((entry) => allowedHostText(entry) !== text);
+        await saveAllowedHosts(storage, left);
+        const confirmed = await loadConfirmedSiteKeys(storage);
+        const stillAllowed = confirmed.filter((key) => {
+            const site = siteOf(`${key}/`);
 
-        return null !== site && left.some((entry) => allowsSite(entry, site));
+            return null !== site && left.some((entry) => allowsSite(entry, site));
+        });
+        await storage.set({ [CONFIRMED_HOSTS_KEY]: stillAllowed });
+
+        return left;
     });
-    await storage.set({ [CONFIRMED_HOSTS_KEY]: stillAllowed });
-
-    return left;
 }
 
 async function loadConfirmedSiteKeys(storage) {
@@ -261,6 +277,8 @@ export async function isConfirmedSite(storage, site) {
 }
 
 export async function confirmSite(storage, site) {
-    const confirmed = (await loadConfirmedSiteKeys(storage)).filter((key) => key !== siteKeyOf(site));
-    await storage.set({ [CONFIRMED_HOSTS_KEY]: [...confirmed, siteKeyOf(site)].slice(-MAX_CONFIRMED_HOSTS) });
+    return inTurn(storage, async () => {
+        const confirmed = (await loadConfirmedSiteKeys(storage)).filter((key) => key !== siteKeyOf(site));
+        await storage.set({ [CONFIRMED_HOSTS_KEY]: [...confirmed, siteKeyOf(site)].slice(-MAX_CONFIRMED_HOSTS) });
+    });
 }

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import vm from 'node:vm';
 import { LOAD_POLL_MS, PAGE_PLAYER_FILES, PAGE_STEP_TIMEOUT_MS, RUNNER_REFUSALS, clearPageHighlight, stepRunnerFor } from '../src/player/step-runner.js';
 import { fakeBrowser } from './fake-browser.mjs';
 
@@ -198,4 +200,139 @@ test('a wait_for answered null by a page that did not navigate stops as unreadab
 
     assert.deepEqual(await runStep(expectReceipt), { stopped: true, message: RUNNER_REFUSALS.unreadableAnswer });
     assert.equal(browser.injectedFiles.length, 3);
+});
+
+test('a wait_for after a load wait tells the page how long the step waited already, beside the time it has left', async () => {
+    const browser = fakeBrowser({ tabs: [{ ...SHOP_PAGE, status: 'loading' }] });
+    browser.clickIcon(SHOP_PAGE.id);
+    await browser.scripting.executeScript({
+        target: { tabId: SHOP_PAGE.id },
+        func: () => {
+            globalThis.optionsSeen = [];
+            globalThis.pinroundPagePlayer = {
+                runStep(step, options) {
+                    globalThis.optionsSeen.push(options);
+
+                    return { ok: true };
+                },
+            };
+        },
+    });
+    const clock = frozenClock((waits) => (3 === waits ? browser.finishLoading(SHOP_PAGE.id) : undefined));
+
+    assert.deepEqual(await runnerOf(browser, clock)(waitForReceipt), { ok: true });
+
+    assert.deepEqual(await pageValue(browser, () => globalThis.optionsSeen), [{ timeoutMs: PAGE_STEP_TIMEOUT_MS - 300, waitedBeforeMs: 300 }]);
+});
+
+test('the page player\'s wait_for timeout names the whole step\'s time, the load wait before it included', async () => {
+    const page = vm.createContext({ document: { querySelectorAll: () => [], body: { innerText: '' } } });
+    vm.runInContext('globalThis.window = globalThis;', page);
+    for (const file of PAGE_PLAYER_FILES) {
+        vm.runInContext(readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'), page, { filename: file });
+    }
+    const waited = [];
+
+    const answer = await page.pinroundPagePlayer.runStep(waitForReceipt, {
+        wait: async (ms) => {
+            waited.push(ms);
+        },
+        timeoutMs: PAGE_STEP_TIMEOUT_MS - 300,
+        pollMs: LOAD_POLL_MS,
+        waitedBeforeMs: 300,
+    });
+
+    assert.deepEqual({ ...answer }, { stopped: true, message: 'Waited 10 seconds. Found no visible element with the text "Order sent".' });
+    assert.equal(waited.length, 97);
+});
+
+test('a wait_for whose page went away once the step\'s time was up stops as timed out, never as an unreadable answer', async () => {
+    const fake = fakeBrowser({ tabs: [SHOP_PAGE] });
+    fake.clickIcon(SHOP_PAGE.id);
+    const clock = frozenClock();
+    let stepInjections = 0;
+    const browser = {
+        ...fake,
+        scripting: {
+            async executeScript(injection) {
+                const answer = await fake.scripting.executeScript(injection);
+                if (undefined !== injection.func) {
+                    stepInjections += 1;
+                    assert.ok(stepInjections <= 3, 'The runner looks again and again at a page whose time is up.');
+                    // The page looked for all the time it was given, then its document went away: no answer.
+                    clock.nowMs += injection.args[1].timeoutMs;
+                    fake.navigate(SHOP_PAGE.id, RECEIPT_URL);
+                    fake.finishLoading(SHOP_PAGE.id);
+                }
+
+                return answer;
+            },
+        },
+    };
+
+    assert.deepEqual(await runnerOf(browser, clock)(waitForReceipt), { stopped: true, message: RUNNER_REFUSALS.waitTimedOut });
+    assert.equal(RUNNER_REFUSALS.waitTimedOut, 'Waited 10 seconds, and the page changed while the step looked. Play the step again once it shows.');
+    assert.equal(stepInjections, 1);
+    assert.deepEqual(clock.waits, []);
+});
+
+for (const permanentRefusal of ['Frame with ID 0 is showing error page', 'The extensions gallery cannot be scripted.']) {
+    test(`a wait_for on a page that always refuses the player (${permanentRefusal}) stops with that refusal once its time is up`, async () => {
+        const fake = fakeBrowser({ tabs: [SHOP_PAGE] });
+        fake.clickIcon(SHOP_PAGE.id);
+        let refusals = 0;
+        const browser = {
+            ...fake,
+            scripting: {
+                executeScript() {
+                    refusals += 1;
+
+                    return Promise.reject(new Error(permanentRefusal));
+                },
+            },
+        };
+        const clock = frozenClock();
+
+        assert.deepEqual(await runnerOf(browser, clock)(waitForReceipt), { stopped: true, message: `The step could not run: ${permanentRefusal}` });
+
+        assert.equal(clock.nowMs - STARTED_AT_MS, PAGE_STEP_TIMEOUT_MS, 'The frozen clock, not a real one, timed the looks.');
+        assert.deepEqual(clock.waits, Array(PAGE_STEP_TIMEOUT_MS / LOAD_POLL_MS).fill(LOAD_POLL_MS));
+        assert.equal(refusals, (PAGE_STEP_TIMEOUT_MS / LOAD_POLL_MS) + 1);
+        assert.deepEqual(await runnerOf(browser, frozenClock())(expectReceipt), { stopped: true, message: `The step could not run: ${permanentRefusal}` }, 'Another step does not look again.');
+    });
+}
+
+test('a wait_for on a page out of reach stops at once with the plain message', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
+    const clock = frozenClock();
+
+    assert.deepEqual(await runnerOf(browser, clock)(waitForReceipt), { stopped: true, message: RUNNER_REFUSALS.outOfReach });
+    assert.deepEqual(clock.waits, []);
+});
+
+test('a runner needs the page check, and a page it refuses gets no step and no capture', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
+    browser.clickIcon(SHOP_PAGE.id);
+    await givePagePlayer(browser, '{"ok":true}');
+    let captures = 0;
+    const tab = { tabId: SHOP_PAGE.id, openUrl: async () => assert.fail('no navigation'), captureToNotebook: async () => { captures += 1; }, clock: frozenClock() };
+    assert.throws(() => stepRunnerFor(browser, tab), { name: 'TypeError', message: 'stepRunnerFor needs pageRefusalOf, which checks the page before a step acts on it.' });
+
+    const pagesChecked = [];
+    const runStep = stepRunnerFor(browser, {
+        ...tab,
+        pageRefusalOf: (loadedTab) => {
+            pagesChecked.push(loadedTab.url);
+
+            return 'shop.acme-foods.test\u001b[2J is not on your allowed hosts.';
+        },
+    });
+
+    for (const step of [waitForReceipt, expectReceipt, { type: 'capture', say: 'Keep a picture.' }]) {
+        assert.deepEqual(await runStep(step), { stopped: true, message: 'shop.acme-foods.test\\u{1b}[2J is not on your allowed hosts.' }, step.type);
+    }
+    assert.deepEqual(pagesChecked, [SHOP_PAGE.url, SHOP_PAGE.url, SHOP_PAGE.url]);
+    assert.deepEqual(browser.injectedFiles, []);
+    assert.deepEqual(await pageValue(browser, () => globalThis.stepsRun), []);
+    assert.equal(captures, 0);
 });
