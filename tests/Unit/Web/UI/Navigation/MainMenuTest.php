@@ -15,6 +15,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Unit\Organization\UI\Voter\FixedCurrentActor;
 use App\Web\UI\Navigation\MainMenu;
 use App\Web\UI\Navigation\MenuItem;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
@@ -151,10 +152,10 @@ final class MainMenuTest extends TestCase
 
         $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP)], [], [self::SHOP => 'shop']))->items();
 
-        self::assertSame(['Home', 'Tickets', 'My reports', 'Team'], self::labelsOf($items));
-        self::assertFalse($items[3]->isGroup());
-        self::assertSame(['slug' => 'shop'], $items[3]->routeParameters());
-        self::assertSame('/teams/shop', $items[3]->url());
+        self::assertSame(['Home', 'Tickets', 'Team'], self::labelsOf($items));
+        self::assertFalse($items[2]->isGroup());
+        self::assertSame(['slug' => 'shop'], $items[2]->routeParameters());
+        self::assertSame('/teams/shop', $items[2]->url());
         self::assertCount(0, $this->teamQueries, 'one team needs no names');
     }
 
@@ -165,7 +166,7 @@ final class MainMenuTest extends TestCase
 
         $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP)], []))->items();
 
-        self::assertSame(['Home', 'Tickets', 'My reports'], self::labelsOf($items));
+        self::assertSame(['Home', 'Tickets'], self::labelsOf($items));
         self::assertCount(0, $this->teamQueries);
     }
 
@@ -176,8 +177,8 @@ final class MainMenuTest extends TestCase
 
         $items = $this->menuFor(new Roles(true, false, [new TeamId(self::SHOP)], [], [new TeamId(self::MOBILE)]))->items();
 
-        self::assertSame(['Home', 'Tickets', 'My reports', 'Teams', 'Admin'], self::labelsOf($items));
-        $teams = $items[3];
+        self::assertSame(['Home', 'Tickets', 'Teams', 'Admin'], self::labelsOf($items));
+        $teams = $items[2];
         self::assertTrue($teams->isGroup());
         self::assertFalse($teams->isCurrent());
         self::assertNull($teams->url());
@@ -194,7 +195,7 @@ final class MainMenuTest extends TestCase
 
         $items = $this->menuFor(new Roles(false, false, [], [$unknownTeam, $otherUnknownTeam], []))->items();
 
-        self::assertSame(['Home', 'Tickets', 'My reports'], self::labelsOf($items));
+        self::assertSame(['Home', 'Tickets'], self::labelsOf($items));
     }
 
     #[Test]
@@ -202,8 +203,24 @@ final class MainMenuTest extends TestCase
     {
         $menu = $this->menuFor(new Roles(false, false, [], [], [new TeamId(self::SHOP)], self::SLUGS));
 
-        self::assertSame(['Home', 'Tickets', 'My reports', 'Team'], self::labelsOf($menu->items()));
+        self::assertSame(['Home', 'Tickets', 'Team'], self::labelsOf($menu->items()));
         self::assertTrue($menu->canReportProblems());
+    }
+
+    /**
+     * Hidden rather than inert until P14.T15 builds the page (product decision 2026-11-20).
+     */
+    #[Test]
+    public function myReportsIsLeftOutUntilItsRouteExists(): void
+    {
+        $roles = new Roles(false, false, [], [new TeamId(self::SHOP)], [], self::SLUGS);
+        self::assertNotContains('My reports', self::labelsOf($this->menuFor($roles)->items()));
+
+        $this->routes->add(MainMenu::MY_REPORTS_ROUTE, new Route('/my-reports'));
+        $items = $this->menuFor($roles)->items();
+
+        self::assertSame(['Home', 'Tickets', 'My reports', 'Team'], self::labelsOf($items));
+        self::assertSame('/my-reports', $items[2]->url());
     }
 
     #[Test]
@@ -226,15 +243,38 @@ final class MainMenuTest extends TestCase
     }
 
     #[Test]
-    public function adminLinksThePeopleTabAndIsCurrentOnEveryAdminTab(): void
+    public function adminLinksTheAdminArea(): void
     {
-        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin/{tab}'));
-        $this->requestStack->push(new Request(attributes: ['_route' => MainMenu::ADMIN_ROUTE, '_route_params' => ['tab' => 'teams']]));
+        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin'));
 
         $admin = $this->menuFor(new Roles(true, false, [], [], []))->items()[1];
 
-        self::assertSame('/admin/people', $admin->url());
-        self::assertTrue($admin->isCurrent());
+        self::assertSame('/admin', $admin->url());
+        self::assertSame([], $admin->routeParameters());
+    }
+
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function routesAndWhetherAdminIsCurrent(): iterable
+    {
+        yield 'the admin area' => [MainMenu::ADMIN_ROUTE, true];
+        yield 'an admin tab' => [MainMenu::ADMIN_ROUTE.'_ai', true];
+        yield 'a form of an admin tab' => [MainMenu::ADMIN_ROUTE.'_people_invite', true];
+        yield 'a route that only starts with the same letters' => [MainMenu::ADMIN_ROUTE.'s', false];
+        yield 'Home' => [MainMenu::HOME_ROUTE, false];
+    }
+
+    #[Test]
+    #[DataProvider('routesAndWhetherAdminIsCurrent')]
+    public function adminIsCurrentOnTheAdminAreaAndEveryRouteUnderIt(string $currentRoute, bool $isCurrent): void
+    {
+        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin'));
+        $this->requestStack->push(new Request(attributes: ['_route' => $currentRoute, '_route_params' => []]));
+
+        $admin = $this->menuFor(new Roles(true, false, [], [], []))->items()[1];
+
+        self::assertSame($isCurrent, $admin->isCurrent());
     }
 
     #[Test]
@@ -246,10 +286,10 @@ final class MainMenuTest extends TestCase
     #[Test]
     public function theAdminHomeUrlIsTheSameAsTheAdminItemsOnceTheRouteExists(): void
     {
-        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin/{tab}'));
+        $this->routes->add(MainMenu::ADMIN_ROUTE, new Route('/admin'));
         $menu = $this->menuFor(new Roles(true, false, [], [], []));
 
-        self::assertSame('/admin/people', $menu->adminHomeUrl());
+        self::assertSame('/admin', $menu->adminHomeUrl());
         self::assertSame($menu->items()[1]->url(), $menu->adminHomeUrl());
     }
 
@@ -282,10 +322,10 @@ final class MainMenuTest extends TestCase
         $items = $this->menuFor(new Roles(false, false, [], [new TeamId(self::SHOP), new TeamId(self::MOBILE)], []))->items();
 
         self::assertFalse($items[0]->isCurrent());
-        self::assertTrue($items[3]->isCurrent(), 'the Teams group is current while one of its teams is');
+        self::assertTrue($items[2]->isCurrent(), 'the Teams group is current while one of its teams is');
         self::assertSame(['Mobile' => false, 'Shop' => true], array_combine(
-            self::labelsOf($items[3]->children()),
-            array_map(static fn (MenuItem $team): bool => $team->isCurrent(), $items[3]->children()),
+            self::labelsOf($items[2]->children()),
+            array_map(static fn (MenuItem $team): bool => $team->isCurrent(), $items[2]->children()),
         ));
     }
 

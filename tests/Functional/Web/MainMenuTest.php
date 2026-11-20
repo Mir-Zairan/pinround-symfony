@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\Organization\UI\Admin\AdminAreaController;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Ticketing\UI\TicketListController;
@@ -19,8 +20,8 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The header's main menu, "Report a problem" and the bell for each person of Acme Foods, which has the teams Shop and
- * Mobile, both led by Lena. Team links the team page by its slug and Tickets the tickets list;
- * My reports and Admin have no route yet, so they are inert.
+ * Mobile, both led by Lena. Team links the team page by its slug, Tickets the tickets list and Admin the admin area;
+ * My reports has no route yet, so it is left out (P14.T15 builds it).
  */
 final class MainMenuTest extends WebTestCase
 {
@@ -46,10 +47,10 @@ final class MainMenuTest extends WebTestCase
      */
     public static function people(): iterable
     {
-        yield 'Lena, Admin and lead of Shop and Mobile' => ['Lena', ['Home', 'Tickets', 'My reports', 'Teams', 'Admin'], ['Mobile', 'Shop'], true];
-        yield 'Omar, member of Shop and Mobile' => ['Omar', ['Home', 'Tickets', 'My reports', 'Teams'], ['Mobile', 'Shop'], true];
-        yield 'Mia, member of Shop' => ['Mia', ['Home', 'Tickets', 'My reports', 'Team'], [], true];
-        yield 'Raj, Manager and viewer of Shop' => ['Raj', ['Home', 'Tickets', 'My reports', 'Team'], [], true];
+        yield 'Lena, Admin and lead of Shop and Mobile' => ['Lena', ['Home', 'Tickets', 'Teams', 'Admin'], ['Mobile', 'Shop'], true];
+        yield 'Omar, member of Shop and Mobile' => ['Omar', ['Home', 'Tickets', 'Teams'], ['Mobile', 'Shop'], true];
+        yield 'Mia, member of Shop' => ['Mia', ['Home', 'Tickets', 'Team'], [], true];
+        yield 'Raj, Manager and viewer of Shop' => ['Raj', ['Home', 'Tickets', 'Team'], [], true];
         yield 'Sara, Admin with no team' => ['Sara', ['Home', 'Admin'], [], false];
         yield 'Noor, Manager with no team' => ['Noor', ['Home', 'Tickets'], [], false];
     }
@@ -75,7 +76,7 @@ final class MainMenuTest extends WebTestCase
     }
 
     #[Test]
-    public function anItemWithARouteIsALinkAndOneWithoutIsInertTextThatSaysSo(): void
+    public function everyItemIsALinkAndAdminLinksTheAdminArea(): void
     {
         $this->logIn($this->client, $this->createAcmeFoodsPeople()['Lena']);
 
@@ -84,15 +85,12 @@ final class MainMenuTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $menu = $page->filter('header nav[aria-label="Main"]');
         self::assertSame(
-            ['Home → / (current)', 'Tickets → /tickets', 'Mobile → /teams/mobile', 'Shop → /teams/shop'],
+            ['Home → / (current)', 'Tickets → /tickets', 'Mobile → /teams/mobile', 'Shop → /teams/shop', 'Admin → /admin'],
             $menu->filter('a')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href').('page' === $link->attr('aria-current') ? ' (current)' : '')),
         );
         self::assertCount(2, $menu->filter('.nav-menu__list > a.menu__item[data-menu-target="item"]'), 'the team links are the disclosure\'s items');
 
-        $notBuilt = $menu->filter('span.nav--not-built, span.menu__item--not-built');
-        self::assertSame(['My reports (not built yet)', 'Admin (not built yet)'], $notBuilt->each(static fn (Crawler $item): string => $item->text()));
-        self::assertSame([' (not built yet)'], array_unique($notBuilt->filter('.visually-hidden')->each(static fn (Crawler $hidden): string => $hidden->text(normalizeWhitespace: false))));
-        self::assertCount(0, $menu->filter('span[href], [tabindex]'));
+        self::assertCount(0, $menu->filter('span.nav--not-built, span.menu__item--not-built, [tabindex]'));
 
         $teamsButton = $menu->filter('div.nav-menu > button.nav[aria-expanded="false"]');
         self::assertCount(1, $teamsButton);
@@ -136,9 +134,11 @@ final class MainMenuTest extends WebTestCase
         self::assertSame(TicketListController::class.'::list', $ticketsRoute->getDefault('_controller'), 'the tickets list is the real one, not a stand-in');
         self::assertSame('/tickets', $ticketsRoute->getPath());
         self::assertSame(TeamController::class.'::show', $routes->get(MainMenu::TEAM_ROUTE)?->getDefault('_controller'), 'the team page is the real one, not a stand-in');
-        foreach ([MainMenu::MY_REPORTS_ROUTE, MainMenu::ADMIN_ROUTE] as $routeName) {
-            self::assertNull($routes->get($routeName), $routeName.' has a page now: MainMenuTest expects it inert');
-        }
+        $adminRoute = $routes->get(MainMenu::ADMIN_ROUTE);
+        self::assertNotNull($adminRoute);
+        self::assertSame(AdminAreaController::class.'::openFirstTab', $adminRoute->getDefault('_controller'));
+        self::assertSame('/admin', $adminRoute->getPath());
+        self::assertNull($routes->get(MainMenu::MY_REPORTS_ROUTE), MainMenu::MY_REPORTS_ROUTE.' has a page now: show My reports again and expect it here (P14.T15)');
     }
 
     #[Test]

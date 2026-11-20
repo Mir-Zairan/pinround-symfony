@@ -1,4 +1,4 @@
-{% extends '@Web/base.html.twig' %}
+{% extends '@Organization/admin/layout.html.twig' %}
 
 {% block title %}People and roles · pinround{% endblock %}
 
@@ -11,7 +11,7 @@
 {% endblock %}
 
 {# TODO(P11): the role help cards and the list of people with their roles. #}
-{% block main %}
+{% block admin_tab %}
     <div class="admin-tab">
         <h1 class="admin-tab__title">People and roles</h1>
         <p>A role says what someone may do. The job (tester, developer) is set by the team lead.</p>

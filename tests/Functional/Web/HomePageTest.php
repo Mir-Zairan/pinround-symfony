@@ -7,7 +7,6 @@ namespace App\Tests\Functional\Web;
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
-use App\Web\UI\Navigation\MainMenu;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -251,16 +250,16 @@ final class HomePageTest extends WebTestCase
     }
 
     #[Test]
-    public function theAdminSettingsButtonIsInertWhileTheAdminPageIsNotBuilt(): void
+    public function openAdminSettingsLinksTheAdminArea(): void
     {
         $page = $this->openHomeAs('Sara');
 
-        self::assertNull(self::getContainer()->get('router')->getRouteCollection()->get(MainMenu::ADMIN_ROUTE), MainMenu::ADMIN_ROUTE.' has a page now: Home links to it');
-        $button = $page->filter('main button.btn-filled');
-        self::assertCount(1, $button);
-        self::assertSame('Open admin settings (not built yet)', $button->text());
-        self::assertNotNull($button->attr('disabled'));
-        self::assertCount(0, $page->filter('main a'));
+        $link = $page->filter('main a.btn-filled');
+        self::assertCount(1, $link);
+        self::assertSame('Open admin settings', $link->text());
+        self::assertSame('/admin', $link->attr('href'));
+        self::assertSame($page->filter('header nav[aria-label="Main"] a')->reduce(static fn (Crawler $item): bool => 'Admin' === $item->text())->attr('href'), $link->attr('href'), 'the menu item and the button open the same page');
+        self::assertCount(0, $page->filter('main button[disabled]'));
     }
 
     #[Test]
@@ -289,14 +288,14 @@ final class HomePageTest extends WebTestCase
     }
 
     #[Test]
-    public function theAdminSectionOfTheWorkHomeHasAnInertOpenSettingsButtonWhileTheAdminPageIsNotBuilt(): void
+    public function theAdminSectionOfTheWorkHomeHasAnOpenSettingsLinkToTheAdminArea(): void
     {
         $page = $this->openHomeAs('Lena');
 
-        $button = $page->filter('section[data-focus-group="admin"] .home__section-header button.btn-text');
-        self::assertCount(1, $button);
-        self::assertSame('Open settings (not built yet)', $button->text());
-        self::assertNotNull($button->attr('disabled'));
+        $link = $page->filter('section[data-focus-group="admin"] .home__section-header a.btn-text');
+        self::assertCount(1, $link);
+        self::assertSame('Open settings', $link->text());
+        self::assertSame('/admin', $link->attr('href'));
         self::assertCount(0, $page->filter('section:not([data-focus-group="admin"]) .btn'), 'only the Admin section has the button');
     }
 

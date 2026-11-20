@@ -288,14 +288,14 @@ final class AdminAiTest extends WebTestCase
         $before = $this->storedSettingsOf($acmeFoods);
 
         $page = $this->client->request('GET', self::AI_PAGE);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
         self::assertCount(0, $page->filter('main form'));
 
         $this->client->request('POST', self::AI_PAGE, ['setting' => 'on', 'choice' => 'off', '_csrf_token' => $this->csrfTokenFor($this->client, self::CHANGE_CSRF_ID)]);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
 
         $this->client->request('POST', self::PROVIDER_KEY_PAGE, ['provider_key' => self::RAW_PROVIDER_KEY, '_csrf_token' => $this->csrfTokenFor($this->client, self::PROVIDER_KEY_CSRF_ID)]);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
 
         self::assertSame($before, $this->storedSettingsOf($acmeFoods));
         self::assertSame(0, $this->outboxCount());

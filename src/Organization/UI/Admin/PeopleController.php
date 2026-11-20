@@ -39,6 +39,7 @@ final class PeopleController extends AbstractController
 {
     public const string ROUTE = 'organization_admin_people';
     public const string INVITE_ROUTE = 'organization_admin_people_invite';
+    public const string INVITE_PAGE_ROUTE = 'organization_admin_people_invite_page';
 
     /** With the email as typed, trimmed. */
     public const string INVITE_SENT = 'Invite sent to %s';
@@ -132,6 +133,18 @@ final class PeopleController extends AbstractController
      * the ORM's savepoint, and only rolling back the whole transaction undoes it. Transactions gives the invite a
      * transaction of its own, which also covers the access checks and the page shown with a field error.
      */
+    /**
+     * The address the invite form posts to, opened by hand or by a reload after the post: sends to the page with the
+     * form instead of a 405 page.
+     */
+    #[Route('/admin/people/invite', name: self::INVITE_PAGE_ROUTE, methods: ['GET'])]
+    public function showInvitePage(): Response
+    {
+        $this->denyAccessUnlessGranted(AdminPermission::AREA, $this->tenantContext->get());
+
+        return $this->redirectToRoute(self::ROUTE);
+    }
+
     #[Route('/admin/people/invite', name: self::INVITE_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function invite(Request $request): Response
     {

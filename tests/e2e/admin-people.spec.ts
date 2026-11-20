@@ -7,7 +7,7 @@ import { logInAndTurnOnTwoStepLogin, SARA_EMAIL, turnOffTwoStepLogin, twoStepCod
 
 // As Sara, the demo admin whom no other spec logs in as: beforeAll turns her two-step login on, which also counts as
 // the code the admin pages ask for, and afterAll turns it off with a recovery code. Inviting the same address again
-// replaces the open invite, so a rerun leaves one pending row. The functional AdminPeopleTest covers the refusals.
+// replaces the open invite, so a rerun leaves one pending row. The functional AdminPeopleTest and AdminShellTest cover the refusals.
 // Every other Acme Foods person has a session that other specs share or turn two-step login on and off in, so the live
 // token the list shows is one Sara makes on her own tokens page (her login in beforeAll is the recent proof it asks
 // for); each test that makes one revokes it from the people page.
@@ -72,6 +72,39 @@ async function seriousViolations(page: Page): Promise<string[]> {
     .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
     .map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`);
 }
+
+function adminRail(page: Page): Locator {
+  return page.getByRole('navigation', { name: 'Admin' });
+}
+
+test('Sara reaches every admin tab from the menu and from Home', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Admin', exact: true }).click();
+
+  await expect(page).toHaveURL('/admin/people');
+  await expect(page.getByRole('heading', { name: 'People and roles', level: 1 })).toBeVisible();
+  await expect(adminRail(page).getByRole('link')).toHaveText(['People and roles', 'AI']);
+  await expect(adminRail(page).getByRole('link', { name: 'People and roles' })).toHaveAttribute('aria-current', 'page');
+
+  await adminRail(page).getByRole('link', { name: 'AI', exact: true }).click();
+
+  await expect(page).toHaveURL('/admin/ai');
+  await expect(page.getByRole('heading', { name: 'AI', level: 1 })).toBeVisible();
+  await expect(adminRail(page).getByRole('link', { name: 'AI', exact: true })).toHaveAttribute('aria-current', 'page');
+
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Open admin settings' }).click();
+
+  await expect(page).toHaveURL('/admin/people');
+  await expect(adminRail(page)).toBeVisible();
+});
+
+test('the invite form\'s address opened by hand shows the people page', async ({ page }) => {
+  await page.goto('/admin/people/invite');
+
+  await expect(page).toHaveURL('/admin/people');
+  await expect(page.getByRole('heading', { name: 'People and roles', level: 1 })).toBeVisible();
+});
 
 test('the Invite button waits for something that looks like an email address', async ({ page }) => {
   await page.goto('/admin/people');

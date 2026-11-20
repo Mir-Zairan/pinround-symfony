@@ -19,8 +19,8 @@ use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 
 /**
  * When AdminAreaVoter refused an Admin only for the missing code proof (ADR-0012, FR-ID-06), sends them to the setup
- * page while their two-step login is off, else to "Confirm it's you"; either one leads back to the admin page. Anyone
- * else keeps the 403. It runs before the firewall's exception listener (1), which would answer 403, and after
+ * page while their two-step login is off, else to "Confirm it's you"; either one leads back to the admin page. It
+ * leaves anyone else's refusal alone: HideAdminAreaFromNonAdmins turns a non-Admin's into a 404. It runs before the firewall's exception listener (1), which would answer 403, and after
  * RequestTransaction rolled back, so CurrentActor gives the actor the voter read in this request. Holds no state, so
  * it is safe in worker mode (ADR-0008).
  */

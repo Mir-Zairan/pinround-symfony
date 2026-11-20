@@ -336,7 +336,7 @@ final class AdminPeopleTokensTest extends WebTestCase
 
         $this->client->request('POST', \sprintf(self::REVOKE, $omarsToken), ['_csrf_token' => $this->csrfTokenFor($this->client, self::REVOKE_CSRF_ID)]);
 
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
         self::assertSame(['last_used_at' => null, 'revoked_at' => null], $this->usageOf($omarsToken, $acmeFoods));
         self::runTheWorkerUntilIdle('outbox');
         self::runTheWorkerUntilIdle('async_notify');

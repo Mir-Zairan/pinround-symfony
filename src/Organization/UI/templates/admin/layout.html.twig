@@ -1,0 +1,15 @@
+{% extends '@Web/base.html.twig' %}
+
+{#- Every admin tab: the tab rail left of the tab's own content (admin.md, Layout), the tabs AdminTabRail lets this person open. A tab fills admin_tab and links admin-tab.css. -#}
+{% block main %}
+    <div class="admin-page">
+        <nav class="admin-rail" aria-label="Admin">
+            <ul class="admin-rail__tabs">
+                {% for tab in admin_tabs() %}
+                    <li><a class="admin-rail__tab" href="{{ tab.url }}"{% if tab.isCurrent %} aria-current="page"{% endif %}>{{ tab.label }}</a></li>
+                {% endfor %}
+            </ul>
+        </nav>
+        {% block admin_tab %}{% endblock %}
+    </div>
+{% endblock %}

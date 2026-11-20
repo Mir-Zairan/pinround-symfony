@@ -1,4 +1,4 @@
-/* The layout every Admin tab shares (People, AI, …): the tab column, its title and section headings, and a form of one
+/* The layout every Admin tab shares (People, AI, …): the tab rail beside the tab column, its title and section headings, and a form of one
    field with its button beside it. The width is the prototype's tab content (admin.md, Layout: max ~760 px). A tab's
    own rows go in its own stylesheet. */
 
@@ -30,4 +30,51 @@
 .admin-tab__field {
   flex: 1 1 260px;
   min-width: 0;
+}
+
+/* The rail left of the tab; on a narrow screen it goes on top. */
+.admin-page {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-24);
+}
+
+.admin-rail__tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A 40 px full-width pill per tab, the current one filled, as the prototype's rail (the project rail's look). */
+.admin-rail__tab {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--space-16);
+  border-radius: var(--radius-button);
+  color: var(--on-surface);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.admin-rail__tab:hover {
+  background: var(--s-high);
+}
+
+.admin-rail__tab[aria-current="page"] {
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font-weight: 600;
+}
+
+@media (max-width: 52em) {
+  .admin-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

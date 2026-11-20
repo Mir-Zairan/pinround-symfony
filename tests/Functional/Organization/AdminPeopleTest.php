@@ -384,14 +384,14 @@ final class AdminPeopleTest extends WebTestCase
         $this->logInWithACode($this->client, $this->clock, $person);
 
         $this->client->request('GET', self::PEOPLE_PAGE);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
 
         // Refused before the cursor is read, so a bad one tells nothing either.
         $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::AFTER_ID => 'not-a-uuid']);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
 
         $this->client->request('POST', self::INVITE, ['email' => 'mia@acme.test', '_csrf_token' => 'any']);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
         self::assertSame([], $this->storedInvitationsOf($acmeFoods));
     }
 

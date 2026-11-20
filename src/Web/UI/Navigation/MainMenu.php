@@ -29,13 +29,15 @@ final readonly class MainMenu
     public const string HOME_ROUTE = 'web_home';
     /** P03.T3 (`/tickets`). */
     public const string TICKETS_ROUTE = 'ticketing_tickets';
-    /** P07 (`/my-reports`). */
+    /** P14.T15 (`/my-reports`); hidden, not inert, until that route exists (product decision 2026-11-20). */
     public const string MY_REPORTS_ROUTE = 'my_reports';
     /** P02.T8 (`/teams/{slug}`), with the team's slug as "slug". */
     public const string TEAM_ROUTE = 'team_show';
-    /** P11 (`/admin/{tab}`); the admin home is its People tab. */
-    public const string ADMIN_ROUTE = 'web_admin';
-    private const array ADMIN_HOME_PARAMETERS = ['tab' => 'people'];
+    /**
+     * P14.T3 (`/admin`), which opens the first admin tab the person may open. The item is current on every page whose
+     * route is this name plus "_…", as each admin tab's is.
+     */
+    public const string ADMIN_ROUTE = 'organization_admin';
 
     public function __construct(
         private TokenStorageInterface $tokenStorage,
@@ -50,8 +52,8 @@ final readonly class MainMenu
      * Ask it inside the request transaction, as CurrentActor needs; without an actor (logged out, no organization
      * chosen yet) the menu is Home alone.
      *
-     * @return list<MenuItem> in this order, each when the roles allow it: Home, Tickets, My reports, Team (or the
-     *                        "Teams" group for two or more teams), Admin
+     * @return list<MenuItem> in this order, each when the roles allow it: Home, Tickets, My reports (once its page
+     *                        exists), Team (or the "Teams" group for two or more teams), Admin
      */
     #[AsTwigFunction('main_menu')]
     public function items(): array
@@ -68,14 +70,16 @@ final readonly class MainMenu
             $items[] = $this->pageItem('Tickets', self::TICKETS_ROUTE);
         }
         if ([] !== $teamIds) {
-            $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE);
+            if (null !== $this->urlOf(self::MY_REPORTS_ROUTE, [])) {
+                $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE);
+            }
             $teamItem = $this->teamItem($actor, $teamIds);
             if (null !== $teamItem) {
                 $items[] = $teamItem;
             }
         }
         if ($roles->isAdmin()) {
-            $items[] = $this->pageItem('Admin', self::ADMIN_ROUTE, self::ADMIN_HOME_PARAMETERS, pageParameters: []);
+            $items[] = MenuItem::page('Admin', self::ADMIN_ROUTE, [], $this->adminHomeUrl(), $this->isAdminPage());
         }
 
         return $items;
@@ -119,24 +123,28 @@ final readonly class MainMenu
     }
 
     /**
-     * @param array<string, string>      $routeParameters
-     * @param array<string, string>|null $pageParameters  the route parameters that must match for the item to be
-     *                                                    current: the team, but not the admin tab; null for all of
-     *                                                    $routeParameters
+     * @param array<string, string> $routeParameters
      */
-    private function pageItem(string $label, string $routeName, array $routeParameters = [], ?array $pageParameters = null): MenuItem
+    private function pageItem(string $label, string $routeName, array $routeParameters = []): MenuItem
     {
         $url = $this->urlOf($routeName, $routeParameters);
 
-        return MenuItem::page($label, $routeName, $routeParameters, $url, $this->isCurrentPage($routeName, $pageParameters ?? $routeParameters));
+        return MenuItem::page($label, $routeName, $routeParameters, $url, $this->isCurrentPage($routeName, $routeParameters));
     }
 
     /**
-     * The admin home's address without building the menu; null while no phase has built the page.
+     * The admin area's address without building the menu; null while the route does not exist.
      */
     public function adminHomeUrl(): ?string
     {
-        return $this->urlOf(self::ADMIN_ROUTE, self::ADMIN_HOME_PARAMETERS);
+        return $this->urlOf(self::ADMIN_ROUTE, []);
+    }
+
+    private function isAdminPage(): bool
+    {
+        $route = $this->requestStack->getMainRequest()?->attributes->get('_route');
+
+        return \is_string($route) && (self::ADMIN_ROUTE === $route || str_starts_with($route, self::ADMIN_ROUTE.'_'));
     }
 
     /**

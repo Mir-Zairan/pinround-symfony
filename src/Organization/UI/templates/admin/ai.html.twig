@@ -1,4 +1,4 @@
-{% extends '@Web/base.html.twig' %}
+{% extends '@Organization/admin/layout.html.twig' %}
 
 {% block title %}AI · Admin · pinround{% endblock %}
 
@@ -14,7 +14,7 @@
     Each setting is a form of its own that applies at once (admin.md: no save button). A chip or switch posts the choice
     it stands for, not "toggle", so a second click of the same button changes nothing.
 #}
-{% block main %}
+{% block admin_tab %}
     {% set where_notes = {
         cloud: 'Every AI request goes to the company’s cloud AI. It costs money per use.',
         laptop: 'Free. Ticket text never leaves the laptop. People without Ollama get no AI features.',

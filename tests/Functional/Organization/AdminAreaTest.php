@@ -186,7 +186,7 @@ final class AdminAreaTest extends WebTestCase
 
         $this->client->request('GET', self::ADMIN_AREA);
 
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
     }
 
     #[Test]
@@ -197,7 +197,7 @@ final class AdminAreaTest extends WebTestCase
 
         $this->client->request('GET', self::ADMIN_AREA);
 
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
     }
 
     /**
@@ -217,7 +217,7 @@ final class AdminAreaTest extends WebTestCase
 
         self::writeSessionAttribute($this->client, EnterChosenOrganization::SESSION_KEY, $acmeFoods->toString());
         $this->client->request('GET', self::ADMIN_AREA);
-        self::assertResponseStatusCodeSame(403);
+        self::assertResponseStatusCodeSame(404);
 
         self::writeSessionAttribute($this->client, EnterChosenOrganization::SESSION_KEY, $betaBakery->toString());
         $this->client->request('GET', self::ADMIN_AREA);

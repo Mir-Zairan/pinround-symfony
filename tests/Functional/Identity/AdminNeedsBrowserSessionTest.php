@@ -33,7 +33,9 @@ final class AdminNeedsBrowserSessionTest extends WebTestCase
 
     /** Each admin page and admin action, as method and path. */
     private const array ADMIN_ROUTES = [
+        ['GET', '/admin'],
         ['GET', '/admin/people'],
+        ['GET', '/admin/people/invite'],
         ['POST', '/admin/people/invite'],
         ['POST', '/admin/people/tokens/0197a3c0-0000-7000-8000-00000000a7e1/revoke'],
         ['GET', '/admin/ai'],
@@ -91,7 +93,8 @@ final class AdminNeedsBrowserSessionTest extends WebTestCase
             if ('GET' === $method) {
                 $this->client->request($method, $path);
 
-                self::assertResponseStatusCodeSame(200, $method.' '.$path);
+                // /admin and the invite form's address send her on to a tab.
+                self::assertResponseStatusCodeSame(\in_array($path, ['/admin', '/admin/people/invite'], true) ? 302 : 200, $method.' '.$path);
             }
         }
     }
