@@ -99,6 +99,23 @@ test('Sara reaches every admin tab from the menu and from Home', async ({ page }
   await expect(adminRail(page)).toBeVisible();
 });
 
+// The demo seed: Lena leads Shop and Mobile as a developer and is an admin; Raj is the manager and views Shop with the
+// job "other", which the line leaves out; Sara, the first admin, is in no team.
+test('Sara sees the people of Acme Foods in name order with their roles and teams', async ({ page }) => {
+  await openPeoplePage(page);
+
+  const people = page.locator('main .people__person');
+  await expect(people.locator('.people__name')).toHaveText(['Lena', 'Mia', 'Omar', 'Raj', 'Sara']);
+  const personNamed = (name: string): Locator => people.filter({ has: page.locator('.people__name', { hasText: new RegExp(`^${name}$`) }) });
+  await expect(personNamed('Lena').locator('.tag')).toHaveText(['Admin']);
+  await expect(personNamed('Lena').locator('.people__sub')).toHaveText(['Developer · Mobile · Team lead', 'Developer · Shop · Team lead']);
+  await expect(personNamed('Raj').locator('.tag')).toHaveText(['Manager']);
+  await expect(personNamed('Raj').locator('.people__sub')).toHaveText(['Shop · Team viewer']);
+  await expect(personNamed('Sara').locator('.tag')).toHaveText(['Admin']);
+  await expect(personNamed('Sara').locator('.people__sub')).toHaveText(['No team yet']);
+  await expect(page.locator('.people__members').getByRole('link', { name: 'Show more' })).toHaveCount(0);
+});
+
 test('the invite form\'s address opened by hand shows the people page', async ({ page }) => {
   await page.goto('/admin/people/invite');
 
