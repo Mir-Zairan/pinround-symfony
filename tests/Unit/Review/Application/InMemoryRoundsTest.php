@@ -18,6 +18,7 @@ use App\SharedKernel\Application\TenantSwitchGuard;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Media\Application\InMemoryTransactions;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -170,6 +171,44 @@ final class InMemoryRoundsTest extends TestCase
                 self::assertStringContainsString('TenantContext', $logic->getMessage());
             }
         }
+    }
+
+    #[Test]
+    public function givenTransactionsEveryAddReadNumberAndSaveNeedsAnOpenOneAsOnDbalRounds(): void
+    {
+        $tenantContext = self::tenant(self::ACME_FOODS);
+        $transactions = new InMemoryTransactions($tenantContext);
+        $rounds = new InMemoryRounds($tenantContext, $transactions);
+        $draft = self::draft($rounds, self::OMAR);
+        $ticket = $draft->ticketId();
+        $at = new \DateTimeImmutable('2026-03-05 08:00:00+00:00');
+
+        $calls = [
+            'add' => static fn () => $rounds->add($draft),
+            'get' => static fn () => $rounds->get($draft->id()),
+            'openUnsharedDraftOf' => static fn () => $rounds->openUnsharedDraftOf($ticket, $draft->ownerId()),
+            'openUnsharedDraftFactsOf' => static fn () => $rounds->openUnsharedDraftFactsOf($ticket, $draft->ownerId()),
+            'nextFreeNumberOf' => static fn () => $rounds->nextFreeNumberOf($ticket),
+            'openSharedRoundsOf' => static fn () => $rounds->openSharedRoundsOf($ticket),
+            'save' => static fn () => $rounds->save($draft, $at),
+        ];
+        foreach ($calls as $name => $call) {
+            try {
+                $call();
+                self::fail($name.' ran with no transaction open.');
+            } catch (\LogicException $logic) {
+                self::assertStringContainsString('none is open', $logic->getMessage(), $name);
+            }
+        }
+        self::assertSame([], $rounds->stored);
+        self::assertSame([], $rounds->lockedOpenRoundTicketIds, 'A refused read took no lock.');
+
+        $transactions->run(static function () use ($calls): void {
+            foreach ($calls as $call) {
+                $call();
+            }
+        });
+        self::assertSame(1, $rounds->savedRounds, 'Inside a run the add and the save went through.');
     }
 
     #[Test]

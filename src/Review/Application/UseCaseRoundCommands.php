@@ -14,6 +14,7 @@ use App\Review\Api\ScreenshotWithPins;
 use App\Review\Application\Checklist\RoundChecklistCommands;
 use App\Review\Application\Checklist\TodoStep;
 use App\Review\Domain\DraftDecision;
+use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\Domain\Pin;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
@@ -250,12 +251,15 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
 
     /**
      * @throws RoundRefused    as shareDraft and shareDraftAtHandOff say; nothing is saved
-     * @throws \LogicException when the findings' items cannot be written; the share is saved, so the caller's
-     *                         transaction must roll back
+     * @throws \LogicException when the findings' items cannot be written or a findings round cannot be closed; the
+     *                         share is saved, so the caller's transaction must roll back
      */
     private function shareOwnDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt, bool $isHandOffChoice): int
     {
         $draft = $this->ownDraft($roundId, $ownerId);
+        // A draft shared already is refused below as read-only, rather than as waiting for its own open round.
+        $findingsRoundsToClose = $draft->isUnsharedDraft() ? $this->findingsRoundsClosedBySharing($draft->ticketId(), $ownerId) : [];
+        // Takes the number lock openSharedRoundsOf took again; a transaction-scoped advisory lock is re-entrant.
         $number = $this->rounds->nextFreeNumberOf($draft->ticketId());
 
         try {
@@ -268,9 +272,57 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         } catch (RoundSlotTaken $taken) {
             throw new RoundRefused(RoundRefused::NUMBER_TAKEN, 0, $taken);
         }
+        // After the share's save, so a refused share closes nothing; both are in the caller's one transaction, so no
+        // reader sees the new round beside an open findings round (ADR-0048: close first, then number).
+        foreach ($findingsRoundsToClose as $findingsRound) {
+            $this->closeLockedRound($findingsRound, $sharedAt);
+        }
         $this->checklistCommands->createFromFindings($draft, $sharedAt);
 
         return $number;
+    }
+
+    /**
+     * Reads the ticket's open shared rounds under Rounds::openSharedRoundsOf's locks, so a second share waits for this
+     * one's transaction and then sees its round. A findings round for the assignee is closed by the assignee's next
+     * share (ADR-0048); every other open shared round makes the share wait for its verdict.
+     *
+     * @return list<Round> the open findings rounds the share closes, locked until the transaction ends; none when no
+     *                     shared round is open
+     *
+     * @throws RoundRefused   roundStillOpen with the lowest-numbered open round the share may not close; nothing is saved
+     * @throws TicketNotFound when a shared round is open and the tenant has no ticket with that id
+     */
+    private function findingsRoundsClosedBySharing(TicketId $ticketId, UserId $sharerId): array
+    {
+        $openRounds = $this->rounds->openSharedRoundsOf($ticketId);
+        if ([] === $openRounds) {
+            return [];
+        }
+        $assigneeId = ($this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.'))->assigneeId;
+        foreach ($openRounds as $openRound) {
+            $isFindingsForAssignee = null !== $assigneeId && $openRound->isFindingsFor($assigneeId);
+            if (!$isFindingsForAssignee || !$sharerId->equals($assigneeId)) {
+                $number = $openRound->number() ?? throw new \LogicException('An open shared round has a number.');
+
+                throw RoundRefused::roundStillOpen($number, $isFindingsForAssignee ? $assigneeId : null);
+            }
+        }
+
+        return $openRounds;
+    }
+
+    /**
+     * @throws \LogicException when the round cannot be closed or saved, which the row lock it was read under rules out
+     */
+    private function closeLockedRound(Round $round, \DateTimeImmutable $closedAt): void
+    {
+        try {
+            $round->close();
+            $this->rounds->save($round, $closedAt);
+        } catch (\DomainException|RoundChanged $refused) {
+            throw new \LogicException(\sprintf('Round %s was read under a row lock, yet could not be closed.', $round->id()->toString()), 0, $refused);
+        }
     }
 
     /**
@@ -349,6 +401,8 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
             $change($round);
         } catch (\InvalidArgumentException $invalidContent) {
             throw RoundRefused::invalidContent($invalidContent->getMessage(), $invalidContent);
+        } catch (DraftHasNoScreenshots $empty) {
+            throw RoundRefused::sharingBlocked($empty->getMessage(), $empty);
         } catch (\DomainException $refused) {
             throw $wasChangeable ? new RoundRefused($refused->getMessage(), 0, $refused) : RoundRefused::readOnly($refused->getMessage(), $refused);
         }

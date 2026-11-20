@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Review\Application;
 
+use App\Review\Api\RoundRefused;
 use App\Review\Application\Checklist\UseCaseChecklistCommands;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
@@ -46,6 +47,7 @@ final class UseCaseRoundCommandsTest extends KernelTestCase
     private const string OMARS_DRAFT = '0197a3c0-0000-7000-8000-0000000f9a23';
     private const string OTHER_ORGANIZATION_DRAFT = '0197a3c0-0000-7000-8000-0000000f9a24';
     private const string EARLIER_CHECKLIST = '0197a3c0-0000-7000-8000-0000000f9a25';
+    private const string OPEN_REVIEW = '0197a3c0-0000-7000-8000-0000000f9a26';
     private const string REPORT_PICTURE = '0197a3c0-0000-7000-8000-0000000f9a31';
     private const string MIAS_FIRST_PICTURE = '0197a3c0-0000-7000-8000-0000000f9a32';
     private const string MIAS_SECOND_PICTURE = '0197a3c0-0000-7000-8000-0000000f9a33';
@@ -154,6 +156,56 @@ final class UseCaseRoundCommandsTest extends KernelTestCase
             [[self::EARLIER_CHECKLIST, self::MIAS_DOUBLE_WARNING_PIN, 'open', null, null, '2027-03-15 10:00:00']],
             $this->itemRowsOf(self::ACME_FOODS),
             'Only the item seeded before; the share wrote none on its draft.',
+        );
+    }
+
+    /**
+     * The refusal is caught inside the transaction, which then commits, so a write the refusal slipped past would stay.
+     */
+    #[Test]
+    public function aShareWhileAReviewRoundIsOpenIsRefusedAndLeavesTheDraftUnsharedAndUnnumbered(): void
+    {
+        $this->roundRows()->addAllOf(self::ACME_FOODS, [self::round(self::ACME_FOODS, self::OPEN_REVIEW, 'review', self::LENA, 1)]);
+        $draftBefore = $this->draftRowOf(self::OMARS_DRAFT);
+        self::assertSame([null, null, 1], $draftBefore, 'The draft is not unshared at version 1, so nothing below is proven.');
+
+        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function (): ?RoundRefused {
+            try {
+                $this->commands()->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), new \DateTimeImmutable(self::SHARED_AT));
+            } catch (RoundRefused $refused) {
+                return $refused;
+            }
+
+            return null;
+        });
+
+        self::assertNotNull($refusal, 'The share went through while round 1 was open.');
+        self::assertSame('Round 1 is still open. Wait for its verdict before you share.', $refusal->getMessage());
+        self::assertSame([true, 1, null], [$refusal->isSharingBlocked(), $refusal->openRoundNumber(), $refusal->readyForUserId()]);
+        self::assertSame($draftBefore, $this->draftRowOf(self::OMARS_DRAFT));
+        self::assertSame([['open', 1]], $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT state, version FROM rvw_round WHERE id = ?', [self::OPEN_REVIEW]));
+    }
+
+    /**
+     * Mia's findings are Round 1, ready for Omar, the assignee; his share closes it and becomes Round 2 in one commit.
+     */
+    #[Test]
+    public function theAssigneesShareClosesTheOpenFindingsRoundAndTakesTheNextNumber(): void
+    {
+        $miasNumber = $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->commands()->shareDraft(self::MIAS_DRAFT, new UserId(self::MIA), new \DateTimeImmutable(self::SHARED_AT)));
+        self::assertSame(1, $miasNumber);
+
+        $omarsNumber = $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->commands()->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), new \DateTimeImmutable(self::SHARED_AT)));
+
+        self::assertSame(2, $omarsNumber);
+        self::assertSame(
+            [[self::REPORT, 0, 'open', 1], [self::MIAS_DRAFT, 1, 'closed', 3], [self::OMARS_DRAFT, 2, 'open', 2]],
+            $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT id, number, state, version FROM rvw_round ORDER BY number'),
+            'Round 0 stays open; only the findings round closed.',
+        );
+        self::assertSame(
+            [[self::OTHER_ORGANIZATION_DRAFT, null, 'open', 1]],
+            $this->roundRows()->runAs(self::OTHER_ORGANIZATION, 'SELECT id, number, state, version FROM rvw_round'),
         );
     }
 

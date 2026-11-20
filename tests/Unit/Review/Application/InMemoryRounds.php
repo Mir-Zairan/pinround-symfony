@@ -17,13 +17,14 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Unit\Media\Application\InMemoryTransactions;
 
 /**
  * Like DbalRounds: ids come once each, a round id met again is a LogicException, and a round whose number the ticket
  * has already, or an open unshared draft of an owner who has one on the ticket, is RoundSlotTaken and not stored. It
  * keeps a copy of each round as it was added or saved, so a change is stored only by save(), which writes only over the
  * version the round was read at (RoundChanged otherwise). Reads, numbers and saves see the tenant's rounds only and
- * need its TenantContext.
+ * need its TenantContext; given InMemoryTransactions, they and add also need an open transaction.
  */
 final class InMemoryRounds implements Rounds
 {
@@ -46,7 +47,11 @@ final class InMemoryRounds implements Rounds
 
     private int $issuedIds = 0;
 
-    public function __construct(private readonly ?TenantContext $tenantContext = null)
+    /**
+     * @param InMemoryTransactions|null $transactions when given, add, reads, numbers and saves need one of its runs
+     *                                                open, as DbalRounds needs a transaction; when null, they need none
+     */
+    public function __construct(private readonly ?TenantContext $tenantContext = null, private readonly ?InMemoryTransactions $transactions = null)
     {
     }
 
@@ -71,6 +76,7 @@ final class InMemoryRounds implements Rounds
 
     public function add(Round $round): void
     {
+        $this->requireTransaction();
         foreach ($this->stored as $existing) {
             if ($existing->id()->equals($round->id())) {
                 throw new \LogicException(\sprintf('Round %s is added already; a round is added once.', $round->id()->toString()));
@@ -187,11 +193,19 @@ final class InMemoryRounds implements Rounds
 
     private function requireTenant(): OrganizationId
     {
+        $this->requireTransaction();
         if (null === $this->tenantContext) {
             throw new \LogicException('InMemoryRounds reads and saves under a TenantContext; none was given.');
         }
 
         return $this->tenantContext->require();
+    }
+
+    private function requireTransaction(): void
+    {
+        if (null !== $this->transactions && !$this->transactions->isOpen()) {
+            throw new \LogicException('Rounds are read and saved in a transaction under the organization as tenant; none is open.');
+        }
     }
 
     private function storedOpenUnsharedDraftOf(TicketId $ticketId, UserId $ownerId): ?Round

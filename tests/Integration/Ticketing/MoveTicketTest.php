@@ -133,7 +133,11 @@ final class MoveTicketTest extends KernelTestCase
     private const array DRAFT_READ = [
         'SELECT id, organization_id, ticket_id, kind, owner_id, number, shared_at, state, version,',
         'SELECT pin.id, pin.screenshot_id,',
-        'SELECT id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot',
+        'SELECT round_id, id, media_id, position, variant_label, verdict, title, summary FROM rvw_',
+    ];
+    private const array OPEN_SHARED_ROUNDS_LOCKED = [
+        'SELECT pg_advisory_xact_lock(',
+        'SELECT id, organization_id, ticket_id, kind, owner',
     ];
     private const array DRAFT_NUMBERED = [
         'SELECT pg_advisory_xact_lock(',
@@ -965,10 +969,11 @@ final class MoveTicketTest extends KernelTestCase
 
     /**
      * A verb move with the answer "share" reads only the facts of the mover's draft before the save, then reads the
-     * draft whole once, takes the round number under its lock, and shares and decides it in one save (P05.T9).
+     * draft whole once, reads the ticket's open shared rounds under its locks (ADR-0048), takes the round number, and
+     * shares and decides it in one save (P05.T9).
      */
     #[Test]
-    public function aWarmVerbMoveThatSharesTheMoversDraftRunsEighteenQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveThatSharesTheMoversDraftRunsTwentyQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
         $ticketId = $this->ticketId();
@@ -981,8 +986,8 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT), DraftChoice::Share),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::DRAFT_READ, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
-        self::assertCount(18, self::queriesBesideSavepoints($statements), 'The 10 of a move, the draft read whole, its number and its one save');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::DRAFT_READ, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
+        self::assertCount(20, self::queriesBesideSavepoints($statements), 'The 10 of a move, the draft read whole, the open shared rounds under lock, its number and its one save');
     }
 
     #[Test]

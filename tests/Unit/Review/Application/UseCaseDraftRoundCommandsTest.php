@@ -43,7 +43,9 @@ use PHPUnit\Framework\TestCase;
  * The draft commands of UseCaseRoundCommands over InMemoryRounds, which keeps what DbalRounds keeps: a copy per saved
  * round, the version check and the number and draft slots. Every refusal is proven with the reason and with the stored
  * rounds exactly as they were. Lena owns the draft the commands change; Omar's draft, Mia's shared and deleted drafts,
- * another organization's draft, a report and a deleted draft of Lena's are the rows each one must leave alone.
+ * another organization's draft, a report and a deleted draft of Lena's are the rows each one must leave alone. Mia's
+ * and Omar's shared rounds are closed, so they do not hold back a share; UseCaseRoundCommandsShareTest covers open
+ * rounds.
  */
 final class UseCaseDraftRoundCommandsTest extends TestCase
 {
@@ -730,6 +732,9 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     public function twoSharesOnOneTicketGetTwoNumbers(): void
     {
         $first = $this->commands->shareDraft(self::DRAFT, new UserId(self::LENA), self::at());
+        $lenasRound = $this->rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('Lena\'s round is missing.');
+        $lenasRound->close();
+        $this->rounds->save($lenasRound, self::at());
         $second = $this->commands->shareDraft(self::OMARS_DRAFT, new UserId(self::OMAR), self::at());
 
         self::assertSame([2, 3], [$first, $second]);
@@ -1061,6 +1066,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         $miasShared = self::draftOn(self::MIAS_SHARED_DRAFT, self::ACME_FOODS, self::TICKET, self::MIA);
         $miasShared->addScreenshot(new UserId(self::MIA), new ScreenshotId(self::MIAS_SCREENSHOT), self::MEDIA);
         $miasShared->share(new UserId(self::MIA), 1, self::at());
+        $miasShared->close();
         $this->rounds->add($miasShared);
 
         $miasDeleted = self::draftOn(self::MIAS_DELETED_DRAFT, self::ACME_FOODS, self::TICKET, self::MIA);
@@ -1090,6 +1096,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         $omarsSharedElsewhere = self::draftOn(self::OMARS_SHARED_ROUND, self::ACME_FOODS, self::OTHER_TICKET, self::OMAR);
         $omarsSharedElsewhere->addScreenshot(new UserId(self::OMAR), new ScreenshotId('0197a3c0-0000-7000-8000-000000000a08'), self::OMARS_MEDIA);
         $omarsSharedElsewhere->share(new UserId(self::OMAR), 7, self::at());
+        $omarsSharedElsewhere->close();
         $this->rounds->add($omarsSharedElsewhere);
     }
 

@@ -28,7 +28,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Review's answer to "Share your draft round?" over InMemoryRounds, which keeps DbalRounds' version check and number
  * slots. Omar owns the draft with two screenshots that the question is about; Lena's draft on the same ticket, Mia's
- * shared round 1 and Omar's draft on another ticket are the rows each answer must leave alone.
+ * closed shared round 1 and Omar's draft on another ticket are the rows each answer must leave alone.
  */
 final class RoundShareDraftQuestionTest extends TestCase
 {
@@ -337,6 +337,8 @@ final class RoundShareDraftQuestionTest extends TestCase
         $miasShared = self::draftOn(self::MIAS_SHARED_ROUND, self::TICKET, self::MIA);
         $miasShared->addScreenshot($mia, new ScreenshotId('0197a3c0-0000-7000-8000-000000002a04'), self::MEDIA);
         $miasShared->share($mia, 1, self::at());
+        // Closed, so it holds back no share (ADR-0048); UseCaseRoundCommandsShareTest covers an open one.
+        $miasShared->close();
         $this->rounds->add($miasShared);
 
         $otherTicketDraft = self::draftOn(self::OMARS_OTHER_TICKET_DRAFT, self::OTHER_TICKET, self::OMAR);

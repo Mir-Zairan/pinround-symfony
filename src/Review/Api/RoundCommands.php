@@ -134,15 +134,22 @@ interface RoundCommands
 
     /**
      * Shows the draft to everyone who may see the ticket as the ticket's next round number. Holds the ticket's round
-     * numbers until the caller's transaction ends, so two shares on one ticket get two numbers. When the owner is not
-     * the ticket's assignee, each pin becomes an open checklist item in the same transaction (findings, ADR-0044), which
-     * reads the ticket's assignee for a draft with pins.
+     * numbers and locks its open shared rounds until the caller's transaction ends, so of two shares on one ticket the
+     * second waits and then sees the first one's round. A ticket has one open shared round (ADR-0048): while one is
+     * open the share is refused, except the assignee's share, which closes the open findings rounds for them in the same
+     * transaction and then shares. When the owner is not the ticket's assignee, each pin becomes an open checklist item
+     * in the same transaction (findings, ADR-0044). Both read the ticket's assignee.
      *
      * @return int the round's number, from 1
      *
-     * @throws RoundRefused    NOT_FOUND, DRAFT_CHANGED, NUMBER_TAKEN, or when the draft is shared already; nothing is saved
-     * @throws \LogicException when no transaction is open or no tenant is set, or the findings' items cannot be written,
-     *                         and then the share is saved: the caller's transaction must roll back
+     * @throws RoundRefused     NOT_FOUND, DRAFT_CHANGED, NUMBER_TAKEN, or when the draft is shared already; isSharingBlocked
+     *                          while another shared round on the ticket is open (roundStillOpen, with its number) or when
+     *                          the draft has no screenshot; nothing is saved, and the draft stays unshared and unnumbered
+     * @throws \DomainException Ticketing's TicketNotFound when a shared round is open and the tenant has no such ticket;
+     *                          nothing is saved
+     * @throws \LogicException  when no transaction is open or no tenant is set, or the findings' items cannot be written
+     *                          or a findings round cannot be closed, and then the share is saved: the caller's transaction
+     *                          must roll back
      */
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int;
 
@@ -152,9 +159,9 @@ interface RoundCommands
      *
      * @return int the round's number, from 1
      *
-     * @throws RoundRefused    NOT_FOUND, DRAFT_CHANGED, NUMBER_TAKEN, or when the draft is shared or decided already;
-     *                         nothing is saved
-     * @throws \LogicException as shareDraft says
+     * @throws RoundRefused     as shareDraft says, or when the draft is decided already; nothing is saved
+     * @throws \DomainException as shareDraft says
+     * @throws \LogicException  as shareDraft says
      */
     public function shareDraftAtHandOff(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int;
 

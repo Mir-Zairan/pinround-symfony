@@ -39,8 +39,8 @@ use Zenstruck\Foundry\Test\Factories;
 /**
  * "Share your draft round?" on a verb move and a move to a chosen step of Acme Foods' SHOP-1 (P05.T9, ADR-0017, hand-off), through the real
  * firewall, voters, policy and database. Omar is the assignee and owns the draft with two screenshots; Lena leads Shop
- * and has a draft of her own, Mia is a member, Raj a manager and Sara an admin of no team. Mia's round 1 is shared, so
- * Omar's draft would be round 2. The clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end
+ * and has a draft of her own, Mia is a member, Raj a manager and Sara an admin of no team. Mia's round 1 is shared and
+ * closed, so Omar's draft would be round 2. The clock is fixed on 6 Nov 2026, before today: a clock ahead of the login would end
  * the session as idle.
  */
 final class TicketMoveDraftQuestionTest extends WebTestCase
@@ -102,6 +102,11 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $this->ticketId = $this->addTicket(self::KEY);
         $miasRound = $this->addRound($this->ticketId, 1, 'draft', 'Mia', '2026-11-05 09:00:00+00');
         $this->addScreenshot($miasRound, $this->addMedia('ready', 'Mia'), 0, 'Shared shot', null);
+        // Closed, so it holds back no share of these hand-offs (ADR-0048, one open shared round per ticket).
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE rvw_round SET state = 'closed' WHERE id = ?",
+            [$miasRound],
+        ));
         $this->lenasDraft = $this->addRound($this->ticketId, null, 'draft', 'Lena', null);
         $this->addScreenshot($this->lenasDraft, $this->addMedia('ready', 'Lena'), 0, 'Lena own shot', null);
         $this->omarsDraft = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
