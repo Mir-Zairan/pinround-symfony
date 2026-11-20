@@ -68,6 +68,8 @@ export const test = base.extend<ExtensionFixtures>({
       channel: 'chromium',
       args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`, `--force-device-scale-factor=${screenDeviceScaleFactor}`],
       ...(viewportFollowsWindow ? { viewport: null } : {}),
+      // The journey spec pairs with the dev app at https://localhost, whose certificate comes from Caddy's local CA.
+      ignoreHTTPSErrors: true,
     });
     await context.route(`${TEST_PAGE_ORIGIN}/**`, (route) =>
       new URL(route.request().url()).pathname === '/' ? route.fulfill({ path: TEST_PAGE_FILE, contentType: 'text/html' }) : route.fulfill({ status: 404 }),

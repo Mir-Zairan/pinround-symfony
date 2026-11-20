@@ -4,7 +4,7 @@ import { OMAR_EMAIL } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { runPhp } from './draft-picture';
 
-// What the MCP specs share: Omar's token, a session on /mcp as Claude Code opens one, and the revoke on /me/tokens.
+// What the MCP specs share: Omar's token (or another demo person's, issueTokenFor), a session on /mcp as Claude Code opens one, and the revoke on /me/tokens.
 //
 // The token is written straight into idn_api_token, hashed by the app's own pepper: making one on /me/tokens needs a
 // fresh two-step proof, and every Acme Foods person who owns a draft has a session other specs share or a spec that
@@ -16,7 +16,7 @@ export const ACCEPT = 'application/json, text/event-stream';
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** The scopes a token may hold (ApiTokenScope); the token page ticks read and rounds:write by default. */
-export type TokenScope = 'read' | 'rounds:write' | 'comments:write' | 'tickets:move' | 'reports:write';
+export type TokenScope = 'read' | 'rounds:write' | 'comments:write' | 'tickets:move' | 'reports:write' | 'notebooks:write';
 
 export interface IssuedToken {
   id: string;
@@ -39,6 +39,11 @@ const issuedTokenIds: string[] = [];
 
 /** Omar's live token in Acme Foods with exactly these scopes, for one day. */
 export function issueOmarsToken(scopes: readonly TokenScope[]): IssuedToken {
+  return issueTokenFor(OMAR_EMAIL, scopes);
+}
+
+/** The live token in Acme Foods of the demo person with this email, with exactly these scopes, for one day. */
+export function issueTokenFor(email: string, scopes: readonly TokenScope[]): IssuedToken {
   expect(scopes.length, 'a token holds at least one scope').toBeGreaterThan(0);
   const plainToken = `pr_${randomBytes(32).toString('base64url')}`;
   // HmacApiTokenHashing, with API_TOKEN_PEPPER read from the app's env as the app reads it; the token goes in on stdin.
@@ -53,9 +58,9 @@ export function issueOmarsToken(scopes: readonly TokenScope[]): IssuedToken {
     INSERT INTO idn_api_token (organization_id, id, user_id, name, token_hash, prefix, scopes, created_at, expires_at)
     SELECT o.organization_id, gen_random_uuid(), u.id, '${name}', decode('${tokenHash}', 'hex'), '${plainToken.slice(0, 11)}',
       ${scopeArray}, now(), now() + interval '1 day'
-    FROM org_organization o, idn_user u WHERE o.slug = 'acme-foods' AND u.email = '${OMAR_EMAIL}'
+    FROM org_organization o, idn_user u WHERE o.slug = 'acme-foods' AND u.email = '${email}'
     RETURNING id`);
-  expect(id, 'the seeded Acme Foods or Omar is missing: run make seed').toMatch(UUID);
+  expect(id, `the seeded Acme Foods or ${email} is missing: run make seed`).toMatch(UUID);
   issuedTokenIds.push(id);
   return { id, name, plainToken };
 }
