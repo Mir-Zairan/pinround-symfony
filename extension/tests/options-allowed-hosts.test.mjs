@@ -202,8 +202,17 @@ async function optionsPageWith(storedEntries) {
     if (undefined !== storedEntries) {
         await storage.set({ [ALLOWED_HOSTS_KEY]: storedEntries });
     }
+    const saving = { refusal: null };
+    // chrome.storage rejects a write it cannot make, such as one past its quota, and leaves the stored value as it was.
+    const savingStorage = {
+        get: (keys) => storage.get(keys),
+        set: (items) => (null === saving.refusal ? storage.set(items) : Promise.reject(saving.refusal)),
+    };
+    const breakSaving = () => {
+        saving.refusal = new Error('QUOTA_BYTES quota exceeded');
+    };
     const document = documentOf(OPTIONS_HTML);
-    const list = new AllowedHostList(document, storage);
+    const list = new AllowedHostList(document, savingStorage);
     await list.show();
     const element = (id) => document.getElementById(id);
     const shownEntries = () => element('allowed-host-list').children.map((item) => item.children[0].textContent);
@@ -217,7 +226,7 @@ async function optionsPageWith(storedEntries) {
         await settle();
     };
 
-    return { storage, element, shownEntries, removeButtonOf, focusedName, stored, add };
+    return { storage, element, shownEntries, removeButtonOf, focusedName, stored, add, breakSaving };
 }
 
 test('options.html holds the allowed host section with its input tied to a label and a polite status', () => {
@@ -237,6 +246,7 @@ test('no stored host shows the empty state and the suggestion, and no list', asy
 
     assert.equal(element('allowed-hosts-empty').checkVisibility(), true);
     assert.equal(element('allowed-hosts-empty').textContent, ALLOWED_HOST_TEXTS.empty);
+    assert.doesNotMatch(ALLOWED_HOST_TEXTS.empty, /\bsites?\b/u, 'The page calls them hosts everywhere.');
     assert.equal(element('allowed-host-list').checkVisibility(), false);
     assert.equal(element('add-suggested-host').checkVisibility(), true);
     assert.equal(element('add-suggested-host').textContent, 'Add http://localhost:*');
@@ -371,4 +381,82 @@ test('two presses at once both land: each reads the list the one before wrote', 
     await settle();
 
     assert.deepEqual(await stored(), ['http://localhost:8000', 'http://localhost:*']);
+});
+
+test('Remove pressed on two hosts back to back moves focus from the list the first left, to the host after both', async () => {
+    const { focusedName, stored, shownEntries, removeButtonOf } = await optionsPageWith(['http://localhost:*', 'https://shop.acme-foods.test', 'http://127.0.0.1:8000']);
+    removeButtonOf('http://localhost:*').focus();
+
+    removeButtonOf('http://localhost:*').click();
+    removeButtonOf('https://shop.acme-foods.test').click();
+    await settle();
+
+    assert.deepEqual(await stored(), ['http://127.0.0.1:8000']);
+    assert.deepEqual(shownEntries(), ['http://127.0.0.1:8000']);
+    assert.equal(focusedName(), 'Remove http://127.0.0.1:8000');
+});
+
+test('Add that storage cannot save says so as an error, keeps the typed text and the list, and marks no input invalid', async () => {
+    const { add, stored, shownEntries, element, breakSaving } = await optionsPageWith(['https://shop.acme-foods.test']);
+    breakSaving();
+
+    await add('http://localhost:8000');
+
+    assert.equal(element('allowed-host-status').textContent, ALLOWED_HOST_TEXTS.notSaved);
+    assert.equal(element('allowed-host-status').classList.contains('error'), true);
+    assert.equal(element('allowed-host-input').value, 'http://localhost:8000');
+    assert.equal(element('allowed-host-input').getAttribute('aria-invalid'), null);
+    assert.deepEqual(shownEntries(), ['https://shop.acme-foods.test']);
+    assert.deepEqual(await stored(), ['https://shop.acme-foods.test']);
+});
+
+test('Remove that storage cannot save says so as an error and keeps the host, and marks no input invalid', async () => {
+    const { stored, shownEntries, removeButtonOf, element, breakSaving } = await optionsPageWith(['https://shop.acme-foods.test', 'http://localhost:*']);
+    breakSaving();
+
+    removeButtonOf('https://shop.acme-foods.test').click();
+    await settle();
+
+    assert.equal(element('allowed-host-status').textContent, ALLOWED_HOST_TEXTS.notSaved);
+    assert.equal(element('allowed-host-status').classList.contains('error'), true);
+    assert.equal(element('allowed-host-input').getAttribute('aria-invalid'), null);
+    assert.deepEqual(shownEntries(), ['https://shop.acme-foods.test', 'http://localhost:*']);
+    assert.deepEqual(await stored(), ['https://shop.acme-foods.test', 'http://localhost:*']);
+});
+
+test('a list that cannot be read marks no input invalid', async () => {
+    const storage = { get: async () => { throw new Error('IO error'); }, set: async () => undefined };
+    const document = documentOf(OPTIONS_HTML);
+
+    await new AllowedHostList(document, storage).show();
+
+    assert.equal(document.getElementById('allowed-host-status').textContent, ALLOWED_HOST_TEXTS.notRead);
+    assert.equal(document.getElementById('allowed-host-input').getAttribute('aria-invalid'), null);
+});
+
+test('the suggestion refused by a full list clears the mark a refused typed host left, and keeps that text', async () => {
+    const full = Array.from({ length: MAX_ALLOWED_HOSTS }, (_, index) => `http://host-${index}.acme-foods.test`);
+    const { add, stored, element } = await optionsPageWith(full);
+    await add('ftp://shop.acme-foods.test');
+    assert.equal(element('allowed-host-input').getAttribute('aria-invalid'), 'true');
+
+    element('add-suggested-host').click();
+    await settle();
+
+    assert.equal(element('allowed-host-status').textContent, HOST_REFUSALS.listFull);
+    assert.equal(element('allowed-host-status').classList.contains('error'), true);
+    assert.equal(element('allowed-host-input').getAttribute('aria-invalid'), null);
+    assert.equal(element('allowed-host-input').value, 'ftp://shop.acme-foods.test');
+    assert.deepEqual(await stored(), full);
+});
+
+test('a typed host refused, then one added, leaves the input no longer marked invalid', async () => {
+    const { add, stored, element } = await optionsPageWith(['https://shop.acme-foods.test']);
+    await add('ftp://shop.acme-foods.test');
+    assert.equal(element('allowed-host-input').getAttribute('aria-invalid'), 'true');
+
+    await add('http://localhost:8000');
+
+    assert.equal(element('allowed-host-input').getAttribute('aria-invalid'), null);
+    assert.deepEqual(await stored(), ['https://shop.acme-foods.test', 'http://localhost:8000']);
 });

@@ -4,7 +4,7 @@
 import { AllowedHostError, HOST_REFUSALS, MAX_ALLOWED_HOSTS, SUGGESTED_HOST, addAllowedHost, allowedHostOf, allowedHostText, loadAllowedHosts, removeAllowedHost } from '../shared/allowed-hosts.js';
 
 export const ALLOWED_HOST_TEXTS = Object.freeze({
-    empty: 'No sites yet. Scenarios play only on sites you add here.',
+    empty: 'No hosts yet. Scenarios play only on hosts you add here.',
     full: HOST_REFUSALS.listFull,
     notRead: 'Could not read your allowed hosts. Reload this page to try again.',
     notSaved: 'Could not save your allowed hosts. Try again.',
@@ -16,7 +16,8 @@ export const ALLOWED_HOST_TEXTS = Object.freeze({
 const SUGGESTED_ENTRY = allowedHostText(allowedHostOf(SUGGESTED_HOST));
 
 /**
- * One press at a time: each press reads the stored list and writes it back, so two at once would lose one's change.
+ * One press at a time: each press draws the list and moves focus from the list the one before left, so a Remove
+ * pressed before the last one ended would pick its next focus from a list that is gone.
  *
  * @param {Document} document the options page's, or a fake in tests
  * @param {object} storage the extension's local storage area
@@ -35,9 +36,9 @@ export class AllowedHostList {
         this.#storage = storage;
         this.#element('allowed-host-form').addEventListener('submit', (event) => {
             event.preventDefault();
-            this.#press(() => this.#add(this.#element('allowed-host-input').value));
+            this.#press(() => this.#add(this.#element('allowed-host-input').value, true));
         });
-        this.#element('add-suggested-host').addEventListener('click', () => this.#press(() => this.#add(SUGGESTED_HOST)));
+        this.#element('add-suggested-host').addEventListener('click', () => this.#press(() => this.#add(SUGGESTED_HOST, false)));
     }
 
     /** Reads the stored list and draws it; a list that cannot be read shows a refusal, never the empty state. */
@@ -62,23 +63,25 @@ export class AllowedHostList {
         this.#pressing = pressed.catch(() => undefined);
     }
 
-    #showStatus(message, isError = false) {
+    /** Only text Add refused marks the input invalid; any other answer clears the mark. */
+    #showStatus(message, isError = false, isTypedTextRefused = false) {
         const status = this.#element('allowed-host-status');
         status.textContent = message;
         status.classList.toggle('error', isError);
-        if (isError) {
+        if (isTypedTextRefused) {
             this.#element('allowed-host-input').setAttribute('aria-invalid', 'true');
         } else {
             this.#element('allowed-host-input').removeAttribute('aria-invalid');
         }
     }
 
-    async #add(typed) {
+    async #add(entryText, isTyped) {
         let added;
         try {
-            added = await addAllowedHost(this.#storage, typed);
+            added = await addAllowedHost(this.#storage, entryText);
         } catch (error) {
-            this.#showStatus(error instanceof AllowedHostError ? error.message : ALLOWED_HOST_TEXTS.notSaved, true);
+            const isRefused = error instanceof AllowedHostError;
+            this.#showStatus(isRefused ? error.message : ALLOWED_HOST_TEXTS.notSaved, true, isRefused && isTyped);
 
             return;
         }
