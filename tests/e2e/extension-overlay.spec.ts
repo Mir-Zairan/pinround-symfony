@@ -618,7 +618,7 @@ interface PageWrites {
 
 const pageWritesOf = (page: Page) => page.evaluate(() => (window as unknown as { pageWrites: PageWrites }).pageWrites);
 
-test('a key whose beforeinput the page cancelled does not let the page\'s execCommand into the note, then or later', async ({ context, testPage }) => {
+test('a key whose beforeinput the page cancelled does not let the page\'s execCommand into the note', async ({ context, testPage }) => {
   await answerPinround(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
@@ -640,11 +640,8 @@ test('a key whose beforeinput the page cancelled does not let the page\'s execCo
   });
   await testPage.keyboard.press('X');
   await expect.poll(async () => (await pageWritesOf(testPage)).wrote).toEqual([true]);
-  await testPage.evaluate(() => {
-    (window as unknown as { pageWrites: PageWrites }).pageWrites.wrote.push(document.execCommand('selectAll') && document.execCommand('insertText', false, 'X'));
-  });
 
-  expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 1, wrote: [true, true] });
+  expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 1, wrote: [true] });
   expect((await inspector.node('textbox', 'Note for pin 1')).value).toBe('Logo is cut off');
   expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
   expect(await inspector.focused()).toEqual({ role: 'textbox', name: 'Note for pin 1' });
@@ -711,7 +708,7 @@ test('a key into a full note brings a beforeinput with no input, and that lets n
   expect({ length: note.length, isTheFullNote: note === fullNote }).toEqual({ length: 1000, isTheFullNote: true });
 });
 
-test('an execCommand the page runs while a typed key\'s input is under way undoes that key and leaves the note as it was', async ({ context, testPage }) => {
+test('an execCommand the page runs while a typed key\'s input is under way leaves the note with that key and without the page\'s text', async ({ context, testPage }) => {
   await answerPinround(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
@@ -734,10 +731,97 @@ test('an execCommand the page runs while a typed key\'s input is under way undoe
   await testPage.keyboard.press('X');
 
   await expect.poll(async () => (await pageWritesOf(testPage)).wrote).toEqual([true]);
-  await expect.poll(async () => (await inspector.node('textbox', 'Note for pin 1')).value).toBe('Logo is cut off');
-  expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
+  await expect.poll(async () => (await inspector.node('textbox', 'Note for pin 1')).value).toBe('Logo is cut offX');
+  expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut offX']);
   await testPage.keyboard.type(', 価格');
-  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off, 価格']);
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut offX, 価格']);
+});
+
+test('the page replaying every note input over the whole note from its capture-phase input listener changes nothing the person writes', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  await popup.getByLabel('Project key').fill('SHOP');
+  const inspector = await PageInspector.of(context, testPage);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await testPage.mouse.click(400, 300);
+  await testPage.evaluate(() => {
+    const writes: PageWrites = { beforeinputs: 0, wrote: [] };
+    (window as unknown as { pageWrites: PageWrites }).pageWrites = writes;
+    let isReplaying = false;
+    window.addEventListener('input', (event) => {
+      if (isReplaying || !(event instanceof InputEvent)) {
+        return;
+      }
+      isReplaying = true;
+      const isAllSelected = document.execCommand('selectAll');
+      writes.wrote.push(isAllSelected && ('insertLineBreak' === event.inputType ? document.execCommand('insertLineBreak') : document.execCommand('insertText', false, event.data ?? '')));
+      isReplaying = false;
+    }, { capture: true });
+  });
+
+  await testPage.keyboard.type('Price is wrong');
+
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Price is wrong']);
+  expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 0, wrote: Array.from({ length: 'Price is wrong'.length }, () => true) });
+
+  await testPage.keyboard.press('Shift+Enter');
+  await testPage.keyboard.type('Total 価格');
+  await testPage.keyboard.insertText('\r\nTax 😀');
+
+  const fullNote = 'Price is wrong\nTotal 価格\nTax 😀';
+  await expect.poll(async () => (await inspector.node('textbox', 'Note for pin 1')).value).toBe(fullNote);
+  const { wrote } = await pageWritesOf(testPage);
+  expect(wrote.length).toBeGreaterThan('Price is wrong'.length + 1 + 'Total 価格'.length);
+  expect(wrote.every((hasWritten) => hasWritten)).toBe(true);
+  // The replay empties the note, which is no deletion before the caret, so the note stays as it was without the key.
+  await testPage.keyboard.press('Home');
+  await testPage.keyboard.press('Backspace');
+  await expect.poll(async () => (await pageWritesOf(testPage)).wrote.length).toBe(wrote.length + 1);
+  expect((await inspector.node('textbox', 'Note for pin 1')).value).toBe(fullNote);
+  await testPage.keyboard.press('Enter');
+  await popup.getByRole('button', { name: 'Capture this page' }).click();
+  await expect(popup.getByRole('status')).toHaveText('Screenshot 1 saved for the report. Capture more pages, or make the report draft.');
+  const [pins] = await storedReportPins(popup);
+  expect(pins.map((stored) => stored.note)).toEqual([fullNote]);
+});
+
+test('the person\'s own inserts, deletions, composition and a cut at the note\'s length all reach the note, and undo is refused', async ({ context, testPage }) => {
+  await answerPinround(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await PageInspector.of(context, testPage);
+  await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await testPage.mouse.click(400, 300);
+  const noteValue = async () => (await inspector.node('textbox', 'Note for pin 1')).value;
+
+  await testPage.keyboard.insertText('Price 価格\r\nis wrong');
+  await expect.poll(noteValue).toBe('Price 価格\nis wrong');
+  await testPage.keyboard.press('Backspace');
+  await expect.poll(noteValue).toBe('Price 価格\nis wron');
+  await testPage.keyboard.press('Home');
+  await testPage.keyboard.press('Delete');
+  await expect.poll(noteValue).toBe('Price 価格\ns wron');
+  await testPage.keyboard.press('End');
+  await testPage.keyboard.press('Control+Backspace');
+  await expect.poll(noteValue).toBe('Price 価格\ns ');
+
+  const session = await context.newCDPSession(testPage);
+  await session.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
+  await session.send('Input.imeSetComposition', { text: 'にほ', selectionStart: 2, selectionEnd: 2 });
+  await session.send('Input.insertText', { text: '日本' });
+  await session.detach();
+  await expect.poll(noteValue).toBe('Price 価格\ns 日本');
+  // The accessibility tree shows a line break in a name as a space.
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Price 価格 s 日本']);
+
+  await testPage.keyboard.press('ControlOrMeta+Z');
+  await afterTwoPaints(testPage);
+  expect(await noteValue()).toBe('Price 価格\ns 日本');
+
+  // The cut falls between the halves of the emoji, so Chrome keeps neither.
+  const filler = 'Prix faux, 価格が違う. '.repeat(60).slice(0, 998);
+  await testPage.keyboard.press('ControlOrMeta+A');
+  await testPage.keyboard.insertText(`${filler}a😀b`);
+  await expect.poll(noteValue).toBe(`${filler}a`);
 });
 
 test('the 101st pin is refused with a plain message and the 100 stay', async ({ context, testPage }) => {
