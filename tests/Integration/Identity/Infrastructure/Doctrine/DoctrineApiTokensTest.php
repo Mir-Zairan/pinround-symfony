@@ -41,6 +41,8 @@ final class DoctrineApiTokensTest extends KernelTestCase
     private const string OMAR_AT_BETA = '0197a3c0-0000-7000-8000-000000000ce6';
     private const string OMAR_REVOKED = '0197a3c0-0000-7000-8000-000000000ce7';
     private const string OMAR_WITHIN_A_SECOND = '0197a3c0-0000-7000-8000-000000000ce8';
+    private const string OMAR_NOTEBOOKS = '0197a3c0-0000-7000-8000-000000000ce9';
+    private const string OMAR_REFUSED_SCOPE = '0197a3c0-0000-7000-8000-000000000cea';
     private const string PEPPER = 'integration-test-pepper-of-32-bytes-or-more';
     private const string ISSUED_AT = '2099-03-15 10:00:00 UTC';
 
@@ -579,6 +581,50 @@ final class DoctrineApiTokensTest extends KernelTestCase
                 self::assertStringContainsString('permission denied for table idn_api_token', $refusal->getMessage(), $change);
             }
         }
+    }
+
+    #[Test]
+    public function aTokenMayHoldNotebooksWriteAlone(): void
+    {
+        $issued = ApiToken::issue(self::OMAR_NOTEBOOKS, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), 'Claude Code', [ApiTokenScope::NotebooksWrite], new HmacApiTokenHashing(self::PEPPER), new \DateTimeImmutable(self::ISSUED_AT), ApiToken::DEFAULT_LIFETIME_DAYS);
+
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->tokens()->add($issued->token()));
+
+        self::assertSame('{notebooks:write}', $this->asAcmeFoods(fn (): mixed => $this->connection()->fetchOne('SELECT scopes::text FROM idn_api_token WHERE id = ?', [self::OMAR_NOTEBOOKS])));
+    }
+
+    /**
+     * Written past ApiTokenScope, as only the constraint stands between other SQL and the table. The same row with a
+     * known scope goes in, so the refusals come from the scope alone.
+     */
+    #[Test]
+    public function theDatabaseRefusesAScopeThatIsNotOneOfTheCases(): void
+    {
+        self::assertSame(1, $this->asAcmeFoods(fn (): int|string => $this->insertRawToken(self::OMAR_REFUSED_SCOPE, '{read,notebooks:write}')));
+
+        foreach (['{read,admin}', '{notebooks:read}', '{NOTEBOOKS:WRITE}'] as $scopes) {
+            try {
+                $this->asAcmeFoods(fn (): int|string => $this->insertRawToken(self::OMAR_REFUSED_SCOPE, $scopes));
+                self::fail('The database took the scopes '.$scopes);
+            } catch (DriverException $refusal) {
+                self::assertSame('23514', $refusal->getSQLState(), $scopes);
+                self::assertStringContainsString('idn_api_token_scopes_check', $refusal->getMessage(), $scopes);
+            }
+        }
+
+        self::assertSame(0, $this->asAcmeFoods(fn (): mixed => $this->connection()->fetchOne('SELECT count(*) FROM idn_api_token WHERE id = ?', [self::OMAR_REFUSED_SCOPE])));
+    }
+
+    /**
+     * @param string $scopes a PostgreSQL array literal
+     */
+    private function insertRawToken(string $id, string $scopes): int|string
+    {
+        return $this->connection()->executeStatement(
+            "INSERT INTO idn_api_token (organization_id, id, user_id, name, token_hash, prefix, scopes, created_at, expires_at)
+             VALUES (?, ?, ?, 'Claude Code', decode(?, 'hex'), 'pr_abcdefgh', ?::text[], '2099-03-15 10:00:00+00', '2099-06-13 10:00:00+00')",
+            [self::ACME_FOODS, $id, self::OMAR, hash('sha256', $id.$scopes), $scopes],
+        );
     }
 
     private function add(string $id, string $organizationId, string $userId, \DateTimeImmutable $issuedAt, int $lifetimeDays = ApiToken::DEFAULT_LIFETIME_DAYS): void

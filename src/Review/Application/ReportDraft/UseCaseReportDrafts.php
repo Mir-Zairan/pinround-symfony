@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\Application\ReportDraft;
 
-use App\Media\Api\MediaImageStatus;
-use App\Media\Api\UploadedMedia;
+use App\Review\Api\AddedReportDraftScreenshot;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftCursor;
@@ -16,6 +15,8 @@ use App\Review\Api\ReportDraftView;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\DraftRoundContents;
+use App\Review\Application\PicturesToKeep;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -43,8 +44,9 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         private TicketCommands $ticketCommands,
         private TicketKeyQueries $ticketKeyQueries,
         private RoundCommands $roundCommands,
-        private UploadedMedia $uploadedMedia,
+        private PicturesToKeep $picturesToKeep,
         private TenantContext $tenantContext,
+        private DraftRoundContents $draftRoundContents,
     ) {
     }
 
@@ -54,6 +56,31 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         $project = $this->reportableProject($projectKey);
         $checked = ReportDraftContentRules::checked($content);
         $this->refuseUnlessOwnUsablePictures($organizationId, $owner, $checked->screenshots);
+        $id = $this->rows->nextId();
+        $this->rows->insert($organizationId, $id, $owner, $project->key(), $checked, $at);
+
+        return $id;
+    }
+
+    public function createFromDraftRound(string $roundId, UserId $owner, \DateTimeImmutable $at): string
+    {
+        $organizationId = $this->tenantContext->require();
+        $draftRound = $this->draftRoundContents->contentsOf($roundId, $owner);
+        $ticketKey = $this->ticketKeyQueries->keyOf($draftRound->ticketId) ?? throw new \LogicException('The ticket of a draft round the tenant has is the tenant\'s.');
+        $foundWhileTesting = \sprintf(self::FOUND_WHILE_TESTING, $ticketKey);
+        $title = $foundWhileTesting;
+        foreach ($draftRound->screenshots as $screenshot) {
+            if (null !== $screenshot->title && '' !== trim($screenshot->title)) {
+                $title = $screenshot->title;
+                break;
+            }
+        }
+        $project = $this->reportableProject(self::projectKeyOf($ticketKey));
+        $checked = ReportDraftContentRules::checked(new ReportDraftContent($title, $foundWhileTesting, $draftRound->screenshots));
+        $this->refuseUnlessOwnUsablePictures($organizationId, $owner, $checked->screenshots);
+
+        // Only once every rule of a report draft holds, so a refused move writes nothing at all.
+        $this->draftRoundContents->deleteAsRead($draftRound, $owner, $at);
         $id = $this->rows->nextId();
         $this->rows->insert($organizationId, $id, $owner, $project->key(), $checked, $at);
 
@@ -80,13 +107,13 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         }
     }
 
-    public function addScreenshot(string $draftId, UserId $owner, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): void
+    public function addScreenshot(string $draftId, UserId $owner, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedReportDraftScreenshot
     {
         $draft = $this->rows->ofOwner($draftId, $owner, lock: true) ?? throw ReportDraftRefused::notFound();
         $checked = ReportDraftContentRules::checkedScreenshot($screenshot);
         foreach ($draft->screenshots as $saved) {
             if ($saved->mediaId === $checked->mediaId) {
-                return;
+                return new AddedReportDraftScreenshot(true, \count($draft->screenshots));
             }
         }
         if (\count($draft->screenshots) >= self::MAX_SCREENSHOTS) {
@@ -97,6 +124,8 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         if (!$this->rows->update($draft->id, $owner, $draft->version, $content, $at)) {
             throw ReportDraftRefused::because(ReportDraftRefused::DRAFT_CHANGED);
         }
+
+        return new AddedReportDraftScreenshot(false, \count($content->screenshots));
     }
 
     public function delete(string $draftId, UserId $owner): void
@@ -168,21 +197,21 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
      */
     private function refuseUnlessOwnUsablePictures(OrganizationId $organizationId, UserId $owner, array $screenshots): void
     {
-        if ([] === $screenshots) {
-            return;
+        $refusal = $this->picturesToKeep->refusalOf($organizationId, $owner, array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $screenshots));
+        if (null !== $refusal) {
+            throw ReportDraftRefused::because($refusal);
         }
-        $mediaIds = array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $screenshots);
-        $states = $this->uploadedMedia->statesOf($organizationId, $owner, $mediaIds);
-        foreach ($mediaIds as $mediaId) {
-            $refusal = match ($states[$mediaId] ?? null) {
-                null => RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU,
-                MediaImageStatus::Rejected => RoundRefused::MEDIA_REJECTED,
-                MediaImageStatus::Pending, MediaImageStatus::Ready => null,
-            };
-            if (null !== $refusal) {
-                throw ReportDraftRefused::because($refusal);
-            }
-        }
+    }
+
+    /**
+     * A ticket key is its project's key, a dash and a number (Ticketing's TicketKey), so the project key is all before
+     * the last dash.
+     */
+    private static function projectKeyOf(string $ticketKey): string
+    {
+        $dash = strrpos($ticketKey, '-');
+
+        return false === $dash ? $ticketKey : substr($ticketKey, 0, $dash);
     }
 
     /**

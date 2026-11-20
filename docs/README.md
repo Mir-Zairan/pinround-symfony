@@ -63,6 +63,8 @@ Where every document is, what it holds, and the order to read it in.
 | File | Holds |
 |---|---|
 | [claude-code.md](guides/claude-code.md) | Connect Claude Code to pinround: token, `claude mcp add`, the tools, uploads, safety |
+| [reporting-with-claude-code.md](guides/reporting-with-claude-code.md) | Report while Claude Code checks: the `report_while_investigating` prompt, token scopes, the evidence log, the choices at the end, Send; the [scenario format](guides/reporting-with-claude-code.md#scenarios) and `save_scenarios` |
+| [browser-extension.md](guides/browser-extension.md) | The Chrome extension: install, connect, capture a page, [notebooks](guides/browser-extension.md#notebooks), [asking Claude Code about one](guides/browser-extension.md#ask-claude-code-about-a-notebook), [playing scenarios](guides/browser-extension.md#play-scenarios), allowed hosts and [safety](guides/browser-extension.md#safety) |
 
 ## 03 Decisions (ADRs)
 [03-adr/README.md](03-adr/README.md) lists all 30 decisions with a one-line summary each.

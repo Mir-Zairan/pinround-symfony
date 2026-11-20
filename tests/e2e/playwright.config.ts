@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const NODE_SPECS = ['pin-count.spec.ts', 'pin-position.spec.ts', 'submit-hold.spec.ts', 'upload-checks.spec.ts', 'upload-status.spec.ts'];
-const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts', 'review-journey.spec.ts', 'mcp-upload.spec.ts'];
+const DRAFT_SPECS = ['share-draft.spec.ts', 'draft-round.spec.ts', 'review-journey.spec.ts', 'mcp-upload.spec.ts', 'mcp-report.spec.ts', 'draft-to-report-draft.spec.ts', 'notebooks.spec.ts'];
 const AI_SETTINGS_SPECS = ['check-with-ai.spec.ts', 'summary-poll.spec.ts', 'local-ai.spec.ts', 'laptop-summary.spec.ts'];
+const EXTENSION_SPECS = 'extension-*.spec.ts';
 
 export default defineConfig({
   testDir: '.',
@@ -21,7 +22,7 @@ export default defineConfig({
     {
       name: 'chromium',
       testMatch: '*.spec.ts',
-      testIgnore: [...NODE_SPECS, ...DRAFT_SPECS, ...AI_SETTINGS_SPECS],
+      testIgnore: [...NODE_SPECS, ...DRAFT_SPECS, ...AI_SETTINGS_SPECS, EXTENSION_SPECS],
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
     },
@@ -43,6 +44,14 @@ export default defineConfig({
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'],
+    },
+    // The extension specs launch a Chromium of their own per test with the extension loaded (extension.ts), so the
+    // browser and device settings above do not apply. One worker, one test at a time, as the draft specs. No setup
+    // dependency: the test page is answered by the fixture, not by the app.
+    {
+      name: 'chromium-extension',
+      testMatch: EXTENSION_SPECS,
+      workers: 1,
     },
   ],
 });

@@ -17,9 +17,10 @@ use Symfony\Component\Security\Core\Authorization\AccessDecisionManagerInterface
 use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 
 /**
- * Decides RoundPermission VIEW and EDIT on one round (ADR-0013, ADR-0017). An unshared draft is its owner's alone: not
- * a lead's or an admin's either, and its ticket is not read. A shared round is whoever TicketPermission VIEW lets see
- * its ticket for VIEW, and whoever TicketPermission VIEW and EDIT both grant for EDIT. A deleted draft is nobody's.
+ * Decides RoundPermission VIEW, EDIT and MOVE_TO_REPORT_DRAFT on one round (ADR-0013, ADR-0017, ADR-0044). An
+ * unshared draft is its owner's alone: not a lead's or an admin's either, and its ticket is not read. A shared round is
+ * whoever TicketPermission VIEW lets see its ticket for VIEW, and whoever TicketPermission VIEW and EDIT both grant for
+ * EDIT; MOVE_TO_REPORT_DRAFT is nobody's on a shared round. A deleted draft is nobody's.
  * Denied with nobody logged in, when the tenant is not the actor's organization, for a round of another organization,
  * and for a shared round whose ticket the tenant has not or whose facts cannot be read.
  *
@@ -43,7 +44,7 @@ final class RoundVoter extends DenyByDefaultVoter
 
     protected function attributes(): array
     {
-        return [RoundPermission::VIEW, RoundPermission::EDIT];
+        return [RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT];
     }
 
     protected function subjectClass(): string
@@ -63,6 +64,9 @@ final class RoundVoter extends DenyByDefaultVoter
         }
         if ($subject->isUnsharedDraft) {
             return $subject->ownerId->equals($actor->userId());
+        }
+        if (RoundPermission::MOVE_TO_REPORT_DRAFT === $attribute) {
+            return false;
         }
         $ticket = $this->ticketOf($subject);
         if (null === $ticket || !$this->accessDecisionManager->decide($token, [TicketPermission::VIEW], $ticket)) {

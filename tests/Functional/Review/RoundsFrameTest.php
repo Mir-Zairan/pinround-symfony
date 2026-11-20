@@ -274,6 +274,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private'));
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private .draft-round-editor'), 'The editor is in the private card only.');
         self::assertCount(1, $page->filter(self::ROUNDS.' .draft-round-editor'));
+        self::assertCount(0, $page->filter(self::ROUNDS.' .checklist'), 'A self-check round has no items, so no checklist.');
         self::assertStringNotContainsString(self::LENA_DRAFT_TITLE, (string) $this->client->getResponse()->getContent());
 
         foreach (['Mia', 'Sara'] as $person) {
@@ -317,9 +318,10 @@ final class RoundsFrameTest extends WebTestCase
         $transactions = new TenantTransactions(self::getContainer()->get(EntityManagerInterface::class), self::getContainer()->get(TenantContext::class));
         $sees = TicketVisibility::for($this->acmeFoods, $this->people['Lena']->id(), [$this->shop], false, null);
         $doesNotSee = TicketVisibility::for($this->acmeFoods, $this->people['Raj']->id(), [], false, null);
+        $assigneeId = $this->people['Omar']->id();
 
-        $seen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $sees, new \DateTimeImmutable(self::NOW)));
-        $unseen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $doesNotSee, new \DateTimeImmutable(self::NOW)));
+        $seen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $sees, $assigneeId, new \DateTimeImmutable(self::NOW)));
+        $unseen = $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $doesNotSee, $assigneeId, new \DateTimeImmutable(self::NOW)));
 
         self::assertCount(1, $seen->cards, 'The same rounds are there for a viewer who may see the ticket.');
         self::assertSame([], $unseen->cards);
@@ -361,10 +363,10 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · Review · by a former member', 'Round 2 · self-check by a former member'],
+            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · Review · by a former member', 'Round 2 · findings by a former member'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
-        self::assertSame('What a former member checked before passing the ticket on.', $page->filter(self::ROUNDS.' .round-card__description')->text());
+        self::assertSame('What a former member found while checking the ticket.', $page->filter(self::ROUNDS.' .round-card__description')->text());
         self::assertStringNotContainsString('Noor', (string) $this->client->getResponse()->getContent());
     }
 
@@ -381,7 +383,7 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['What Lena checked before passing the ticket on.', 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.'],
+            ['What Lena found while checking the ticket.', 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.'],
             $page->filter(self::ROUNDS.' .round-card__description')->each(static fn (Crawler $description): string => $description->text()),
             'A review round has no description.',
         );
@@ -473,9 +475,10 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     /**
-     * The section's own reads do not grow with the rounds: one report with one picture and pin, then the same ticket with the
-     * report, 5 more rounds by different people with 3 pictures each, a shared draft and the viewer's draft read the same
-     * number of queries.
+     * The section's own reads do not grow with the rounds: one report with one picture and pin and one findings round
+     * with one item, then the same ticket with those, 5 more rounds by different people with 3 pictures each, three of
+     * them findings rounds with an item per pin, and the viewer's draft read the same number of queries. The findings
+     * round of the first read is there because a shared draft adds the items query and the ticket's facts, once.
      */
     #[Test]
     public function theSectionReadsTheSameNumberOfQueriesWhateverTheNumberOfRounds(): void
@@ -483,24 +486,33 @@ final class RoundsFrameTest extends WebTestCase
         $ticketId = $this->addTicket('SHOP-1');
         $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $this->addPin($this->addScreenshot($report, $this->addMedia('ready'), 0, 'First', null), 1, '10.00', '10.00', 'A note', 'Mia');
+        $findings = $this->addRound($ticketId, 6, 'draft', 'Mia', self::SHARED_AT);
+        $this->addCheckItem($findings, $this->addPin($this->addScreenshot($findings, $this->addMedia('ready'), 0, null, null), 1, '10.00', '10.00', 'A finding', 'Mia'), 'open');
         $this->logIn($this->client, $this->people['Omar']);
         $this->queryCountOf(self::ROUNDS_PAGE);
-        $oneRoundQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+        $twoRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+        self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
 
         foreach (['Lena', 'Omar', 'Raj', 'Sara', 'Mia'] as $number => $owner) {
-            $round = $this->addRound($ticketId, $number + 1, 0 === $number % 2 ? 'draft' : 'review', $owner, self::SHARED_AT);
+            $isDraft = 0 === $number % 2;
+            $round = $this->addRound($ticketId, $number + 1, $isDraft ? 'draft' : 'review', $owner, self::SHARED_AT);
             foreach ([0, 1, 2] as $position) {
                 $screenshot = $this->addScreenshot($round, $this->addMedia('ready'), $position, null, null);
-                $this->addPin($screenshot, 1, '10.00', '10.00', 'A note', $owner);
+                $pinId = $this->addPin($screenshot, 1, '10.00', '10.00', 'A note', $owner);
+                if ($isDraft) {
+                    $this->addCheckItem($round, $pinId, 'open');
+                }
             }
         }
         $own = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addScreenshot($own, $this->addMedia('pending'), 0, null, null);
         $manyRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
-        self::assertCount(7, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
-        self::assertCount(11, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'));
-        self::assertSame($oneRoundQueryCount, $manyRoundsQueryCount);
+        self::assertCount(8, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
+        self::assertCount(12, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'));
+        self::assertCount(4, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
+        self::assertCount(10, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row button'), 'Omar may mark each finding fixed.');
+        self::assertSame($twoRoundsQueryCount, $manyRoundsQueryCount);
     }
 
     #[Test]

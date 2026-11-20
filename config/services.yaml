@@ -213,6 +213,7 @@ services:
     App\Ticketing\Api\TicketVisibilities: '@App\Ticketing\Application\RoleTicketVisibilities'
     App\Ticketing\Api\TicketCommands: '@App\Ticketing\Application\UseCaseTicketCommands'
     App\Ticketing\Api\TicketQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketQueries'
+    App\Ticketing\Api\TicketSearchQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketSearchQueries'
     App\Ticketing\Api\AssigneeTicketCounts: '@App\Ticketing\Infrastructure\Doctrine\DbalAssigneeTicketCounts'
     App\Ticketing\Api\TicketSummaryQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketSummaryQueries'
     App\Ticketing\Api\TicketSummaryCommands: '@App\Ticketing\Application\CheckedTicketSummaryCommands'
@@ -460,13 +461,17 @@ when@test:
         test.review_verdict_commands:
             alias: App\Review\Api\VerdictCommands
             public: true
-        # No route changes a checklist item before the checklist card ships;
-        # UseCaseChecklistCommandsTest gets the Api as they will.
+        # UseCaseChecklistCommandsTest gets the Api by this id, as ChecklistController and the AgentApi tools get it
+        # injected.
         test.review_checklist_commands:
             alias: App\Review\Api\ChecklistCommands
             public: true
         test.review_checklist_queries:
             alias: App\Review\Api\ChecklistQueries
+            public: true
+        # NotebookLeakTest gets the Api by this id, as the notebook page and the AgentApi notebook tools get it injected.
+        test.review_notebooks:
+            alias: App\Review\Api\Notebooks
             public: true
         # No page saves a report before the new ticket form takes a screenshot; ScreenshotReportOnNewTicketTest gets
         # Ticketing's port as that form will.

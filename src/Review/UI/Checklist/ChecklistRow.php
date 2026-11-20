@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace App\Review\UI\Checklist;
 
 /**
- * One row of the checklist card: a pin of the report with its note, its state chip and the buttons the viewer may use.
+ * One row of a checklist card: a pin with its picture, its note, its state chip and the buttons the viewer may use.
  */
 final readonly class ChecklistRow
 {
     /**
      * @param string $itemId       the check item's id, lowercase
-     * @param int    $pinNumber    the number of its pin on its Round 0 picture, from 1
+     * @param int    $pinNumber    the number of its pin on its picture, from 1; two pictures each have a pin 1
+     * @param string $pinLabel     the pin with its picture, for example "Screenshot 2 · pin 1"
      * @param string $note         the pin's note as shown; "(no note)" for a pin with none
      * @param string $stateLabel   for example "Fixed · to check"
      * @param string $stateClass   the chip's colour class, for example "check-state--fixed"
@@ -21,6 +22,7 @@ final readonly class ChecklistRow
     public function __construct(
         public string $itemId,
         public int $pinNumber,
+        public string $pinLabel,
         public string $note,
         public string $stateLabel,
         public string $stateClass,

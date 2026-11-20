@@ -36,8 +36,6 @@ final readonly class CreateReportUpload implements AgentTool
 {
     public const string NAME = 'create_report_upload';
     public const string AUDIT_TARGET_TYPE = 'project';
-    /** UploadPurpose::Screenshot, which this module may not read. */
-    private const string SCREENSHOT_PURPOSE = 'screenshot';
     /** A project key is far shorter; the cap only keeps a lookup from reading megabytes. */
     private const int MAX_PROJECT_KEY_LENGTH = 20;
     /** The allowed types are 10 characters; the cap only keeps a refusal from echoing megabytes. */
@@ -120,7 +118,7 @@ final readonly class CreateReportUpload implements AgentTool
             throw new \LogicException('The input schema lets create_report_upload run only with "bytes" as an integer.');
         }
         try {
-            $slot = $this->uploads->begin($this->ticketVisibilityCheck->callerOrganizationId(), $callerId, $uploadTarget, self::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
+            $slot = $this->uploads->begin($this->ticketVisibilityCheck->callerOrganizationId(), $callerId, $uploadTarget, CreateUpload::SCREENSHOT_PURPOSE, self::stringAt($arguments, 'mime'), $bytes, $this->clock->now());
         } catch (UploadRefused $refused) {
             throw ToolRefusal::refused($refused->getMessage());
         } catch (UploadTargetDenied) {

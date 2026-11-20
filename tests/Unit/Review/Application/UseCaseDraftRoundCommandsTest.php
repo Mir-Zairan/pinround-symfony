@@ -93,6 +93,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     private InMemoryUploadedMedia $uploadedMedia;
     private UseCaseRoundCommands $commands;
     private TenantContext $tenantContext;
+    private RecordingChecklistCommands $checklistCommands;
 
     protected function setUp(): void
     {
@@ -111,6 +112,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             [self::ACME_FOODS, self::FRESH_MEDIA, self::LENA, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::FRESH_MEDIA, self::MIA, MediaImageStatus::Ready],
         ]);
+        $this->checklistCommands = new RecordingChecklistCommands();
         $this->commands = $this->commandsOver($this->interfering);
         $this->seedRounds();
     }
@@ -678,6 +680,9 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         self::assertSame(RoundState::Open, $shared->state());
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
         self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
+        self::assertSame([[self::DRAFT, self::at()->format('Y-m-d H:i:s')]], $this->checklistCommands->findingsCreated, 'The shared round is offered as findings once, after its save.');
+        $offered = $this->checklistCommands->findingsRounds[0] ?? self::fail('No round was offered as findings.');
+        self::assertSame([2, $shared->version()], [$offered->number(), $offered->version()], 'The findings step gets the round as the share saved it.');
     }
 
     #[Test]
@@ -696,6 +701,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             $this->snapshot()[self::DRAFT],
         );
         self::assertSame($savesBefore + 1, $this->rounds->savedRounds);
+        self::assertSame([[self::DRAFT, self::at()->format('Y-m-d H:i:s')]], $this->checklistCommands->findingsCreated);
         self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
         self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
     }
@@ -755,6 +761,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
         self::assertInstanceOf(RoundSlotTaken::class, $refused->getPrevious());
         self::assertNull($this->storedRound(self::DRAFT)->number());
+        self::assertSame([], $this->checklistCommands->findingsCreated, 'A refused share offers no findings.');
     }
 
     #[Test]
@@ -783,6 +790,107 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         $this->commands->deleteDraft(self::DRAFT, new UserId(self::LENA), self::at());
 
         $this->assertRefusedAndNothingSaved(RoundRefused::NOT_FOUND, fn () => $this->commands->deleteDraft(self::DRAFT, new UserId(self::LENA), new \DateTimeImmutable('2026-03-05 10:00:00+00:00')));
+    }
+
+    #[Test]
+    public function readingTheContentsOfADraftGivesItsPicturesByPositionWithTheirPinsAndVersionAndSavesNothing(): void
+    {
+        $before = $this->snapshot();
+
+        $read = $this->commands->contentsOf(self::DRAFT, new UserId(self::LENA));
+
+        self::assertSame([self::DRAFT, self::TICKET, $this->storedRound(self::DRAFT)->version()], [$read->roundId, $read->ticketId->toString(), $read->version]);
+        self::assertEquals([
+            new ScreenshotWithPins(self::MEDIA, 'Cart', null, [new PlacedPin(10.0, 20.0, 'old note')]),
+            new ScreenshotWithPins(self::OTHER_MEDIA, null, null, []),
+        ], $read->screenshots);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function roundsWhoseContentsAreNotTheOwners(): iterable
+    {
+        yield 'a malformed round id' => ['not-a-round-id'];
+        yield 'an unknown round' => [self::UNKNOWN_ROUND];
+        yield 'another person\'s draft' => [self::OMARS_DRAFT];
+        yield 'the owner\'s deleted draft' => [self::LENAS_DELETED_DRAFT];
+        yield 'a report the owner made' => [self::REPORT];
+        yield 'the owner\'s draft in another organization' => [self::BETA_BAKERY_DRAFT];
+    }
+
+    #[Test]
+    #[DataProvider('roundsWhoseContentsAreNotTheOwners')]
+    public function readingTheContentsOfARoundThatIsNotTheOwnersUndeletedDraftIsNotFound(string $roundId): void
+    {
+        $this->assertRefusedAndNothingSaved(RoundRefused::NOT_FOUND, fn () => $this->commands->contentsOf($roundId, new UserId(self::LENA)));
+    }
+
+    #[Test]
+    public function deletingADraftAsReadClosesItKeepsItsPicturesAndASecondDeleteIsNotFound(): void
+    {
+        $before = $this->snapshot();
+        $read = $this->commands->contentsOf(self::DRAFT, new UserId(self::LENA));
+
+        $this->commands->deleteAsRead($read, new UserId(self::LENA), self::at());
+
+        $deleted = $this->storedRound(self::DRAFT);
+        self::assertSame([RoundState::Closed, $read->version + 1], [$deleted->state(), $deleted->version()]);
+        self::assertEquals(self::at(), $deleted->deletedAt());
+        self::assertSame([self::MEDIA, self::OTHER_MEDIA], array_map(static fn (Screenshot $screenshot): string => $screenshot->mediaId(), $deleted->screenshots()), 'The pictures stay where they are.');
+        self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
+
+        $this->assertRefusedAndNothingSaved(RoundRefused::NOT_FOUND, fn () => $this->commands->deleteAsRead($read, new UserId(self::LENA), self::at()));
+    }
+
+    #[Test]
+    public function deletingADraftAsReadAfterAnotherRequestSavedItIsRefusedAsChanged(): void
+    {
+        $read = $this->commands->contentsOf(self::DRAFT, new UserId(self::LENA));
+        $this->commands->addDraftScreenshot(self::DRAFT, new UserId(self::LENA), self::FRESH_MEDIA, self::at());
+
+        $refused = $this->assertRefusedAndNothingSaved(RoundRefused::DRAFT_CHANGED, fn () => $this->commands->deleteAsRead($read, new UserId(self::LENA), self::at()));
+
+        self::assertNull($refused->getPrevious(), 'Refused on the version read, before any save.');
+        self::assertNull($this->storedRound(self::DRAFT)->deletedAt());
+    }
+
+    /**
+     * Two moves that both read the draft and both pass the version check: the save's version check refuses the second.
+     */
+    #[Test]
+    public function deletingADraftAsReadThatAnotherRequestSavesBeforeThisSaveIsRefusedAsChanged(): void
+    {
+        $read = $this->commands->contentsOf(self::DRAFT, new UserId(self::LENA));
+        $this->interfering->afterNextGet = static function (Rounds $rounds): void {
+            $draft = $rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('The seeded draft is missing.');
+            $draft->delete(new UserId(self::LENA), new \DateTimeImmutable('2026-03-04 09:29:00+00:00'));
+            $rounds->save($draft, self::at());
+        };
+        $versionBefore = $this->storedRound(self::DRAFT)->version();
+
+        try {
+            $this->commands->deleteAsRead($read, new UserId(self::LENA), self::at());
+            self::fail('Two deletes of one draft both succeeded.');
+        } catch (RoundRefused $refused) {
+            self::assertSame(RoundRefused::DRAFT_CHANGED, $refused->getMessage());
+            self::assertInstanceOf(RoundChanged::class, $refused->getPrevious());
+        }
+
+        $draft = $this->storedRound(self::DRAFT);
+        self::assertSame($versionBefore + 1, $draft->version(), 'Only the other request\'s delete landed.');
+        self::assertEquals(new \DateTimeImmutable('2026-03-04 09:29:00+00:00'), $draft->deletedAt());
+    }
+
+    #[Test]
+    public function deletingASharedDraftAsReadIsRefusedAndNothingIsSaved(): void
+    {
+        $read = $this->commands->contentsOf(self::MIAS_SHARED_DRAFT, new UserId(self::MIA));
+
+        $refused = $this->assertRefusedAndNothingSaved('This draft round is shared, so it no longer changes.', fn () => $this->commands->deleteAsRead($read, new UserId(self::MIA), self::at()));
+
+        self::assertTrue($refused->isReadOnly());
     }
 
     /**
@@ -932,7 +1040,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
     private function commandsOver(Rounds $rounds): UseCaseRoundCommands
     {
-        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($this->uploadedMedia), new RecordingChecklistCommands());
+        return new UseCaseRoundCommands($rounds, $this->tickets, $this->tenantContext, new ReportPictures($this->uploadedMedia), $this->checklistCommands);
     }
 
     private function seedRounds(): void

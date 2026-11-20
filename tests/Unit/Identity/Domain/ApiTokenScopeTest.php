@@ -12,10 +12,10 @@ use PHPUnit\Framework\TestCase;
 final class ApiTokenScopeTest extends TestCase
 {
     #[Test]
-    public function theScopesAreExactlyTheFiveOfAdr0021AndAdr0039(): void
+    public function theScopesAreExactlyTheSixOfAdr0021Adr0039AndAdr0046(): void
     {
         self::assertSame(
-            ['read', 'rounds:write', 'comments:write', 'tickets:move', 'reports:write'],
+            ['read', 'rounds:write', 'comments:write', 'tickets:move', 'reports:write', 'notebooks:write'],
             self::valuesOf(ApiTokenScope::cases()),
         );
     }
@@ -37,7 +37,7 @@ final class ApiTokenScopeTest extends TestCase
     public function anUnknownValueIsRefusedEvenNextToKnownOnes(): void
     {
         $this->expectException(UnknownApiTokenScope::class);
-        $this->expectExceptionMessageIsOrContains('A token scope must be one of: read, rounds:write, comments:write, tickets:move, reports:write.');
+        $this->expectExceptionMessageIsOrContains('A token scope must be one of: read, rounds:write, comments:write, tickets:move, reports:write, notebooks:write.');
 
         ApiTokenScope::fromValues(['read', 'admin']);
     }

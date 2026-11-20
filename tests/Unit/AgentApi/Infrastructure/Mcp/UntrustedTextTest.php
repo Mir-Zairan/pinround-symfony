@@ -82,6 +82,29 @@ final class UntrustedTextTest extends TestCase
         self::assertStringNotContainsString("\n", $json);
     }
 
+    /**
+     * An agent unwraps with one replacement after another, as UNWRAP tells it; &amp; must go last, or a text that held
+     * "&lt;" literally comes back as "<".
+     */
+    #[Test]
+    public function theStepsUnwrapGivesInItsOrderRecoverTheTextAndAmpersandFirstWouldNot(): void
+    {
+        $lessThanStep = strpos(UntrustedText::UNWRAP, '&lt; into <');
+        $ampersandStep = strpos(UntrustedText::UNWRAP, '&amp; into &');
+        self::assertIsInt($lessThanStep);
+        self::assertIsInt($ampersandStep);
+        self::assertGreaterThan($lessThanStep, $ampersandStep);
+        self::assertStringContainsString('&gt; into >', UntrustedText::UNWRAP);
+
+        foreach (['http://localhost:8000/cart?a=1&b=2', 'Literally &lt;b&gt; & <b>', "Tom &amp;amp; Jerry\r\n"] as $text) {
+            $inner = substr(UntrustedText::wrap($text), \strlen(UntrustedText::OPEN), -\strlen(UntrustedText::CLOSE));
+
+            self::assertSame($text, str_replace('&amp;', '&', str_replace('&gt;', '>', str_replace('&lt;', '<', $inner))));
+        }
+        $inner = substr(UntrustedText::wrap('Literally &lt;b&gt;'), \strlen(UntrustedText::OPEN), -\strlen(UntrustedText::CLOSE));
+        self::assertSame('Literally <b>', str_replace('&gt;', '>', str_replace('&lt;', '<', str_replace('&amp;', '&', $inner))));
+    }
+
     #[Test]
     public function noTextStaysNull(): void
     {

@@ -5,13 +5,21 @@ declare(strict_types=1);
 namespace App\Tests\Integration\AgentApi;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReport;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReportUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
+use App\AgentApi\Infrastructure\Mcp\Tool\FindTickets;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetRoundNotes;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetTicket;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
+use App\AgentApi\Infrastructure\Mcp\Tool\SaveScenarios;
 use App\AgentApi\Infrastructure\Mcp\Tool\SetVerdict;
 use App\AgentApi\Infrastructure\Mcp\Tool\WhoAmI;
 use App\Kernel;
@@ -37,7 +45,7 @@ final class AgentToolServicesTest extends TestCase
      */
     public static function environments(): iterable
     {
-        $productTools = [WhoAmI::class, ListMyTickets::class, GetTicket::class, GetRoundNotes::class, SetVerdict::class, CreateUpload::class, AddScreenshot::class, CreateReportUpload::class, CreateReport::class];
+        $productTools = [WhoAmI::class, ListMyTickets::class, FindTickets::class, GetTicket::class, GetRoundNotes::class, SetVerdict::class, CreateUpload::class, AddScreenshot::class, CreateReportUpload::class, CreateReport::class, ListMyNotebooks::class, GetNotebook::class, SaveScenarios::class, CreateNotebook::class, CreateNotebookUpload::class, AddNotebookScreenshot::class, AddReportScreenshot::class];
 
         yield 'dev' => ['dev', true, $productTools];
         yield 'prod' => ['prod', false, $productTools];

@@ -42,6 +42,18 @@ final class TokenControllerTest extends TestCase
     }
 
     /**
+     * The words of the phase 13 design notes, which name both clients that use the scope.
+     */
+    #[Test]
+    public function notebooksWriteSaysThatClaudeCodeAndTheExtensionWriteToYourNotebooks(): void
+    {
+        self::assertSame(
+            'Let Claude Code and the extension write to your notebooks.',
+            self::explanations()[ApiTokenScope::NotebooksWrite->value] ?? null,
+        );
+    }
+
+    /**
      * The longest one ApiToken allows is offered, and none longer; the default sits among the offers.
      */
     #[Test]

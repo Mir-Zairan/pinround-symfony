@@ -54,7 +54,11 @@ final readonly class ListFilter
         return 1 === preg_match(self::CANONICAL_UUID, $value);
     }
 
-    private static function isSearchText(string $searchText): bool
+    /**
+     * True for a search the list and TicketSearchQueries take: not empty, trimmed, valid UTF-8 without NUL, and at most
+     * SEARCH_TEXT_MAX_LENGTH characters.
+     */
+    public static function isSearchText(string $searchText): bool
     {
         return '' !== $searchText
             && trim($searchText) === $searchText

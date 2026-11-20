@@ -28,5 +28,22 @@
     </section>
 
     <p class="status" id="status" role="status" aria-live="polite"></p>
+
+    <section id="allowed-hosts" class="allowed-hosts" aria-labelledby="allowed-hosts-heading">
+        <h2 id="allowed-hosts-heading">Allowed hosts</h2>
+        <p class="hint">Scenarios click and type only on these hosts, and never on pinround.</p>
+        <p class="hint" id="allowed-hosts-empty" hidden>No hosts yet. Scenarios play only on hosts you add here.</p>
+        <ul class="allowed-host-list" id="allowed-host-list" hidden></ul>
+        <p class="hint" id="allowed-hosts-full" hidden></p>
+        <form id="allowed-host-form">
+            <label for="allowed-host-input">Host to add</label>
+            <div class="allowed-host-add">
+                <input id="allowed-host-input" type="text" maxlength="300" autocomplete="off" spellcheck="false" placeholder="http://localhost:8000" aria-describedby="allowed-host-status">
+                <button type="submit" id="add-allowed-host">Add</button>
+            </div>
+            <p class="status" id="allowed-host-status" role="status" aria-live="polite"></p>
+            <button type="button" class="secondary" id="add-suggested-host" hidden>Add http://localhost:*</button>
+        </form>
+    </section>
 </body>
 </html>

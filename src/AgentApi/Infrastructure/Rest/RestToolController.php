@@ -5,10 +5,16 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Rest;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReport;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReportUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
+use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
 use App\AgentApi\Infrastructure\Mcp\ToolCallGate;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
@@ -91,10 +97,68 @@ final readonly class RestToolController
         return $this->idempotent($request, fn (array $body): Response => $this->run(CreateReport::NAME, $body, Response::HTTP_CREATED));
     }
 
+    /**
+     * One more picture at the end of the caller's own report draft (add_report_screenshot, reports:write), uploaded
+     * through /api/v1/uploads with the draft's project, as for /api/v1/reports.
+     */
+    #[Route('/api/v1/reports/{id}/screenshots', name: 'api_v1_report_screenshots', methods: ['POST'])]
+    public function reportScreenshots(string $id, Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->runOnPathId(AddReportScreenshot::NAME, $body, 'report', $id, Response::HTTP_OK));
+    }
+
     #[Route('/api/v1/tickets/{key}/draft/screenshots', name: 'api_v1_draft_screenshots', methods: ['POST'])]
     public function draftScreenshots(string $key, Request $request): Response
     {
-        return $this->idempotent($request, fn (array $body): Response => $this->run(AddScreenshot::NAME, [...$body, 'key' => $key], Response::HTTP_OK));
+        return $this->idempotent($request, fn (array $body): Response => $this->runOnPathId(AddScreenshot::NAME, $body, 'key', $key, Response::HTTP_OK));
+    }
+
+    /**
+     * A new, empty notebook of the caller (create_notebook, notebooks:write).
+     */
+    #[Route('/api/v1/notebooks', name: 'api_v1_notebooks', methods: ['POST'])]
+    public function notebooks(Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->run(CreateNotebook::NAME, $body, Response::HTTP_CREATED));
+    }
+
+    /**
+     * One page of the caller's own notebooks, last used first (list_my_notebooks, read). The cursor goes to the tool as
+     * sent, so an empty one, one over its maxLength or a list (cursor[]=…) gets the tool's invalid input, 422.
+     */
+    #[Route('/api/v1/notebooks', name: 'api_v1_my_notebooks', methods: ['GET'])]
+    public function myNotebooks(Request $request): Response
+    {
+        $query = $request->query->all();
+        $arguments = \array_key_exists('cursor', $query) ? ['cursor' => $query['cursor']] : [];
+
+        return $this->run(ListMyNotebooks::NAME, $arguments, Response::HTTP_OK);
+    }
+
+    /**
+     * One of the caller's own notebooks with its pictures and scenarios (get_notebook, read), each text wrapped as
+     * UntrustedText, as the tool answers it.
+     */
+    #[Route('/api/v1/notebooks/{id}', name: 'api_v1_notebook', methods: ['GET'])]
+    public function notebook(string $id): Response
+    {
+        return $this->runOnPathId(GetNotebook::NAME, [], 'notebook', $id, Response::HTTP_OK);
+    }
+
+    /**
+     * {mime, bytes, sha256} begins an upload for the caller's own notebook (create_notebook_upload, notebooks:write);
+     * apart from /api/v1/uploads, whose body names a ticket or a project, as the notebook is in the path here.
+     */
+    #[Route('/api/v1/notebooks/{id}/uploads', name: 'api_v1_notebook_uploads', methods: ['POST'])]
+    public function notebookUploads(string $id, Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->runOnPathId(CreateNotebookUpload::NAME, $body, 'notebook', $id, Response::HTTP_CREATED));
+    }
+
+    #[Route('/api/v1/notebooks/{id}/screenshots', name: 'api_v1_notebook_screenshots', methods: ['POST'])]
+    public function notebookScreenshots(string $id, Request $request): Response
+    {
+        return $this->idempotent($request, fn (array $body): Response => $this->runOnPathId(AddNotebookScreenshot::NAME, $body, 'notebook', $id, Response::HTTP_OK));
     }
 
     #[Route('/api/v1/me/tickets', name: 'api_v1_my_tickets', methods: ['GET'])]
@@ -136,18 +200,62 @@ final readonly class RestToolController
     }
 
     /**
+     * Runs the tool with the id from the path as its $argumentName. An id longer than the tool's input schema allows
+     * names nothing, so it is not found, as v1.yaml promises for a malformed id, rather than the schema's invalid input.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function runOnPathId(string $toolName, array $body, string $argumentName, string $pathId, int $successStatus): Response
+    {
+        $tool = $this->toolNamed($toolName);
+        if (mb_strlen($pathId, 'UTF-8') > self::maxLengthOf($tool, $argumentName)) {
+            try {
+                $this->toolCallGate->refuseAsNotFound($tool);
+            } catch (ToolRefusal $refusal) {
+                return self::refusal($refusal);
+            }
+        }
+
+        return $this->run($toolName, [...$body, $argumentName => $pathId], $successStatus);
+    }
+
+    /**
      * @param array<string, mixed> $arguments
      */
     private function run(string $toolName, array $arguments, int $successStatus): Response
     {
-        $tool = $this->toolsByName[$toolName] ?? throw new \LogicException(\sprintf('No tool is named %s.', $toolName));
         try {
-            $toolAnswer = $this->toolCallGate->call($tool, $arguments);
+            $toolAnswer = $this->toolCallGate->call($this->toolNamed($toolName), $arguments);
         } catch (ToolRefusal $refusal) {
-            return new JsonResponse(['error' => $refusal->getMessage(), 'outcome' => $refusal->outcome->value], self::statusOf($refusal->outcome));
+            return self::refusal($refusal);
         }
 
         return new JsonResponse($toolAnswer->structuredContent ?? [], $successStatus);
+    }
+
+    private function toolNamed(string $toolName): AgentTool
+    {
+        return $this->toolsByName[$toolName] ?? throw new \LogicException(\sprintf('No tool is named %s.', $toolName));
+    }
+
+    /**
+     * @throws \LogicException when the tool's input schema gives the argument no maxLength, so no path id is capped
+     */
+    private static function maxLengthOf(AgentTool $tool, string $argumentName): int
+    {
+        $properties = $tool->definition()->inputSchema['properties'] ?? null;
+        $argument = \is_array($properties) ? $properties[$argumentName] ?? null : null;
+        $maxLength = \is_array($argument) ? $argument['maxLength'] ?? null : null;
+        if (!\is_int($maxLength)) {
+            throw new \LogicException(\sprintf('The input schema of %s gives "%s" no maxLength.', $tool->definition()->name, $argumentName));
+        }
+
+        return $maxLength;
+    }
+
+    private static function refusal(ToolRefusal $refusal): JsonResponse
+    {
+        return new JsonResponse(['error' => $refusal->getMessage(), 'outcome' => $refusal->outcome->value], self::statusOf($refusal->outcome));
     }
 
     private static function statusOf(ToolCallOutcome $outcome): int

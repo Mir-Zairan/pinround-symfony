@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Acme Foods order form</title>
+    <style>
+        body { margin: 24px; font: 16px/1.5 sans-serif; }
+        section, form { margin-bottom: 24px; }
+        label { display: block; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Acme Foods order form</h1>
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='green'/%3E%3C/svg%3E" width="40" height="40" alt="Acme Foods logo">
+    <section>
+        <h2>Strawberry jam</h2>
+        <button type="button" class="add">Add to basket</button>
+    </section>
+    <section>
+        <h2>Rye bread</h2>
+        <button type="button" class="add">Add to basket</button>
+    </section>
+    <p id="basket">Basket: <span id="basket-count">0</span> items</p>
+    <p id="shelf-code">Shelf code: A&#27;[31m7</p>
+    <a href="#terms" id="terms-link">Delivery terms</a>
+    <div hidden>Delivery terms</div>
+    <button type="button" id="pay-later" hidden>Pay later</button>
+    <button type="button" id="pay-by-invoice" disabled>Pay by invoice</button>
+
+    <form id="order" action="#">
+        <label for="email">Email for the receipt</label>
+        <input id="email" type="email" autocomplete="off">
+        <label>Note for the driver <textarea id="note" rows="3"></textarea></label>
+        <input id="coupon" type="text" aria-label="Coupon code" autocomplete="off" maxlength="12">
+        <span id="jars-label">Jars of jam</span>
+        <input id="jars" type="number" aria-labelledby="jars-label">
+        <input id="order-number" type="text" aria-label="Order number" value="SHOP-7" readonly>
+        <label for="day">Delivery day</label>
+        <select id="day">
+            <option>Monday</option>
+            <option>Tuesday</option>
+            <option>Wednesday</option>
+        </select>
+        <label for="password">Password</label>
+        <input id="password" type="password">
+        <label for="pin">New PIN</label>
+        <input id="pin" type="text" autocomplete="new-password">
+        <button type="button" id="check-stock">Check stock</button>
+        <p id="stock" role="status" hidden>In stock: 12 jars</p>
+        <button type="button" id="pay">Pay 12.40 EUR</button>
+    </form>
+    <p id="thanks" hidden>Thank you. Your order is on its way.</p>
+    <p id="terms">Acme Foods delivers Monday to Wednesday.</p>
+    <div aria-hidden="true"><button type="button" tabindex="-1">Pay 12.40 EUR</button></div>
+    <section>
+        <label for="extras">Extras</label>
+        <select id="extras" multiple>
+            <option selected>Napkins</option>
+            <option>Ice pack</option>
+        </select>
+        <label for="box-size">Box size</label>
+        <select id="box-size">
+            <option>Small</option>
+            <option>Large</option>
+            <option>Large</option>
+            <option disabled>Medium</option>
+        </select>
+        <button type="button" id="pay-by-card" aria-disabled="true">Pay by card</button>
+    </section>
+    <a href="/player-2" id="receipt-link">See the receipt</a>
+    <form id="send" action="/player-2" method="get">
+        <input id="reference" name="reference" type="text" aria-label="Order reference" value="SHOP-8">
+        <button type="submit">Send the order</button>
+    </form>
+    <script>
+        window.fieldEvents = [];
+        for (const type of ['input', 'change']) {
+            document.addEventListener(type, (event) => window.fieldEvents.push(`${type} ${event.target.id}`));
+        }
+        let basketCount = 0;
+        for (const button of document.querySelectorAll('.add')) {
+            button.addEventListener('click', () => {
+                basketCount += 1;
+                document.getElementById('basket-count').textContent = String(basketCount);
+            });
+        }
+        document.getElementById('check-stock').addEventListener('click', () => {
+            document.getElementById('stock').hidden = false;
+        });
+        document.getElementById('pay').addEventListener('click', () => {
+            document.getElementById('thanks').hidden = false;
+        });
+        for (const id of ['pay-by-invoice', 'pay-by-card']) {
+            document.getElementById(id).addEventListener('click', () => {
+                document.getElementById('thanks').hidden = false;
+            });
+        }
+    </script>
+</body>
+</html>

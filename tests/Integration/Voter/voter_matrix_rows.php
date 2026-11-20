@@ -12,6 +12,7 @@ use App\Notification\Api\PingPermission;
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\Organization\Api\TeamPermission;
+use App\Review\Api\NotebookPermission;
 use App\Review\Api\ReportDraftPermission;
 use App\Review\Api\RoundPermission;
 use App\Review\UI\Voter\ReportDraftVoter;
@@ -58,12 +59,12 @@ use App\Workflow\Api\WorkflowPermission;
  * extend: the STEP_CHANGE_TEAM and RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and
  * team cases.
  *
- * Or a round (RoundPermission VIEW, EDIT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
+ * Or a round (RoundPermission VIEW, EDIT, MOVE_TO_REPORT_DRAFT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
  *            "Shared round of Omar on a team-only Shop ticket" or "… Support ticket", "… on a ticket nobody has", or
  *            "Shared round of another organization" or "Unshared draft round of Omar in another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
  *            assigned to Omar", "Done Shop ticket assigned to Omar", "Shop ticket in Testing, Mia's turn" (assigned to Omar),
  *            "Ticket nobody has, for a draft round".
- * Or "Report draft of Mia" (ReportDraftPermission), or "No subject" for an attribute whose voter takes none
+ * Or "Report draft of Mia" (ReportDraftPermission), "Notebook of Lena" (NotebookPermission), or "No subject" for an attribute whose voter takes none
  *            (REVOKE_CURRENT_TOKEN).
  *
  * The roles doc has no mute row: whoever may see a ticket may mute it for themselves (MuteVoter), so the
@@ -104,11 +105,15 @@ $adminNeedsABrowserSession = 'Admin pages and admin actions never accept a token
 
 $seeADraftRound = '| See a draft round |';
 $editADraftRound = '| Start / edit / share a draft round |';
+$makeItANewTicket = '| Make it a new ticket (draft round to report draft) | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | — | — |';
 
 $reportAProblem = '| Report a problem (create ticket through the intake) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |';
 $ownReportDrafts = '| See, edit and send my report drafts ⁹ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |';
 $noAdminOrLeadSeesAReportDraft = 'A report draft is its owner\'s alone: no admin or lead sees it';
 $onlyAClickSendsAReportDraft = 'but only the person\'s click in the browser sends it.';
+$ownNotebooks = '| See and edit my notebooks ¹⁰ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |';
+$noAdminOrTeamSeesANotebook = 'A notebook is its owner\'s alone: not admins, not the team, and nobody of another organization';
+$aTokenMayChangeANotebook = 'A personal access token of the owner may read and change it.';
 
 return [
     ['source' => $isAUser, 'attribute' => OrganizationPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Acme Foods', 'expected' => 'granted'],
@@ -471,6 +476,16 @@ return [
     ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
     ['source' => $seeADraftRound, 'attribute' => RoundPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar', 'expected' => 'granted'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Lena', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Sara', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Raj', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Mia', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Omar', 'subject' => 'Deleted draft round of Omar', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Lena', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
+    ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Omar', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'granted'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Lena', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
     ['source' => $editADraftRound, 'attribute' => RoundPermission::DRAFT_CREATE, 'actor' => 'Mia', 'subject' => 'Shop ticket assigned to Omar', 'expected' => 'denied'],
@@ -518,6 +533,19 @@ return [
     ['source' => $onlyAClickSendsAReportDraft, 'attribute' => ReportDraftPermission::VIEW, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted', 'login' => 'personal access token'],
     ['source' => $onlyAClickSendsAReportDraft, 'attribute' => ReportDraftPermission::EDIT, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'granted', 'login' => 'personal access token'],
     ['source' => $onlyAClickSendsAReportDraft, 'attribute' => ReportDraftPermission::SEND, 'actor' => 'Mia', 'subject' => 'Report draft of Mia', 'expected' => 'denied', 'login' => 'personal access token', 'refusalReason' => ReportDraftVoter::TOKEN_REFUSAL_REASON],
+
+    // Notebooks: Lena's notebook is hers alone, from a session or her token; no admin, team member or other organization.
+    ['source' => $ownNotebooks, 'attribute' => NotebookPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Notebook of Lena', 'expected' => 'granted'],
+    ['source' => $ownNotebooks, 'attribute' => NotebookPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Notebook of Lena', 'expected' => 'granted'],
+    ['source' => $aTokenMayChangeANotebook, 'attribute' => NotebookPermission::VIEW, 'actor' => 'Lena', 'subject' => 'Notebook of Lena', 'expected' => 'granted', 'login' => 'personal access token'],
+    ['source' => $aTokenMayChangeANotebook, 'attribute' => NotebookPermission::EDIT, 'actor' => 'Lena', 'subject' => 'Notebook of Lena', 'expected' => 'granted', 'login' => 'personal access token'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::VIEW, 'actor' => 'Omar', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::EDIT, 'actor' => 'Omar', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::VIEW, 'actor' => 'Sara', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::EDIT, 'actor' => 'Sara', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::VIEW, 'actor' => 'Raj', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::VIEW, 'actor' => 'Ben', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
+    ['source' => $noAdminOrTeamSeesANotebook, 'attribute' => NotebookPermission::EDIT, 'actor' => 'Ben', 'subject' => 'Notebook of Lena', 'expected' => 'denied'],
 
     // Revoking the current token: only a request made with that token has one, so a browser session is denied.
     ['source' => $deniedUnlessARuleAllows, 'attribute' => AccountPermission::REVOKE_CURRENT_TOKEN, 'actor' => 'Omar', 'subject' => 'No subject', 'expected' => 'denied', 'refusalReason' => CurrentApiTokenVoter::SESSION_REFUSAL_REASON],

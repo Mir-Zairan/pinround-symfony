@@ -63,11 +63,12 @@ export async function upload(api, target, file) {
 /**
  * Adds an uploaded picture to the person's draft round on the ticket, asking again while it is still being processed.
  *
+ * @param {{title?: string, summary?: string, pins?: Array<{x_pct: number, y_pct: number, note: string}>}} screenshotFields
  * @returns {Promise<{status: string}>} added or added_before
  */
-export async function addToDraftRound(api, ticketKey, uploadId, texts, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), tries = 15) {
+export async function addToDraftRound(api, ticketKey, uploadId, screenshotFields, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), tries = 15) {
     for (let attempt = 1; attempt <= tries; attempt += 1) {
-        const answer = await api.call('POST', `/api/v1/tickets/${encodeURIComponent(ticketKey)}/draft/screenshots`, { upload_id: uploadId, ...texts });
+        const answer = await api.call('POST', `/api/v1/tickets/${encodeURIComponent(ticketKey)}/draft/screenshots`, { upload_id: uploadId, ...screenshotFields });
         if ('processing' !== answer.status) {
             return answer;
         }

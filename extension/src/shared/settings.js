@@ -1,5 +1,7 @@
-// The pinround address and the paired token, kept in chrome.storage.local only: never synced to other devices, and
-// never readable by a web page.
+// The pinround address and the paired token, kept in the extension's local storage only: never synced to other devices,
+// and never readable by a web page.
+import { CONFIRMED_HOSTS_KEY } from './allowed-hosts.js';
+import { browser } from './browser.js';
 
 const STORAGE_KEY = 'pinround';
 const TOKEN_PATTERN = /^pr_[A-Za-z0-9_-]{16,200}$/;
@@ -43,7 +45,7 @@ export function checkedToken(typed) {
 }
 
 /** @returns {Promise<{origin: string, token: string}|null>} */
-export async function loadSettings(storage = chrome.storage.local) {
+export async function loadSettings(storage = browser.storage.local) {
     const stored = (await storage.get(STORAGE_KEY))[STORAGE_KEY];
     if (!stored || 'string' !== typeof stored.origin || 'string' !== typeof stored.token) {
         return null;
@@ -52,10 +54,11 @@ export async function loadSettings(storage = chrome.storage.local) {
     return { origin: stored.origin, token: stored.token };
 }
 
-export async function saveSettings(origin, token, storage = chrome.storage.local) {
+export async function saveSettings(origin, token, storage = browser.storage.local) {
     await storage.set({ [STORAGE_KEY]: { origin: pinroundOriginOf(origin), token: checkedToken(token) } });
 }
 
-export async function clearSettings(storage = chrome.storage.local) {
-    await storage.remove(STORAGE_KEY);
+/** Forgets the pairing and the hosts the person said "Play anyway" for; the allowed hosts stay. */
+export async function clearSettings(storage = browser.storage.local) {
+    await storage.remove([STORAGE_KEY, CONFIRMED_HOSTS_KEY]);
 }

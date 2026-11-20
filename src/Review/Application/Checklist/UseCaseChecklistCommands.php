@@ -14,18 +14,22 @@ use App\Review\Domain\CheckItem;
 use App\Review\Domain\CheckItemId;
 use App\Review\Domain\Checklist;
 use App\Review\Domain\Checklists;
+use App\Review\Domain\FindingsChecklist;
+use App\Review\Domain\Round;
 use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
 use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\TicketTurnQueries;
 
 /**
- * ChecklistCommands on Checklists; the contract is on {@see ChecklistCommands}. Every change locks its item before it
- * reads the state, so two changes of one item are made one after the other.
+ * ChecklistCommands and RoundChecklistCommands on Checklists; the contracts are on {@see ChecklistCommands} and
+ * {@see RoundChecklistCommands}. Every change locks its item before it reads the state, so two changes of one item are
+ * made one after the other.
  */
-final readonly class UseCaseChecklistCommands implements ChecklistCommands
+final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
 {
     public function __construct(
         private Checklists $checklists,
@@ -34,6 +38,7 @@ final readonly class UseCaseChecklistCommands implements ChecklistCommands
         private ReviewEvents $reviewEvents,
         private PingClearing $pingClearing,
         private TenantContext $tenantContext,
+        private TicketTurnQueries $ticketTurnQueries,
     ) {
     }
 
@@ -64,6 +69,30 @@ final readonly class UseCaseChecklistCommands implements ChecklistCommands
         }
 
         return $checklist->id()->toString();
+    }
+
+    public function createFromFindings(Round $sharedDraft, \DateTimeImmutable $at): int
+    {
+        if (!$this->tenantContext->require()->equals($sharedDraft->organizationId())) {
+            throw new \LogicException(\sprintf('Round %s is not the tenant\'s.', $sharedDraft->id()->toString()));
+        }
+        $assigneeOf = function () use ($sharedDraft): ?UserId {
+            $ticket = $this->ticketTurnQueries->factsOf($sharedDraft->ticketId())
+                ?? throw new \LogicException(\sprintf('The ticket of round %s cannot be read.', $sharedDraft->id()->toString()));
+
+            return $ticket->assigneeId;
+        };
+        try {
+            $checklist = FindingsChecklist::ofSharedDraft($sharedDraft, $assigneeOf, $this->checklists->nextItemIdentity(...), $at);
+        } catch (\InvalidArgumentException $notShared) {
+            throw new \LogicException($notShared->getMessage(), 0, $notShared);
+        }
+        if (null === $checklist) {
+            return 0;
+        }
+        $this->checklists->addFindings($checklist);
+
+        return \count($checklist->items());
     }
 
     public function markFixed(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange

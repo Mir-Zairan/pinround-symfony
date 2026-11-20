@@ -1,64 +1,73 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { NEW_REPORT, fillReportInputs, showCaptures } from '../src/popup/report-captures.js';
+import { NEW_NOTEBOOK, NEW_REPORT } from '../src/capture/capture-target.js';
+import { emptyNewReport } from '../src/capture/new-report.js';
+import { fillReportInputs, showTargetFields } from '../src/popup/report-captures.js';
 
-// The popup elements showCaptures and fillReportInputs touch, as plain objects with the DOM properties they use.
+// The popup elements showTargetFields and fillReportInputs touch, as plain objects with the DOM properties they use.
 function popupOf(targetValue) {
-    const ownerDocument = { createElement: (tag) => ({ tag, textContent: '' }) };
     const elements = {
         target: { value: targetValue },
+        'new-notebook-fields': { hidden: true },
         'report-fields': { hidden: false },
         project: { value: '', disabled: false },
-        'report-title': { value: '' },
-        'report-captures': { hidden: false },
-        'captures-count': { textContent: '' },
-        'captures-list': { ownerDocument, children: [], replaceChildren(...children) { this.children = children; } },
+        'report-title': { value: '', disabled: false },
+        'report-draft': { hidden: false },
+        'report-draft-count': { textContent: '' },
+        'send-again': { hidden: false },
     };
 
     return (id) => elements[id] ?? assert.fail(`The popup has no element ${id}.`);
 }
 
-const saved = { project: 'SHOP', reportTitle: 'Total is doubled on the cart', items: [{ upload_id: 'u1', title: 'Cart' }, { upload_id: 'u2' }], idempotencyKey: 'k1' };
+const withDraft = { ...emptyNewReport(), project: 'SHOP', reportTitle: 'Total is doubled on the cart', draftId: 'd1', draftUrl: 'https://pinround.acme-foods.example/report-drafts/d1', screenshotCount: 2 };
 
 test('switching the target keeps the project and report title the person typed and has not saved', () => {
     const element = popupOf(NEW_REPORT);
     element('project').value = 'MOBILE';
     element('report-title').value = 'Typed, not saved yet';
 
-    element('target').value = 'SHOP-12';
-    showCaptures(element, saved);
+    element('target').value = 'ticket:SHOP-12';
+    showTargetFields(element, emptyNewReport());
     element('target').value = NEW_REPORT;
-    showCaptures(element, saved);
+    showTargetFields(element, emptyNewReport());
 
     assert.equal(element('project').value, 'MOBILE');
     assert.equal(element('report-title').value, 'Typed, not saved yet');
 });
 
-test('the saved captures show as a list for a new report and hide for a draft round', () => {
+test('a made draft shows its count with Done and locks its project and title; other targets hide it', () => {
     const element = popupOf(NEW_REPORT);
-    showCaptures(element, saved);
-    assert.deepEqual([element('report-fields').hidden, element('report-captures').hidden, element('project').disabled], [false, false, true]);
-    assert.equal(element('captures-count').textContent, '2 of 10 screenshots for this report.');
-    assert.deepEqual(element('captures-list').children.map((entry) => entry.textContent), ['Cart', 'Screenshot 2']);
+    showTargetFields(element, withDraft);
+    assert.deepEqual([element('report-fields').hidden, element('report-draft').hidden, element('project').disabled, element('report-title').disabled, element('send-again').hidden], [false, false, true, true, true]);
+    assert.equal(element('report-draft-count').textContent, '2 of 10 screenshots in the report draft.');
 
-    element('target').value = 'SHOP-12';
-    showCaptures(element, saved);
-    assert.deepEqual([element('report-fields').hidden, element('report-captures').hidden], [true, true]);
+    element('target').value = 'notebook:nb1';
+    showTargetFields(element, withDraft);
+    assert.deepEqual([element('report-fields').hidden, element('report-draft').hidden, element('new-notebook-fields').hidden], [true, true, true]);
 });
 
-test('with nothing captured the project stays editable and the list is hidden', () => {
+test('with no draft the project stays editable and Done is hidden; a capture waiting to be sent shows Send it again', () => {
     const element = popupOf(NEW_REPORT);
-    showCaptures(element, { project: '', reportTitle: '', items: [], idempotencyKey: 'k2' });
-    assert.deepEqual([element('project').disabled, element('report-captures').hidden], [false, true]);
-    assert.deepEqual(element('captures-list').children, []);
+    showTargetFields(element, emptyNewReport());
+    assert.deepEqual([element('project').disabled, element('report-draft').hidden], [false, true]);
+
+    showTargetFields(element, { ...emptyNewReport(), pendingCapture: { idempotencyKey: 'k1', path: '/api/v1/reports', bodyJson: '{}' } });
+    assert.deepEqual([element('project').disabled, element('report-draft').hidden, element('send-again').hidden], [true, false, false]);
 });
 
-test('filling the inputs writes the saved project and report title over what is there', () => {
+test('"A new notebook" shows its title field only', () => {
+    const element = popupOf(NEW_NOTEBOOK);
+    showTargetFields(element, emptyNewReport());
+    assert.deepEqual([element('new-notebook-fields').hidden, element('report-fields').hidden], [false, true]);
+});
+
+test('filling the inputs writes the stored project and report title over what is there', () => {
     const element = popupOf(NEW_REPORT);
     element('project').value = 'MOBILE';
     element('report-title').value = 'Typed, not saved yet';
 
-    fillReportInputs(element, saved);
+    fillReportInputs(element, withDraft);
 
     assert.deepEqual([element('project').value, element('report-title').value], ['SHOP', 'Total is doubled on the cart']);
 });

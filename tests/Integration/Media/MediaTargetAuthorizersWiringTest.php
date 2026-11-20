@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Media;
 
 use App\Media\Application\MediaTargetAuthorizers;
+use App\Review\Api\Notebooks;
 use App\Review\Api\ReportDrafts;
 use App\Review\UI\Media\NewReportMediaTarget;
+use App\Review\UI\Media\NotebookMediaTarget;
 use App\Review\UI\Media\RoundMediaTarget;
 use App\Ticketing\UI\Media\NewTicketMediaTarget;
 use App\Ticketing\UI\Media\TicketMediaTarget;
@@ -21,7 +23,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 final class MediaTargetAuthorizersWiringTest extends KernelTestCase
 {
     #[Test]
-    public function theNewReportNewTicketRoundAndTicketTargetsReachTheAuthorizersThroughTheTagAsTheOnlyKinds(): void
+    public function theNewReportNewTicketNotebookRoundAndTicketTargetsReachTheAuthorizersThroughTheTagAsTheOnlyKinds(): void
     {
         $authorizers = self::getContainer()->get('test.media_target_authorizers');
         self::assertInstanceOf(MediaTargetAuthorizers::class, $authorizers);
@@ -35,7 +37,7 @@ final class MediaTargetAuthorizersWiringTest extends KernelTestCase
         ksort($authorizerClassByKind);
 
         self::assertSame(
-            [ReportDrafts::NEW_REPORT_UPLOAD_TARGET_KIND => NewReportMediaTarget::class, NewTicketMediaTarget::KIND => NewTicketMediaTarget::class, RoundMediaTarget::KIND => RoundMediaTarget::class, TicketMediaTarget::KIND => TicketMediaTarget::class],
+            [ReportDrafts::NEW_REPORT_UPLOAD_TARGET_KIND => NewReportMediaTarget::class, NewTicketMediaTarget::KIND => NewTicketMediaTarget::class, Notebooks::UPLOAD_TARGET_KIND => NotebookMediaTarget::class, RoundMediaTarget::KIND => RoundMediaTarget::class, TicketMediaTarget::KIND => TicketMediaTarget::class],
             $authorizerClassByKind,
         );
     }

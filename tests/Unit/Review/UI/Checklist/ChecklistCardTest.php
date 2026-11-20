@@ -7,6 +7,8 @@ namespace App\Tests\Unit\Review\UI\Checklist;
 use App\Review\Api\CheckItemView;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\ChecklistView;
+use App\Review\Application\Checklist\CheckItemPicture;
+use App\Review\Application\Checklist\RoundChecklist;
 use App\Review\UI\Checklist\ChecklistCard;
 use App\Review\UI\Checklist\ChecklistRow;
 use PHPUnit\Framework\Attributes\Test;
@@ -42,6 +44,48 @@ final class ChecklistCardTest extends TestCase
         );
         self::assertSame('1 of 4 checked OK', $card->status);
         self::assertSame('Round 1 · Checklist from the report', $card->headline);
+    }
+
+    /**
+     * The checklist round's card is the round's own card: its heading labels the article RoundCards names after the round.
+     */
+    #[Test]
+    public function theChecklistRoundsCardHasTheRoundsHeadingAtLevelThreeAndTheReportsRule(): void
+    {
+        $card = ChecklistCard::of(self::checklistOf([1 => ChecklistCommands::STATE_OPEN]), true, false);
+
+        self::assertSame(
+            ['checklist-'.self::ROUND, 'round-'.self::ROUND.'-heading', 3, 'Round 1 · Checklist from the report', ChecklistCard::DESCRIPTION, false],
+            [$card->id, $card->headingId, $card->headingLevel, $card->headline, $card->description, $card->isFindings],
+        );
+    }
+
+    /**
+     * A findings round's items sit under the round's own h3, so they get a heading of their own one level down, with an
+     * id that is not the round's.
+     */
+    #[Test]
+    public function aFindingsCardIsAChecklistUnderTheRoundsHeadingWithTheFindingsRuleAndTheSameRows(): void
+    {
+        $checklist = self::checklistOf([1 => ChecklistCommands::STATE_FIXED, 2 => ChecklistCommands::STATE_OK, 3 => ChecklistCommands::STATE_OPEN], true);
+
+        $card = ChecklistCard::of($checklist, false, true);
+
+        self::assertSame(
+            ['checklist-'.self::ROUND, 'checklist-'.self::ROUND.'-heading', 4, 'Checklist', ChecklistCard::FINDINGS_DESCRIPTION, true],
+            [$card->id, $card->headingId, $card->headingLevel, $card->headline, $card->description, $card->isFindings],
+        );
+        self::assertSame('1 of 3 checked OK', $card->status);
+        self::assertEquals(ChecklistCard::of(new RoundChecklist($checklist->checklist, false, $checklist->picturesByItemId), false, true)->rows, $card->rows);
+        self::assertSame([true, false, false], array_map(static fn (ChecklistRow $row): bool => $row->mayCheck, $card->rows));
+    }
+
+    #[Test]
+    public function focusGoesToTheFindingsHeadingWhenItsCardHasNoButtonLeft(): void
+    {
+        $card = ChecklistCard::of(self::checklistOf([1 => ChecklistCommands::STATE_OK, 2 => ChecklistCommands::STATE_NOT_FIXED], true), false, true);
+
+        self::assertSame('checklist-'.self::ROUND.'-heading', $card->focusedControlIdAfterChangeOf(self::itemId(1)));
     }
 
     /**
@@ -113,15 +157,56 @@ final class ChecklistCardTest extends TestCase
     }
 
     /**
+     * Pin numbers start at 1 on each picture: two pins 1, one on an untitled picture and one on a titled one, and a pin
+     * whose picture is missing, which is broken data.
+     */
+    #[Test]
+    public function eachRowNamesItsPictureAsWellAsItsPinNumber(): void
+    {
+        $checklist = new ChecklistView(self::ROUND, 1, [
+            new CheckItemView(self::itemId(1), 1, 'Wrong total.', ChecklistCommands::STATE_OPEN),
+            new CheckItemView(self::itemId(2), 1, 'Logo too small.', ChecklistCommands::STATE_OPEN),
+        ]);
+
+        $card = ChecklistCard::of(new RoundChecklist($checklist, true, [
+            self::itemId(1) => new CheckItemPicture(0, null),
+            self::itemId(2) => new CheckItemPicture(1, 'Checkout page'),
+        ]), true, false);
+
+        self::assertSame(
+            [[1, 'Screenshot 1 · pin 1'], [1, 'Screenshot 2 · Checkout page · pin 1']],
+            array_map(static fn (ChecklistRow $row): array => [$row->pinNumber, $row->pinLabel], $card->rows),
+        );
+    }
+
+    #[Test]
+    public function anItemWithoutItsPictureIsALogicError(): void
+    {
+        $checklist = new ChecklistView(self::ROUND, 1, [new CheckItemView(self::itemId(1), 1, 'Wrong total.', ChecklistCommands::STATE_OPEN)]);
+
+        $this->expectExceptionObject(new \LogicException(\sprintf('Check item %s has no picture.', self::itemId(1))));
+
+        ChecklistCard::of(new RoundChecklist($checklist, false, [self::itemId(2) => new CheckItemPicture(0, null)]), true, true);
+    }
+
+    /**
+     * Every item on the first picture, untitled.
+     *
      * @param non-empty-array<int, string> $statesByPinNumber
      */
-    private static function checklistOf(array $statesByPinNumber): ChecklistView
+    private static function checklistOf(array $statesByPinNumber, bool $isFindings = false): RoundChecklist
     {
-        return new ChecklistView(self::ROUND, 1, array_map(
+        $items = array_map(
             static fn (int $pinNumber, string $state): CheckItemView => new CheckItemView(self::itemId($pinNumber), $pinNumber, 'Note '.$pinNumber, $state),
             array_keys($statesByPinNumber),
             $statesByPinNumber,
-        ));
+        );
+        $pictures = [];
+        foreach ($items as $item) {
+            $pictures[$item->itemId] = new CheckItemPicture(0, null);
+        }
+
+        return new RoundChecklist(new ChecklistView(self::ROUND, 1, $items), $isFindings, $pictures);
     }
 
     private static function itemId(int $pinNumber): string

@@ -250,8 +250,9 @@ final class Round
     }
 
     /**
-     * Closes the draft for good; it frees its owner's draft slot on the ticket, and its pictures are left for
-     * retention to remove (ADR-0017, Delete).
+     * Closes the draft for good; it frees its owner's draft slot on the ticket, and its pictures stay in Media (ADR-0017,
+     * Delete). A report draft made of it by "Make it a new ticket" holds the same pictures (ADR-0044), so retention may
+     * remove a picture only once no round and no report draft points to it.
      *
      * @throws \DomainException when the round is not an open unshared draft of $actorId; the round stays as it was
      */

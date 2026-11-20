@@ -6,6 +6,7 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\Identity\Api\CurrentUser;
@@ -55,8 +56,6 @@ final readonly class SetVerdict implements AgentTool
     public const array VERDICT_LABELS = [self::LOOKS_RIGHT => 'Looks right', self::NOT_RIGHT_YET => 'Not right yet'];
 
     private const array ROUND_VERDICTS = [self::LOOKS_RIGHT => RoundCommands::VERDICT_LOOKS_RIGHT, self::NOT_RIGHT_YET => RoundCommands::VERDICT_NOT_RIGHT_YET];
-    /** A ticket key or an id is far shorter; the cap only keeps a lookup from reading megabytes. */
-    private const int MAX_KEY_OR_ID_LENGTH = 64;
 
     public function __construct(
         private CurrentUser $currentUser,
@@ -77,7 +76,7 @@ final readonly class SetVerdict implements AgentTool
      */
     public function definition(): Tool
     {
-        $idOf = static fn (string $description): array => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_OR_ID_LENGTH, 'description' => $description];
+        $idOf = static fn (string $description): array => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => $description];
 
         return new Tool(
             name: self::NAME,
@@ -88,7 +87,7 @@ final readonly class SetVerdict implements AgentTool
                     'key' => $idOf('The ticket key, such as SHOP-12.'),
                     'screenshot_id' => $idOf('A screenshot of your own draft round on the ticket, as get_round_notes lists it.'),
                     'verdict' => ['type' => 'string', 'enum' => array_keys(self::VERDICT_LABELS), 'description' => 'looks_right is "Looks right", not_right_yet is "Not right yet".'],
-                    'summary' => ['type' => 'string', 'description' => 'What the picture shows, in plain words: at most 600 characters after trimming. An empty one removes the summary; leave it out to keep the one there is.'],
+                    'summary' => ['type' => 'string', 'description' => \sprintf('What the picture shows, in plain words: at most %d characters after trimming. An empty one removes the summary; leave it out to keep the one there is.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'check_item_id' => $idOf('A checklist item of the ticket, as get_round_notes lists it.'),
                     'state' => ['type' => 'string', 'enum' => [self::FIXED], 'description' => 'Only "fixed": you mark the item fixed for the tester to check.'],
                 ],

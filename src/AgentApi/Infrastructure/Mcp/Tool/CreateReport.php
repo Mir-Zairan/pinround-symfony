@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
+use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
+use App\AgentApi\Infrastructure\Mcp\ToolUploadCompletion;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\CompletedUpload;
 use App\Media\Api\MediaImageStatus;
 use App\Media\Api\MediaPermission;
 use App\Media\Api\UploadCompletions;
-use App\Media\Api\UploadIntentNotFound;
-use App\Media\Api\UploadRefused;
 use App\Media\Api\UploadTarget;
-use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\ReportDraftContent;
 use App\Review\Api\ReportDraftRefused;
@@ -50,8 +50,7 @@ final readonly class CreateReport implements AgentTool
     public const string NEXT_STEP = 'Saved as a private report draft. Open it in pinround, check it and press Send to make the ticket.';
 
     private const int MAX_PROJECT_KEY_LENGTH = 20;
-    private const int MAX_UPLOAD_ID_LENGTH = 64;
-    private const int MAX_TITLE_LENGTH = 200;
+    private const int MAX_REPORT_TITLE_LENGTH = 200;
     private const int MAX_DETAIL_LENGTH = 50000;
 
     public function __construct(
@@ -74,7 +73,7 @@ final readonly class CreateReport implements AgentTool
                 'type' => 'object',
                 'properties' => [
                     'project' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_PROJECT_KEY_LENGTH, 'description' => 'The project key, such as SHOP.'],
-                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_TITLE_LENGTH, 'description' => 'What is wrong, in one line.'],
+                    'title' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_REPORT_TITLE_LENGTH, 'description' => 'What is wrong, in one line.'],
                     'detail' => ['type' => 'string', 'maxLength' => self::MAX_DETAIL_LENGTH, 'description' => 'More detail: the steps to see it, what you expected and what happened.'],
                     'screenshots' => [
                         'type' => 'array',
@@ -83,23 +82,10 @@ final readonly class CreateReport implements AgentTool
                         'items' => [
                             'type' => 'object',
                             'properties' => [
-                                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_UPLOAD_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
+                                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
                                 'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                                 'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                                'pins' => [
-                                    'type' => 'array',
-                                    'maxItems' => RoundCommands::MAX_PINS_PER_SCREENSHOT,
-                                    'items' => [
-                                        'type' => 'object',
-                                        'properties' => [
-                                            'x_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the left edge, in percent of the width.'],
-                                            'y_pct' => ['type' => 'number', 'minimum' => 0, 'maximum' => 100, 'description' => 'From the top edge, in percent of the height.'],
-                                            'note' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_PIN_NOTE_LENGTH, 'description' => 'What is at the pin.'],
-                                        ],
-                                        'required' => ['x_pct', 'y_pct', 'note'],
-                                        'additionalProperties' => false,
-                                    ],
-                                ],
+                                'pins' => PlacedPinArguments::schema(),
                             ],
                             'required' => ['upload_id'],
                             'additionalProperties' => false,
@@ -196,13 +182,8 @@ final readonly class CreateReport implements AgentTool
         if (null === $begunFor || $begunFor->kind !== $reportTarget->kind || $begunFor->id !== $reportTarget->id) {
             throw ToolRefusal::notFound();
         }
-        try {
-            return $this->uploadCompletions->completeInTransaction($organizationId, $callerId, $uploadId, $now);
-        } catch (UploadIntentNotFound|UploadTargetDenied) {
-            throw ToolRefusal::notFound();
-        } catch (UploadRefused) {
-            throw ToolRefusal::refused(self::UPLOAD_EXPIRED);
-        }
+
+        return ToolUploadCompletion::completed($this->uploadCompletions, $organizationId, $callerId, $uploadId, $now, self::UPLOAD_EXPIRED);
     }
 
     /**
@@ -223,25 +204,15 @@ final readonly class CreateReport implements AgentTool
             }
             $title = $screenshot['title'] ?? null;
             $summary = $screenshot['summary'] ?? null;
-            $pins = $screenshot['pins'] ?? [];
-            if ((null !== $title && !\is_string($title)) || (null !== $summary && !\is_string($summary)) || !\is_array($pins)) {
-                throw new \LogicException('The input schema lets create_report run only with a text title, summary and a list of pins.');
+            if ((null !== $title && !\is_string($title)) || (null !== $summary && !\is_string($summary))) {
+                throw new \LogicException('The input schema lets create_report run only with a text title and summary.');
             }
 
             return [
                 'upload_id' => $screenshot['upload_id'],
                 'title' => $title,
                 'summary' => $summary,
-                'pins' => array_values(array_map(static function (mixed $pin): PlacedPin {
-                    $xPercent = \is_array($pin) ? ($pin['x_pct'] ?? null) : null;
-                    $yPercent = \is_array($pin) ? ($pin['y_pct'] ?? null) : null;
-                    $note = \is_array($pin) ? ($pin['note'] ?? null) : null;
-                    if (!(\is_int($xPercent) || \is_float($xPercent)) || !(\is_int($yPercent) || \is_float($yPercent)) || !\is_string($note)) {
-                        throw new \LogicException('The input schema lets create_report run only with pins of {x_pct, y_pct, note}.');
-                    }
-
-                    return new PlacedPin((float) $xPercent, (float) $yPercent, $note);
-                }, $pins)),
+                'pins' => PlacedPinArguments::of($screenshot['pins'] ?? null, self::NAME),
             ];
         }, $screenshots));
     }

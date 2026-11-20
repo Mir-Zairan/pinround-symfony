@@ -6,12 +6,12 @@ namespace App\Review\Application;
 
 use App\Media\Api\UploadedMedia;
 use App\Review\Api\AddedDraftScreenshot;
-use App\Review\Api\ChecklistCommands;
 use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\Checklist\RoundChecklistCommands;
 use App\Review\Application\Checklist\TodoStep;
 use App\Review\Domain\DraftDecision;
 use App\Review\Domain\Pin;
@@ -33,17 +33,17 @@ use App\Ticketing\Api\TicketNotFound;
 use App\Ticketing\Api\TicketTurnQueries;
 
 /**
- * RoundCommands and DraftScreenshotCommands on the Round aggregate; the contracts are on {@see RoundCommands} and
- * {@see DraftScreenshotCommands}.
+ * RoundCommands, DraftScreenshotCommands and DraftRoundContents on the Round aggregate; the contracts are on
+ * {@see RoundCommands}, {@see DraftScreenshotCommands} and {@see DraftRoundContents}.
  */
-final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands
+final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreenshotCommands, DraftRoundContents
 {
     public function __construct(
         private Rounds $rounds,
         private TicketTurnQueries $ticketTurnQueries,
         private TenantContext $tenantContext,
         private ReportPictures $reportPictures,
-        private ChecklistCommands $checklistCommands,
+        private RoundChecklistCommands $checklistCommands,
     ) {
     }
 
@@ -222,8 +222,36 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         $this->changeAndSave($draft, $deletedAt, static fn (Round $round) => $round->delete($ownerId, $deletedAt));
     }
 
+    public function contentsOf(string $roundId, UserId $ownerId): DraftRoundAsRead
+    {
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $screenshots = array_map(
+            static fn (Screenshot $screenshot): ScreenshotWithPins => new ScreenshotWithPins(
+                $screenshot->mediaId(),
+                $screenshot->title(),
+                $screenshot->summary(),
+                array_map(static fn (Pin $pin): PlacedPin => new PlacedPin($pin->xPercent(), $pin->yPercent(), $pin->note()), $screenshot->pins()),
+            ),
+            $draft->screenshots(),
+        );
+
+        return new DraftRoundAsRead($draft->id()->toString(), $draft->ticketId(), $draft->version(), $screenshots);
+    }
+
+    public function deleteAsRead(DraftRoundAsRead $read, UserId $ownerId, \DateTimeImmutable $deletedAt): void
+    {
+        $draft = $this->ownDraft($read->roundId, $ownerId);
+        if ($draft->version() !== $read->version) {
+            throw new RoundRefused(RoundRefused::DRAFT_CHANGED);
+        }
+
+        $this->changeAndSave($draft, $deletedAt, static fn (Round $round) => $round->delete($ownerId, $deletedAt));
+    }
+
     /**
-     * @throws RoundRefused as shareDraft and shareDraftAtHandOff say; nothing is saved
+     * @throws RoundRefused    as shareDraft and shareDraftAtHandOff say; nothing is saved
+     * @throws \LogicException when the findings' items cannot be written; the share is saved, so the caller's
+     *                         transaction must roll back
      */
     private function shareOwnDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt, bool $isHandOffChoice): int
     {
@@ -240,6 +268,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         } catch (RoundSlotTaken $taken) {
             throw new RoundRefused(RoundRefused::NUMBER_TAKEN, 0, $taken);
         }
+        $this->checklistCommands->createFromFindings($draft, $sharedAt);
 
         return $number;
     }

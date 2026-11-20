@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Review\UI;
 
-use App\Media\Api\MediaImageStatus;
-use App\Media\Api\SignedUrls;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Review\Api\PlacedPin;
@@ -64,7 +62,7 @@ final class ReportDraftController extends AbstractController
         private readonly CurrentActor $currentActor,
         private readonly TenantContext $tenantContext,
         private readonly Transactions $transactions,
-        private readonly SignedUrls $signedUrls,
+        private readonly ScreenshotWithPinsViews $screenshotViews,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -274,31 +272,10 @@ final class ReportDraftController extends AbstractController
 
     private function renderPage(ReportDraftView $draft, ?string $error, int $status, ?Request $postedForm = null): Response
     {
-        $images = $this->signedUrls->forVariants(
-            $this->tenantContext->require(),
-            array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $draft->screenshots),
-            'view',
-            $this->clock->now(),
-        );
+        $views = $this->screenshotViews->viewsOf($this->tenantContext->require(), $draft->screenshots, 'draft-shot', 'Screenshot %d of the report');
         $pictures = [];
         foreach ($draft->screenshots as $index => $screenshot) {
-            $image = $images[$screenshot->mediaId] ?? null;
-            $isReady = null !== $image && MediaImageStatus::Ready === $image->status;
-            $pictures[] = [
-                'index' => $index,
-                'screenshot' => $screenshot,
-                'view' => new ScreenshotView(
-                    \sprintf('draft-shot-%d', $index + 1),
-                    $isReady ? $image->url : null,
-                    $isReady ? $image->width : null,
-                    $isReady ? $image->height : null,
-                    \sprintf('Screenshot %d of the report', $index + 1),
-                    $screenshot->title,
-                    $screenshot->summary,
-                    array_map(static fn (int $number, PlacedPin $pin): PinView => new PinView($number + 1, $pin->xPercent, $pin->yPercent, $pin->note), array_keys($screenshot->pins), $screenshot->pins),
-                    $image->status ?? MediaImageStatus::Pending,
-                ),
-            ];
+            $pictures[] = ['index' => $index, 'screenshot' => $screenshot, 'view' => $views[$index]];
         }
 
         return $this->render('@Review/report_draft.html.twig', [

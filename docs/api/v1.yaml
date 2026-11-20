@@ -97,6 +97,34 @@ paths:
         '403': { $ref: '#/components/responses/Refused' }
         '404': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/reports/{id}/screenshots:
+    post:
+      summary: Add a picture at the end of my own report draft (add_report_screenshot, scope reports:write). Never a ticket.
+      description: >-
+        Begin the upload with `POST /api/v1/uploads` and `project` set to the draft's project, as for
+        `POST /api/v1/reports`, then PUT the file. At most 10 pictures; the 11th is 422. A picture in the draft
+        already is not added again (`status: already_in_draft`). Another person's draft, another organization's, an
+        unknown or malformed id, and an upload begun by anyone else or for another project are 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [upload_id]
+              properties:
+                upload_id: { type: string }
+                title: { type: string, maxLength: 120 }
+                summary: { type: string, maxLength: 600 }
+                pins: { type: array, maxItems: 100, items: { type: object } }
+      responses:
+        '200': { description: '{draft_id, media_id, status: added | already_in_draft, screenshot_count}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
   /api/v1/tickets/{key}/draft/screenshots:
     post:
       summary: Add an uploaded picture to my own draft round on the ticket (add_screenshot, scope rounds:write).
@@ -117,8 +145,113 @@ paths:
                 pins: { type: array, maxItems: 100, items: { type: object } }
       responses:
         '200': { description: '{screenshot_id, round_id, status: added | added_before, pin_count}, or {status: processing} while the picture is processed: send again in a few seconds' }
+        '403': { $ref: '#/components/responses/Refused' }
         '404': { $ref: '#/components/responses/Refused' }
         '409': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks:
+    get:
+      summary: My own private notebooks in the token's organization, the last used first (list_my_notebooks, scope read).
+      description: >-
+        At most 20 a page. `next_cursor` is null on the last page; else send it as `cursor` for the next one. Nobody
+        else's notebooks are ever listed. Titles come wrapped as untrusted text, as for `GET /api/v1/notebooks/{id}`.
+      parameters:
+        - name: cursor
+          in: query
+          description: The `next_cursor` of the page before; leave it out for the first page.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': { description: '{untrusted_text_notice, notebooks: [{notebook_id, title, screenshot_count, scenario_count, last_used_at}], next_cursor}' }
+        '401': { $ref: '#/components/responses/NoToken' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+    post:
+      summary: Make a new, empty private notebook of mine (create_notebook, scope notebooks:write).
+      description: Only its owner ever sees it (ADR-0046). Each request without an Idempotency-Key makes another one.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201': { description: '{notebook_id}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks/{id}:
+    get:
+      summary: One of my own notebooks with its pictures, pins and scenarios (get_notebook, scope read).
+      description: >-
+        Each picture's `image` is `{status, url}` with a signed URL that works for a few minutes, or null when the
+        picture is gone. Every text a person or an agent wrote (titles, summaries, pin notes, and each scenario text but
+        a step's `type`) comes wrapped as `<untrusted_text>…</untrusted_text>` with &, < and > escaped. To read it,
+        remove the <untrusted_text> and </untrusted_text> markers, then turn &lt; into <, &gt; into > and, last,
+        &amp; into &. Reading a notebook is no use of it. Another person's notebook, another organization's, and an
+        unknown or malformed id are 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: '{untrusted_text_notice, notebook_id, title, version, last_used_at, screenshots: [{media_id, position, image, title, summary, pins: [{number, x_pct, y_pct, note}]}], scenarios}' }
+        '401': { $ref: '#/components/responses/NoToken' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks/{id}/uploads:
+    post:
+      summary: Begin one screenshot upload for my own notebook (create_notebook_upload, scope notebooks:write).
+      description: >-
+        Then PUT the file to `put_url` with the `headers` given, before `expires_at`, and add it with
+        `POST /api/v1/notebooks/{id}/screenshots`. Another person's notebook is 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mime, bytes, sha256]
+              properties:
+                mime: { type: string, enum: [image/png, image/jpeg, image/webp] }
+                bytes: { type: integer, maximum: 15728640 }
+                sha256: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+      responses:
+        '201': { description: '{upload_id, put_url, headers, expires_at}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
+        '422': { $ref: '#/components/responses/Refused' }
+  /api/v1/notebooks/{id}/screenshots:
+    post:
+      summary: Add a picture uploaded for this notebook at its end (add_notebook_screenshot, scope notebooks:write).
+      description: >-
+        At most 10 pictures; the 11th is 422. A picture in the notebook already is not added again
+        (`status: already_in_notebook`), so the call sent again without an Idempotency-Key changes nothing. A picture
+        still being processed is added and shows once ready. An upload begun for anything but this notebook, or by
+        anyone else, is 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [upload_id]
+              properties:
+                upload_id: { type: string }
+                title: { type: string, maxLength: 120 }
+                summary: { type: string, maxLength: 600 }
+                pins: { type: array, maxItems: 100, items: { type: object } }
+      responses:
+        '200': { description: '{notebook_id, media_id, status: added | already_in_notebook, screenshot_count}' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
 components:
   securitySchemes:
@@ -140,5 +273,6 @@ components:
       description: No live token. The body is empty or a plain error.
     Refused:
       description: >-
-        {error, outcome}: outcome not_found (404; also for what you may not see), missing_scope (403), read_only
-        (409), invalid_input or refused (422). Nothing was saved.
+        {error, outcome}: outcome not_found (404; also for what you may not see, and for an id or key in the path
+        that is malformed or over 64 characters), missing_scope (403, checked first), read_only (409), invalid_input
+        or refused (422). Nothing was saved.

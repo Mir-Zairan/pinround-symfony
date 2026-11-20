@@ -7,7 +7,7 @@ namespace App\Review\Domain;
 use App\SharedKernel\Domain\TicketId;
 
 /**
- * The checklist rounds of tickets with their items. A checklist round is a row of the ticket's rounds, so it takes a
+ * The checklist rounds of tickets with their items, and the items of findings rounds. A checklist round is a row of the ticket's rounds, so it takes a
  * round number as any shared round does (Rounds::nextFreeNumberOf). Each method needs an open transaction under the
  * organization as tenant, and reads or writes that organization's checklists only.
  */
@@ -24,6 +24,14 @@ interface Checklists
      *                         checklist already
      */
     public function add(Checklist $checklist): void;
+
+    /**
+     * Writes the items of a findings round, all or nothing; the round is stored already.
+     *
+     * @throws \LogicException when no transaction is open, or an item's id was added before or its pin is not stored or
+     *                         is in a checklist already (a second call for the round)
+     */
+    public function addFindings(FindingsChecklist $checklist): void;
 
     /**
      * The pins of the ticket's Round 0 and who reported it; null when the ticket has no Round 0.

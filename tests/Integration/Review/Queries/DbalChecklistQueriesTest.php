@@ -9,6 +9,9 @@ use App\Review\Api\CheckItemView;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ChecklistView;
+use App\Review\Application\Checklist\CheckItemPicture;
+use App\Review\Application\Checklist\RoundChecklist;
+use App\Review\Application\Checklist\RoundChecklistQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -21,9 +24,11 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * ChecklistQueries as the container wires it, under row-level security. Lena reported SHOP-1 of Acme Foods with three
- * pins on two pictures, given out of order, and SHOP-2 with one; Beta Bakery reported a ticket with SHOP-1's id. Every
- * checklist has one item confirmed OK, so a count that took in another ticket's or organization's items would be off.
+ * ChecklistQueries and RoundChecklistQueries as the container wires them, under row-level security. Lena reported
+ * SHOP-1 of Acme Foods with three pins on two pictures, given out of order, and SHOP-2 with one; Beta Bakery reported a
+ * ticket with SHOP-1's id. Every checklist has one item confirmed OK, so a count that took in another ticket's or
+ * organization's items would be off. SHOP-1 also has Mia's findings round with two items and Lena's review round with
+ * one, which no checklist may show.
  */
 final class DbalChecklistQueriesTest extends KernelTestCase
 {
@@ -47,6 +52,16 @@ final class DbalChecklistQueriesTest extends KernelTestCase
     private const string SMALL_LOGO_PIN = '0197a3c0-0000-7000-8000-0000000f8d33';
     private const string OTHER_TICKET_PIN = '0197a3c0-0000-7000-8000-0000000f8d34';
     private const string BETA_PIN = '0197a3c0-0000-7000-8000-0000000f8d35';
+    private const string FINDINGS = '0197a3c0-0000-7000-8000-0000000f8d15';
+    private const string REVIEW = '0197a3c0-0000-7000-8000-0000000f8d16';
+    private const string FINDINGS_PICTURE = '0197a3c0-0000-7000-8000-0000000f8d25';
+    private const string BADGE_PIN = '0197a3c0-0000-7000-8000-0000000f8d36';
+    private const string CUT_TEXT_PIN = '0197a3c0-0000-7000-8000-0000000f8d37';
+    private const string BADGE_ITEM = '0197a3c0-0000-7000-8000-0000000f8d41';
+    private const string CUT_TEXT_ITEM = '0197a3c0-0000-7000-8000-0000000f8d42';
+    private const string REVIEW_PICTURE = '0197a3c0-0000-7000-8000-0000000f8d26';
+    private const string REVIEW_PIN = '0197a3c0-0000-7000-8000-0000000f8d38';
+    private const string REVIEW_ITEM = '0197a3c0-0000-7000-8000-0000000f8d43';
     private const string MEDIA = '0197a3c0-0000-7000-8000-0000000f8d51';
     private const string CREATED_AT = '2027-03-16 08:30:00+00:00';
     private const string NOW = '2027-03-16 09:30:00+00:00';
@@ -81,6 +96,20 @@ final class DbalChecklistQueriesTest extends KernelTestCase
                 $this->commands()->markOk($itemId, new UserId(self::MIA), new \DateTimeImmutable(self::NOW));
             });
         }
+        // After the checklist round took number 1: Mia's findings round 2, with pin 2 before pin 1, one fixed, and Lena's
+        // review round 3, whose item no command makes but only the round's kind keeps out of forRounds.
+        $this->roundRows()->addAllOf(self::ACME_FOODS, [
+            self::sharedRound(self::FINDINGS, 2, 'draft', self::MIA),
+            self::sharedRound(self::REVIEW, 3, 'review', self::LENA),
+            self::picture(self::ACME_FOODS, self::FINDINGS_PICTURE, self::FINDINGS, 0),
+            self::picture(self::ACME_FOODS, self::REVIEW_PICTURE, self::REVIEW, 0),
+            self::pin(self::ACME_FOODS, self::BADGE_PIN, self::FINDINGS_PICTURE, 2, 'Badge overlaps.'),
+            self::pin(self::ACME_FOODS, self::CUT_TEXT_PIN, self::FINDINGS_PICTURE, 1, 'Text cut off.'),
+            self::pin(self::ACME_FOODS, self::REVIEW_PIN, self::REVIEW_PICTURE, 1, 'Menu is hidden.'),
+            self::item(self::BADGE_ITEM, self::FINDINGS, self::BADGE_PIN, ChecklistCommands::STATE_FIXED),
+            self::item(self::CUT_TEXT_ITEM, self::FINDINGS, self::CUT_TEXT_PIN, ChecklistCommands::STATE_OPEN),
+            self::item(self::REVIEW_ITEM, self::REVIEW, self::REVIEW_PIN, ChecklistCommands::STATE_OPEN),
+        ]);
     }
 
     protected function tearDown(): void
@@ -169,6 +198,121 @@ final class DbalChecklistQueriesTest extends KernelTestCase
     }
 
     /**
+     * The findings round is asked first, in upper case and twice, beside the report, which has no items, the review
+     * round, whose item its kind keeps out, another ticket's checklist round and an unknown round: only the ticket's
+     * checklist and findings rounds come back, by round number, each with its own items by picture position and pin number.
+     */
+    #[Test]
+    public function theRoundsAskedHaveTheirOwnItemsByRoundNumberAndOnlyTheFindingsRoundIsFindings(): void
+    {
+        [$checklists, $checklistRoundId, $reportItemIds] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
+            $checklistRoundId = $this->checklistRoundOf(self::TICKET);
+
+            return [
+                $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), [
+                    strtoupper(self::FINDINGS), self::REPORT, self::REVIEW, $this->checklistRoundOf(self::OTHER_TICKET),
+                    '0197a3c0-0000-7000-8000-0000000f8dfd', $checklistRoundId, self::FINDINGS,
+                ]),
+                $checklistRoundId,
+                [$this->itemIdOf(self::MISSING_PRICE_PIN), $this->itemIdOf(self::WRONG_TOTAL_PIN), $this->itemIdOf(self::SMALL_LOGO_PIN)],
+            ];
+        });
+
+        self::assertEquals([
+            $checklistRoundId => new RoundChecklist(new ChecklistView($checklistRoundId, 1, [
+                new CheckItemView($reportItemIds[0], 1, '', ChecklistCommands::STATE_OK),
+                new CheckItemView($reportItemIds[1], 2, 'Wrong total.', ChecklistCommands::STATE_OPEN),
+                new CheckItemView($reportItemIds[2], 1, 'Logo too small.', ChecklistCommands::STATE_OPEN),
+            ]), false, [
+                $reportItemIds[0] => new CheckItemPicture(0, null),
+                $reportItemIds[1] => new CheckItemPicture(0, null),
+                $reportItemIds[2] => new CheckItemPicture(1, null),
+            ]),
+            self::FINDINGS => new RoundChecklist(new ChecklistView(self::FINDINGS, 2, [
+                new CheckItemView(self::CUT_TEXT_ITEM, 1, 'Text cut off.', ChecklistCommands::STATE_OPEN),
+                new CheckItemView(self::BADGE_ITEM, 2, 'Badge overlaps.', ChecklistCommands::STATE_FIXED),
+            ]), true, [self::CUT_TEXT_ITEM => new CheckItemPicture(0, null), self::BADGE_ITEM => new CheckItemPicture(0, null)]),
+        ], $checklists);
+        self::assertSame([$checklistRoundId, self::FINDINGS], array_keys($checklists));
+    }
+
+    #[Test]
+    public function anotherOrganizationsRoundsOfATicketWithTheSameIdAndNoRoundsHaveNoItems(): void
+    {
+        $betaChecklistRoundId = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): string => $this->checklistRoundOf(self::TICKET));
+
+        self::assertSame([[], []], $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
+            $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), [$betaChecklistRoundId]),
+            $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), []),
+        ]));
+        self::assertSame([], $this->transactions()->rolledBackAs(
+            self::BETA_BAKERY,
+            fn (): array => $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), [self::FINDINGS]),
+        ));
+    }
+
+    /**
+     * forRounds' join with its organization conditions taken out, run as pinround_app: under Acme Foods as tenant,
+     * row-level security alone hides Beta Bakery's checklist round on the same ticket id, whose items Beta's own tenant
+     * gets.
+     */
+    #[Test]
+    public function rowLevelSecurityAloneHidesAnotherOrganizationsChecklistItemsOnTheTicketId(): void
+    {
+        [$betaChecklistRoundId, $betaItemIds] = $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => [
+            $this->checklistRoundOf(self::TICKET),
+            [$this->itemIdOf(self::BETA_PIN)],
+        ]);
+        $itemIdsAs = fn (string $organizationId): array => $this->transactions()->rolledBackAs($organizationId, fn (): array => [
+            $this->connection()->fetchOne('SELECT current_user'),
+            $this->connection()->fetchFirstColumn(
+                'SELECT item.id FROM rvw_round AS round'
+                .' JOIN rvw_check_item AS item ON item.round_id = round.id'
+                .' JOIN rvw_pin AS pin ON pin.id = item.pin_id'
+                .' JOIN rvw_screenshot AS screenshot ON screenshot.id = pin.screenshot_id'
+                .' WHERE round.ticket_id = CAST(:ticket AS uuid) AND round.id = ANY(CAST(:rounds AS uuid[])) AND round.kind IN (:checklist, :findings)'
+                .' ORDER BY round.number, screenshot.position, pin.number',
+                ['ticket' => self::TICKET, 'rounds' => '{'.$betaChecklistRoundId.'}', 'checklist' => 'checklist', 'findings' => 'draft'],
+            ),
+        ]);
+
+        self::assertSame(['pinround_app', []], $itemIdsAs(self::ACME_FOODS));
+        self::assertSame(['pinround_app', $betaItemIds], $itemIdsAs(self::BETA_BAKERY));
+    }
+
+    #[Test]
+    public function aMalformedRoundIdIsRefusedBeforeAnyQuery(): void
+    {
+        $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): void {
+            $this->expectException(\InvalidArgumentException::class);
+            $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), [self::FINDINGS, self::FINDINGS."\n"]);
+        });
+    }
+
+    #[Test]
+    public function withNoTransactionNoRoundsItemsAreRead(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $this->expectException(\LogicException::class);
+            $this->roundChecklistQueries()->forRounds(new TicketId(self::TICKET), [self::FINDINGS]);
+        } finally {
+            $this->tenantContext()->clear();
+        }
+    }
+
+    /**
+     * Reads in the transaction already open, under its tenant.
+     */
+    private function checklistRoundOf(string $ticketId): string
+    {
+        $roundId = $this->connection()->fetchOne("SELECT id FROM rvw_round WHERE ticket_id = ? AND kind = 'checklist'", [$ticketId]);
+        self::assertIsString($roundId);
+
+        return $roundId;
+    }
+
+    /**
      * Reads in the transaction already open, under its tenant.
      */
     private function itemIdOf(string $pinId): string
@@ -195,6 +339,42 @@ final class DbalChecklistQueriesTest extends KernelTestCase
             'state' => 'closed',
             'version' => 1,
             'created_at' => '2027-03-15 10:00:00+00',
+        ]];
+    }
+
+    /**
+     * A round of Acme Foods' SHOP-1 shared after the report.
+     *
+     * @return array{string, array<string, mixed>}
+     */
+    private static function sharedRound(string $roundId, int $number, string $kind, string $ownerId): array
+    {
+        return ['rvw_round', [
+            'organization_id' => self::ACME_FOODS,
+            'id' => $roundId,
+            'ticket_id' => self::TICKET,
+            'number' => $number,
+            'kind' => $kind,
+            'owner_id' => $ownerId,
+            'shared_at' => '2027-03-16 09:00:00+00',
+            'state' => 'open',
+            'version' => 1,
+            'created_at' => '2027-03-16 08:00:00+00',
+        ]];
+    }
+
+    /**
+     * An item of Acme Foods; one past "open" was last changed by Omar.
+     *
+     * @return array{string, array<string, mixed>}
+     */
+    private static function item(string $itemId, string $roundId, string $pinId, string $state): array
+    {
+        $isChanged = ChecklistCommands::STATE_OPEN !== $state;
+
+        return ['rvw_check_item', [
+            'organization_id' => self::ACME_FOODS, 'id' => $itemId, 'round_id' => $roundId, 'pin_id' => $pinId, 'state' => $state,
+            'changed_by' => $isChanged ? self::OMAR : null, 'changed_at' => $isChanged ? self::NOW : null, 'created_at' => '2027-03-16 09:00:00+00',
         ]];
     }
 
@@ -228,6 +408,14 @@ final class DbalChecklistQueriesTest extends KernelTestCase
     {
         $queries = self::getContainer()->get('test.review_checklist_queries');
         self::assertInstanceOf(ChecklistQueries::class, $queries);
+
+        return $queries;
+    }
+
+    private function roundChecklistQueries(): RoundChecklistQueries
+    {
+        $queries = self::getContainer()->get('test.review_checklist_queries');
+        self::assertInstanceOf(RoundChecklistQueries::class, $queries, 'The container gives Review one checklist reader.');
 
         return $queries;
     }

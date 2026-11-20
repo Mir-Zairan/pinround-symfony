@@ -218,6 +218,42 @@ final class TokenPageTest extends WebTestCase
     }
 
     #[Test]
+    public function theNotebooksBoxSaysWhatItAllowsAndStartsUnticked(): void
+    {
+        [$omar] = $this->omarInAcmeFoods();
+        $this->logIn($this->client, $omar);
+
+        $page = $this->client->request('GET', self::TOKENS_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        $box = $page->filter('main fieldset input[type="checkbox"][name="scopes[]"][value="notebooks:write"]');
+        self::assertCount(1, $box);
+        self::assertNull($box->attr('checked'));
+        self::assertSame('Let Claude Code and the extension write to your notebooks.', trim((string) $box->closest('label')?->text()));
+    }
+
+    /**
+     * A token made with the box ticked holds notebooks:write; one made beside it without the box does not.
+     */
+    #[Test]
+    public function onlyATokenMadeWithTheNotebooksBoxTickedMayWriteToNotebooks(): void
+    {
+        [$omar, $acmeFoods] = $this->omarInAcmeFoods();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+        $csrfToken = $this->createCsrfToken();
+
+        $this->postNewToken(['name' => 'Omar notebooks', 'scopes' => ['read', 'notebooks:write'], 'lifetime_days' => '30', '_csrf_token' => $csrfToken]);
+        self::assertResponseStatusCodeSame(200);
+        $this->postNewToken(['name' => 'Omar reads only', 'scopes' => ['read'], 'lifetime_days' => '30', '_csrf_token' => $csrfToken]);
+        self::assertResponseStatusCodeSame(200);
+
+        self::assertSame(
+            ['Omar notebooks' => '{read,notebooks:write}', 'Omar reads only' => '{read}'],
+            $this->storedScopesByNameOf($omar, $acmeFoods),
+        );
+    }
+
+    #[Test]
     public function revokingOwnTokenTakesItOffTheListAndItStopsWorkingAtOnce(): void
     {
         [$omar, $acmeFoods] = $this->omarInAcmeFoods();
@@ -481,6 +517,17 @@ final class TokenPageTest extends WebTestCase
         self::assertIsInt($count);
 
         return $count;
+    }
+
+    /**
+     * @return array<mixed> token name => its scopes as PostgreSQL prints the array
+     */
+    private function storedScopesByNameOf(User $user, OrganizationId $organizationId): array
+    {
+        return $this->inTokenTransactionAs($organizationId, fn (): array => $this->tokenEntityManager()->getConnection()->fetchAllKeyValue(
+            'SELECT name, scopes::text FROM idn_api_token WHERE user_id = ? ORDER BY name',
+            [$user->id()->toString()],
+        ));
     }
 
     /**

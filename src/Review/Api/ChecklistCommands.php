@@ -9,7 +9,7 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * A ticket's checklist round (FR-RND-04, P05.T6): one item per pin of Round 0, which the assignee marks fixed and the
- * tester then confirms OK or sends back as not fixed.
+ * tester then confirms OK or sends back as not fixed. A findings round's pins become items the same way (FR-RND-17).
  *
  * Each method runs in the caller's open transaction under the organization as tenant. Who may mark an item is
  * ChecklistPermission's to decide: the caller must have been granted MARK_FIXED or CHECK on the item before calling.
