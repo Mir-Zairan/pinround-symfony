@@ -68,7 +68,8 @@ final readonly class SecurityHeadersSubscriber
             "default-src 'self'",
             "script-src 'self' ".$nonceSource,
             "style-src 'self' ".$nonceSource,
-            self::directive('img-src', "'self'", $this->objectStorageOrigin, 'data:'),
+            // blob: only here: the upload forms preview the chosen file from a blob: URL before it reaches the bucket.
+            self::directive('img-src', "'self'", $this->objectStorageOrigin, 'data:', 'blob:'),
             self::directive('connect-src', "'self'", $this->objectStorageOrigin, $this->mercureOrigin, ...$this->cspConnectSources->origins()),
             "font-src 'self'",
             "frame-ancestors 'none'",

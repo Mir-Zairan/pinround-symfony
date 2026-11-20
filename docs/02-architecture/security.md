@@ -191,7 +191,7 @@ Details: [media-pipeline.md](media-pipeline.md).
 Headers on every response the app answers:
 
 ```http
-Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{random}'; style-src 'self' 'nonce-{random}'; img-src 'self' https://{bucket-host} data:; connect-src 'self' https://{bucket-host} https://{mercure-host} http://localhost:11434; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-{random}'; style-src 'self' 'nonce-{random}'; img-src 'self' https://{bucket-host} data: blob:; connect-src 'self' https://{bucket-host} https://{mercure-host} http://localhost:11434; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
 Strict-Transport-Security: max-age=63072000; includeSubDomains
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
@@ -202,7 +202,7 @@ Cross-Origin-Opener-Policy: same-origin
 Notes:
 
 - `App\Web\Infrastructure\Security\SecurityHeadersSubscriber` sends these headers on every main-request response the app answers (HTML, JSON, redirects and error pages), and replaces any value a controller set. `Strict-Transport-Security` is sent only when the kernel environment is `prod`. Files Caddy serves straight from `public/` (in prod the compiled `/assets/*`) and the Mercure hub's own responses get none of them.
-- `{bucket-host}` comes from `OBJECT_STORAGE_PUBLIC_URL` and `{mercure-host}` from `MERCURE_PUBLIC_URL`. The subscriber keeps only the origin (scheme, host, port) of each, so `http://localhost:9000` in dev is allowed. An empty value adds no source. A value that is not an `http` or `https` URL whose host is only letters, digits, dots and hyphens (optional port; a path or query may follow but holds no space, `;` or `,`) throws, so a bad setting fails loudly instead of widening the policy. `.env` leaves both empty; `.env.dev` and `.env.test` set the local hub and MinIO.
+- `{bucket-host}` comes from `OBJECT_STORAGE_PUBLIC_URL` and `{mercure-host}` from `MERCURE_PUBLIC_URL`. The subscriber keeps only the origin (scheme, host, port) of each, so `https://localhost:9443` (the dev stack's HTTPS proxy to MinIO) is allowed with its port. An empty value adds no source. A value that is not an `http` or `https` URL whose host is only letters, digits, dots and hyphens (optional port; a path or query may follow but holds no space, `;` or `,`) throws, so a bad setting fails loudly instead of widening the policy. `.env` leaves both empty; `.env.dev` and `.env.test` set the local hub and MinIO. `img-src` also allows `blob:`, for the preview of a file picked for upload; no other directive does.
 - With `kernel.debug` on (dev, test), Symfony's `ErrorListener` drops the CSP from error pages so its exception page can run; the other headers stay. Prod has debug off and keeps it.
 - `Referrer-Policy` is `strict-origin-when-cross-origin` as above. The P00.T8 plan step said `same-origin`; this doc wins.
 - `http://localhost:11434` is added to `connect-src` **only** on a page that shows the Local AI chip: the header's `local_ai_chip()` (`App\Assist\UI\LocalAiChip`) puts it in `CspConnectSources` when the viewer's AI policy allows laptop AI, and the subscriber appends what that request collected. Every other page and response keeps the policy above exactly. `http://127.0.0.1:11434` (ADR-0019) is not added, because the browser only ever calls `localhost`.

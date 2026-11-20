@@ -59,7 +59,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), '', '', 'dev'));
 
         $directives = $this->cspDirectives($response);
-        self::assertSame("img-src 'self' data:", $directives['img-src']);
+        self::assertSame("img-src 'self' data: blob:", $directives['img-src']);
         self::assertSame("connect-src 'self'", $directives['connect-src']);
         self::assertStringNotContainsString('  ', (string) $response->headers->get('Content-Security-Policy'));
         self::assertStringNotContainsString('*', (string) $response->headers->get('Content-Security-Policy'));
@@ -71,7 +71,7 @@ final class SecurityHeadersSubscriberTest extends TestCase
         $response = $this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), 'http://localhost:9000/pinround/', 'https://localhost/.well-known/mercure?topic=x', 'dev'));
 
         $directives = $this->cspDirectives($response);
-        self::assertSame("img-src 'self' http://localhost:9000 data:", $directives['img-src']);
+        self::assertSame("img-src 'self' http://localhost:9000 data: blob:", $directives['img-src']);
         self::assertSame("connect-src 'self' http://localhost:9000 https://localhost", $directives['connect-src']);
     }
 
@@ -94,11 +94,24 @@ final class SecurityHeadersSubscriberTest extends TestCase
 
         $directives = $this->cspDirectives($this->respond($subscriber));
         self::assertSame("connect-src 'self' http://localhost:9000 ".self::MERCURE_ORIGIN.' http://localhost:11434', $directives['connect-src']);
-        self::assertSame("img-src 'self' http://localhost:9000 data:", $directives['img-src']);
+        self::assertSame("img-src 'self' http://localhost:9000 data: blob:", $directives['img-src']);
         self::assertSame("default-src 'self'", $directives['default-src']);
 
         $cspConnectSources->reset();
         self::assertSame("connect-src 'self' http://localhost:9000 ".self::MERCURE_ORIGIN, $this->cspDirectives($this->respond($subscriber))['connect-src']);
+    }
+
+    #[Test]
+    public function onlyImgSrcAllowsBlobUrls(): void
+    {
+        $cspConnectSources = new CspConnectSources();
+        $cspConnectSources->allow('http://localhost:11434');
+        $directives = $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), $cspConnectSources, self::STORAGE_URL, self::MERCURE_URL, 'dev')));
+
+        $directivesWithBlob = array_keys(array_filter($directives, static fn (string $directive): bool => str_contains($directive, 'blob:')));
+        self::assertSame(['img-src'], $directivesWithBlob);
+        self::assertSame("img-src 'self' ".self::STORAGE_URL.' data: blob:', $directives['img-src']);
+        self::assertCount(10, $directives);
     }
 
     /**

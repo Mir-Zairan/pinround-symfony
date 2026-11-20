@@ -31,7 +31,7 @@ final class ExpectedSecurityHeaders
     public static function withoutStrictTransportSecurity(string $nonce, string $objectStorageOrigin, string $mercureOrigin): array
     {
         return [
-            'content-security-policy' => "default-src 'self'; script-src 'self' 'nonce-{$nonce}'; style-src 'self' 'nonce-{$nonce}'; img-src 'self' {$objectStorageOrigin} data:; connect-src 'self' {$objectStorageOrigin} {$mercureOrigin}; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
+            'content-security-policy' => "default-src 'self'; script-src 'self' 'nonce-{$nonce}'; style-src 'self' 'nonce-{$nonce}'; img-src 'self' {$objectStorageOrigin} data: blob:; connect-src 'self' {$objectStorageOrigin} {$mercureOrigin}; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
             'x-content-type-options' => 'nosniff',
             'referrer-policy' => 'strict-origin-when-cross-origin',
             'permissions-policy' => 'camera=(), microphone=(), geolocation=()',

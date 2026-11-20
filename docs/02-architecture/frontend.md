@@ -233,7 +233,7 @@ Rules:
   - `default-src 'self'`;
   - `script-src 'self' 'nonce-…'`;
   - `connect-src 'self'` plus the Mercure hub, the storage host and `http://localhost:11434` (only when the org's AI runs on laptops);
-  - `img-src 'self'` plus the storage host and `data:` (only for tiny placeholders);
+  - `img-src 'self'` plus the storage host, `data:` (only for tiny placeholders) and `blob:` (the preview of a file picked for upload, before it reaches the bucket); no other directive allows `blob:`;
   - `frame-ancestors 'none'`.
   - There are no inline event handlers. Every script tag gets the request's nonce from `csp_nonce()`: `<script nonce="{{ csp_nonce() }}">`, and for the import map `{{ importmap('app', {nonce: csp_nonce()}) }}`, which puts it on the importmap JSON and the entry module script.
 - **CSRF:** a token on every POST form and Live Component action (Symfony's CSRF protection, SameSite=Lax cookies).

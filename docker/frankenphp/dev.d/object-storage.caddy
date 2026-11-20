@@ -1,0 +1,9 @@
+# Dev only: compose.yaml mounts this folder; the prod image has none, and prod's OBJECT_STORAGE_PUBLIC_URL is the
+# bucket's own HTTPS URL. Browsers on https://localhost read screenshots and PUT presigned uploads here, over HTTPS
+# from the same internal CA. A separate origin, so an uploaded file is never served from the app's own origin.
+# Caddy passes the Host header through unchanged by default, and the path is not rewritten: MinIO checks the presigned
+# signature against Host localhost:9443 and /{bucket}/{key}, as signed for .env.dev's OBJECT_STORAGE_PUBLIC_URL.
+# Do not add `header_up Host`, a `rewrite` or `handle_path` here.
+https://localhost:9443 {
+	reverse_proxy minio:9000
+}

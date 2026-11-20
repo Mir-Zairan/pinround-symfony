@@ -5,7 +5,7 @@ import { deflateSync } from 'node:zlib';
 // A browser PUT to the bucket needs its CORS to allow this origin, which the dev stack does for the app's own origin only.
 
 // The dev stack's OBJECT_STORAGE_PUBLIC_URL (.env.dev), the only storage origin the page's CSP lets it connect to.
-export const STORAGE_URL = 'http://localhost:9000/pinround-dev/uploads/slot';
+export const STORAGE_URL = 'https://localhost:9443/pinround-dev/uploads/slot';
 export const MEDIA_ID = '0192f3a0-7b2c-7d3e-8a4f-5b6c7d8e9f02';
 const APP_ORIGIN = new URL(process.env.E2E_BASE_URL ?? 'https://localhost').origin;
 // What the bucket's CORS rule answers for the app's origin; a PUT with a Content-Type is preflighted.

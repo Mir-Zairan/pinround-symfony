@@ -88,8 +88,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   1. Add `blob:` to `img-src` in `SecurityHeadersSubscriber` and to its test.
   2. Serve object storage to the browser over HTTPS on the dev stack (Caddy route or `OBJECT_STORAGE_PUBLIC_URL` on https); document it in [config.md](../operations/config.md).
 - **Acceptance:**
-  - [ ] Choosing a PNG on Report a problem shows its preview; no CSP error (Playwright).
-  - [ ] No mixed-content warning on the ticket page.
+  - [x] Choosing a PNG on Report a problem shows its preview; no CSP error (Playwright).
+  - [x] No mixed-content warning on the ticket page.
 - **Tests:** `SecurityHeadersSubscriberTest`; Playwright upload preview.
 - **Size:** S
 
@@ -340,5 +340,6 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 ## Hand-off notes
 - 2026-11-20 (plan change): phase added from the product owner's hands-on test and a UI check of every page. P07.T6 (My reports page) moves here as T15, and the smallest part of P11.T1 (admin shell with the tabs that exist) as T3; their phase files say so. Evidence for T1 and T2 (live checks on SHOP-42 and Report a problem) is in this session's notes, not in the repo.
 - 2026-11-20 (T1): PinLayer and Screenshot print no `<style>` any more, on any path. The `pin-layer` controller places each pin from `data-x-percent`/`data-y-percent` (and re-places it when a re-render changes them); `picture-shape` sets a not-shown picture's frame shape. Chosen over keeping the style for full loads because one script path covers full loads, frames and live re-renders, and a page cannot tell which path it is on. Cost: pins sit at the corner until Stimulus connects. Proof owed: `pin-placement.spec.ts` and the draft re-render case in `draft-round.spec.ts` run as Omar and were not run, because the dev Omar has two-step login on; the same scenarios passed as Lena in an uncommitted copy. Tick the T1 boxes once they pass as Omar. `review.css` line 83 still says left/top come from the style element; fix it in a task that may touch CSS.
+- 2026-11-20 (T2): `img-src` gains `blob:` and no other directive does (`SecurityHeadersSubscriberTest::onlyImgSrcAllowsBlobUrls`). The dev stack serves the bucket to browsers at `https://localhost:9443` (`.env.dev` `OBJECT_STORAGE_PUBLIC_URL`): a site in `docker/frankenphp/dev.d/object-storage.caddy`, which `compose.yaml` mounts at `/etc/caddy/dev.d` and the Caddyfile imports by glob, so the prod image (no such folder) starts with a warning and no storage site. A separate port, not a path on `https://localhost`, so an uploaded file never runs on the app's origin; Caddy keeps Host and path, so presigned signatures still match. `.env.test` keeps `http://localhost:9000` (PHPUnit only). The Caddyfile is baked into the image: after pulling this, run `make up` (it rebuilds) or `docker compose build app` before `up -d app`. `storage-over-https.spec.ts` proves the preview, https picture addresses with no mixed content, and with `E2E_MEDIA_PIPELINE=1` a real presigned PUT and a drawn picture through the proxy; all three passed. `media-mocks.ts` now routes the https storage URL.
 </content>
 </invoke>

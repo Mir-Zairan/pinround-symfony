@@ -34,6 +34,10 @@ http://{$MERCURE_INTERNAL_HOST:app}:80 {
 	respond 404
 }
 
+# Dev-only sites (the HTTPS proxy to MinIO), mounted by compose.yaml. A glob, so the prod image, which has no such
+# folder, starts with a warning instead of an error.
+import /etc/caddy/dev.d/*.caddy
+
 # One host name: the Dockerfile healthcheck connects to it.
 {$SERVER_NAME:localhost} {
 	# No `log` directive on purpose: Caddy writes no access log, so no request URI (the tickets list's ?q= holds search
