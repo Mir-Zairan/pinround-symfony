@@ -47,7 +47,7 @@ A browser sends the extension's origin with every request. pinround and its stor
 1. Open the page with the problem and click the extension's icon.
 2. In **Put the screenshot in**, choose **A new report** or **My draft round on SHOP-12**.
 3. For a new report, type the project key (for example `SHOP`) and what is wrong in one line.
-4. Optionally give the capture a title (up to 120 characters) and say what the picture shows (up to 600).
+4. The title starts as the page's title, and **What this picture shows** as "Page: <address> · Window <width>×<height> · <browser and version>". The address has no user name, password, query (`?…`) or fragment (`#…`), as those can hold a token. Change or clear either; the title holds up to 120 characters and the summary up to 600, and a longer page title or address is cut with "…".
 5. Press **Capture this page**. For a draft round the picture is added at once; pinround processes it first, which can take a few seconds.
 6. For a new report, open the next page and capture again, up to 10 pictures; each goes into the same report draft. Then press **Done**. pinround opens the draft: check it and press **Send**.
 
@@ -109,6 +109,7 @@ A notebook's scenarios click and type on a page, so they play only on hosts you 
 - **AI suggests, you play.** Claude Code only writes scenarios into your notebook. Nothing runs until you press **Play** or **Step**, and nothing runs on a new host until you press **Play anyway**.
 - **Data, never code.** A scenario is a list of steps the player reads. A step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. The extension holds no `eval(`, no `new Function` and no plain `Function(` call, and the build fails if a tracked file under `extension/` has one.
 - **Text from pinround is shown as text.** Titles, lines and notes never become part of the page or the popup's markup.
+- **The page's title and address are the page's to choose.** Before they fill a capture's title and summary, control characters, line breaks, the BOM and direction overrides go, white space collapses to one line, and the address loses its user name, password, query and fragment. They only ever fill the two fields as text.
 - **A closed tab stops a run.** "The tab is closed. Open the scenario's page and play again." Nothing runs in another tab in its place.
 
 ## Sign out
@@ -117,7 +118,7 @@ In the options, press **Sign out**. The extension asks pinround to revoke the to
 ## Permissions and why
 | Permission | Why |
 |---|---|
-| `activeTab` | To take a picture of the tab you are on, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
+| `activeTab` | To take a picture of the tab you are on, and read its title and address for the capture's title and summary, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
 | `scripting` | To run the extension's own pin overlay and scenario player in the tab you are on, only after you click the extension's icon. It never runs a script from the network. |
 | `storage` | To keep the pinround address, your token, your allowed hosts and your "Play anyway" answers in this browser profile, and, until the browser closes, where your captures go and the report draft they are adding to. |
 
