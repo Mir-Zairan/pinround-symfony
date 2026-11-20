@@ -306,6 +306,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
 
         self::assertTrue($decision->isAllowed);
         self::assertEquals(MoveTarget::step($testing->id()), $decision->moveTarget);
+        self::assertTrue($decision->isLeadOnlyMove, '"Move to another step…" is lead-only, so it never closes a shared round (ADR-0048)');
     }
 
     #[Test]

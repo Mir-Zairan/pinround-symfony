@@ -123,7 +123,9 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             return Decision::refused($blockingNote);
         }
 
-        return $this->mayUse($ticket, $transition, $actor, $team) ? Decision::allowed(self::moveTargetOf($this->coreTargetOf($transition, $ticket), $ticket)) : Decision::refused(null);
+        return $this->mayUse($ticket, $transition, $actor, $team)
+            ? Decision::allowed(self::moveTargetOf($this->coreTargetOf($transition, $ticket), $ticket), $transition->isLeadOnly())
+            : Decision::refused(null);
     }
 
     /**
@@ -189,7 +191,7 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
             }
         }
 
-        return Decision::allowed(MoveTarget::step($target->id()));
+        return Decision::allowed(MoveTarget::step($target->id()), true);
     }
 
     private function noteForEveryMove(TicketState $ticket, ActorInTeam $actor): ?RuleNote

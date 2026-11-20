@@ -11,13 +11,21 @@ namespace App\Workflow\Api;
  */
 final readonly class Decision
 {
-    private function __construct(public bool $isAllowed, public ?RuleNote $ruleNote, public ?MoveTarget $moveTarget)
+    /**
+     * @param bool $isLeadOnlyMove true for an allowed verb only the team's lead may use ("Plan it", "Go on", "Put on
+     *                             hold") and for "Move to another step…"; such a move never closes a shared round
+     *                             (ADR-0048). False for a move-on verb and for every refusal.
+     */
+    private function __construct(public bool $isAllowed, public ?RuleNote $ruleNote, public ?MoveTarget $moveTarget, public bool $isLeadOnlyMove = false)
     {
     }
 
-    public static function allowed(MoveTarget $moveTarget): self
+    /**
+     * @param bool $isLeadOnlyMove see the constructor
+     */
+    public static function allowed(MoveTarget $moveTarget, bool $isLeadOnlyMove = false): self
     {
-        return new self(true, null, $moveTarget);
+        return new self(true, null, $moveTarget, $isLeadOnlyMove);
     }
 
     /**

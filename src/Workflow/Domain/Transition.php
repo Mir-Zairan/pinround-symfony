@@ -46,6 +46,15 @@ final readonly class Transition
         }
     }
 
+    /**
+     * Whether only the team's lead may use it ("Plan it", "Go on", "Put on hold"). Every other verb is a move-on verb,
+     * which closes the ticket's open shared round when the person whose turn it is uses it (ADR-0048).
+     */
+    public function isLeadOnly(): bool
+    {
+        return [Mover::Lead] === $this->movers;
+    }
+
     public function startsFrom(CoreStep $step): bool
     {
         return \in_array($step, $this->from, true);

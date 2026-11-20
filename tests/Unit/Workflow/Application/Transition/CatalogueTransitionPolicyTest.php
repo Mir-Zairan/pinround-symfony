@@ -79,6 +79,46 @@ final class CatalogueTransitionPolicyTest extends TestCase
         self::assertSame($isOffered, $policy->check($ticket, $actor, $rules, GuardFixtures::team(), $verb)->isAllowed);
     }
 
+    /**
+     * ADR-0048: only a move-on verb closes a shared round, so check says which allowed verbs are lead-only.
+     *
+     * @return iterable<string, array{Verb, TicketState, ActorInTeam, bool}> verb, ticket, an actor allowed to use it,
+     *                                                                       whether it is lead-only
+     */
+    public static function allowedVerbsWithTheirLeadOnlyFlag(): iterable
+    {
+        yield 'Plan it' => [Verb::PlanIt, GuardFixtures::ticket('backlog', 'todo'), GuardFixtures::lena(), true];
+        yield 'Put on hold' => [Verb::PutOnHold, GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::lena(), true];
+        yield 'Go on' => [Verb::GoOn, GuardFixtures::ticket('hold', 'wait', assignee: GuardFixtures::OMAR), GuardFixtures::lena(), true];
+        yield 'Send to code review' => [Verb::SendToCodeReview, GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::omar(), false];
+        yield 'Send to code review by the lead, nobody assigned' => [Verb::SendToCodeReview, GuardFixtures::ticket('progress', 'doing'), GuardFixtures::lena(), false];
+        yield 'Approve code' => [Verb::ApproveCode, self::omarsTicketInCodeReview(), GuardFixtures::lena(), false];
+        yield 'Pass it by the lead' => [Verb::PassIt, self::omarsTicketInTesting(), GuardFixtures::lena(), false];
+        yield 'Needs changes' => [Verb::NeedsChanges, self::omarsTicketInTesting(), GuardFixtures::mia(), false];
+        yield 'Input given by the lead' => [Verb::InputGiven, GuardFixtures::ticket('input', 'wait', reporter: GuardFixtures::OMAR), GuardFixtures::lena(), false];
+        yield 'Reopen by the lead' => [Verb::Reopen, GuardFixtures::ticket('done', 'done', assignee: GuardFixtures::OMAR), GuardFixtures::lena(), false];
+        yield 'Move on by the lead' => [Verb::MoveOn, GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR), GuardFixtures::lena(), false];
+    }
+
+    #[Test]
+    #[DataProvider('allowedVerbsWithTheirLeadOnlyFlag')]
+    public function anAllowedVerbSaysWhetherOnlyTheLeadMayUseIt(Verb $verb, TicketState $ticket, ActorInTeam $actor, bool $isLeadOnly): void
+    {
+        $decision = GuardFixtures::policy()->check($ticket, $actor, GuardFixtures::rules(testerMovesDone: false), GuardFixtures::team(), $verb->value);
+
+        self::assertTrue($decision->isAllowed);
+        self::assertSame($isLeadOnly, $decision->isLeadOnlyMove);
+    }
+
+    #[Test]
+    public function aRefusedVerbIsNeverLeadOnly(): void
+    {
+        $decision = GuardFixtures::policy()->check(GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::omar(), GuardFixtures::rules(), GuardFixtures::team(), Verb::PutOnHold->value);
+
+        self::assertFalse($decision->isAllowed);
+        self::assertFalse($decision->isLeadOnlyMove);
+    }
+
     #[Test]
     public function withNoSelfReviewOnLenaAsTheAssigneeGetsNoApproveCodeAndANoteNamingOmar(): void
     {
