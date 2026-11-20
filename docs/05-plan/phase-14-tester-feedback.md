@@ -247,8 +247,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   1. Reuse the List view's rail, search and Show done; apply project and search to the turn query.
   2. "Show N more" uses the text-button style; the cards line up with the heading; keys never break across lines.
 - **Acceptance:**
-  - [ ] Search and project narrow "Whose turn?" (functional test with tickets that must be left out).
-  - [ ] At 390 px wide, no key wraps (Playwright).
+  - [x] Search and project narrow "Whose turn?" (functional test with tickets that must be left out). (`Functional/Ticketing/WhoseTurnTest::theProjectAndTheSearchNarrowTheCardsTheirCountsAndTheirOldestWait`)
+  - [x] At 390 px wide, no key wraps (Playwright). (`whose-turn-toolbar.spec.ts`: "at 390 px wide › no ticket key wraps and the page does not scroll sideways")
 - **Prototype check:** `Main › Tickets` › Whose turn?
 - **Size:** M
 
@@ -369,3 +369,4 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (T5, steps 3 to 5): the hand-off dialog and the draft round's share card both refuse a share while another shared round on the ticket is open, with a reason that names who gives the verdict ("Round 2 is still open. Mia gives a verdict first.", or "Give your verdict first." to that person); the dialog then offers only "Keep private and move", and a share sent anyway is refused and changes nothing (the new T5 criterion, ticked on `TicketMoveDraftQuestionTest`). A share reads the assignee for a findings round's reason under the ticket's row lock (commit 7ff169cf). MCP and REST have no share tool or route today (AgentApi offers none), so step 5's "MCP and REST answer the same refusal as a 4xx" has no entry point to guard; it is owed when a share tool or route is added, and no criterion for it is ticked.
 - 2026-11-21 (T11): T11 step 1 done in the extension (page-context.js); steps 2-3 (MCP requires title and summary, guides) still open. Criteria 1 and 3 are ticked on `extension/tests/page-context.test.mjs` and `tests/e2e/extension-capture-target.spec.ts` (14 passed in `chromium-extension`). That spec's credentialed-address test now routes `http://omar:s3cret@shop.acme-foods.test/**` itself: Playwright's request URL keeps the credentials, so the fixture's route for `TEST_PAGE_ORIGIN` did not match and the page went to DNS (`TEST_PAGE_FILE` is now exported from `extension.ts`).
 - 2026-11-21: T6 steps 1 and 5 done in 6a (column, chain to first try, cap 5); criteria for sixth try and foreign retake_of stay unticked until 6d maps the 404 at the MCP/REST edge; share still copies every try until 6b.
+- 2026-11-21 (P14.T13): Whose turn? reuses ProjectRail, TicketFilters (isWhoseTurnView) and the ticket-list frames; Show done changes only the rail counts. When a search passes the 1,000-match cap, each card's count reads "N+" as the total line does (`WhoseTurnTest::aSearchPastTheCapShowsTheCountAsALowerBound`). The criteria are ticked on `WhoseTurnTest` and on `whose-turn-toolbar.spec.ts`, which passed in full (4 of 4, as Lena) against the dev stack after a dev cache clear and an app and worker restart.

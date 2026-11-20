@@ -81,12 +81,15 @@ test.describe('at 390 px wide', () => {
 
   test('"Show N more" is a text button inside its card', async ({ page }) => {
     await openWhoseTurn(page);
-    const more = page.getByRole('link', { name: /^Show [\d,]+ more$/ }).first();
-    test.skip((await more.count()) === 0, 'No seeded card holds more than 5 tickets: run make seed.');
+    const showMoreName = /^Show [\d,]+ more$/;
+    // A `has` locator is matched inside each card, so `.first()` there would match every card with the link.
+    const card = page.locator('.turn__card', { has: page.getByRole('link', { name: showMoreName }) }).first();
+    test.skip((await card.count()) === 0, 'No seeded card holds more than 5 tickets: run make seed.');
+    const more = card.getByRole('link', { name: showMoreName });
 
     await expect(more).toHaveClass(/\bbtn-text\b/);
     const moreBox = await more.boundingBox();
-    const cardBox = await page.locator('.turn__card', { has: more }).boundingBox();
+    const cardBox = await card.boundingBox();
     expect(moreBox).not.toBeNull();
     expect(cardBox).not.toBeNull();
     expect(moreBox!.x + moreBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);

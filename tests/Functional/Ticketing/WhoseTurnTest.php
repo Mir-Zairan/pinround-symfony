@@ -747,11 +747,13 @@ final class WhoseTurnTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('1,000+ tickets · grouped by who acts next', $capped->filter('.tickets__total')->text());
         self::assertSame(['Omar'], self::textsOf($capped, '.turn__name'));
+        self::assertSame(['1,000+ tickets wait on Omar · the oldest since today'], self::textsOf($capped, '.turn__sentence'));
 
         $plain = $this->client->request('GET', self::TURN);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('1,002 tickets · grouped by who acts next', $plain->filter('.tickets__total')->text());
+        self::assertSame(['1 ticket waits on Raj · for 3 days · outside the team', '1,001 tickets wait on Omar · the oldest since today'], self::textsOf($plain, '.turn__sentence'));
     }
 
     /**
@@ -925,7 +927,10 @@ final class WhoseTurnTest extends WebTestCase
      */
     private static function sortedClassesOf(string $classAttribute): array
     {
-        $classes = preg_split('/\s+/', trim($classAttribute)) ?: [];
+        $classes = preg_split('/\s+/', trim($classAttribute));
+        if (false === $classes) {
+            return [];
+        }
         sort($classes);
 
         return $classes;

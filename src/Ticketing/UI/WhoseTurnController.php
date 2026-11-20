@@ -126,7 +126,7 @@ final class WhoseTurnController extends AbstractController
 
         $cards = [];
         foreach ($groups as $group) {
-            $cards[] = $this->cardOf($group, $actor->userId(), $names, $teamPeopleIds, $openedGroup, $pageQuery);
+            $cards[] = $this->cardOf($group, $actor->userId(), $names, $teamPeopleIds, $openedGroup, $pageQuery, $page->isTicketCountCapped);
         }
 
         // A filter change reloads only the cards' frame, so it gets that frame alone: no layout, toolbar or rail.
@@ -170,7 +170,7 @@ final class WhoseTurnController extends AbstractController
      *
      * @return array<string, mixed>
      */
-    private function cardOf(TurnGroup $group, UserId $viewerId, array $names, ?array $teamPeopleIds, ?string $openedGroup, array $pageQuery): array
+    private function cardOf(TurnGroup $group, UserId $viewerId, array $names, ?array $teamPeopleIds, ?string $openedGroup, array $pageQuery, bool $isTicketCountCapped): array
     {
         $cardId = self::cardIdOf($group);
         $now = $this->clock->now();
@@ -206,7 +206,7 @@ final class WhoseTurnController extends AbstractController
             'name' => $isViewer ? WhoseTurnText::YOU : $name,
             'avatarName' => $name,
             'tone' => $isViewer ? 'you' : ($isOutsideTheTeam ? 'outside' : 'team'),
-            'sentence' => WhoseTurnText::sentenceOf($group->ticketCount, $waitsOn, $oldestWaitDays, $isOutsideTheTeam),
+            'sentence' => WhoseTurnText::sentenceOf($group->ticketCount, $waitsOn, $oldestWaitDays, $isOutsideTheTeam, $isTicketCountCapped),
             'meterValue' => min($oldestWaitDays, WhoseTurnText::METER_FULL_DAYS),
             'meterLevel' => WhoseTurnText::meterLevelOf($oldestWaitDays),
             'meterTitle' => 'Oldest wait: '.WhoseTurnText::waitOf($oldestWaitDays),

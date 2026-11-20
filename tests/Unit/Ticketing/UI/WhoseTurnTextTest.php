@@ -55,7 +55,7 @@ final class WhoseTurnTextTest extends TestCase
     #[DataProvider('sentences')]
     public function theSentenceSaysHowManyWaitOnWhomAndForHowLong(int $ticketCount, string $waitsOn, int $oldestWaitDays, bool $isOutsideTheTeam, string $sentence): void
     {
-        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, $waitsOn, $oldestWaitDays, $isOutsideTheTeam));
+        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, $waitsOn, $oldestWaitDays, $isOutsideTheTeam, false));
     }
 
     #[Test]
@@ -74,5 +74,35 @@ final class WhoseTurnTextTest extends TestCase
         self::assertSame('0 tickets · grouped by who acts next', WhoseTurnText::totalLineOf(0));
         self::assertSame('1 ticket · grouped by who acts next', WhoseTurnText::totalLineOf(1));
         self::assertSame('1,200 tickets · grouped by who acts next', WhoseTurnText::totalLineOf(1200));
+    }
+
+    #[Test]
+    public function aCappedTotalLineSaysThereAreMoreThanItCounts(): void
+    {
+        self::assertSame('1,000+ tickets · grouped by who acts next', WhoseTurnText::totalLineOf(1000, true));
+        self::assertSame('1+ tickets · grouped by who acts next', WhoseTurnText::totalLineOf(1, true));
+    }
+
+    /**
+     * @return iterable<string, array{int, string}>
+     */
+    public static function cappedSentences(): iterable
+    {
+        yield 'many tickets' => [6, '6+ tickets wait on Mia · the oldest for 12 days'];
+        yield 'one ticket' => [1, '1+ tickets wait on Mia · the oldest for 12 days'];
+    }
+
+    #[Test]
+    #[DataProvider('cappedSentences')]
+    public function aCappedSearchSaysTheCardMayHoldMore(int $ticketCount, string $sentence): void
+    {
+        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, 'Mia', 12, false, true));
+    }
+
+    #[Test]
+    public function noMatchesAsksToClearTheSearchAndNamesNoPerson(): void
+    {
+        self::assertStringEndsWith('Clear the search.', WhoseTurnText::NO_MATCHES);
+        self::assertStringNotContainsString('person', WhoseTurnText::NO_MATCHES);
     }
 }

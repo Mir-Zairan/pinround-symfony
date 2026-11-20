@@ -47,20 +47,22 @@ final class WhoseTurnText
 
     /**
      * "6 tickets wait on Mia · the oldest for 12 days", "1 ticket waits on you · since today", with
-     * OUTSIDE_THE_TEAM added for someone outside the team.
+     * OUTSIDE_THE_TEAM added for someone outside the team, and "6+ tickets wait on …" when the search was capped.
      *
-     * @param string $waitsOn the person's first name, "you", or the label
+     * @param string $waitsOn             the person's first name, "you", or the label
+     * @param bool   $isTicketCountCapped true when the search found more tickets than it counts, so the card may hold more
      */
-    public static function sentenceOf(int $ticketCount, string $waitsOn, int $oldestWaitDays, bool $isOutsideTheTeam): string
+    public static function sentenceOf(int $ticketCount, string $waitsOn, int $oldestWaitDays, bool $isOutsideTheTeam, bool $isTicketCountCapped): string
     {
         $wait = 0 === $oldestWaitDays ? 'since today' : 'for '.self::waitOf($oldestWaitDays);
+        $isOneTicket = 1 === $ticketCount && !$isTicketCountCapped;
 
         return \sprintf(
             '%s %s on %s · %s%s',
-            TicketListText::countOf($ticketCount, false),
-            1 === $ticketCount ? 'ticket waits' : 'tickets wait',
+            TicketListText::countOf($ticketCount, $isTicketCountCapped),
+            $isOneTicket ? 'ticket waits' : 'tickets wait',
             $waitsOn,
-            1 === $ticketCount ? $wait : 'the oldest '.$wait,
+            $isOneTicket ? $wait : 'the oldest '.$wait,
             $isOutsideTheTeam ? self::OUTSIDE_THE_TEAM : '',
         );
     }
