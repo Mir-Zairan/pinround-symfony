@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   CAPTURE_HOST_PERMISSIONS,
   PINROUND_TEST_ORIGIN,
+  STUB_NOT_FOUND_TEXT,
   TEST_PAGE_ORIGIN,
   answerPinroundApi,
   expect,
@@ -23,7 +24,7 @@ const PLAYER_PAGE_FILE = path.join(__dirname, 'fixtures', 'extension', 'player-p
 const PLAYER_PAGE_URL = `${TEST_PAGE_ORIGIN}/player`;
 /** pinround's host on another port: no pinround, as a site is its scheme, host and port. */
 const OTHER_PORT_ORIGIN = 'https://pinround.acme-foods.test:8443';
-const NOTEBOOK_ID = 'nb000000-0000-4000-8000-000000000301';
+const NOTEBOOK_ID = 'b0000000-0000-7000-8000-000000000301';
 const TARGET_PICKER = 'Put the screenshot in';
 const TEST_PAGE_HOST = 'http://shop.acme-foods.test';
 const SHOP_HOST_QUESTION = 'This scenario clicks and types on shop.acme-foods.test. It can change data there.';
@@ -35,6 +36,7 @@ const scenarioOn = (startUrl: string, title: string, steps: StubScenarioStep[]):
 const scenario = (title: string, steps: StubScenarioStep[]) => scenarioOn(PLAYER_PAGE_URL, title, steps);
 const pressCheckStock: StubScenarioStep = { type: 'click', say: 'Press Check stock.', target: { role: 'button', name: 'Check stock' } };
 const pressPay: StubScenarioStep = { type: 'click', say: 'Press Pay.', target: { role: 'button', name: 'Pay 12.40 EUR' } };
+const typeCoupon: StubScenarioStep = { type: 'type', say: 'Type the coupon.', target: { label: 'Coupon code' }, text: 'SHOP10' };
 
 interface OpenedPlayer {
   stub: PinroundStub;
@@ -42,10 +44,10 @@ interface OpenedPlayer {
 }
 
 /**
- * Pairs the popup opened on the player page at `pageUrl`, allows `allowedHosts` as the options page stores them, and
- * chooses the notebook holding `scenarios`, whose list is then shown.
+ * Pairs the popup opened on the player page at `pageUrl` and allows `allowedHosts` as the options page stores them; the
+ * picker then lists the notebook holding `scenarios`, not yet chosen.
  */
-async function openNotebookPlayer(context: BrowserContext, testPage: Page, scenarios: StubScenario[], { allowedHosts = [TEST_PAGE_HOST], pageUrl = PLAYER_PAGE_URL } = {}): Promise<OpenedPlayer> {
+async function openPairedPopupOnPlayerPage(context: BrowserContext, testPage: Page, scenarios: StubScenario[], { allowedHosts = [TEST_PAGE_HOST], pageUrl = PLAYER_PAGE_URL } = {}): Promise<OpenedPlayer> {
   const stub = await answerPinroundApi(context, { notebooks: [{ notebook_id: NOTEBOOK_ID, title: 'Basket checks', last_used_at: '2026-03-02T09:00:00+00:00', scenarios }] });
   await context.route(
     (url) => url.pathname === '/player' && [TEST_PAGE_ORIGIN, OTHER_PORT_ORIGIN].includes(url.origin),
@@ -58,9 +60,17 @@ async function openNotebookPlayer(context: BrowserContext, testPage: Page, scena
     await chrome.storage.local.set({ pinroundAllowedHosts: hosts });
   }, allowedHosts);
   await popup.reload();
-  await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'Notebook: Basket checks' });
-  await expect(popup.locator('#scenario-position')).toHaveText(`Scenario 1 of ${scenarios.length}`);
   return { stub, popup };
+}
+
+const chooseBasketChecks = (popup: Page) => popup.getByLabel(TARGET_PICKER).selectOption({ label: 'Notebook: Basket checks' });
+
+/** As openPairedPopupOnPlayerPage, then chooses the notebook, whose list of scenarios is then shown. */
+async function openNotebookPlayer(context: BrowserContext, testPage: Page, scenarios: StubScenario[], options: { allowedHosts?: string[]; pageUrl?: string } = {}): Promise<OpenedPlayer> {
+  const opened = await openPairedPopupOnPlayerPage(context, testPage, scenarios, options);
+  await chooseBasketChecks(opened.popup);
+  await expect(opened.popup.locator('#scenario-position')).toHaveText(`Scenario 1 of ${scenarios.length}`);
+  return opened;
 }
 
 const playButton = (popup: Page) => popup.getByRole('button', { name: 'Play', exact: true });
@@ -218,6 +228,27 @@ test('a scenario on a host not in the allowed list is refused before anything is
   await expectNothingRan(testPage, stub);
 });
 
+test('a chosen notebook pinround will not show is refused with its message, and no step runs', async ({ context, testPage }) => {
+  const { stub, popup } = await openPairedPopupOnPlayerPage(context, testPage, [
+    scenario('Coupon and stock', [typeCoupon, pressCheckStock]),
+  ]);
+  await expect(popup.getByLabel(TARGET_PICKER).getByRole('option', { name: 'Notebook: Basket checks' })).toHaveCount(1);
+  const listedNotebook = stub.notebooks.get(NOTEBOOK_ID);
+  if (listedNotebook === undefined) {
+    throw new Error('The stub holds the notebook it was seeded with.');
+  }
+  // Listed, then another person's: GET /api/v1/notebooks/{id} answers 404, as pinround does for a notebook not yours.
+  listedNotebook.owner = 'omar';
+
+  await chooseBasketChecks(popup);
+
+  await expect(popup.locator('#scenarios-message')).toHaveText(STUB_NOT_FOUND_TEXT);
+  await expect(popup.locator('#scenario-player')).toBeHidden();
+  await expect(playButton(popup)).toBeHidden();
+  expect(stub.requests.filter((request) => request.path === `/api/v1/notebooks/${NOTEBOOK_ID}`).map((request) => request.answerStatus)).toEqual([404]);
+  await expectNothingRan(testPage, stub);
+});
+
 test('pinround\'s own origin is refused though the list allows it, while the same host on another port plays after the question', async ({ context, testPage }) => {
   const { stub, popup } = await openNotebookPlayer(context, testPage, [
     scenarioOn(`${PINROUND_TEST_ORIGIN}/player`, 'On pinround', [pressCheckStock]),
@@ -345,7 +376,7 @@ test('the host question is asked once per host, and each run\'s capture step add
 });
 
 test('the run lives in the popup: Chrome closes the toolbar popup on a click on the page, and a run ends with its popup', async ({ context, testPage }) => {
-  const { stub, popup } = await openNotebookPlayer(context, testPage, [scenario('Stock picture', [{ type: 'capture', say: 'Keep the basket.' }, pressCheckStock])]);
+  const { stub, popup } = await openNotebookPlayer(context, testPage, [scenario('Basket picture', [{ type: 'capture', say: 'Keep the basket.' }, typeCoupon])]);
   const extensionContexts = () => popup.evaluate(async () => {
     const { chrome } = globalThis as unknown as { chrome: { runtime: { getContexts(filter: { contextTypes: string[] }): Promise<Array<{ contextType: string }>> } } };
     return (await chrome.runtime.getContexts({ contextTypes: ['POPUP', 'TAB'] })).map((found) => found.contextType).sort();
@@ -383,15 +414,25 @@ test('the run lives in the popup: Chrome closes the toolbar popup on a click on 
 
   await expect.poll(() => uploadOutcome).toBe('answered');
 
-  // No document of the extension is left to run the player in: the next popup is the only one, and the service
-  // worker does not play.
+  // No document of the extension is left to run the player in: the next popup is the only one, with no service worker
+  // or offscreen document beside it.
   const nextPopup = await openPopupFor(context, testPage);
   const contextsLeft = await nextPopup.evaluate(async () => {
     const { chrome } = globalThis as unknown as { chrome: { runtime: { getContexts(filter: { contextTypes: string[] }): Promise<Array<{ contextType: string; documentUrl: string }>> } } };
-    return (await chrome.runtime.getContexts({ contextTypes: ['POPUP', 'TAB', 'OFFSCREEN_DOCUMENT'] })).map((found) => [found.contextType, found.documentUrl]);
+    return (await chrome.runtime.getContexts({ contextTypes: ['BACKGROUND', 'POPUP', 'TAB', 'OFFSCREEN_DOCUMENT'] })).map((found) => [found.contextType, found.documentUrl]);
   });
   expect(contextsLeft).toEqual([['TAB', nextPopup.url()]]);
-  expect(stub.storedPictures).toEqual([]);
-  expect(stub.notebooks.get(NOTEBOOK_ID)?.screenshots).toEqual([]);
-  expect(await pageStateOf(testPage)).toEqual(UNTOUCHED_PAGE);
+
+  // A run that went on in another context would have sent its upload to pinround, stored its picture and typed the
+  // coupon before this second run of the same scenario began, so by the end of the second run only its work is there.
+  await chooseBasketChecks(nextPopup);
+  await playButton(nextPopup).click();
+  await expect(nextPopup.getByRole('status')).toHaveText(RAN_TO_ITS_END);
+  expect(stub.requests.filter((request) => request.method === 'POST').map((request) => [request.path, request.answerStatus])).toEqual([
+    [`/api/v1/notebooks/${NOTEBOOK_ID}/uploads`, 201],
+    [`/api/v1/notebooks/${NOTEBOOK_ID}/screenshots`, 200],
+  ]);
+  expect(stub.storedPictures).toHaveLength(1);
+  expect(stub.notebooks.get(NOTEBOOK_ID)?.screenshots.map((screenshot) => screenshot.title)).toEqual(['Basket picture']);
+  expect(await pageStateOf(testPage)).toEqual({ ...UNTOUCHED_PAGE, coupon: 'SHOP10', fieldEvents: ['input coupon', 'change coupon'] });
 });

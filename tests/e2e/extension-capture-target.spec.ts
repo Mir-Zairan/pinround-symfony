@@ -37,11 +37,11 @@ const TICKETS: StubTicket[] = [
   { key: 'SHOP-7', title: 'Basket total is wrong', step: 'Building', now: 'Omar builds it', is_your_turn: true, is_assignee: false, updated_at: '2026-03-02T09:00:00+00:00' },
   { key: 'SHOP-12', title: 'Logo is cut off on the receipt', step: 'Checking', now: 'Mia checks it', is_your_turn: true, is_assignee: true, updated_at: '2026-03-01T09:00:00+00:00' },
 ];
-const RECEIPT_NOTEBOOK_ID = 'nb000000-0000-4000-8000-000000000101';
-const PRICES_NOTEBOOK_ID = 'nb000000-0000-4000-8000-000000000102';
-const OMARS_NOTEBOOK_ID = 'nb000000-0000-4000-8000-000000000103';
-const OMARS_DRAFT_ID = 'rd000000-0000-4000-8000-000000000201';
-const MY_FULL_DRAFT_ID = 'rd000000-0000-4000-8000-000000000202';
+const RECEIPT_NOTEBOOK_ID = 'b0000000-0000-7000-8000-000000000101';
+const PRICES_NOTEBOOK_ID = 'b0000000-0000-7000-8000-000000000102';
+const OMARS_NOTEBOOK_ID = 'b0000000-0000-7000-8000-000000000103';
+const OMARS_DRAFT_ID = 'd0000000-0000-7000-8000-000000000201';
+const MY_FULL_DRAFT_ID = 'd0000000-0000-7000-8000-000000000202';
 
 test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS });
 

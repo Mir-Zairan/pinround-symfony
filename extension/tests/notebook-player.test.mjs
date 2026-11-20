@@ -334,7 +334,10 @@ test('a step whose page has moved to a host not allowed stops before anything is
     assert.deepEqual(calls.injections.slice(injectionsBeforeStep).filter((injection) => 'clear highlight' !== injection), []);
 });
 
-/** The first scenario's 'Remove bread' runs after its 'Remove jam' took the tab to OTHER_SHOP_URL, allowed by localhost:*. */
+/**
+ * player.next() moves to the second scenario, 'Empty basket'; when its 'Remove bread' starts, the tab moves to
+ * OTHER_SHOP_URL as if 'Remove jam' had taken it there. localhost:* allows that host, so only the yes can stop the step.
+ */
 const OTHER_SHOP_URL = 'http://localhost:3000/basket';
 async function playerMovedToOtherShop({ isOtherShopConfirmed }) {
     const moved = { injectionsBefore: null };
