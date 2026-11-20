@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Review\Doctrine;
 use App\Review\Domain\AreaId;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
+use App\Review\Domain\PinVerdict;
 use App\Review\Domain\RetakenScreenshotNotFound;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
@@ -24,6 +25,7 @@ use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Tests\Integration\ReadsSentSql;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -336,6 +338,112 @@ final class DbalRoundsTriesTest extends KernelTestCase
         self::assertSame([], $this->chainRowsOfDraft());
         self::assertSame([], $this->pinIdsOf([self::CHECKOUT_PIN, self::LATEST_TRY_PIN]));
         self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
+    }
+
+    /**
+     * rvw_pin.fixed_on_try keeps the try the chain had when Lena marked the pin: a later retake leaves it, marking it
+     * again names the new latest try, removing an earlier try counts one less, and another verdict clears it.
+     */
+    #[Test]
+    public function theTryThatFixedAPinIsStoredReadBackAndKeptThroughALaterRetake(): void
+    {
+        $otherRoundsBefore = $this->rowsOfOtherRounds();
+        $lena = new UserId(self::LENA);
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->addScreenshot($lena, self::tryId(1), self::MEDIA, new ScreenshotId(self::CHECKOUT));
+            $draft->setPinVerdict($lena, new PinId(self::CHECKOUT_PIN), PinVerdict::Fixed);
+        });
+
+        self::assertSame(['verdict' => 'fixed', 'fixed_on_try' => 2], $this->storedMarkOfCheckoutPin());
+        self::assertSame([PinVerdict::Fixed, 2], $this->markOfCheckoutPinReadBack());
+
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->addScreenshot($lena, self::tryId(2), self::MEDIA, new ScreenshotId(self::CHECKOUT));
+        });
+        self::assertSame(['verdict' => 'fixed', 'fixed_on_try' => 2], $this->storedMarkOfCheckoutPin(), 'Try 3 leaves the mark on try 2.');
+        self::assertSame([PinVerdict::Fixed, 2], $this->markOfCheckoutPinReadBack());
+
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->setPinVerdict($lena, new PinId(self::CHECKOUT_PIN), PinVerdict::Fixed);
+        });
+        self::assertSame(['verdict' => 'fixed', 'fixed_on_try' => 3], $this->storedMarkOfCheckoutPin());
+
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->removeScreenshot($lena, self::tryId(1));
+        });
+        self::assertSame(['verdict' => 'fixed', 'fixed_on_try' => 2], $this->storedMarkOfCheckoutPin(), 'Try 3 is try 2 once the try before it is gone.');
+        self::assertSame([PinVerdict::Fixed, 2], $this->markOfCheckoutPinReadBack());
+
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->setPinVerdict($lena, new PinId(self::CHECKOUT_PIN), PinVerdict::StillWrong);
+        });
+        self::assertSame(['verdict' => 'still_wrong', 'fixed_on_try' => null], $this->storedMarkOfCheckoutPin());
+        self::assertSame([PinVerdict::StillWrong, null], $this->markOfCheckoutPinReadBack());
+        self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function triesNoPinIsFixedOn(): iterable
+    {
+        yield 'the first try, which fixes nothing' => [1];
+        yield 'a sixth try, past Screenshot::MAX_TRIES' => [6];
+    }
+
+    /**
+     * Past the domain, as pinround_app under Acme Foods: rvw_pin_fixed_on_try_check refuses the try, and the pin keeps
+     * the mark it had.
+     */
+    #[Test]
+    #[DataProvider('triesNoPinIsFixedOn')]
+    public function theDatabaseRefusesAPinFixedOnATryOutsideTwoToFive(int $fixedOnTry): void
+    {
+        $lena = new UserId(self::LENA);
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->addScreenshot($lena, self::tryId(1), self::MEDIA, new ScreenshotId(self::CHECKOUT));
+            $draft->setPinVerdict($lena, new PinId(self::CHECKOUT_PIN), PinVerdict::Fixed);
+        });
+
+        $refusal = $this->transactions()->rolledBackAs(self::ACME_FOODS, function () use ($fixedOnTry): ?DriverException {
+            try {
+                $this->connection()->executeStatement(
+                    'UPDATE rvw_pin SET fixed_on_try = ? WHERE organization_id = ? AND id = ?',
+                    [$fixedOnTry, self::ACME_FOODS, self::CHECKOUT_PIN],
+                );
+            } catch (DriverException $refused) {
+                return $refused;
+            }
+
+            return null;
+        });
+
+        self::assertNotNull($refusal);
+        self::assertSame('23514', $refusal->getSQLState());
+        self::assertStringContainsString('rvw_pin_fixed_on_try_check', $refusal->getMessage());
+        self::assertSame(['verdict' => 'fixed', 'fixed_on_try' => 2], $this->storedMarkOfCheckoutPin());
+    }
+
+    /**
+     * @return array<string, mixed>|false the stored verdict and fixed_on_try of Checkout's pin
+     */
+    private function storedMarkOfCheckoutPin(): array|false
+    {
+        return $this->transactions()->rolledBackAs(
+            self::ACME_FOODS,
+            fn (): array|false => $this->connection()->fetchAssociative('SELECT verdict, fixed_on_try FROM rvw_pin WHERE id = ?', [self::CHECKOUT_PIN]),
+        );
+    }
+
+    /**
+     * @return array{?PinVerdict, ?int} Checkout's pin as DbalRounds reads it back
+     */
+    private function markOfCheckoutPinReadBack(): array
+    {
+        $pins = $this->readDraft()->screenshots()[0]->pins();
+        self::assertSame([self::CHECKOUT_PIN], array_map(static fn (Pin $pin): string => $pin->id()->toString(), $pins));
+
+        return [$pins[0]->verdict(), $pins[0]->fixedOnTry()];
     }
 
     private function addTwoTriesOfCheckoutWithAPinOnTheLatest(): void

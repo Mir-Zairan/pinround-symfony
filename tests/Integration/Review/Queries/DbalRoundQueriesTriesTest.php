@@ -34,7 +34,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * Tries of a screenshot (ADR-0048) through DbalRoundQueries and DbalReviewRoundQueries, on rows committed once per
  * class in Acme Foods' Shop team (Lena leads it, Omar develops, Mia tests). Omar's shared draft, Round 1, holds the
- * chain A (A1 at 0, A2 at 2, A3 at 3, A2 and A3 retakes of A1) and B at 1; A1, B and A3 have a pin. The team sees only
+ * chain A (A1 at 0, A2 at 2, A3 at 3, A2 and A3 retakes of A1) and B at 1; A1 (fixed on try 2), B and A3 have a pin,
+ * and the shared card lists chain A's latest try A3 before B, by first try. The team sees only
  * the latest try of each chain, B and A3; only Omar's own draftOf gives A1 and A2. Omar also has an unshared draft with
  * the chain C (C1 at 0, C2 at 1), and Lena's review Round 2 has areas whose "before" is A1, A3 and B. Rows go in out of
  * position order, so only the queries' order puts them right. Every time is fixed in March 2027.
@@ -98,9 +99,10 @@ final class DbalRoundQueriesTriesTest extends KernelTestCase
             'organization_id' => self::ACME_FOODS, 'id' => $id, 'round_id' => $roundId, 'media_id' => self::MEDIA, 'position' => $position,
             'title' => 'Try at '.$position, 'retake_of' => $retakeOf, 'created_at' => self::CREATED_AT,
         ]];
-        $pin = static fn (string $id, string $screenshotId, string $note): array => ['rvw_pin', [
+        $pin = static fn (string $id, string $screenshotId, string $note, ?string $verdict = null, ?int $fixedOnTry = null): array => ['rvw_pin', [
             'organization_id' => self::ACME_FOODS, 'id' => $id, 'screenshot_id' => $screenshotId, 'number' => 1, 'x_pct' => '40.00',
-            'y_pct' => '60.00', 'note' => $note, 'source' => 'human', 'author_id' => self::OMAR, 'created_at' => self::CREATED_AT,
+            'y_pct' => '60.00', 'note' => $note, 'verdict' => $verdict, 'source' => 'human', 'author_id' => self::OMAR,
+            'fixed_on_try' => $fixedOnTry, 'created_at' => self::CREATED_AT,
         ]];
         $area = static fn (string $id, int $position, string $beforeId, string $afterId): array => ['rvw_area', [
             'organization_id' => self::ACME_FOODS, 'id' => $id, 'round_id' => self::REVIEW_ROUND, 'name' => 'Area '.$position,
@@ -121,7 +123,7 @@ final class DbalRoundQueriesTriesTest extends KernelTestCase
             $screenshot(self::AFTER_OF_A3, self::REVIEW_ROUND, 1, null),
             $screenshot(self::AFTER_OF_B, self::REVIEW_ROUND, 2, null),
             $pin(self::A3_PIN, self::A3, 'Still cut off on the latest try'),
-            $pin(self::A1_PIN, self::A1, 'Cut off on the first try'),
+            $pin(self::A1_PIN, self::A1, 'Cut off on the first try', 'fixed', 2),
             $pin(self::B_PIN, self::B, 'The basket'),
             $area(self::AREA_BEFORE_A1, 0, self::A1, self::AFTER_OF_A1),
             $area(self::AREA_BEFORE_A3, 1, self::A3, self::AFTER_OF_A3),
@@ -156,17 +158,18 @@ final class DbalRoundQueriesTriesTest extends KernelTestCase
 
     /**
      * The card shows what the team sees, so the owner gets the same latest tries as the others, each with its own pin;
-     * A1's pin is nowhere.
+     * A1's pin is nowhere. A3 comes before B, as its chain's first try A1 is at 0 and B at 1, so the card numbers them as
+     * the owner's draft did, though A3's own position is after B's.
      */
     #[Test]
     #[DataProvider('viewers')]
-    public function aSharedDraftShowsEveryoneOnlyTheLatestTryOfEachScreenshot(string $viewer): void
+    public function aSharedDraftShowsEveryoneOnlyTheLatestTryOfEachScreenshotInTheOrderOfTheirFirstTries(string $viewer): void
     {
         $sharedDraft = $this->sharedDraftAsSeenBy($viewer);
 
         self::assertNotSame([], $sharedDraft->screenshots);
         self::assertSame(
-            [[self::B, 1, null, [self::B_PIN]], [self::A3, 3, self::A1, [self::A3_PIN]]],
+            [[self::A3, 3, self::A1, [self::A3_PIN]], [self::B, 1, null, [self::B_PIN]]],
             array_map(static fn (RoundScreenshotView $screenshot): array => [
                 $screenshot->id,
                 $screenshot->position,
@@ -199,7 +202,8 @@ final class DbalRoundQueriesTriesTest extends KernelTestCase
 
     /**
      * Earlier tries stay with their owner (ADR-0048): draftOf gives Omar every try of his shared draft, each with its
-     * pin, and gives Lena or Mia nothing of it.
+     * pin, the tries of chain A together before B, and gives Lena or Mia nothing of it. A1's pin, fixed on try 2, says
+     * so; the others have no try that fixed them.
      */
     #[Test]
     public function theOwnersDraftOfASharedDraftGivesEveryTryAndNobodyElseGetsIt(): void
@@ -208,11 +212,16 @@ final class DbalRoundQueriesTriesTest extends KernelTestCase
 
         self::assertNotNull($asOmar);
         self::assertSame(
-            [[self::A1, null, [self::A1_PIN]], [self::B, null, [self::B_PIN]], [self::A2, self::A1, []], [self::A3, self::A1, [self::A3_PIN]]],
+            [
+                [self::A1, null, [[self::A1_PIN, 'fixed', 2]]],
+                [self::A2, self::A1, []],
+                [self::A3, self::A1, [[self::A3_PIN, null, null]]],
+                [self::B, null, [[self::B_PIN, null, null]]],
+            ],
             array_map(static fn (RoundScreenshotView $screenshot): array => [
                 $screenshot->id,
                 $screenshot->retakeOf,
-                array_map(static fn (RoundPinView $pin): string => $pin->id, $screenshot->pins),
+                array_map(static fn (RoundPinView $pin): array => [$pin->id, $pin->verdict, $pin->fixedOnTry], $screenshot->pins),
             ], $asOmar->screenshots),
         );
         self::assertNull($this->draftOfAs(self::SHARED_DRAFT, 'Lena'));

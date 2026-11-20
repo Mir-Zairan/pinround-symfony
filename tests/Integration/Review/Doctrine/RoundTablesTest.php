@@ -13,7 +13,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * What rvw_round, rvw_screenshot, rvw_pin and rvw_check_item keep on their own (Version20261115180000,
- * Version20261116100000, Version20261116120000, Version20261116130000, Version20261121100000), whatever writes them: the
+ * Version20261116100000, Version20261116120000, Version20261116130000, Version20261121100000, Version20261121120000),
+ * whatever writes them: the
  * CHECKs and keys refuse a row the domain could not make, written as the app past the domain, and the rows next to it
  * are still accepted; the indexes and foreign keys are as the migration made them. Grants, ownership and the schema
  * filter are pinned with every other module's in DatabaseRolesTest, row-level security in CatalogTest.
@@ -111,6 +112,10 @@ final class RoundTablesTest extends KernelTestCase
         yield 'an AI pin with no state' => [[self::round([]), self::screenshot([]), self::pin(['source' => 'ai'])], 'rvw_pin_ai_check', self::CHECK_VIOLATION];
         yield 'a person\'s pin with an AI state' => [[self::round([]), self::screenshot([]), self::pin(['ai_state' => 'kept'])], 'rvw_pin_ai_check', self::CHECK_VIOLATION];
         yield 'a second pin with one number' => [[self::round([]), self::screenshot([]), self::pin([]), self::pin(['id' => self::SECOND_PIN])], 'rvw_pin_screenshot_id_number_key', self::UNIQUE_VIOLATION];
+        yield 'a pin fixed on the first try' => [[self::round([]), self::screenshot([]), self::pin(['verdict' => 'fixed', 'fixed_on_try' => 1])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
+        yield 'a pin fixed on a sixth try' => [[self::round([]), self::screenshot([]), self::pin(['verdict' => 'fixed', 'fixed_on_try' => 6])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
+        yield 'a pin still wrong naming a try that fixed it' => [[self::round([]), self::screenshot([]), self::pin(['verdict' => 'still_wrong', 'fixed_on_try' => 2])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
+        yield 'a pin with no verdict naming a try that fixed it' => [[self::round([]), self::screenshot([]), self::pin(['fixed_on_try' => 3])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
         yield 'a second checklist round of the ticket' => [[self::checklistRound([]), self::checklistRound(['id' => self::SECOND_CHECKLIST, 'number' => 2])], 'rvw_round_ticket_id_checklist_key', self::UNIQUE_VIOLATION];
         yield 'a check item in an unknown state' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'done'])], 'rvw_check_item_state_check', self::CHECK_VIOLATION];
         yield 'a check item changed by someone at no time' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'fixed', 'changed_by' => self::LENA])], 'rvw_check_item_changed_check', self::CHECK_VIOLATION];
@@ -169,6 +174,13 @@ final class RoundTablesTest extends KernelTestCase
             self::draftRound([]),
             self::screenshot([]),
             self::screenshot(['id' => self::SECOND_SCREENSHOT, 'position' => 1, 'retake_of' => self::SCREENSHOT]),
+        ]];
+        yield 'pins fixed on try 2 and on try 5, and one fixed with no try as before the try was stored' => [[
+            self::round([]),
+            self::screenshot([]),
+            self::pin(['verdict' => 'fixed', 'fixed_on_try' => 2]),
+            self::pin(['id' => self::SECOND_PIN, 'number' => 2, 'verdict' => 'fixed', 'fixed_on_try' => 5]),
+            self::pin(['id' => self::MISSING_PIN, 'number' => 3, 'verdict' => 'fixed']),
         ]];
         yield 'two screenshots at two positions with a pin 1 each' => [[
             self::round([]),
