@@ -1,5 +1,6 @@
 // Pairing and sign-out (P10.T8), apart from the options page so they can be tested without a browser.
 import { ApiError, PinroundApi } from '../shared/api.js';
+import { browser } from '../shared/browser.js';
 import { checkedToken, clearSettings, loadSettings, pinroundOriginOf, saveSettings } from '../shared/settings.js';
 
 export const CONNECTED = 'Connected. You can capture pages now.';
@@ -11,7 +12,7 @@ export const SIGNED_OUT_LOCALLY = 'Signed out here, but pinround could not be re
  *
  * @throws {SettingsError|ApiError} with the message to show
  */
-export async function pair(typedOrigin, typedToken, storage = chrome.storage.local, fetchFn = undefined) {
+export async function pair(typedOrigin, typedToken, storage = browser.storage.local, fetchFn = undefined) {
     const origin = pinroundOriginOf(typedOrigin);
     const token = checkedToken(typedToken);
     await new PinroundApi(origin, token, fetchFn).call('GET', '/api/v1/me/tickets');
@@ -26,7 +27,7 @@ export async function pair(typedOrigin, typedToken, storage = chrome.storage.loc
  *
  * @returns {Promise<string>} the message to show
  */
-export async function signOut(storage = chrome.storage.local, fetchFn = undefined) {
+export async function signOut(storage = browser.storage.local, fetchFn = undefined) {
     const settings = await loadSettings(storage);
     if (null === settings) {
         return SIGNED_OUT;

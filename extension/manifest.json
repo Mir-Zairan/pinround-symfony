@@ -9,5 +9,5 @@
     "default_popup": "popup.html"
   },
   "options_page": "options.html",
-  "permissions": ["activeTab", "storage"]
+  "permissions": ["activeTab", "scripting", "storage"]
 }

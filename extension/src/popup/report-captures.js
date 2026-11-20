@@ -1,5 +1,5 @@
-// What the popup shows of the captures saved for a new report (chrome.storage.session). `element` finds a popup element
-// by its id.
+// What the popup shows of the captures saved for a new report (the extension's session storage). `element` finds a popup
+// element by its id.
 import { MAX_SCREENSHOTS } from '../capture/capture.js';
 
 export const NEW_REPORT = 'new-report';
