@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Functional\Organization\Admin;
+namespace App\Tests\Functional\Web\Admin;
 
 use App\Identity\Domain\User;
 use App\SharedKernel\Domain\OrganizationId;

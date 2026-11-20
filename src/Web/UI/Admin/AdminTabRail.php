@@ -2,11 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Organization\UI\Admin;
+namespace App\Web\UI\Admin;
 
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
+use App\Web\UI\Controller\Admin\AdminShellController;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
@@ -14,15 +15,17 @@ use Twig\Attribute\AsTwigFunction;
 
 /**
  * The tabs of the admin area (admin.md, Layout) in the prototype's order, each only for a person its page lets in: the
- * same attributes the tab's page asks, ADMIN_AREA first. P14.T3 built the tabs that exist today; P11 adds the others
- * here. Holds no state, so it is safe in worker mode (ADR-0008).
+ * same attributes the tab's page asks, ADMIN_AREA first. Each tab's page lives in the module that owns it (P11 design
+ * notes), so the rail names its route as a string rather than reaching into that module's UI; generating a renamed
+ * route throws, so AdminShellTest finds it. P14.T3 built the tabs that exist today; P11 adds the others here. Holds no
+ * state, so it is safe in worker mode (ADR-0008).
  */
 final readonly class AdminTabRail
 {
     /** Label, route of the page, and the attributes it asks on the organization besides ADMIN_AREA. */
     private const array TABS = [
-        ['People and roles', PeopleController::ROUTE, [OrganizationPermission::INVITE, OrganizationPermission::ADMIN]],
-        ['AI', AiSettingsController::ROUTE, []],
+        ['People and roles', 'organization_admin_people', [OrganizationPermission::INVITE, OrganizationPermission::ADMIN]],
+        ['AI', 'organization_admin_ai', []],
     ];
 
     public function __construct(
@@ -53,7 +56,7 @@ final readonly class AdminTabRail
             if (!array_all($attributes, fn (string $attribute): bool => $this->authorizationChecker->isGranted($attribute, $organizationId))) {
                 continue;
             }
-            $isCurrent = \is_string($currentRoute) && ($currentRoute === $routeName || str_starts_with($currentRoute, $routeName.'_'));
+            $isCurrent = \is_string($currentRoute) && self::isRouteOrUnder($currentRoute, $routeName);
             $tabs[] = new AdminTab($label, $this->urlGenerator->generate($routeName), $isCurrent);
         }
 
@@ -66,5 +69,23 @@ final readonly class AdminTabRail
     public function firstTab(): ?AdminTab
     {
         return $this->tabs()[0] ?? null;
+    }
+
+    /**
+     * Whether a route belongs to the admin area: the shell's address, a tab's page or a route under it ("_…"), whatever
+     * the person may open. Asks no voter.
+     */
+    public static function isAdminAreaRoute(string $routeName): bool
+    {
+        if (AdminShellController::ROUTE === $routeName) {
+            return true;
+        }
+
+        return array_any(self::TABS, static fn (array $tab): bool => self::isRouteOrUnder($routeName, $tab[1]));
+    }
+
+    private static function isRouteOrUnder(string $routeName, string $tabRoute): bool
+    {
+        return $routeName === $tabRoute || str_starts_with($routeName, $tabRoute.'_');
     }
 }

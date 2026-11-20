@@ -1,6 +1,6 @@
 {% extends '@Web/base.html.twig' %}
 
-{#- Every admin tab: the tab rail left of the tab's own content (admin.md, Layout), the tabs AdminTabRail lets this person open. A tab fills admin_tab and links admin-tab.css. -#}
+{#- Every admin tab: the tab rail left of the tab's own content (admin.md, Layout), the tabs AdminTabRail lets this person open. A tab's template, in the module that owns the tab, extends '@Web/admin/layout.html.twig', fills admin_tab and links admin-tab.css. -#}
 {% block main %}
     <div class="admin-page">
         <nav class="admin-rail" aria-label="Admin">

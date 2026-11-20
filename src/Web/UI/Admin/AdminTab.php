@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Organization\UI\Admin;
+namespace App\Web\UI\Admin;
 
 /**
  * One tab of the admin rail, as AdminTabRail gives it to the person who may open it.

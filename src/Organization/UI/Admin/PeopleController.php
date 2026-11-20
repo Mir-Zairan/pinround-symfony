@@ -129,11 +129,6 @@ final class PeopleController extends AbstractController
     }
 
     /**
-     * Without the request transaction: when InviteMember refuses a concurrent invite, its DELETE has already run outside
-     * the ORM's savepoint, and only rolling back the whole transaction undoes it. Transactions gives the invite a
-     * transaction of its own, which also covers the access checks and the page shown with a field error.
-     */
-    /**
      * The address the invite form posts to, opened by hand or by a reload after the post: sends to the page with the
      * form instead of a 405 page.
      */
@@ -145,6 +140,11 @@ final class PeopleController extends AbstractController
         return $this->redirectToRoute(self::ROUTE);
     }
 
+    /**
+     * Without the request transaction: when InviteMember refuses a concurrent invite, its DELETE has already run outside
+     * the ORM's savepoint, and only rolling back the whole transaction undoes it. Transactions gives the invite a
+     * transaction of its own, which also covers the access checks and the page shown with a field error.
+     */
     #[Route('/admin/people/invite', name: self::INVITE_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function invite(Request $request): Response
     {

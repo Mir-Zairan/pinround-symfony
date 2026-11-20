@@ -2,17 +2,18 @@
 
 declare(strict_types=1);
 
-namespace App\Tests\Unit\Organization\UI\Admin;
+namespace App\Tests\Unit\Web\UI\Admin;
 
 use App\Organization\Api\AdminPermission;
 use App\Organization\Api\OrganizationPermission;
-use App\Organization\UI\Admin\AdminTab;
-use App\Organization\UI\Admin\AdminTabRail;
 use App\Organization\UI\Admin\AiSettingsController;
 use App\Organization\UI\Admin\PeopleController;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchGuard;
 use App\SharedKernel\Domain\OrganizationId;
+use App\Web\UI\Admin\AdminTab;
+use App\Web\UI\Admin\AdminTabRail;
+use App\Web\UI\Controller\Admin\AdminShellController;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -59,7 +60,7 @@ final class AdminTabRailTest extends TestCase
         yield 'the tab page' => [PeopleController::ROUTE, ['People and roles → /admin/people (current)', 'AI → /admin/ai']];
         yield 'a form of the tab' => [PeopleController::INVITE_ROUTE, ['People and roles → /admin/people (current)', 'AI → /admin/ai']];
         yield 'a route that only starts with the same letters' => [PeopleController::ROUTE.'s', ['People and roles → /admin/people', 'AI → /admin/ai']];
-        yield 'the admin area address' => ['organization_admin', ['People and roles → /admin/people', 'AI → /admin/ai']];
+        yield 'the admin area address' => [AdminShellController::ROUTE, ['People and roles → /admin/people', 'AI → /admin/ai']];
     }
 
     /**

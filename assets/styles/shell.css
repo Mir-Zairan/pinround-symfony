@@ -124,6 +124,24 @@
   max-width: calc(100vw - 32px);
 }
 
+/*
+ * Under the button, a 200px list ends past a narrow screen whenever the button sits right of its middle, and where it
+ * sits depends on the items before it. So on a narrow screen the list hangs from the header's full width instead
+ * (.site-header__inner is its containing block once .nav-menu is static), inside the viewport wherever the button is.
+ * 640px leaves room for the widest row before the button (logo, Home, Tickets, My reports) plus the list.
+ */
+@media (max-width: 640px) {
+  .menu.nav-menu {
+    position: static;
+  }
+
+  .menu__list.nav-menu__list {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+}
+
 .nav-menu__list .menu__item {
   display: flex;
   align-items: center;

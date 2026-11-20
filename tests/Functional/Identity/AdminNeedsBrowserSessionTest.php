@@ -90,11 +90,15 @@ final class AdminNeedsBrowserSessionTest extends WebTestCase
 
         $this->logInWithACode($this->client, $this->clock, $sara);
         foreach (self::ADMIN_ROUTES as [$method, $path]) {
-            if ('GET' === $method) {
-                $this->client->request($method, $path);
+            if ('GET' !== $method) {
+                continue;
+            }
+            $this->client->request($method, $path);
 
-                // /admin and the invite form's address send her on to a tab.
-                self::assertResponseStatusCodeSame(\in_array($path, ['/admin', '/admin/people/invite'], true) ? 302 : 200, $method.' '.$path);
+            if (\in_array($path, ['/admin', '/admin/people/invite'], true)) {
+                self::assertResponseRedirects('/admin/people', 302, $method.' '.$path);
+            } else {
+                self::assertResponseStatusCodeSame(200, $method.' '.$path);
             }
         }
     }

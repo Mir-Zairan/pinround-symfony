@@ -23,7 +23,9 @@ use Symfony\Component\Security\Core\Exception\AccessDeniedException;
  * keeps the 403 of AdminNeedsBrowserSessionVoter, which says why. Runs before the firewall's exception listener (1),
  * after RequestTransaction rolled back, so CurrentActor gives the roles AdminAreaVoter read in this request; the token
  * case is left out also because there that voter never runs, and roles read after the rollback would be none. Holds no
- * state, so it is safe in worker mode (ADR-0008).
+ * state, so it is safe in worker mode (ADR-0008). It lives beside AdminAreaVoter rather than in Web's admin shell: it
+ * answers for every refusal of ADMIN_AREA, whichever module's tab asked, and it needs Identity's LoginAssurance, which
+ * Web may not read.
  */
 #[AsEventListener(event: KernelEvents::EXCEPTION, priority: 2)]
 final readonly class HideAdminAreaFromNonAdmins

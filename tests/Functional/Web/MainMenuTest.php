@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
-use App\Organization\UI\Admin\AdminAreaController;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Ticketing\UI\TicketListController;
+use App\Web\UI\Controller\Admin\AdminShellController;
 use App\Web\UI\Controller\TeamController;
 use App\Web\UI\Navigation\MainMenu;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -136,7 +136,7 @@ final class MainMenuTest extends WebTestCase
         self::assertSame(TeamController::class.'::show', $routes->get(MainMenu::TEAM_ROUTE)?->getDefault('_controller'), 'the team page is the real one, not a stand-in');
         $adminRoute = $routes->get(MainMenu::ADMIN_ROUTE);
         self::assertNotNull($adminRoute);
-        self::assertSame(AdminAreaController::class.'::openFirstTab', $adminRoute->getDefault('_controller'));
+        self::assertSame(AdminShellController::class.'::openFirstTab', $adminRoute->getDefault('_controller'));
         self::assertSame('/admin', $adminRoute->getPath());
         self::assertNull($routes->get(MainMenu::MY_REPORTS_ROUTE), MainMenu::MY_REPORTS_ROUTE.' has a page now: show My reports again and expect it here (P14.T15)');
     }

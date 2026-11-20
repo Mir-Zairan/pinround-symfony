@@ -42,7 +42,7 @@ FR-ADM-01, FR-ADM-02, FR-ADM-03, FR-ADM-04, FR-ADM-05, FR-ADM-06, FR-ADM-07, FR-
 NFR-SEC-01, NFR-SEC-04, NFR-SEC-05, NFR-PRIV-03, NFR-PRIV-04, NFR-PRIV-05, NFR-USE-01, NFR-A11Y-01, NFR-SCAL-04.
 
 ## Design notes
-- **Modules.** Web owns the admin shell (`App\Web\UI\Controller\Admin\AdminShellController`, routes `GET /admin/{tab}` with tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data). Each tab's form posts to its owning module: Organization (people, teams, pings, new tickets), Workflow (statuses), Assist (AI), Integration (connections), Audit (activity, data).
+- **Modules.** Web owns the admin shell: `App\Web\UI\Controller\Admin\AdminShellController` (`GET /admin`, route `web_admin`, which redirects to the first tab the person may open), the tab rail `App\Web\UI\Admin\AdminTabRail` and the layout `@Web/admin/layout.html.twig` (`src/Web/UI/templates/admin/layout.html.twig`). Each tab is a page of its owning module at `/admin/<tab>` (tab ∈ people, teams, statuses, ai, pings, new-tickets, connections, activity, data) whose template extends that layout and whose forms post to the same module: Organization (people, teams, pings, new tickets), Workflow (statuses), Assist (AI), Integration (connections), Audit (activity, data). The rail lists each tab by its route name, so Web reads no module's UI. P14.T3 built the shell with People and AI, both Organization's today (the AI page moves to Assist only if P11 decides so).
 - **Tables.** `org_membership` (org_roles `text[]`: admin, manager), `org_team`, `org_team_member` (team_role lead|member|viewer, job), `org_invitation`, `org_settings.data` (ping_limit_hours, auto_clear, quiet_hours, lead_check, triager_id, step_policy, ai…), `wf_step`, `wf_rule_set`, `aud_event` (append-only, monthly partitions), `aud_export`.
 - **Security.** Voters `ADMIN_PEOPLE`, `ADMIN_TEAMS`, `ADMIN_STATUSES`, `ADMIN_PINGS`, `ADMIN_DATA`, `ADMIN_AUDIT`; deny by default. Sensitive actions (role changes, retention change, export, connection changes) need a recent MFA check (re-auth within 10 minutes). The last admin cannot remove their own Admin role. Role change rotates the affected user's session. Audit events hold old/new values, never ticket text. `pinround_app` has `INSERT`/`SELECT` on the `aud_event` **parent table only**; all privileges are revoked on its partitions (a direct partition query would skip the parent's RLS policy); the catalog test checks this through `pg_inherits` (P00.T4, P00.T7).
 - **Retention (binding):** the purge never deletes open tickets; it deletes closed tickets older than the setting with their rounds, messages, media and **only their** events (events of open tickets stay, whatever their age), and old audit events (security events kept at least 1 year). A warning shows 30 days before the first purge after a change. It runs as `pinround_retention`, the only `BYPASSRLS` role ([ADR-0005](../03-adr/0005-multi-tenancy.md)).
@@ -55,11 +55,11 @@ NFR-SEC-01, NFR-SEC-04, NFR-SEC-05, NFR-PRIV-03, NFR-PRIV-04, NFR-PRIV-05, NFR-U
 ### P11.T1 — Admin shell and access rules
 - **Why:** one consistent place, safe by default.
 - **Steps:**
-  1. Admin layout with the tab list (labels as prototype), active tab, plain sub-titles.
-  2. Voters per tab; nav shows "Admin" only for admins; non-admins get 404 on `/admin/*`.
+  1. Admin layout with the tab list (labels as prototype), active tab, plain sub-titles: extend P14.T3's layout and add each new tab to `AdminTabRail::TABS`.
+  2. Voters per tab; nav shows "Admin" only for admins; non-admins get 404 on `/admin/*` (P14.T3's `HideAdminAreaFromNonAdmins` does it for every `ADMIN_AREA` refusal).
   3. Use the re-auth flow ("Confirm it's you", `RecentAuth` from P01.T6, remembered 10 minutes) for every sensitive action listed in the design notes.
   4. Admin home for pure admins: "Your organization" stats (People, Teams, AI help, Jira) linking to tabs (if phase 07 built it, reuse).
-- **Files:** `src/Web/UI/Controller/Admin/AdminShellController.php`, `templates/admin/layout.html.twig`.
+- **Files:** `src/Web/UI/Controller/Admin/AdminShellController.php`, `src/Web/UI/Admin/AdminTabRail.php`, `src/Web/UI/templates/admin/layout.html.twig` (all from P14.T3).
 - **Acceptance:**
   - [ ] Every admin route has a voter test for each role (viewer, member, lead, manager, admin).
 - **Tests:** voter table test; functional 404 for non-admins.

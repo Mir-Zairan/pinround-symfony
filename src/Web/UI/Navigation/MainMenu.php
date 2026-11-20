@@ -9,6 +9,8 @@ use App\Organization\Api\CurrentActor;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
 use App\SharedKernel\Domain\TeamId;
+use App\Web\UI\Admin\AdminTabRail;
+use App\Web\UI\Controller\Admin\AdminShellController;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Exception\RouteNotFoundException;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -34,10 +36,10 @@ final readonly class MainMenu
     /** P02.T8 (`/teams/{slug}`), with the team's slug as "slug". */
     public const string TEAM_ROUTE = 'team_show';
     /**
-     * P14.T3 (`/admin`), which opens the first admin tab the person may open. The item is current on every page whose
-     * route is this name plus "_…", as each admin tab's is.
+     * P14.T3 (`/admin`), which opens the first admin tab the person may open. The item is current on every page of the
+     * admin area (AdminTabRail::isAdminAreaRoute), whichever module owns the tab.
      */
-    public const string ADMIN_ROUTE = 'organization_admin';
+    public const string ADMIN_ROUTE = AdminShellController::ROUTE;
 
     public function __construct(
         private TokenStorageInterface $tokenStorage,
@@ -144,7 +146,7 @@ final readonly class MainMenu
     {
         $route = $this->requestStack->getMainRequest()?->attributes->get('_route');
 
-        return \is_string($route) && (self::ADMIN_ROUTE === $route || str_starts_with($route, self::ADMIN_ROUTE.'_'));
+        return \is_string($route) && AdminTabRail::isAdminAreaRoute($route);
     }
 
     /**

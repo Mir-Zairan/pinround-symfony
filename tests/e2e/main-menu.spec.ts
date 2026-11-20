@@ -143,17 +143,20 @@ test.describe('as Omar, who holds no Admin role', () => {
   });
 });
 
-test.describe('narrow viewport', () => {
-  test.use({ viewport: { width: 360, height: 800 } });
+// 360px is the narrowest screen we support; 641px is the narrowest that keeps the list under its button (shell.css).
+for (const width of [360, 641]) {
+  test.describe(`${width}px viewport`, () => {
+    test.use({ viewport: { width, height: 800 } });
 
-  test('the open team list stays inside the viewport at 360px', async ({ page }) => {
-    await openHome(page);
-    await teamsButton(page).click();
-    await expect(teamList(page)).toBeVisible();
+    test(`the open team list stays inside the viewport at ${width}px`, async ({ page }) => {
+      await openHome(page);
+      await teamsButton(page).click();
+      await expect(teamList(page)).toBeVisible();
 
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-    const list = (await teamList(page).boundingBox())!;
-    expect(list.x).toBeGreaterThanOrEqual(0);
-    expect(list.x + list.width).toBeLessThanOrEqual(360);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+      const list = (await teamList(page).boundingBox())!;
+      expect(list.x).toBeGreaterThanOrEqual(0);
+      expect(list.x + list.width).toBeLessThanOrEqual(width);
+    });
   });
-});
+}

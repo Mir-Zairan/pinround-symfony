@@ -9,6 +9,8 @@ use App\Organization\Api\MemberJob;
 use App\Organization\Api\Roles;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
+use App\Organization\UI\Admin\AiSettingsController;
+use App\Organization\UI\Admin\PeopleController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
@@ -259,9 +261,11 @@ final class MainMenuTest extends TestCase
     public static function routesAndWhetherAdminIsCurrent(): iterable
     {
         yield 'the admin area' => [MainMenu::ADMIN_ROUTE, true];
-        yield 'an admin tab' => [MainMenu::ADMIN_ROUTE.'_ai', true];
-        yield 'a form of an admin tab' => [MainMenu::ADMIN_ROUTE.'_people_invite', true];
-        yield 'a route that only starts with the same letters' => [MainMenu::ADMIN_ROUTE.'s', false];
+        yield 'an admin tab of another module' => [AiSettingsController::ROUTE, true];
+        yield 'a form of an admin tab' => [PeopleController::INVITE_ROUTE, true];
+        yield 'a route under the admin area address that is no tab' => [MainMenu::ADMIN_ROUTE.'_ai', false];
+        yield 'a route that only starts with the same letters as the address' => [MainMenu::ADMIN_ROUTE.'s', false];
+        yield 'a route that only starts with the same letters as a tab' => [PeopleController::ROUTE.'s', false];
         yield 'Home' => [MainMenu::HOME_ROUTE, false];
     }
 

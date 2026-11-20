@@ -422,6 +422,7 @@ Table prefixes keep ownership visible in SQL. The tables and columns are in [dat
 - **Purpose:** the layout, the navigation (built from the user's roles), Home composition with focus chips, and the design-system Twig components.
 - **Rule:** no business logic. Web only puts the other modules' UI pieces together.
 - **Owns:** `web_home_focus` (each user's Home focus chip per organization, saved by `POST /home/focus`; see [data-model.md](data-model.md#web)). Prefix `web_`, for UI preference tables only ([ADR-0035](../03-adr/0035-web-owns-its-ui-preferences.md)).
+- **Admin shell (built in P14.T3):** `UI\Controller\Admin\AdminShellController` (`GET /admin`, `web_admin`) asks Organization's `ADMIN_AREA` and redirects to the first tab `UI\Admin\AdminTabRail` gives the person; the rail and `@Web/admin/layout.html.twig` frame every admin tab. Each tab is a page of the module that owns it, whose template extends that layout; the rail names its route as a string, so Web reads no module's UI. Organization's `HideAdminAreaFromNonAdmins` turns a non-Admin's `ADMIN_AREA` refusal into a 404 on every admin route.
 - **Health:** `UI\Controller\HealthController` serves `/health/live` and `/health/ready`, which runs every tagged `ReadinessCheck` ([operations.md](operations.md#observability)).
 - **Depends on:** Api of Insight, Organization, Notification, Ticketing and Workflow (read only).
 - **More:** [frontend.md](frontend.md).
