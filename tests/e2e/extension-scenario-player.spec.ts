@@ -6,6 +6,7 @@ import {
   TEST_PAGE_ORIGIN,
   answerPinroundApi,
   expect,
+  openPopupFor,
   pairedPopupFor,
   test,
   type ExtensionPageGlobals,
@@ -341,4 +342,56 @@ test('the host question is asked once per host, and each run\'s capture step add
     [`/api/v1/notebooks/${NOTEBOOK_ID}/uploads`, 201],
     [`/api/v1/notebooks/${NOTEBOOK_ID}/screenshots`, 200],
   ]);
+});
+
+test('the run lives in the popup: Chrome closes the toolbar popup on a click on the page, and a run ends with its popup', async ({ context, testPage }) => {
+  const { stub, popup } = await openNotebookPlayer(context, testPage, [scenario('Stock picture', [{ type: 'capture', say: 'Keep the basket.' }, pressCheckStock])]);
+  const extensionContexts = () => popup.evaluate(async () => {
+    const { chrome } = globalThis as unknown as { chrome: { runtime: { getContexts(filter: { contextTypes: string[] }): Promise<Array<{ contextType: string }>> } } };
+    return (await chrome.runtime.getContexts({ contextTypes: ['POPUP', 'TAB'] })).map((found) => found.contextType).sort();
+  });
+  // chrome.action.openPopup opens the toolbar popup as the icon's click does, in the focused window: not a tab.
+  await testPage.bringToFront();
+  await popup.evaluate(async () => {
+    await (globalThis as unknown as { chrome: { action: { openPopup(): Promise<void> } } }).chrome.action.openPopup();
+  });
+  await expect.poll(extensionContexts).toEqual(['POPUP', 'TAB']);
+  await testPage.mouse.click(5, 5);
+  await expect.poll(extensionContexts, 'the toolbar popup is gone after the click on the page').toEqual(['TAB']);
+
+  let releaseUpload = () => {};
+  const uploadReleased = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let uploadOutcome: string | null = null;
+  let isUploadHeld = false;
+  await context.route(`${PINROUND_TEST_ORIGIN}/api/v1/notebooks/${NOTEBOOK_ID}/uploads`, async (route) => {
+    isUploadHeld = true;
+    await uploadReleased;
+    try {
+      await route.fallback();
+      uploadOutcome = 'answered';
+    } catch (error) {
+      uploadOutcome = `gone: ${String(error)}`;
+    }
+  });
+  await playAnyway(popup);
+  await expect.poll(() => isUploadHeld, 'the capture step is under way').toBe(true);
+
+  await popup.close();
+  releaseUpload();
+
+  await expect.poll(() => uploadOutcome).toBe('answered');
+
+  // No document of the extension is left to run the player in: the next popup is the only one, and the service
+  // worker does not play.
+  const nextPopup = await openPopupFor(context, testPage);
+  const contextsLeft = await nextPopup.evaluate(async () => {
+    const { chrome } = globalThis as unknown as { chrome: { runtime: { getContexts(filter: { contextTypes: string[] }): Promise<Array<{ contextType: string; documentUrl: string }>> } } };
+    return (await chrome.runtime.getContexts({ contextTypes: ['POPUP', 'TAB', 'OFFSCREEN_DOCUMENT'] })).map((found) => [found.contextType, found.documentUrl]);
+  });
+  expect(contextsLeft).toEqual([['TAB', nextPopup.url()]]);
+  expect(stub.storedPictures).toEqual([]);
+  expect(stub.notebooks.get(NOTEBOOK_ID)?.screenshots).toEqual([]);
+  expect(await pageStateOf(testPage)).toEqual(UNTOUCHED_PAGE);
 });

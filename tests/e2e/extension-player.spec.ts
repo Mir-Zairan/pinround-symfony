@@ -534,3 +534,44 @@ test('tabs.get, tabs.update and a func cut off by a navigation behave in Chrome 
   });
   await expect.poll(() => seenTab(tab)).toEqual({ id: tab.tabId, status: 'complete', url: RECEIPT_PAGE_URL });
 });
+
+test('while a tabs.update navigation waits for its page, a func still runs in the old document and the tab reads loading with pendingUrl, as the fake models it', async ({ context, testPage }) => {
+  const tab = await openPlayerPage(context, testPage);
+  let releaseReceipt = () => {};
+  const receiptReleased = new Promise<void>((resolve) => {
+    releaseReceipt = resolve;
+  });
+  let isReceiptAskedFor = false;
+  await context.route(RECEIPT_PAGE_URL, async (route) => {
+    isReceiptAskedFor = true;
+    await receiptReleased;
+    await route.fallback();
+  });
+  const documentSeen = () => tab.extensionPage.evaluate(async (tabId) => {
+    const { chrome } = globalThis as unknown as ExtensionPageGlobals;
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => ({ marker: (globalThis as unknown as { marker?: string }).marker ?? null, title: document.title }),
+    });
+    return injection?.result;
+  }, tab.tabId);
+  await tab.extensionPage.evaluate(async (tabId) => {
+    const { chrome } = globalThis as unknown as ExtensionPageGlobals;
+    await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+      (globalThis as unknown as { marker: string }).marker = 'set on the order form';
+    } });
+  }, tab.tabId);
+
+  await tab.extensionPage.evaluate(`(async () => {
+    const { browser } = await import('/src/shared/browser.js');
+    await browser.tabs.update(${JSON.stringify(tab.tabId)}, { url: ${JSON.stringify(RECEIPT_PAGE_URL)} });
+  })()`);
+  await expect.poll(() => isReceiptAskedFor, 'the receipt page is asked for and held').toBe(true);
+
+  expect(await seenTab(tab)).toEqual({ id: tab.tabId, status: 'loading', url: PLAYER_PAGE_URL, pendingUrl: RECEIPT_PAGE_URL });
+  expect(await documentSeen()).toEqual({ marker: 'set on the order form', title: 'Acme Foods order form' });
+
+  releaseReceipt();
+  await expect.poll(() => seenTab(tab)).toEqual({ id: tab.tabId, status: 'complete', url: RECEIPT_PAGE_URL });
+  expect(await documentSeen()).toEqual({ marker: null, title: 'Acme Foods receipt' });
+});
