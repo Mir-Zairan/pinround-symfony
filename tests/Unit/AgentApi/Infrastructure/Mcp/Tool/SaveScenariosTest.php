@@ -134,6 +134,23 @@ final class SaveScenariosTest extends TestCase
         self::assertSame([], $notebooks->replaced);
     }
 
+    /**
+     * Notebooks checks the scenarios before it saves, so a broken rule is the answer even when the save would be refused.
+     */
+    #[Test]
+    public function theDoubleRefusesAScenarioThatBreaksARuleBeforeASaveItWouldRefuse(): void
+    {
+        $notebooks = new ScriptedNotebooks(self::notebook(), NotebookRefused::because(NotebookRefused::NOTEBOOK_CHANGED));
+
+        try {
+            $notebooks->replaceScenarios(self::NOTEBOOK, [(object) ['title' => 'Coupon']], new \DateTimeImmutable(self::NOW));
+            self::fail('The double saved a scenario ScenarioRules refuses.');
+        } catch (NotebookRefused $refused) {
+            self::assertStringStartsWith('Scenario 1', $refused->getMessage());
+        }
+        self::assertSame([], $notebooks->replaced);
+    }
+
     #[Test]
     public function theDescriptionTellsTheAgentToUnwrapTheTextsGetNotebookGave(): void
     {

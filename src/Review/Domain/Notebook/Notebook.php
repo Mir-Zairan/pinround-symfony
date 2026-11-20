@@ -103,13 +103,8 @@ final readonly class Notebook
     public function holdsPicture(string $mediaId): bool
     {
         $lowercaseMediaId = strtolower($mediaId);
-        foreach ($this->screenshots as $screenshot) {
-            if ($screenshot->mediaId() === $lowercaseMediaId) {
-                return true;
-            }
-        }
 
-        return false;
+        return array_any($this->screenshots, static fn (NotebookScreenshot $screenshot): bool => $screenshot->mediaId() === $lowercaseMediaId);
     }
 
     /**

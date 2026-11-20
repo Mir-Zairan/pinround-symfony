@@ -10,20 +10,24 @@ use App\Review\Api\NotebookRefused;
 use App\Review\Api\Notebooks;
 use App\Review\Api\NotebooksPage;
 use App\Review\Api\NotebookView;
+use App\Review\Api\PlacedPin;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Domain\Notebook\NotebookPin;
 use App\Review\Domain\Notebook\NotebookRefused as NotebookRule;
+use App\Review\Domain\Notebook\NotebookScreenshot;
 use App\Review\Domain\Scenario\ScenarioRefused;
 use App\Review\Domain\Scenario\ScenarioRules;
 
 /**
  * Notebooks as save_scenarios and add_notebook_screenshot use them: get() finds only the one notebook it holds, by its
- * id exactly, as the real one finds only a lowercase uuid of the person's. Each write refuses as the real one does, in
- * its order: an id get() does not find as not found, then $refusal when one is given, then the first rule broken; it
- * records what it was given only when it refuses nothing, as the real one saves nothing when it refuses.
+ * id exactly, as the real one finds only a lowercase uuid of the person's. Each write refuses as UseCaseNotebooks does,
+ * in its order: an id get() does not find as not found, then the first rule the given scenarios or picture breaks, by
+ * the domain's own rules; $refusal, when one is given, only where the real one would save, as its picture and
+ * NOTEBOOK_CHANGED refusals come there. It records what it was given only when it refuses nothing.
  * addScreenshot() reads the pictures again as the real one does before it saves over the version it read:
  * $mediaIdsAtAdd, the pictures another request may have saved since get(), or the ones get() shows when null. A
- * picture among them is there already, and the call changes nothing, even on a full notebook; else a full notebook is
- * refused.
+ * picture among them is there already, and the call changes nothing and saves nothing, even on a full notebook; else a
+ * full notebook is refused.
  */
 final class ScriptedNotebooks implements Notebooks
 {
@@ -51,25 +55,27 @@ final class ScriptedNotebooks implements Notebooks
 
     public function replaceScenarios(string $notebookId, mixed $decodedScenarios, \DateTimeImmutable $at): void
     {
-        $this->refuseUnlessWritable($notebookId);
+        $this->refuseUnlessFound($notebookId);
         try {
             ScenarioRules::parse($decodedScenarios);
         } catch (ScenarioRefused $refused) {
             throw NotebookRefused::because($refused->reason, $refused);
         }
+        $this->refuseWhenScripted();
         $this->replaced[] = [$notebookId, $decodedScenarios, $at];
     }
 
     public function addScreenshot(string $notebookId, ScreenshotWithPins $screenshot, \DateTimeImmutable $at): AddedNotebookScreenshot
     {
-        $this->refuseUnlessWritable($notebookId);
-        $mediaId = strtolower($screenshot->mediaId);
+        $this->refuseUnlessFound($notebookId);
+        $mediaId = self::pictureObeyingTheRules($screenshot)->mediaId();
         if (\in_array($mediaId, $this->mediaIdsAtAdd, true)) {
             return new AddedNotebookScreenshot(true, \count($this->mediaIdsAtAdd));
         }
         if (\count($this->mediaIdsAtAdd) >= self::MAX_SCREENSHOTS) {
             throw NotebookRefused::because(NotebookRule::TOO_MANY_SCREENSHOTS);
         }
+        $this->refuseWhenScripted();
         $this->mediaIdsAtAdd[] = $mediaId;
         $this->added[] = [$notebookId, $screenshot, $at];
 
@@ -97,15 +103,39 @@ final class ScriptedNotebooks implements Notebooks
     }
 
     /**
-     * @throws NotebookRefused not found for an id get() does not find, else $refusal when one is given
+     * @throws NotebookRefused not found for an id get() does not find
      */
-    private function refuseUnlessWritable(string $notebookId): void
+    private function refuseUnlessFound(string $notebookId): void
     {
         if (null === $this->get($notebookId)) {
             throw NotebookRefused::notFound();
         }
+    }
+
+    /**
+     * @throws NotebookRefused $refusal when one is given
+     */
+    private function refuseWhenScripted(): void
+    {
         if (null !== $this->refusal) {
             throw $this->refusal;
+        }
+    }
+
+    /**
+     * @throws NotebookRefused with the text of the first picture or pin rule $screenshot breaks
+     */
+    private static function pictureObeyingTheRules(ScreenshotWithPins $screenshot): NotebookScreenshot
+    {
+        try {
+            return NotebookScreenshot::of(
+                $screenshot->mediaId,
+                $screenshot->title,
+                $screenshot->summary,
+                array_map(static fn (PlacedPin $pin): NotebookPin => NotebookPin::placed($pin->xPercent, $pin->yPercent, $pin->note), $screenshot->pins),
+            );
+        } catch (NotebookRule $broken) {
+            throw NotebookRefused::because($broken->getMessage(), $broken);
         }
     }
 }

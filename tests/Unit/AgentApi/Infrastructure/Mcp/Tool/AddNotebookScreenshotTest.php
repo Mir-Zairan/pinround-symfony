@@ -12,11 +12,14 @@ use App\Identity\Api\CurrentUser;
 use App\Media\Api\CompletedUpload;
 use App\Media\Api\MediaImageStatus;
 use App\Media\Api\UploadTarget;
+use App\Review\Api\NotebookRefused;
 use App\Review\Api\NotebookView;
+use App\Review\Api\PlacedPin;
 use App\Review\Api\ScreenshotWithPins;
 use App\Review\Domain\Notebook\NotebookRefused as NotebookRule;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -86,6 +89,62 @@ final class AddNotebookScreenshotTest extends TestCase
         $answer = $this->callWith($notebooks);
 
         self::assertSame(['notebook_id' => self::NOTEBOOK, 'media_id' => self::UPLOAD, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 10], $answer);
+        self::assertSame([], $notebooks->added);
+    }
+
+    /**
+     * @return iterable<string, array{ScreenshotWithPins, string}>
+     */
+    public static function picturesTheRulesRefuse(): iterable
+    {
+        yield 'a pin outside' => [new ScreenshotWithPins(self::FIRST_PICTURE, pins: [new PlacedPin(120.0, 40.0, 'Coupon box')]), NotebookRule::PIN_OUTSIDE];
+        yield 'a title too long' => [new ScreenshotWithPins(self::FIRST_PICTURE, str_repeat('a', 121)), NotebookRule::PICTURE_TITLE_TOO_LONG];
+    }
+
+    /**
+     * The double checks the picture before it looks for it, as Notebooks does, so a picture the notebook holds already
+     * but the rules refuse is refused, not answered as already there.
+     */
+    #[Test]
+    #[DataProvider('picturesTheRulesRefuse')]
+    public function theDoubleRefusesAPictureThatBreaksARuleBeforeItFindsItThereAlready(ScreenshotWithPins $picture, string $reason): void
+    {
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture());
+
+        try {
+            $notebooks->addScreenshot(self::NOTEBOOK, $picture, new \DateTimeImmutable(self::NOW));
+            self::fail('The double answered a picture the rules refuse.');
+        } catch (NotebookRefused $refused) {
+            self::assertSame($reason, $refused->getMessage());
+        }
+        self::assertSame([], $notebooks->added);
+    }
+
+    /**
+     * Notebooks saves nothing for a picture there already, so the notebook changed meanwhile cannot refuse it.
+     */
+    #[Test]
+    public function theDoubleAnswersAPictureThereAlreadyEvenWhenASaveWouldBeRefused(): void
+    {
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), NotebookRefused::because(NotebookRefused::NOTEBOOK_CHANGED));
+
+        $answer = $notebooks->addScreenshot(self::NOTEBOOK, new ScreenshotWithPins(strtoupper(self::FIRST_PICTURE)), new \DateTimeImmutable(self::NOW));
+
+        self::assertSame([true, 1], [$answer->wasAddedBefore, $answer->screenshotCount]);
+        self::assertSame([], $notebooks->added);
+    }
+
+    #[Test]
+    public function theDoubleRefusesANewPictureWhenTheSaveIsRefusedAndAddsNothing(): void
+    {
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture(), NotebookRefused::because(NotebookRefused::NOTEBOOK_CHANGED));
+
+        try {
+            $notebooks->addScreenshot(self::NOTEBOOK, new ScreenshotWithPins(self::UPLOAD), new \DateTimeImmutable(self::NOW));
+            self::fail('The double added a picture whose save is refused.');
+        } catch (NotebookRefused $refused) {
+            self::assertSame(NotebookRefused::NOTEBOOK_CHANGED, $refused->getMessage());
+        }
         self::assertSame([], $notebooks->added);
     }
 
