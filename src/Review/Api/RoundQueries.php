@@ -26,6 +26,8 @@ interface RoundQueries
      * Another person's unshared draft is left out for everyone, the lead and admins included.
      *
      * Only Round 0 (the report) and drafts come with screenshots and pins; a checklist or review round has none loaded.
+     * A shared round comes with only the latest try of each screenshot, to everyone, its owner included (ADR-0048): the
+     * earlier tries are the owner's, read through draftOf. The viewer's own unshared draft comes with every try.
      *
      * Round 0, the viewer's own unshared draft and the newest MAX_NUMBERED_ROUNDS numbered rounds from Round 1 up are
      * loaded; the count of the older ones is in the answer. The cap is in the rounds query, so a ticket with a
@@ -70,7 +72,9 @@ interface RoundQueries
      * @param string $screenshotId the id as the request carried it, in any case
      *
      * @return RoundAccessFacts|null null for a malformed id, without a query, and for a picture of no draft of that
-     *                               ticket: a report's, another ticket's, another organization's or an unknown one
+     *                               ticket: a report's, another ticket's, another organization's or an unknown one;
+     *                               null too for an earlier try of a shared draft, which is its owner's alone
+     *                               (ADR-0048), so the caller answers it as not found, never as read-only
      *
      * @throws \LogicException when no transaction is open or no tenant is set, before any query
      */
@@ -93,9 +97,10 @@ interface RoundQueries
 
     /**
      * The newest shared round of the ticket that holds pictures, the report (Round 0) or a shared draft round, by
-     * number, with its pictures and the pins that count, in one query whatever the number of pictures and pins. A
-     * checklist or review round, a deleted round and an unshared draft are never it; neither is another organization's.
-     * A suggested or dismissed AI pin is left out, as in roundNotes.
+     * number, with the latest try of each of its pictures and the pins that count, in one query whatever the number of
+     * pictures and pins. An earlier try of a shared draft is its owner's alone (ADR-0048) and never comes back, nor do
+     * its pins. A checklist or review round, a deleted round and an unshared draft are never it; neither is another
+     * organization's. A suggested or dismissed AI pin is left out, as in roundNotes.
      *
      * This method checks nobody: the caller asks TicketPermission VIEW on the ticket first, and RoundPermission VIEW on
      * the round it answers.

@@ -39,7 +39,8 @@ use Psr\Clock\ClockInterface;
  * ticket has, once TicketPermission VIEW grants the ticket, as get_round_notes asks it: a ticket the caller may not see
  * is not found, also for the owner of an unshared draft on it, which RoundPermission grants without reading the
  * ticket. Another person's unshared draft is denied by RoundPermission EDIT and so not found, as every denial of the
- * gate; a shared draft is read-only for everyone RoundPermission VIEW lets see it, its owner included (FR-RND-12).
+ * gate; a shared draft is read-only for everyone RoundPermission VIEW lets see it, its owner included (FR-RND-12),
+ * and an earlier try of one is not found, as draftScreenshotOf finds none (ADR-0048).
  * A checklist item the voter denies, such as one of a ticket the caller is not the assignee of or may not see, is not
  * found too.
  */
