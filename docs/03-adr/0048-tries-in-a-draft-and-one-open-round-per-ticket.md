@@ -5,7 +5,7 @@ it closes when the person it is ready for moves the ticket on.
 
 ## Index
 
-- [Status](#status) — accepted, date, deciders, what it adds to ADR-0017 and ADR-0044.
+- [Status](#status) — accepted, dates, deciders, what it supersedes in ADR-0017 and ADR-0044.
 - [Context and problem statement](#context-and-problem-statement) — Omar shares three empty rounds while Lena still checks one.
 - [Decision drivers](#decision-drivers) — one story per ticket, honest round numbers, no race, no data change.
 - [Considered options](#considered-options) — what closes a round, and what happens to old open rounds.
@@ -20,11 +20,23 @@ it closes when the person it is ready for moves the ticket on.
 Accepted · 2026-11-20 · Deciders: Zairan Mir (lead, product owner).
 
 The product owner accepted these decisions in a session on 2026-11-20, after testing pinround by hand
-([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)).
+([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)). On 2026-11-21 the product owner decided
+two more points, written here: only the person whose turn it is closes an open round (a lead's move does not), and a
+findings round closes when the assignee moves the ticket on.
 
-It adds to [ADR-0017](0017-private-draft-rounds.md) (tries inside a draft, the share rules) and to
-[ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md) (when a findings round closes). It supersedes nothing in
-them: drafts stay private, the hand-off dialog stays, and the person whose turn it is may still keep a draft.
+It supersedes in part:
+
+- [ADR-0017](0017-private-draft-rounds.md), **Share**: a share no longer always gives the draft the next round
+  number. It is refused while another shared round is open or when the draft has no screenshots, and the refused draft
+  stays unshared and unnumbered. A share copies only the latest try of each screenshot.
+- [ADR-0017](0017-private-draft-rounds.md) and [ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md),
+  **hand-off choices** ("Share and move", "Keep private and move", Cancel): when sharing is refused, the dialog drops
+  "Share and move" and shows the reason.
+- [ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md), **findings round**: it closes when the assignee moves
+  the ticket on or shares the next round.
+
+The rest of both stands: drafts stay private, the hand-off dialog stays, and the person whose turn it is may still
+keep a draft.
 
 ## Context and problem statement
 
@@ -86,9 +98,12 @@ does not close them.
   ("Approve code", "Ask for changes", "Pass it", "Needs changes" and the others in the
   [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue)). The verb is the round's verdict.
   The round becomes `RoundState::Closed` in the move's transaction.
+- **Only the person whose turn it is closes it** (product owner, 2026-11-21). A move by anyone else, such as a lead's
+  "Move to another step…" or "Put on hold", leaves an open round open.
 - A **findings round** ([ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md)) is ready for the assignee. It
-  stays open until **the assignee shares the next round**. That share closes it first, then numbers the new round, in
-  one transaction.
+  closes when **the assignee moves the ticket on**, with any verb, like any other round (product owner, 2026-11-21).
+  That holds also when the assignee chooses "Keep private and move" and shares no new screenshots. It also closes when
+  **the assignee shares the next round**: that share closes it first, then numbers the new round, in one transaction.
 - A tester's "Needs changes" with a draft does both in one move: it closes the open round with her verdict, then
   shares her draft as "Round N · findings by Mia".
 
@@ -104,8 +119,8 @@ does not close them.
 
 **Old open rounds.** Tickets that already have more than one open shared round keep them. There is no data migration.
 The demo seed has two open shared rounds on one ticket, and stays that way. On such a ticket every share is refused
-until the rounds close, and the next move by the person whose turn it is closes every open shared round of the ticket that is not a
-findings round.
+until the rounds close, and the next move by the person whose turn it is closes every open shared round of the ticket
+that is not a findings round. An open findings round closes on the assignee's move, as above.
 
 ### Consequences
 
@@ -124,9 +139,9 @@ findings round.
   ([ADR-0009](0009-async-messaging-and-outbox.md)). The port Review already implements for the move
   (`Ticketing\Api\ShareDraftQuestion`, called inside `MoveTicket`) shows the same-transaction way. P14.T5 picks the
   path and updates the "Depends on" lines in [modules.md](../02-architecture/modules.md) if it adds a call.
-- Bad: a move by someone whose turn it is not (a lead's "Move to another step…" or "Put on hold") does not close the
-  round. The round can stay open while the ticket sits in another step, and nobody can share until the person whose
-  turn it is moves it on.
+- Bad: because a lead's "Move to another step…" or "Put on hold" does not close the round, the round can stay open
+  while the ticket sits in another step, and no new round can be shared until the person whose turn it is moves the
+  ticket on.
 - Bad: the verb closes the round even when the person never opened the pictures.
 - Bad: old tickets with two open rounds look odd until someone moves them on.
 - Neutral: the database gains `rvw_screenshot.retake_of` (index led by `organization_id`, RLS on). The round table
@@ -137,7 +152,9 @@ findings round.
 - P14.T5: domain unit tests for the share refusals and the close; a repository integration test with two connections
   where exactly one of two shares wins; functional and MCP tests where a refused share leaves the draft unshared and
   unnumbered (state, not only status); a test where Mia's "Needs changes" closes Round 2 and shares Round 3 · findings
-  by Mia in one move, and Omar's next share closes Round 3.
+  by Mia in one move, and Omar's next share closes Round 3; a test where Omar moves the ticket on with "Keep private
+  and move" and no new screenshots, and Round 3 · findings by Mia closes with nothing new shared; a test where Lena's
+  "Put on hold" leaves the open round open.
 - P14.T6: domain, migration, repository and isolation tests for `retake_of`; a sixth try is refused and nothing is
   stored; `retake_of` pointing at another round, another person's draft or another organization answers 404; after
   share the round holds one screenshot per chain, the latest try.

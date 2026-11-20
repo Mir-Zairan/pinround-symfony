@@ -4,7 +4,7 @@ A tester or reviewer can gather new findings on a ticket in a private draft roun
 
 ## Index
 
-- [Status](#status) — Accepted, date, deciders, what it supersedes.
+- [Status](#status) — Accepted, superseded in part by ADR-0048, date, deciders, what it supersedes.
 - [Context and problem statement](#context-and-problem-statement) — Mia finds a second problem while testing.
 - [Decision drivers](#decision-drivers) — one ticket per problem thread, privacy, no new hand-off rule.
 - [Considered options](#considered-options) — tester's draft, comments, always a new ticket.
@@ -15,7 +15,9 @@ A tester or reviewer can gather new findings on a ticket in a private draft roun
 
 ## Status
 
-Accepted
+Accepted. Superseded in part by [ADR-0048](0048-tries-in-a-draft-and-one-open-round-per-ticket.md): the hand-off dialog
+drops "Share and move" when sharing is refused, and a findings round closes when the assignee moves the ticket on or
+shares the next round.
 
 - Date: 2026-11-19
 - Deciders: Zairan Mir (lead, product owner)

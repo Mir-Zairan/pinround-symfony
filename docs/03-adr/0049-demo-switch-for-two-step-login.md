@@ -65,10 +65,18 @@ people see it, and cannot be turned on in a real deployment.
   `bool` env processor reads as true; empty or unset is off.
 - **Only in `dev`.** The kernel refuses to boot when the switch is true and `APP_ENV` is not `dev`, with a plain
   message. This covers `prod` and `test`.
-- **Where it is read.** Only where the two-step proof is checked: Identity's `RecentAuth` (which covers
-  `AskToConfirmItsYou` and `SymfonyLoginAssurance`) and Organization's `AdminAreaVoter`. It skips the two-step proof
-  only. It never grants a role, never skips the password session, and `ADMIN_*` voters still deny every request made
-  with a token ([ADR-0013](0013-authorization.md)).
+- **Where it is read.** Only in Identity's `RecentAuth::hasConfirmedTwoStepLoginWithin`, the one place that decides
+  whether a two-step proof counts. Every check of the proof goes through it, so none needs its own copy of the switch:
+  - Organization's `AdminAreaVoter` asks Identity's `Api\LoginAssurance::hasConfirmedTwoStepLoginWithin`, which
+    `SymfonyLoginAssurance` answers with `RecentAuth`.
+  - `AskToConfirmItsYou` enforces `#[RequiresRecentAuth]` with `RecentAuth::isRecentFor`, which calls the same method.
+    Token creation (`TokenController::create`) and the AI provider key change (`AiSettingsController::changeProviderKey`)
+    carry that attribute.
+  - `SendAdminToTwoStepProof` and `AskToConfirmItsYou`'s choice between setup and "Confirm it's you" run only after a
+    refusal, so they never run while the switch lets the proof count.
+
+  It skips the two-step proof only. It never grants a role, never skips the password session or `isRecentFor`'s
+  recent password, and `ADMIN_*` voters still deny every request made with a token ([ADR-0013](0013-authorization.md)).
 - **Visible while on.** Every page shows a banner: "Demo mode: two-step login is skipped."
 - **Setup.** `.env` explains the switch, and the `pinround-setup` skill asks whether to turn it on.
 
@@ -76,8 +84,8 @@ people see it, and cannot be turned on in a real deployment.
 
 - Good: a local demo reaches admin pages and token creation without an authenticator app.
 - Good: the default stays safe, and people still see two-step login unless they choose to skip it.
-- Bad: a second code path around two-step login exists, and every new check of the two-step proof must use
-  `RecentAuth` or `AdminAreaVoter`, or it ignores the switch.
+- Bad: a second code path around two-step login exists, and every new check of the two-step proof must go through
+  `RecentAuth` (directly or through `LoginAssurance`), or it ignores the switch.
 - Bad: a person who copies a `dev` setup to a server could run it in `dev` mode with the switch on; the boot check
   cannot catch a server that runs `APP_ENV=dev`. The banner and `.env` text say it is for a local demo only.
 - Neutral: the same shape as the hackathon flag `APP_HACKATHON_SKIP_ADMIN_MFA` of ADR-0012, which was deleted on
@@ -88,8 +96,8 @@ people see it, and cannot be turned on in a real deployment.
 - A kernel boot test: with the switch on and `APP_ENV=prod` (and `test`), boot fails with the message.
 - With the switch on in `dev`, Sara opens admin pages and makes a token without two-step login (P14.T18).
 - With the switch off, every existing two-step login test still passes.
-- Unit tests of `RecentAuth` and `AdminAreaVoter` with the switch on and off; with it on, a person without the Admin
-  role is still refused.
+- Unit tests of `RecentAuth` with the switch on and off; functional tests through `AdminAreaVoter` and token creation
+  with it on, where a person without the Admin role is still refused.
 
 ## Pros and cons of the options
 

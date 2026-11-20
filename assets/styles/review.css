@@ -100,6 +100,13 @@
   cursor: pointer;
 }
 
+/* A pin with no style attribute has not been placed yet (pin-layer has not connected, or a re-render dropped its spot
+   and the controller has not put it back), so it would show at the layer's top-left corner. placeMarker writes the
+   attribute, also for a pin added in the browser. */
+.pin:not([style]) {
+  visibility: hidden;
+}
+
 .pin--ai {
   border: 2px dashed var(--ai);
   box-shadow: 0 0 0 2px var(--pin-inner), 0 0 0 4px var(--pin-outer);

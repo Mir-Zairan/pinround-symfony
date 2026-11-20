@@ -41,17 +41,43 @@ const HARNESS = `<!doctype html>
 </script>
 </body></html>`;
 
-async function openHarness(page: Page): Promise<void> {
+// The app's own review.css, with one layer pin-layer places and one it does not, as a pin looks before it connects.
+const STYLED_HARNESS = `<!doctype html>
+<html><head>
+<link rel="stylesheet" href="/assets/styles/review.css">
+<style>.frame { position: relative; width: ${LAYER_WIDTH_PX}px; height: ${LAYER_HEIGHT_PX}px; }</style>
+<script type="importmap">{"imports": {"@hotwired/stimulus": "/assets/vendor/@hotwired/stimulus/stimulus.index.js"}}</script>
+</head><body>
+<div class="frame">
+  <div class="pin-layer" id="layer" data-controller="pin-layer">
+    <button type="button" class="pin pin--n1" data-pin-layer-target="pin" data-pin-number="1" data-x-percent="25.00" data-y-percent="30.00"></button>
+  </div>
+</div>
+<div class="frame">
+  <div class="pin-layer" id="unplaced">
+    <button type="button" class="pin pin--n1" data-pin-number="1" data-x-percent="60.00" data-y-percent="40.00"></button>
+  </div>
+</div>
+<script type="module">
+  import { Application } from '@hotwired/stimulus';
+  import PinLayer from '/assets/controllers/pin-layer_controller.js';
+  Application.start().register('pin-layer', PinLayer);
+  window.stimulusStarted = true;
+</script>
+</body></html>`;
+
+async function openHarness(page: Page, html: string = HARNESS): Promise<void> {
   await page.route(`${ORIGIN}/**`, (route) => {
     const { pathname } = new URL(route.request().url());
     if ('/' === pathname) {
-      return route.fulfill({ contentType: 'text/html', body: HARNESS });
+      return route.fulfill({ contentType: 'text/html', body: html });
     }
     const file = path.join(ASSETS_DIR, pathname.replace(/^\/assets\//, ''));
     if (!pathname.startsWith('/assets/') || !file.startsWith(ASSETS_DIR + path.sep)) {
       return route.fulfill({ status: 404 });
     }
-    return route.fulfill({ contentType: 'text/javascript', body: readFileSync(file, 'utf8') });
+    const contentType = pathname.endsWith('.css') ? 'text/css' : 'text/javascript';
+    return route.fulfill({ contentType, body: readFileSync(file, 'utf8') });
   });
   await page.goto(`${ORIGIN}/`);
   await page.waitForFunction(() => true === (window as unknown as { stimulusStarted?: boolean }).stimulusStarted);
@@ -114,6 +140,29 @@ test('a pin whose percents change, or whose spot a re-render wipes, goes back to
 
   await page.locator('#layer .pin--n2').evaluate((marker) => marker.removeAttribute('style'));
   await expectAt(page, 2, 70.5, 100);
+});
+
+test('a pin is hidden until it is placed, so it never shows at the layer corner, and shows once placed', async ({ page }) => {
+  await openHarness(page, STYLED_HARNESS);
+  const placed = page.locator('#layer .pin--n1');
+
+  await expect(page.locator('#unplaced .pin--n1')).toBeHidden();
+  await expectAt(page, 1, 25, 30);
+  await expect(placed).toBeVisible();
+
+  // As pin_board.js adds a pin in the browser: build, append, then place.
+  await page.addScriptTag({
+    type: 'module',
+    content: `
+      import { buildMarker, placeMarker } from '/assets/review/pin_markup.js';
+      const marker = buildMarker(2);
+      document.getElementById('layer').append(marker);
+      placeMarker(marker, 62, 44.4);
+      window.liveMarkerAdded = true;`,
+  });
+  await page.waitForFunction(() => true === (window as unknown as { liveMarkerAdded?: boolean }).liveMarkerAdded);
+  await expect(page.locator('#layer .pin--n2')).toBeVisible();
+  await expectAt(page, 2, 62, 44.4);
 });
 
 test('a frame of a picture not shown takes the picture shape: its width at most and its ratio', async ({ page }) => {

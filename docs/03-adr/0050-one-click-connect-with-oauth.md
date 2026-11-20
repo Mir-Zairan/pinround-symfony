@@ -9,7 +9,7 @@ with a consent page instead of a pasted token. Pasted personal access tokens kee
 - [Context and problem statement](#context-and-problem-statement) — Mia and Omar paste tokens; a Claude connector cannot.
 - [Decision drivers](#decision-drivers) — one click, same scopes and voters, short-lived tokens, nothing in logs.
 - [Considered options](#considered-options) — our own OAuth server, pasted tokens only, an outside identity server.
-- [Decision outcome](#decision-outcome) — the flow, the tokens, the clients, pasted tokens.
+- [Decision outcome](#decision-outcome) — the flow, redirect URIs, consent and its organization, the tokens, the clients, pasted tokens.
   - [Consequences](#consequences) — what gets easier and what it costs.
 - [Confirmation](#confirmation) — the tests of P14.T20.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — the trade-offs.
@@ -59,8 +59,15 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
 - **Where.** Identity owns the authorization server, as it owns personal access tokens ([ADR-0012](0012-authentication.md)).
 - **Flow.** OAuth 2.1 authorization code with PKCE. A code is single use; a wrong PKCE verifier or a reused code is
   refused, and no token is issued.
-- **Consent.** A consent page in the signed-in browser lists the client and the scopes it asks for. The person allows
-  or denies.
+- **Redirect URIs.** The authorize and token endpoints accept only a redirect URI registered for the client, compared
+  as an exact string (no prefix, pattern or normalised match). The token request must carry the same `redirect_uri`
+  as the authorize request that issued the code. An unregistered or changed redirect URI is refused on the authorize
+  page itself, with no redirect and no code.
+- **Consent.** A consent page in the signed-in browser lists the client and the scopes it asks for. The person picks
+  one organization they are a member of, then allows or denies.
+- **One organization per grant.** The code, the access token and the refresh token are bound to the organization
+  picked on the consent page, as a personal access token is bound to its organization. A token reads and writes only
+  that organization, and stops working (access and refresh) when the person's membership of it ends.
 - **Tokens.** Access tokens of 1 hour; refresh tokens with rotation; revocation. The same scopes as personal access
   tokens ([ADR-0021](0021-mcp-server.md), [ADR-0039](0039-agents-file-report-drafts-a-person-sends-them.md),
   [ADR-0046](0046-notebooks-and-scenarios-for-understanding-an-app.md)). A token acts as its user with that user's
@@ -91,6 +98,11 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
 - The extension connects without a pasted token, and its calls use the issued token (Playwright, P14.T20).
 - A code is single use; a wrong PKCE verifier and a reused code are refused, and no token is issued.
 - A refreshed token rotates: the old refresh token is refused after use.
+- An unregistered redirect URI, or a registered one changed by a single character, a trailing slash or a different
+  case, is refused at authorize with no redirect and no code; a token request with a `redirect_uri` other than the
+  authorize request's is refused, and no token is issued.
+- A token issued for Acme Foods cannot read another organization: the same call answers not found, as with a personal
+  access token of Acme Foods. After the person leaves Acme Foods, its access and refresh tokens are refused.
 - Tokens never appear in logs (log test).
 - The MCP and REST integration tests of ADR-0021 run with an issued token as with a personal access token: wrong
   tenant not found, missing scope refused, another person's draft not found.
