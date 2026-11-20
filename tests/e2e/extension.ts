@@ -25,40 +25,37 @@ function extensionIdOf(manifestKey: string): string {
 export const EXTENSION_ID = extensionIdOf(TEST_MANIFEST_KEY);
 
 /**
- * A copy of extension/ whose manifest also grants the test page's origin as a host permission. The shipped manifest asks
- * only activeTab, which Chrome grants when a person clicks the toolbar icon, and Playwright cannot click it; so the e2e
- * permission set differs from the shipped one on purpose (the user chose this). extension/ itself is never written.
+ * A copy of extension/ whose manifest also grants `hostPermissions`. The shipped manifest asks only activeTab, which
+ * Chrome grants when a person clicks the toolbar icon, and Playwright cannot click it; so the test copy grants the test
+ * page's origin instead. extension/ itself is never written.
  */
-async function testCopyOfExtension(): Promise<string> {
+async function testCopyOfExtension(hostPermissions: string[]): Promise<string> {
   const copy = await mkdtemp(path.join(os.tmpdir(), 'pinround-extension-'));
   await cp(SHIPPED_EXTENSION, copy, { recursive: true, filter: (source) => path.basename(source) !== 'tests' });
   const manifest = JSON.parse(await readFile(path.join(SHIPPED_EXTENSION, 'manifest.json'), 'utf8')) as Record<string, unknown>;
-  await writeFile(path.join(copy, 'manifest.json'), JSON.stringify({ ...manifest, key: TEST_MANIFEST_KEY, host_permissions: [`${TEST_PAGE_ORIGIN}/*`] }));
+  await writeFile(path.join(copy, 'manifest.json'), JSON.stringify({ ...manifest, key: TEST_MANIFEST_KEY, host_permissions: hostPermissions }));
   return copy;
 }
 
 interface ExtensionFixtures {
+  extensionHostPermissions: string[];
+  extensionDirectory: string;
   context: BrowserContext;
   testPage: Page;
 }
 
-interface ExtensionWorkerFixtures {
-  extensionDirectory: string;
-}
-
 /**
- * Each test gets a fresh Chromium profile with the test copy of the extension loaded and the test page answered on
- * TEST_PAGE_ORIGIN; `testPage` is a tab already on it.
+ * Each test gets a fresh Chromium profile with a test copy of the extension loaded and the test page answered on
+ * TEST_PAGE_ORIGIN; `testPage` is a tab already on it. `extensionHostPermissions` is the copy's host permissions: the
+ * test page's origin by default; `test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS })` for a capture.
  */
-export const test = base.extend<ExtensionFixtures, ExtensionWorkerFixtures>({
-  extensionDirectory: [
-    async ({}, use) => {
-      const directory = await testCopyOfExtension();
-      await use(directory);
-      await rm(directory, { recursive: true, force: true });
-    },
-    { scope: 'worker' },
-  ],
+export const test = base.extend<ExtensionFixtures>({
+  extensionHostPermissions: [[`${TEST_PAGE_ORIGIN}/*`], { option: true }],
+  extensionDirectory: async ({ extensionHostPermissions }, use) => {
+    const directory = await testCopyOfExtension(extensionHostPermissions);
+    await use(directory);
+    await rm(directory, { recursive: true, force: true });
+  },
   context: async ({ extensionDirectory }, use) => {
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
@@ -91,13 +88,40 @@ export async function openPopupFor(context: BrowserContext, tab: Page): Promise<
 }
 
 /**
+ * Host permissions for a test copy that captures: chrome.tabs.captureVisibleTab needs an activeTab grant or <all_urls>,
+ * and a single-site host permission is refused. Every web page is then in reach, so a spec that proves a page is out of
+ * reach keeps the default.
+ */
+export const CAPTURE_HOST_PERMISSIONS = ['<all_urls>'];
+
+/**
+ * What `tab` shows, as the PNG data URL chrome.tabs.captureVisibleTab answers the popup page opened for it. Chrome
+ * captures the active tab of the popup's window, which openPopupFor keeps on `tab`. The spec needs
+ * `test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS })`.
+ */
+export async function captureVisibleTabOf(context: BrowserContext, tab: Page): Promise<string> {
+  const popup = await openPopupFor(context, tab);
+  return popup.evaluate(async () => {
+    const { chrome } = globalThis as unknown as ExtensionPageGlobals;
+    return chrome.tabs.captureVisibleTab({ format: 'png' });
+  });
+}
+
+/**
  * The part of the chrome API the specs call inside an extension page's evaluate, as
  * `(globalThis as unknown as ExtensionPageGlobals).chrome`; the e2e package has no Chrome types.
  */
 export interface ExtensionPageGlobals {
   chrome: {
-    tabs: { query(queryInfo: { url?: string; active?: boolean; currentWindow?: boolean }): Promise<Array<{ id?: number; url?: string }>> };
-    scripting: { executeScript<Result>(injection: { target: { tabId: number }; func: () => Result }): Promise<Array<{ result?: Awaited<Result> }>> };
+    tabs: {
+      query(queryInfo: { url?: string; active?: boolean; currentWindow?: boolean }): Promise<Array<{ id?: number; url?: string }>>;
+      captureVisibleTab(options: { format: 'png' | 'jpeg' }): Promise<string>;
+    };
+    scripting: {
+      executeScript<Result>(injection: { target: { tabId: number }; func: (...args: never[]) => Result; args?: unknown[] }): Promise<Array<{ documentId?: string; result?: Awaited<Result> }>>;
+      executeScript(injection: { target: { tabId: number }; files: string[] }): Promise<Array<{ result?: unknown }>>;
+    };
+    storage: { local: { set(items: Record<string, unknown>): Promise<void>; get(keys: string | string[] | null): Promise<Record<string, unknown>> } };
   };
 }
 

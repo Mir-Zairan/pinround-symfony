@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CANNOT_ACCESS_PAGE, fakeBrowser } from './fake-browser.mjs';
+import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, CANNOT_ACCESS_CHROME_URL, CANNOT_ACCESS_PAGE, NEEDS_ACTIVE_TAB, fakeBrowser } from './fake-browser.mjs';
 
 const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true };
 const OTHER_PAGE = { id: 8, url: 'https://news.acme-foods.example/', title: 'Acme Foods news', active: false };
+const SETTINGS_PAGE = { id: 9, url: 'chrome://settings/', title: 'Settings', active: false };
+const SHOP_ORIGIN = 'https://shop.acme-foods.example';
+const ORDER_PLACED_AT = new Date('2026-03-14T09:30:00Z');
+
+const resultOf = async (browser, injection) => (await browser.scripting.executeScript(injection))[0].result;
 
 test('storage answers {} for a missing key, {key: value} for a kept one and everything for null', async () => {
     const { storage } = fakeBrowser();
@@ -30,6 +35,54 @@ test('storage copies values on set and on get, so a caller cannot change what is
     assert.deepEqual((await storage.session.get('captures')).captures, { project: 'SHOP', items: [{ upload_id: 'u1' }] });
 });
 
+test('storage keeps values as Chrome converts them: undefined and NaN dropped, a Date or Map as {}, no toJSON, keys sorted', async () => {
+    const { storage } = fakeBrowser();
+    const looped = { name: 'looped' };
+    looped.self = looped;
+
+    await storage.local.set({
+        placedAt: ORDER_PLACED_AT,
+        gone: undefined,
+        notANumber: NaN,
+        lines: [undefined, 2, () => 'x'],
+        totals: new Map([['jam', 2]]),
+        order: { note: undefined, placedAt: ORDER_PLACED_AT, total: -0, label: { toJSON: () => 'converted' } },
+        looped,
+    });
+    const kept = await storage.local.get(null);
+
+    assert.equal(kept.placedAt instanceof Date, false);
+    assert.deepEqual(kept, {
+        placedAt: {},
+        lines: [null, 2, null],
+        totals: {},
+        order: { placedAt: {}, total: 0, label: {} },
+        looped: { name: 'looped', self: null },
+    });
+    assert.equal(Object.hasOwn(kept, 'gone'), false);
+    assert.equal(Object.is(kept.order.total, -0), false);
+    assert.deepEqual(Object.keys(kept), ['lines', 'looped', 'order', 'placedAt', 'totals']);
+    assert.deepEqual(Object.keys(kept.order), ['label', 'placedAt', 'total']);
+    assert.deepEqual(Object.keys(await storage.local.get(['totals', 'lines'])), ['lines', 'totals']);
+});
+
+test('storage converts the fallbacks of get like the values of set', async () => {
+    const { storage } = fakeBrowser();
+
+    assert.deepEqual(await storage.local.get({ placedAt: ORDER_PLACED_AT, gone: undefined, notANumber: NaN, project: 'SHOP' }), { placedAt: {}, project: 'SHOP' });
+});
+
+test('storage throws at once on a wrong argument type, rejects binary data, and keeps nothing of a refused set', async () => {
+    const { storage } = fakeBrowser();
+    await storage.local.set({ pinround: 'kept' });
+
+    await assert.rejects(storage.local.set({ picture: new Uint8Array([1, 2]), other: 'not kept either' }), { message: 'Cannot serialize value to JSON' });
+    assert.throws(() => storage.local.set('pinround'), { name: 'TypeError', message: 'Error in invocation of storage.set(object items, optional function callback): No matching signature.' });
+    assert.throws(() => storage.local.get(5), { name: 'TypeError', message: 'Error in invocation of storage.get(optional [string|array|object] keys, optional function callback): No matching signature.' });
+    assert.throws(() => storage.local.remove(5), { name: 'TypeError', message: 'Error in invocation of storage.remove([string|array] keys, optional function callback): No matching signature.' });
+    assert.deepEqual(await storage.local.get(null), { pinround: 'kept' });
+});
+
 test('removing a missing key is fine, and local and session storage are apart', async () => {
     const { storage } = fakeBrowser();
     await storage.local.set({ pinround: 'kept', other: 'kept too' });
@@ -42,9 +95,9 @@ test('removing a missing key is fine, and local and session storage are apart', 
     assert.deepEqual(await storage.session.get(null), { pinround: 'session only' });
 });
 
-test('captureVisibleTab answers a data URL of the active tab, png when asked and jpeg by default, only with access', async () => {
+test('captureVisibleTab answers a data URL of the active tab after the icon was clicked there, png when asked and jpeg by default', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE] });
-    await assert.rejects(browser.tabs.captureVisibleTab({ format: 'png' }), { message: "Either the '<all_urls>' or 'activeTab' permission is required." });
+    await assert.rejects(browser.tabs.captureVisibleTab({ format: 'png' }), { message: NEEDS_ACTIVE_TAB });
 
     browser.clickIcon(SHOP_PAGE.id);
     const png = await browser.tabs.captureVisibleTab({ format: 'png' });
@@ -53,8 +106,27 @@ test('captureVisibleTab answers a data URL of the active tab, png when asked and
     assert.match(await browser.tabs.captureVisibleTab(), /^data:image\/jpeg;base64,/);
 });
 
+test('captureVisibleTab refuses with a host permission alone, and with activeTab granted on a tab that is not the active one', async () => {
+    const hostOnly = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    await assert.rejects(hostOnly.tabs.captureVisibleTab({ format: 'png' }), { message: NEEDS_ACTIVE_TAB });
+    assert.equal(await resultOf(hostOnly, { target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), 'reached', 'The host permission itself works.');
+
+    const grantedElsewhere = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE] });
+    grantedElsewhere.clickIcon(OTHER_PAGE.id);
+    await grantedElsewhere.tabs.create({ url: 'https://shop.acme-foods.example/new' });
+    await assert.rejects(grantedElsewhere.tabs.captureVisibleTab({ format: 'png' }), { message: NEEDS_ACTIVE_TAB });
+});
+
+test('captureVisibleTab works with <all_urls> on a web page and refuses on a chrome:// page', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE, SETTINGS_PAGE], hostOrigins: [ALL_URLS] });
+    assert.match(await browser.tabs.captureVisibleTab({ format: 'png' }), /^data:image\/png;base64,/);
+
+    await browser.tabs.create({ url: 'chrome://version/' });
+    await assert.rejects(browser.tabs.captureVisibleTab({ format: 'png' }), { message: ACTIVE_TAB_NOT_IN_EFFECT });
+});
+
 test('executeScript answers [{ result }] like Chrome, with the arguments and the result copied', async () => {
-    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: ['https://shop.acme-foods.example'] });
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
     const step = { label: 'Pay' };
 
     const answer = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: (given) => { given.label = 'changed in the page'; return { seen: given.label }; }, args: [step] });
@@ -63,50 +135,140 @@ test('executeScript answers [{ result }] like Chrome, with the arguments and the
     assert.deepEqual(answer[0].result, { seen: 'changed in the page' });
     assert.equal(answer[0].frameId, 0);
     assert.equal(step.label, 'Pay', 'The page gets a copy of the arguments.');
-    assert.deepEqual(await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: async () => 'awaited' }).then((results) => results.map((injection) => injection.result)), ['awaited']);
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: async () => 'awaited' }), 'awaited');
 });
 
-test('executeScript records file injections and refuses an injection that names both or neither of func and files', async () => {
+test('executeScript runs func from its source in the page, where the caller\'s variables do not exist', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    const outside = { touched: false };
+
+    const answer = await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => { outside.touched = true; return 'ran'; } });
+
+    assert.equal(answer, null, 'A ReferenceError in the page answers null, as in Chrome.');
+    assert.equal(outside.touched, false);
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: (amount, currency) => `${amount} ${currency}`, args: [12.4, 'EUR'] }), '12.4 EUR');
+    assert.deepEqual(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => [typeof window, window === globalThis] }), ['object', true]);
+});
+
+test('executeScript answers null when func throws, rejects, or returns nothing Chrome can carry', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    const run = (func) => resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func });
+
+    assert.equal(await run(() => { throw new Error('broken page'); }), null);
+    assert.equal(await run(async () => { throw new Error('broken later'); }), null);
+    assert.equal(await run(() => undefined), null);
+    assert.equal(await run(() => NaN), null);
+    assert.equal(await run(() => () => 'a function'), null);
+    assert.equal(await run(() => 0), 0, 'A falsy result is still the result.');
+});
+
+test('executeScript arguments and results cross as Chrome converts them, not as JSON or structured clone', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+
+    const pageSaw = await resultOf(browser, {
+        target: { tabId: SHOP_PAGE.id },
+        func: (order) => ({ json: JSON.stringify(order), placedAtIsDate: order.placedAt instanceof Date }),
+        args: [{ placedAt: ORDER_PLACED_AT, note: undefined, lines: [undefined, NaN, 3], label: { toJSON: () => 'converted' } }],
+    });
+    const result = await resultOf(browser, {
+        target: { tabId: SHOP_PAGE.id },
+        func: () => { const loop = { at: new Date(0), gone: undefined, bytes: new Uint8Array([1]), lines: [undefined, 2] }; loop.self = loop; return loop; },
+    });
+
+    assert.deepEqual(pageSaw, { json: '{"label":{},"lines":[null,null,3],"placedAt":{}}', placedAtIsDate: false });
+    assert.deepEqual(result, { at: {}, bytes: {}, lines: [null, 2], self: null });
+});
+
+test('executeScript refuses arguments Chrome cannot send before it runs anything: a wrong shape throws at once, binary data rejects', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    const injectionOf = (args) => ({ target: { tabId: SHOP_PAGE.id }, func: () => { globalThis.ran = true; }, args });
+    const argsError = "Error in invocation of scripting.executeScript(scripting.ScriptInjection injection, optional function callback): Error at parameter 'injection': Error at property 'args'";
+
+    assert.throws(() => browser.scripting.executeScript(injectionOf(['SHOP', undefined])), { name: 'TypeError', message: `${argsError}: Error at index 1: Value is unserializable.` });
+    assert.throws(() => browser.scripting.executeScript(injectionOf([() => 'x'])), { name: 'TypeError', message: `${argsError}: Error at index 0: Value is unserializable.` });
+    assert.throws(() => browser.scripting.executeScript(injectionOf('SHOP')), { name: 'TypeError', message: `${argsError}: Invalid type: expected array, found string.` });
+    await assert.rejects(browser.scripting.executeScript(injectionOf([{ picture: new Uint8Array([1]) }])), { message: 'Unserializable argument passed.' });
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => globalThis.ran ?? 'never ran' }), 'never ran');
+});
+
+test('the page keeps its globals between injections until the tab navigates, and a navigation is a new document', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    const [first] = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => { globalThis.kept = 'from the first injection'; } });
+    const [second] = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => globalThis.kept });
+
+    browser.navigate(SHOP_PAGE.id, 'https://shop.acme-foods.example/checkout');
+    const [afterNavigation] = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => globalThis.kept ?? 'gone' });
+
+    assert.equal(second.result, 'from the first injection');
+    assert.equal(second.documentId, first.documentId);
+    assert.equal(afterNavigation.result, 'gone');
+    assert.notEqual(afterNavigation.documentId, first.documentId);
+});
+
+test('executeScript records file injections, refuses a file the extension does not have, and one that names both or neither of func and files', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
     browser.clickIcon(SHOP_PAGE.id);
 
-    const answer = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, files: ['src/overlay/overlay.js'] });
+    const answer = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, files: ['src/popup/report-captures.js'] });
 
-    assert.deepEqual(answer.map((injection) => injection.frameId), [0]);
-    assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: ['src/overlay/overlay.js'] }]);
-    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id } }), { message: "Exactly one of 'func' and 'files' must be specified." });
-    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 1, files: ['a.js'] }), { message: "Exactly one of 'func' and 'files' must be specified." });
+    assert.deepEqual(answer.map((injection) => [injection.frameId, injection.result]), [[0, null]]);
+    assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: ['src/popup/report-captures.js'] }]);
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, files: ['src/popup/report-captures.js', 'src/missing.js'] }), { message: "Could not load file: 'src/missing.js'." });
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id } }), { message: "Exactly one of 'func' and 'files' must be specified" });
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 1, files: ['src/popup/report-captures.js'] }), { message: "Exactly one of 'func' and 'files' must be specified" });
     assert.equal(browser.injectedFiles.length, 1, 'A refused injection records nothing.');
 });
 
-test('executeScript refuses like Chrome on a page the extension may not reach, and on a tab that is not there', async () => {
-    const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE], hostOrigins: ['https://shop.acme-foods.example'] });
-    let ran = false;
+test('executeScript refuses like Chrome on a page the extension may not reach, on a chrome:// page, and on a tab that is not there', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE, SETTINGS_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    const everywhere = fakeBrowser({ tabs: [SETTINGS_PAGE], hostOrigins: [ALL_URLS] });
 
-    await assert.rejects(browser.scripting.executeScript({ target: { tabId: OTHER_PAGE.id }, func: () => { ran = true; } }), { message: CANNOT_ACCESS_PAGE });
-    await assert.rejects(browser.scripting.executeScript({ target: { tabId: 99 }, func: () => { ran = true; } }), { message: 'No tab with id: 99.' });
-    assert.equal(ran, false);
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: OTHER_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_PAGE });
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SETTINGS_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_CHROME_URL });
+    await assert.rejects(everywhere.scripting.executeScript({ target: { tabId: SETTINGS_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_CHROME_URL });
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: 99 }, func: () => 'reached' }), { message: 'No tab with id: 99' });
     assert.match(CANNOT_ACCESS_PAGE, /^Cannot access contents of the page\./);
 });
 
-test('activeTab reaches only the tab whose icon was clicked, and only until it navigates', async () => {
+test('<all_urls> reaches every web page but not a chrome:// page, whose address stays hidden', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE, SETTINGS_PAGE], hostOrigins: [ALL_URLS] });
+
+    assert.equal(await resultOf(browser, { target: { tabId: OTHER_PAGE.id }, func: () => 'reached' }), 'reached');
+    assert.deepEqual((await browser.tabs.query({})).map((tab) => tab.url), [SHOP_PAGE.url, OTHER_PAGE.url, undefined]);
+    assert.throws(() => browser.clickIcon(SETTINGS_PAGE.id), /does not model activeTab on a chrome:\/\/ page/);
+});
+
+test('activeTab reaches only the tab whose icon was clicked, and keeps it through a navigation within the origin', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE] });
     browser.clickIcon(SHOP_PAGE.id);
 
-    assert.deepEqual(await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }).then((results) => results[0].result), 'reached');
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), 'reached');
     await assert.rejects(browser.scripting.executeScript({ target: { tabId: OTHER_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_PAGE });
 
+    browser.navigate(SHOP_PAGE.id, 'https://shop.acme-foods.example/checkout');
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => 'still reached' }), 'still reached');
+    assert.match(await browser.tabs.captureVisibleTab({ format: 'png' }), /^data:image\/png;base64,/);
+});
+
+test('activeTab ends when the tab navigates to another origin, also after it comes back', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
+    browser.clickIcon(SHOP_PAGE.id);
+
     browser.navigate(SHOP_PAGE.id, 'https://bank.acme-foods.example/');
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_PAGE });
+    await assert.rejects(browser.tabs.captureVisibleTab({ format: 'png' }), { message: NEEDS_ACTIVE_TAB });
+
+    browser.navigate(SHOP_PAGE.id, SHOP_PAGE.url);
     await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_PAGE });
 });
 
 test('a host permission keeps reaching the tab after it navigates within that origin', async () => {
-    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: ['https://shop.acme-foods.example'] });
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
 
     browser.navigate(SHOP_PAGE.id, 'https://shop.acme-foods.example/checkout');
 
     assert.deepEqual(await browser.tabs.query({ active: true }), [{ ...SHOP_PAGE, url: 'https://shop.acme-foods.example/checkout' }]);
-    assert.equal((await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }))[0].result, 'reached');
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), 'reached');
 });
 
 test('tabs.query filters on active and hides the address of a tab the extension may not reach', async () => {

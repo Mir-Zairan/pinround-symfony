@@ -1,60 +1,175 @@
-// A stand-in for src/shared/browser.js in node --test, with the rules of the real chrome API the extension relies on:
-// storage answers {} for a missing key and copies values both ways; activeTab reaches only the tab whose icon was
-// clicked, until it navigates; a host permission reaches its origin; captureVisibleTab and executeScript refuse with
-// Chrome's own messages. One window only.
+// A stand-in for src/shared/browser.js in node --test, with the rules of the real chrome API the extension relies on,
+// each proved in real Chromium by tests/e2e/extension-harness.spec.ts: storage answers {} for a missing key; values
+// cross storage and executeScript as Chrome converts them (copyAcrossChrome); activeTab reaches only the tab whose icon
+// was clicked, until it navigates to another origin; a host permission reaches its origin; captureVisibleTab needs
+// activeTab or <all_urls>; executeScript runs `func` from its source text in a page scope of its own, where a thrown
+// error answers null; a call with arguments of the wrong shape throws at once, any other refusal rejects. The page
+// scope has no document. One window only.
 
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
+
+export const ALL_URLS = '<all_urls>';
 export const CANNOT_ACCESS_PAGE = 'Cannot access contents of the page. Extension manifest must request permission to access the respective host.';
-const NEEDS_ACTIVE_TAB = "Either the '<all_urls>' or 'activeTab' permission is required.";
-const FUNC_OR_FILES = "Exactly one of 'func' and 'files' must be specified.";
+export const CANNOT_ACCESS_CHROME_URL = 'Cannot access a chrome:// URL';
+export const NEEDS_ACTIVE_TAB = "Either the '<all_urls>' or 'activeTab' permission is required.";
+export const ACTIVE_TAB_NOT_IN_EFFECT = "The 'activeTab' permission is not in effect because this extension has not been in invoked.";
+const FUNC_OR_FILES = "Exactly one of 'func' and 'files' must be specified";
+const EXECUTE_SCRIPT_ARGS = "Error in invocation of scripting.executeScript(scripting.ScriptInjection injection, optional function callback): Error at parameter 'injection': Error at property 'args'";
+const BINARY_ARGUMENT = 'Unserializable argument passed.';
+const BINARY_IN_STORAGE = 'Cannot serialize value to JSON';
 
+const EXTENSION_ROOT = new URL('../', import.meta.url);
 const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const EMPTY_JPEG = '/9j/2Q==';
 
+const LEFT_OUT = Symbol('left out');
+const isLeftOut = (value) => ['undefined', 'function', 'symbol', 'bigint'].includes(typeof value) || ('number' === typeof value && !Number.isFinite(value));
+
+// Chrome checks the shape of a call's arguments before the call starts and throws; what fails later rejects.
+const answerLater = (work) => Promise.resolve().then(work);
+
+/**
+ * A value as it comes out of Chrome's extension boundary: undefined, functions, symbols, bigints and non-finite numbers
+ * are left out of an object and become null in an array; any other object (Date, Map, Error, RegExp) becomes a plain
+ * object of its own enumerable properties, with no toJSON call; keys come back sorted; -0 becomes 0.
+ *
+ * @param {{binaryRefusal?: string, cycle: null|symbol}} rules what a typed array or ArrayBuffer does (refuse with this
+ *   message, or become {} when unset), and what a reference back to an enclosing object becomes
+ * @returns {unknown} the copy, or LEFT_OUT
+ */
+function copyAcrossChrome(value, rules, enclosing = []) {
+    if (isLeftOut(value)) {
+        return LEFT_OUT;
+    }
+    if ('number' === typeof value) {
+        return value + 0;
+    }
+    if (null === value || 'object' !== typeof value) {
+        return value;
+    }
+    if (enclosing.includes(value)) {
+        return rules.cycle;
+    }
+    if (ArrayBuffer.isView(value) || '[object ArrayBuffer]' === Object.prototype.toString.call(value)) {
+        if (undefined !== rules.binaryRefusal) {
+            throw new Error(rules.binaryRefusal);
+        }
+
+        return {};
+    }
+    const inside = [...enclosing, value];
+    if (Array.isArray(value)) {
+        return Array.from(value, (entry) => {
+            const copy = copyAcrossChrome(entry, rules, inside);
+
+            return LEFT_OUT === copy ? null : copy;
+        });
+    }
+
+    return Object.fromEntries(Object.entries(value)
+        .map(([key, entry]) => [key, copyAcrossChrome(entry, rules, inside)])
+        .filter(([, copy]) => LEFT_OUT !== copy)
+        .sort(byKey));
+}
+
+function byKey([oneKey], [otherKey]) {
+    if (oneKey === otherKey) {
+        return 0;
+    }
+
+    return oneKey < otherKey ? -1 : 1;
+}
+
+const STORED = { binaryRefusal: BINARY_IN_STORAGE, cycle: null };
+const SCRIPT_ARGUMENT = { binaryRefusal: BINARY_ARGUMENT, cycle: LEFT_OUT };
+const SCRIPT_RESULT = { cycle: null };
+
 function fakeStorageArea() {
     const kept = new Map();
+    const noMatchingSignature = (signature) => new TypeError(`Error in invocation of storage.${signature}: No matching signature.`);
 
     return {
-        async get(keys) {
-            if (null === keys || undefined === keys) {
-                return Object.fromEntries([...kept].map(([key, value]) => [key, structuredClone(value)]));
+        get(keys) {
+            if (!['undefined', 'string', 'object'].includes(typeof keys)) {
+                throw noMatchingSignature('get(optional [string|array|object] keys, optional function callback)');
             }
-            if ('string' === typeof keys || Array.isArray(keys)) {
-                const wanted = [keys].flat().filter((key) => kept.has(key));
 
-                return Object.fromEntries(wanted.map((key) => [key, structuredClone(kept.get(key))]));
-            }
-            if ('object' === typeof keys) {
-                return Object.fromEntries(Object.entries(keys).map(([key, fallback]) => [key, structuredClone(kept.has(key) ? kept.get(key) : fallback)]));
-            }
-            throw new TypeError('Error in invocation of storage.get(optional [string|array|object] keys): No matching signature.');
+            const answerOf = (entries) => Object.fromEntries(entries.sort(byKey));
+
+            return answerLater(() => {
+                if (null === keys || undefined === keys) {
+                    return answerOf([...kept].map(([key, value]) => [key, structuredClone(value)]));
+                }
+                if ('string' === typeof keys || Array.isArray(keys)) {
+                    const wanted = [keys].flat().filter((key) => kept.has(key));
+
+                    return answerOf(wanted.map((key) => [key, structuredClone(kept.get(key))]));
+                }
+                const fallbacks = copyAcrossChrome(keys, STORED);
+
+                return answerOf(Object.entries(fallbacks).map(([key, fallback]) => [key, kept.has(key) ? structuredClone(kept.get(key)) : fallback]));
+            });
         },
-        async set(items) {
-            for (const [key, value] of Object.entries(structuredClone(items))) {
-                kept.set(key, value);
+        set(items) {
+            if (null === items || 'object' !== typeof items) {
+                throw noMatchingSignature('set(object items, optional function callback)');
             }
+
+            return answerLater(() => {
+                for (const [key, value] of Object.entries(copyAcrossChrome(items, STORED))) {
+                    kept.set(key, value);
+                }
+            });
         },
-        async remove(keys) {
-            for (const key of [keys].flat()) {
-                kept.delete(key);
+        remove(keys) {
+            if ('string' !== typeof keys && !Array.isArray(keys)) {
+                throw noMatchingSignature('remove([string|array] keys, optional function callback)');
             }
+
+            return answerLater(() => {
+                for (const key of [keys].flat()) {
+                    kept.delete(key);
+                }
+            });
         },
     };
 }
 
+/** Chrome's own check of executeScript's args, which throws before the call starts. */
+function checkScriptArguments(args) {
+    if (!Array.isArray(args)) {
+        throw new TypeError(`${EXECUTE_SCRIPT_ARGS}: Invalid type: expected array, found ${null === args ? 'null' : typeof args}.`);
+    }
+    const unserializable = args.findIndex(isLeftOut);
+    if (-1 !== unserializable) {
+        throw new TypeError(`${EXECUTE_SCRIPT_ARGS}: Error at index ${unserializable}: Value is unserializable.`);
+    }
+}
+
+const isChromeUrl = (url) => url.startsWith('chrome://');
+const isWebUrl = (url) => ['http:', 'https:'].includes(new URL(url).protocol);
+
 /**
  * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean}>, hostOrigins?: string[]}} options
- *   the open tabs, at most one of them active, and the origins the manifest grants as host permissions
+ *   the open tabs, at most one of them active, and the manifest's host permissions: origins such as
+ *   'https://shop.acme-foods.example', or ALL_URLS for every web page
  */
 export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
     const openTabs = tabs.map((tab) => ({ active: false, ...structuredClone(tab) }));
     const hostOriginSet = new Set(hostOrigins);
+    const hasAllUrls = hostOriginSet.has(ALL_URLS);
     const activeTabGrants = new Set();
+    const pageDocuments = new Map();
     const injectedFiles = [];
     let nextTabId = Math.max(0, ...openTabs.map((tab) => tab.id)) + 1;
+    let documentsLoaded = 0;
     let optionsPageOpenings = 0;
 
     const tabOf = (tabId) => openTabs.find((tab) => tab.id === tabId);
-    const mayReach = (tab) => activeTabGrants.has(tab.id) || hostOriginSet.has(new URL(tab.url).origin);
+    const mayReach = (tab) => !isChromeUrl(tab.url)
+        && (activeTabGrants.has(tab.id) || hostOriginSet.has(new URL(tab.url).origin) || (hasAllUrls && isWebUrl(tab.url)));
     const activate = (tabId) => openTabs.forEach((tab) => { tab.active = tab.id === tabId; });
     const asSeen = (tab) => {
         if (mayReach(tab)) {
@@ -63,6 +178,29 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
         const { url, title, ...withoutAddress } = tab;
 
         return structuredClone(withoutAddress);
+    };
+    // The page's globals last as long as its document: one injection can leave a value for the next until the tab
+    // navigates.
+    const documentOf = (tabId) => {
+        if (!pageDocuments.has(tabId)) {
+            documentsLoaded += 1;
+            const globals = vm.createContext({ console });
+            vm.runInContext('globalThis.window = globalThis; globalThis.self = globalThis;', globals);
+            pageDocuments.set(tabId, { documentId: `document-${documentsLoaded}`, globals });
+        }
+
+        return pageDocuments.get(tabId);
+    };
+    const runInPage = async (pageDocument, func, args) => {
+        try {
+            const pageFunction = vm.runInContext(`(${func.toString()})`, pageDocument.globals);
+            const pageArgs = vm.runInContext('JSON.parse', pageDocument.globals)(JSON.stringify(args));
+            const result = copyAcrossChrome(await pageFunction(...pageArgs), SCRIPT_RESULT);
+
+            return LEFT_OUT === result ? null : result;
+        } catch {
+            return null;
+        }
     };
 
     return {
@@ -78,8 +216,11 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             },
             async captureVisibleTab(options = {}) {
                 const active = openTabs.find((tab) => tab.active);
-                if (undefined === active || !mayReach(active)) {
+                if (undefined === active || !(activeTabGrants.has(active.id) || hasAllUrls)) {
                     throw new Error(NEEDS_ACTIVE_TAB);
+                }
+                if (isChromeUrl(active.url)) {
+                    throw new Error(ACTIVE_TAB_NOT_IN_EFFECT);
                 }
 
                 return 'png' === options.format ? `data:image/png;base64,${ONE_PIXEL_PNG}` : `data:image/jpeg;base64,${EMPTY_JPEG}`;
@@ -101,37 +242,56 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             },
         },
         scripting: {
-            async executeScript({ target, func, args = [], files }) {
-                if ((undefined === func) === (undefined === files)) {
-                    throw new Error(FUNC_OR_FILES);
-                }
-                const tab = tabOf(target.tabId);
-                if (undefined === tab) {
-                    throw new Error(`No tab with id: ${target.tabId}.`);
-                }
-                if (!mayReach(tab)) {
-                    throw new Error(CANNOT_ACCESS_PAGE);
-                }
-                if (undefined !== files) {
-                    injectedFiles.push({ tabId: tab.id, files: [...files] });
+            executeScript({ target, func, args = [], files }) {
+                checkScriptArguments(args);
 
-                    return [{ documentId: `document-${tab.id}`, frameId: 0, result: null }];
-                }
-                const result = await func(...structuredClone(args));
+                return answerLater(async () => {
+                    if ((undefined === func) === (undefined === files)) {
+                        throw new Error(FUNC_OR_FILES);
+                    }
+                    const pageArgs = args.map((argument) => copyAcrossChrome(argument, SCRIPT_ARGUMENT));
+                    const tab = tabOf(target.tabId);
+                    if (undefined === tab) {
+                        throw new Error(`No tab with id: ${target.tabId}`);
+                    }
+                    if (isChromeUrl(tab.url)) {
+                        throw new Error(CANNOT_ACCESS_CHROME_URL);
+                    }
+                    if (!mayReach(tab)) {
+                        throw new Error(CANNOT_ACCESS_PAGE);
+                    }
+                    const pageDocument = documentOf(tab.id);
+                    if (undefined !== files) {
+                        const missing = files.find((file) => !existsSync(fileURLToPath(new URL(file, EXTENSION_ROOT))));
+                        if (undefined !== missing) {
+                            throw new Error(`Could not load file: '${missing}'.`);
+                        }
+                        injectedFiles.push({ tabId: tab.id, files: [...files] });
 
-                return [{ documentId: `document-${tab.id}`, frameId: 0, result: structuredClone(result) }];
+                        return [{ documentId: pageDocument.documentId, frameId: 0, result: null }];
+                    }
+
+                    return [{ documentId: pageDocument.documentId, frameId: 0, result: await runInPage(pageDocument, func, pageArgs) }];
+                });
             },
         },
 
         /** What clicking the extension's icon on the tab does: the tab becomes the active one and activeTab reaches it. */
         clickIcon(tabId) {
+            if (isChromeUrl(tabOf(tabId).url)) {
+                throw new Error('The fake browser does not model activeTab on a chrome:// page.');
+            }
             activate(tabId);
             activeTabGrants.add(tabId);
         },
-        /** A navigation in the tab; it ends the activeTab grant, a host permission still counts for the new address. */
+        /** A navigation: a new document with empty globals; only leaving the origin ends the activeTab grant. */
         navigate(tabId, url) {
-            tabOf(tabId).url = url;
-            activeTabGrants.delete(tabId);
+            const tab = tabOf(tabId);
+            if (new URL(url).origin !== new URL(tab.url).origin) {
+                activeTabGrants.delete(tabId);
+            }
+            tab.url = url;
+            pageDocuments.delete(tabId);
         },
         tabUrl: (tabId) => tabOf(tabId)?.url,
         injectedFiles,

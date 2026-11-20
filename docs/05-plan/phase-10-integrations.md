@@ -157,7 +157,7 @@ NFR-SEC-01, NFR-SEC-05, NFR-SEC-10, NFR-SEC-14, NFR-AVL-05, NFR-PERF-09, NFR-OPS
 - **Files:** `extension/manifest.json`, `extension/src/capture/*`.
 - **Acceptance:**
   - [ ] Works end to end on the dev stack with a hard-coded dev token; the screenshot passes the normal media validation.
-  - [x] The manifest asks only for the permissions listed in the guide. (`extension/tests/pairing.test.mjs`, "the manifest asks for exactly the permissions the guide lists, and for no host": `activeTab` and `storage`, no host permission, no content script.)
+  - [x] The manifest asks only for the permissions listed in the guide. (`extension/tests/pairing.test.mjs`, "the manifest asks for exactly the permissions the guide lists, and for no host": `activeTab` and `storage`, no host permission, no content script. 2026-11-20: P13.T5 added `scripting` for its overlay, so the list is now `activeTab`, `scripting` and `storage`.)
 - **Tests:** API functional tests (already from P09.T7); a manual test checklist.
 - **Prototype check:** Report a problem screenshot area.
 - **Size:** M
