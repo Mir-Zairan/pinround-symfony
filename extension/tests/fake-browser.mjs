@@ -1,12 +1,17 @@
-// A stand-in for src/shared/browser.js in node --test, with the rules of the real chrome API the extension relies on,
-// each proved in real Chromium by tests/e2e/extension-harness.spec.ts: storage answers {} for a missing key; values
-// cross storage and executeScript as Chrome converts them (copyAcrossChrome); activeTab reaches only the tab whose icon
-// was clicked, until it navigates to another origin; a host permission reaches its origin; captureVisibleTab needs
-// activeTab or <all_urls>; executeScript runs `func` from its source text in a page scope of its own, where a thrown
-// error answers null; a call with arguments of the wrong shape throws at once, any other refusal rejects. The page
-// scope has no document. One window only.
+// A stand-in for src/shared/browser.js in node --test, with the rules of the real chrome API the extension relies on.
+// Proved in real Chromium by tests/e2e/extension-harness.spec.ts: values cross storage and executeScript as Chrome
+// converts them (copyAcrossChrome); executeScript runs `func` from its source text in a page scope of its own, where a
+// throw or a rejection answers null and globals last until a navigation; a call with arguments of the wrong shape
+// throws at once, any other refusal rejects, each with Chrome's message; a host permission reaches its origin and no
+// other; a host permission alone does not let captureVisibleTab capture, <all_urls> does; a chrome:// page refuses the
+// capture and the script and hides its address. Proved by tests/e2e/extension-overlay.spec.ts: `files` are found from
+// the extension's root as refusalOfInjectedFile reads them, each refusal with Chrome's message. Only documented:
+// storage answers {} for a missing key; and, as Playwright cannot click the toolbar icon that grants it, activeTab
+// reaches only the tab whose icon was clicked and keeps it after a navigation within the origin but not to another. A
+// `files` injection is recorded, not run: the page scope has no document. One window only.
 
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
@@ -20,7 +25,7 @@ const EXECUTE_SCRIPT_ARGS = "Error in invocation of scripting.executeScript(scri
 const BINARY_ARGUMENT = 'Unserializable argument passed.';
 const BINARY_IN_STORAGE = 'Cannot serialize value to JSON';
 
-const EXTENSION_ROOT = new URL('../', import.meta.url);
+const EXTENSION_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const EMPTY_JPEG = '/9j/2Q==';
 
@@ -148,6 +153,28 @@ function checkScriptArguments(args) {
     }
 }
 
+/**
+ * Chrome's refusal of a file to inject, or null when it loads. The path is read from the extension's root after one
+ * leading slash is dropped; a path that does not name something there, also through `..`, a second slash or a trailing
+ * one, is not found; something found that is not a .js file, a folder too, is refused as no script.
+ */
+function refusalOfInjectedFile(file) {
+    const relative = file.replace(/^\//, '');
+    const notFound = `Could not load file: '${file}'.`;
+    if (relative.startsWith('/') || relative.endsWith('/') || relative.split('/').includes('..')) {
+        return notFound;
+    }
+    const found = statSync(path.join(EXTENSION_ROOT, relative), { throwIfNoEntry: false });
+    if (undefined === found) {
+        return notFound;
+    }
+    if (!relative.endsWith('.js')) {
+        return `Could not load file '${file}' for content script, content scripts can only be loaded from supported JavaScript files such as .js files.`;
+    }
+
+    return found.isFile() ? null : notFound;
+}
+
 const isChromeUrl = (url) => url.startsWith('chrome://');
 const isWebUrl = (url) => ['http:', 'https:'].includes(new URL(url).protocol);
 
@@ -262,9 +289,9 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
                     }
                     const pageDocument = documentOf(tab.id);
                     if (undefined !== files) {
-                        const missing = files.find((file) => !existsSync(fileURLToPath(new URL(file, EXTENSION_ROOT))));
-                        if (undefined !== missing) {
-                            throw new Error(`Could not load file: '${missing}'.`);
+                        const refusal = files.map(refusalOfInjectedFile).find((fileRefusal) => null !== fileRefusal);
+                        if (undefined !== refusal) {
+                            throw new Error(refusal);
                         }
                         injectedFiles.push({ tabId: tab.id, files: [...files] });
 

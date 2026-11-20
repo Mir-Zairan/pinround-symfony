@@ -1,4 +1,4 @@
-import { test as base, chromium, type BrowserContext, type Page } from '@playwright/test';
+import { test as base, chromium, expect, type BrowserContext, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -39,6 +39,7 @@ async function testCopyOfExtension(hostPermissions: string[]): Promise<string> {
 
 interface ExtensionFixtures {
   extensionHostPermissions: string[];
+  viewportFollowsWindow: boolean;
   extensionDirectory: string;
   context: BrowserContext;
   testPage: Page;
@@ -48,18 +49,21 @@ interface ExtensionFixtures {
  * Each test gets a fresh Chromium profile with a test copy of the extension loaded and the test page answered on
  * TEST_PAGE_ORIGIN; `testPage` is a tab already on it. `extensionHostPermissions` is the copy's host permissions: the
  * test page's origin by default; `test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS })` for a capture.
+ * `viewportFollowsWindow` drops Playwright's fixed viewport, for a spec that resizes the window (resizeWindowOf).
  */
 export const test = base.extend<ExtensionFixtures>({
   extensionHostPermissions: [[`${TEST_PAGE_ORIGIN}/*`], { option: true }],
+  viewportFollowsWindow: [false, { option: true }],
   extensionDirectory: async ({ extensionHostPermissions }, use) => {
     const directory = await testCopyOfExtension(extensionHostPermissions);
     await use(directory);
     await rm(directory, { recursive: true, force: true });
   },
-  context: async ({ extensionDirectory }, use) => {
+  context: async ({ extensionDirectory, viewportFollowsWindow }, use) => {
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
       args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`],
+      ...(viewportFollowsWindow ? { viewport: null } : {}),
     });
     await context.route(`${TEST_PAGE_ORIGIN}/**`, (route) =>
       new URL(route.request().url()).pathname === '/' ? route.fulfill({ path: TEST_PAGE_FILE, contentType: 'text/html' }) : route.fulfill({ status: 404 }),
@@ -74,7 +78,7 @@ export const test = base.extend<ExtensionFixtures>({
   },
 });
 
-export { expect } from '@playwright/test';
+export { expect };
 
 /**
  * Opens the extension's popup page in a tab of its own while `tab` stays the active tab, so the popup's
@@ -121,8 +125,42 @@ export interface ExtensionPageGlobals {
       executeScript<Result>(injection: { target: { tabId: number }; func: (...args: never[]) => Result; args?: unknown[] }): Promise<Array<{ documentId?: string; result?: Awaited<Result> }>>;
       executeScript(injection: { target: { tabId: number }; files: string[] }): Promise<Array<{ result?: unknown }>>;
     };
-    storage: { local: { set(items: Record<string, unknown>): Promise<void>; get(keys: string | string[] | null): Promise<Record<string, unknown>> } };
+    storage: {
+      local: { set(items: Record<string, unknown>): Promise<void>; get(keys: string | string[] | null): Promise<Record<string, unknown>> };
+      session: { get(keys: string | string[] | null): Promise<Record<string, unknown>> };
+    };
   };
+}
+
+/**
+ * Resizes the window `tab` is in, as a person drags its edge, and waits until the page has the new size.
+ * page.setViewportSize only emulates a size, and captureVisibleTab still captures the window's own, so a spec that
+ * captures after a resize resizes the window instead, with `test.use({ viewportFollowsWindow: true })`.
+ */
+export async function resizeWindowOf(context: BrowserContext, tab: Page, size: { width: number; height: number }): Promise<void> {
+  const viewportBefore = await tab.evaluate(() => [window.innerWidth, window.innerHeight]);
+  const session = await context.newCDPSession(tab);
+  const { windowId } = await session.send('Browser.getWindowForTarget');
+  await session.send('Browser.setWindowBounds', { windowId, bounds: { ...size, windowState: 'normal' } });
+  await session.detach();
+  await expect.poll(() => tab.evaluate(() => [window.innerWidth, window.innerHeight])).not.toEqual(viewportBefore);
+}
+
+/** A pinround the specs answer with context.route; no app runs behind it. */
+export const PINROUND_TEST_ORIGIN = 'https://pinround.acme-foods.test';
+
+/**
+ * The popup opened for `tab` (openPopupFor), paired with PINROUND_TEST_ORIGIN as the options page pairs it, so it
+ * shows the capture form. The spec answers that origin's API with context.route before it calls this.
+ */
+export async function pairedPopupFor(context: BrowserContext, tab: Page): Promise<Page> {
+  const popup = await openPopupFor(context, tab);
+  await popup.evaluate(async (origin) => {
+    const { chrome } = globalThis as unknown as ExtensionPageGlobals;
+    await chrome.storage.local.set({ pinround: { origin, token: 'pr_test0000000000000000extension' } });
+  }, PINROUND_TEST_ORIGIN);
+  await popup.reload();
+  return popup;
 }
 
 /** The chrome tab id of the tab at `url`, asked from an extension page (the test manifest lets it see the test page's address). */

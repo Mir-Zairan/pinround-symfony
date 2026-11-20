@@ -1,30 +1,21 @@
-// The popup: capture the visible tab into a new report draft (several captures, then "Make the report draft") or into
-// the person's own draft round on a ticket (one capture at a time). Nothing becomes a ticket here: the person sends a
-// report draft in pinround (ADR-0039).
+// The popup: pin the page, then capture the visible tab with its pins into a new report draft (several captures, then
+// "Make the report draft") or into the person's own draft round on a ticket (one capture at a time). Nothing becomes a
+// ticket here: the person sends a report draft in pinround (ADR-0039).
 import { ApiError, PinroundApi } from '../shared/api.js';
 import { browser } from '../shared/browser.js';
 import { loadSettings } from '../shared/settings.js';
-import { MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH, addToDraftRound, captureTexts, pngOf, upload } from '../capture/capture.js';
+import { REPORT_TITLE_MAX_LENGTH, addToDraftRound, captureTexts, upload } from '../capture/capture.js';
+import { addCaptureToNewReport, clearReportCaptures, loadReportCaptures, saveReportCaptures } from '../capture/new-report.js';
+import { activeTabId, capturePinnedTab, closePinOverlay, openPinOverlay } from '../capture/page-pins.js';
 import { NEW_REPORT, fillReportInputs, showCaptures } from './report-captures.js';
 
-const SESSION_KEY = 'pinroundReportCaptures';
-
 const element = (id) => document.getElementById(id);
+const reportStorage = browser.storage.session;
 
 function showStatus(message, isError = false) {
     const status = element('status');
     status.textContent = message;
     status.classList.toggle('error', isError);
-}
-
-async function loadCaptures() {
-    const stored = (await browser.storage.session.get(SESSION_KEY))[SESSION_KEY];
-
-    return stored ?? { project: '', reportTitle: '', items: [], idempotencyKey: crypto.randomUUID() };
-}
-
-async function saveCaptures(captures) {
-    await browser.storage.session.set({ [SESSION_KEY]: captures });
 }
 
 function showSavedCaptures(captures) {
@@ -46,43 +37,41 @@ async function fillTargets(api) {
     }
 }
 
+async function pinPage() {
+    await openPinOverlay(browser, await activeTabId(browser));
+    showStatus('Click the page to drop a pin. Then capture the page here.');
+}
+
+// The pins leave the page only once the screenshot is saved with them; a refused capture keeps them there.
 async function capture(api) {
     const texts = captureTexts(element('shot-title').value, element('shot-summary').value);
-    const file = pngOf(await browser.tabs.captureVisibleTab({ format: 'png' }));
+    const tabId = await activeTabId(browser);
+    const { file, pins } = await capturePinnedTab(browser, tabId);
     const targetValue = element('target').value;
+    showStatus('Uploading…');
     if (NEW_REPORT !== targetValue) {
-        showStatus('Uploading…');
         const uploadId = await upload(api, { ticket: targetValue }, file);
-        await addToDraftRound(api, targetValue, uploadId, texts);
+        await addToDraftRound(api, targetValue, uploadId, { ...texts, pins });
+        await closePinOverlay(browser, tabId);
         showStatus(`Added to your draft round on ${targetValue}. Only you see it.`);
 
         return;
     }
-    const captures = await loadCaptures();
-    const project = (captures.items.length > 0 ? captures.project : element('project').value).trim().toUpperCase();
-    if ('' === project) {
-        throw new Error('Type the project key, for example SHOP.');
-    }
-    if (captures.items.length >= MAX_SCREENSHOTS) {
-        throw new Error('A report holds at most 10 screenshots. Make the report draft first.');
-    }
-    showStatus('Uploading…');
-    const uploadId = await upload(api, { project }, file);
-    const updated = { ...captures, project, reportTitle: element('report-title').value, items: [...captures.items, { upload_id: uploadId, ...texts }] };
-    await saveCaptures(updated);
+    const updated = await addCaptureToNewReport(reportStorage, api, { project: element('project').value, reportTitle: element('report-title').value }, { file, texts, pins });
+    await closePinOverlay(browser, tabId);
     showSavedCaptures(updated);
     showStatus(`Screenshot ${updated.items.length} saved for the report. Capture more pages, or make the report draft.`);
 }
 
 async function makeDraft(api, origin) {
-    const captures = await loadCaptures();
+    const captures = await loadReportCaptures(reportStorage);
     const title = element('report-title').value.trim();
     if ('' === title || [...title].length > REPORT_TITLE_MAX_LENGTH) {
         throw new Error('Write what is wrong in one line, at most 200 characters.');
     }
     const answer = await api.call('POST', '/api/v1/reports', { project: captures.project, title, screenshots: captures.items }, captures.idempotencyKey);
-    await browser.storage.session.remove(SESSION_KEY);
-    showSavedCaptures(await loadCaptures());
+    await clearReportCaptures(reportStorage);
+    showSavedCaptures(await loadReportCaptures(reportStorage));
     if ('string' === typeof answer.url && new URL(answer.url).origin === origin) {
         await browser.tabs.create({ url: answer.url });
     }
@@ -111,10 +100,11 @@ async function start() {
     const api = new PinroundApi(settings.origin, settings.token);
     element('capture-form').hidden = false;
     await fillTargets(api);
-    showSavedCaptures(await loadCaptures());
+    showSavedCaptures(await loadReportCaptures(reportStorage));
 
-    element('target').addEventListener('change', async () => showCaptures(element, await loadCaptures()));
-    element('report-title').addEventListener('change', async () => saveCaptures({ ...(await loadCaptures()), reportTitle: element('report-title').value }));
+    element('target').addEventListener('change', async () => showCaptures(element, await loadReportCaptures(reportStorage)));
+    element('report-title').addEventListener('change', async () => saveReportCaptures(reportStorage, { ...(await loadReportCaptures(reportStorage)), reportTitle: element('report-title').value }));
+    element('pin-page').addEventListener('click', () => run(element('pin-page'), pinPage));
     element('capture-form').addEventListener('submit', (event) => {
         event.preventDefault();
         run(element('capture'), async () => {
@@ -125,8 +115,8 @@ async function start() {
     });
     element('make-draft').addEventListener('click', () => run(element('make-draft'), () => makeDraft(api, settings.origin)));
     element('clear-captures').addEventListener('click', async () => {
-        await browser.storage.session.remove(SESSION_KEY);
-        showSavedCaptures(await loadCaptures());
+        await clearReportCaptures(reportStorage);
+        showSavedCaptures(await loadReportCaptures(reportStorage));
         showStatus('Started over. The screenshots already uploaded are not in any report.');
     });
 }

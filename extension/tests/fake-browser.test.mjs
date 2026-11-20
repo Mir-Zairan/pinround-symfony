@@ -219,6 +219,24 @@ test('executeScript records file injections, refuses a file the extension does n
     assert.equal(browser.injectedFiles.length, 1, 'A refused injection records nothing.');
 });
 
+test('executeScript finds files from the extension\'s root after one leading slash, and refuses what Chrome does with its message', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
+    browser.clickIcon(SHOP_PAGE.id);
+    const notFound = ['src/overlay/missing.js', '//src/overlay/pin-rules.js', 'src/popup/../overlay/pin-rules.js', '../pin-rules.js', 'src/overlay/', 'SRC/overlay/pin-rules.js', 'src/overlay/pin-rules.js/', 'src/overlay/missing.JS'];
+    const noScript = ['src/overlay', 'styles.css'];
+
+    await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, files: ['/src/overlay/pin-rules.js'] });
+
+    assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: ['/src/overlay/pin-rules.js'] }]);
+    for (const file of notFound) {
+        await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, files: [file] }), { message: `Could not load file: '${file}'.` }, file);
+    }
+    for (const file of noScript) {
+        await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, files: [file] }), { message: `Could not load file '${file}' for content script, content scripts can only be loaded from supported JavaScript files such as .js files.` }, file);
+    }
+    assert.equal(browser.injectedFiles.length, 1);
+});
+
 test('executeScript refuses like Chrome on a page the extension may not reach, on a chrome:// page, and on a tab that is not there', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE, SETTINGS_PAGE], hostOrigins: [SHOP_ORIGIN] });
     const everywhere = fakeBrowser({ tabs: [SETTINGS_PAGE], hostOrigins: [ALL_URLS] });
