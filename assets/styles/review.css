@@ -35,8 +35,8 @@
 }
 
 /* A block frame, so a placeholder of unknown size takes the column's width. A frame of known shape gets its max-width
-   and aspect-ratio from the style element the Screenshot component prints; the box fills it, so the pin layer over the
-   frame and the box are the same size. */
+   and aspect-ratio from the picture-shape controller (its width and height values); the box fills it, so the pin
+   layer over the frame and the box are the same size. */
 .screenshot__frame--placeholder {
   display: block;
 }
@@ -80,7 +80,8 @@
   pointer-events: none;
 }
 
-/* left and top come from the style element PinLayer prints; the ring is centred on that point. */
+/* left and top are set by the pin-layer controller from data-x-percent and data-y-percent; the ring is centred on that
+   point. */
 .pin {
   position: absolute;
   box-sizing: border-box;
