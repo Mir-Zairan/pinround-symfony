@@ -3,7 +3,7 @@
 How to install, connect and use the Chrome extension that captures the page you are on into pinround.
 
 ## Index
-- [What it does](#what-it-does) — two places a capture can go, and what it never does
+- [What it does](#what-it-does) — where a capture can go, and what it never does
 - [Install it](#install-it) — load the folder, find its id
 - [Let pinround accept it](#let-pinround-accept-it) — the two origin settings an admin sets once
 - [Connect it](#connect-it) — make a token and paste it
@@ -13,7 +13,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Manual check](#manual-check) — the steps to run by hand, and the record of the last run
 
 ## What it does
-- **A new report.** Capture one or more pages of the app you test, each with an optional title and a line on what it shows. Then press **Make the report draft**. pinround keeps a private report draft and opens it for you. You check it and press **Send**; only then is there a ticket ([ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)).
+- **A new report.** Capture one or more pages of the app you test, each with an optional title and a line on what it shows. The first capture makes a private report draft in pinround and each later one adds to it. Press **Done** and pinround opens the draft for you. You check it and press **Send**; only then is there a ticket ([ADR-0039](../03-adr/0039-agents-file-report-drafts-a-person-sends-them.md)).
 - **Your draft round on a ticket.** Pick a ticket where it is your turn or that is assigned to you. Each capture goes into your private draft round on it ([ADR-0044](../03-adr/0044-whose-turn-it-is-may-keep-a-draft-round.md)). Nobody else sees it until you share it.
 - It never makes a ticket, never sends a report, and never reads the page's text: it takes a picture of the visible part of the tab when you click.
 - It talks only to the pinround address you set. The picture itself goes straight to pinround's storage, to the one upload address pinround gave for it.
@@ -43,7 +43,7 @@ A browser sends the extension's origin with every request. pinround and its stor
 3. For a new report, type the project key (for example `SHOP`) and what is wrong in one line.
 4. Optionally give the capture a title (up to 120 characters) and say what the picture shows (up to 600).
 5. Press **Capture this page**. For a draft round the picture is added at once; pinround processes it first, which can take a few seconds.
-6. For a new report, open the next page and capture again, up to 10 pictures. Then press **Make the report draft**. pinround opens the draft: check it and press **Send**.
+6. For a new report, open the next page and capture again, up to 10 pictures; each goes into the same report draft. Then press **Done**. pinround opens the draft: check it and press **Send**.
 
 ## Sign out
 In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it. If pinround cannot be reached, the extension still forgets it and tells you to revoke it on the **API tokens** page.
@@ -53,14 +53,14 @@ In the options, press **Sign out**. The extension asks pinround to revoke the to
 |---|---|
 | `activeTab` | To take a picture of the tab you are on, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
 | `scripting` | To run the extension's own pin overlay and scenario player in the tab you are on, only after you click the extension's icon. It never runs a script from the network. |
-| `storage` | To keep the pinround address and your token in this browser profile, and the captures of a report you are still collecting until you make the draft. |
+| `storage` | To keep the pinround address and your token in this browser profile, and, until the browser closes, where your captures go and the report draft they are adding to. |
 
 It asks for no host permission and has no content scripts. It injects only its own files, and only into the tab you chose by clicking its icon. `extension/tests/pairing.test.mjs` checks that the manifest asks for exactly these.
 
 ## Manual check
 Run by hand on the dev stack after a change to the extension:
 1. Load the extension, set `EXTENSION_ORIGINS` and `MINIO_CORS_ALLOW_ORIGIN` as above, and connect with a token that has `read`, `rounds:write` and `reports:write`.
-2. Capture two pages as a new report for `SHOP`, make the draft, check that pinround opens it with both pictures (after "Processing…"), and press **Send**: the ticket has Round 0 with both pictures.
+2. Capture two pages as a new report for `SHOP`, press **Done**, check that pinround opens the draft with both pictures (after "Processing…"), and press **Send**: the ticket has Round 0 with both pictures.
 3. As the assignee of a ticket, capture into **My draft round on** it: the picture is in your draft round, and the tester does not see it.
 4. Sign out, then try to capture: the popup asks you to connect first, and the old token gets 401 from `GET /api/v1/me/tickets`.
 

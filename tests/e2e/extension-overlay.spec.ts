@@ -1,19 +1,19 @@
-import type { BrowserContext, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { inflateSync } from 'node:zlib';
-import { CAPTURE_HOST_PERMISSIONS, PINROUND_TEST_ORIGIN, PageInspector, TEST_PAGE_URL, captureVisibleTabOf, expect, openPopupFor, pairedPopupFor, resizeWindowOf, tabIdOf, test, type ExtensionPageGlobals, type ShadowElement } from './extension';
+import { ALL_TOKEN_SCOPES, CAPTURE_HOST_PERMISSIONS, PageInspector, TEST_PAGE_URL, answerPinroundApi, captureVisibleTabOf, chooseNewReport, expect, openPopupFor, pairedPopupFor, resizeWindowOf, tabIdOf, test, type ExtensionPageGlobals, type PinroundStub, type ShadowElement, type StubTicket } from './extension';
 
 // The pin overlay "Pin this page" injects (extension/src/overlay/) and the capture that sends its pins (P13.T5 step 1).
 // The overlay's shadow root is closed, which Playwright's locators do not enter: the specs read it through
 // PageInspector (Chrome's accessibility tree and DOM, as DevTools reads them) and drive it with the trusted
 // page.mouse and page.keyboard.
 
-const STORAGE_ORIGIN = 'https://storage.acme-foods.test';
 const PAGE_GREEN = [0, 128, 0];
 // The ring's white inner outline lies 12 to 14 CSS px from the pin's centre.
 const RING_OFFSET_CSS_PX = 13;
 const OVERLAY = { role: 'application', name: 'Pin overlay' };
 const OVERLAY_KEYS = 'Click, or move with the arrow keys and press Enter, to drop a pin. Tab goes through the pins, and Delete removes one. Escape closes and drops the pins.';
-const TICKETS = [
+const FIRST_REPORT_CAPTURE_SAVED = 'Report draft made with screenshot 1. Capture more pages, or press Done to open it.';
+const TICKETS: StubTicket[] = [
   { key: 'SHOP-7', title: 'Basket total is wrong', step: 'Building', now: 'Omar builds it', is_your_turn: true, is_assignee: false, updated_at: '2026-03-02T09:00:00+00:00' },
   { key: 'SHOP-12', title: 'Logo is cut off on the receipt', step: 'Checking', now: 'Mia checks it', is_your_turn: true, is_assignee: true, updated_at: '2026-03-01T09:00:00+00:00' },
 ];
@@ -106,63 +106,9 @@ function expectPinsAt(pins: StoredPin[], droppedAt: number[][]): void {
   });
 }
 
-interface StubPinround {
-  storedPictures: Buffer[];
-  uploadBodies: Array<Record<string, unknown>>;
-  draftRoundAdds: Array<{ ticketKey: string; body: Record<string, unknown> }>;
-}
-
-/**
- * Answers pinround's API for the paired popup as pinround does: `tickets` are the person's tickets, the only ones an
- * upload or a draft round may name (any other is 404); each picture PUT to storage is kept, in order.
- */
-async function answerPinround(context: BrowserContext, { uploadRefusal, tickets = [] }: { uploadRefusal?: string; tickets?: typeof TICKETS } = {}): Promise<StubPinround> {
-  const stub: StubPinround = { storedPictures: [], uploadBodies: [], draftRoundAdds: [] };
-  const isTicketOfMine = (key: unknown) => tickets.some((ticket) => ticket.key === key);
-  const notFound = { status: 404, json: { error: 'No ticket SHOP-0 for you.', outcome: 'not_found' } };
-  await context.route(`${PINROUND_TEST_ORIGIN}/**`, (route) => {
-    const request = route.request();
-    const { pathname } = new URL(request.url());
-    if (pathname === '/api/v1/me/tickets' && request.method() === 'GET') {
-      return route.fulfill({ json: { tickets, has_more: false } });
-    }
-    if (pathname === '/api/v1/uploads' && request.method() === 'POST') {
-      const body = request.postDataJSON() as Record<string, unknown>;
-      stub.uploadBodies.push(body);
-      if (uploadRefusal !== undefined) {
-        return route.fulfill({ status: 403, json: { error: uploadRefusal, outcome: 'refused' } });
-      }
-      if ('ticket' in body && !isTicketOfMine(body.ticket)) {
-        return route.fulfill(notFound);
-      }
-      const uploadNumber = stub.uploadBodies.length;
-      return route.fulfill({ status: 201, json: { upload_id: `upload-${uploadNumber}`, put_url: `${STORAGE_ORIGIN}/upload-${uploadNumber}`, headers: { 'Content-Type': 'image/png' } } });
-    }
-    const draftRound = /^\/api\/v1\/tickets\/([^/]+)\/draft\/screenshots$/.exec(pathname);
-    if (draftRound !== null && request.method() === 'POST') {
-      const ticketKey = decodeURIComponent(draftRound[1]);
-      if (!isTicketOfMine(ticketKey)) {
-        return route.fulfill(notFound);
-      }
-      const body = request.postDataJSON() as Record<string, unknown>;
-      stub.draftRoundAdds.push({ ticketKey, body });
-      return route.fulfill({ json: { screenshot_id: 'screenshot-1', round_id: 'round-1', status: 'added', pin_count: (body.pins as unknown[]).length } });
-    }
-    return route.fulfill({ status: 404, json: { error: 'Not found.' } });
-  });
-  await context.route(`${STORAGE_ORIGIN}/**`, (route) => {
-    stub.storedPictures.push(route.request().postDataBuffer() ?? Buffer.alloc(0));
-    return route.fulfill({ status: 200, body: '' });
-  });
-  return stub;
-}
-
-async function storedReportPins(popup: Page): Promise<StoredPin[][]> {
-  return popup.evaluate(async () => {
-    const { chrome } = globalThis as unknown as ExtensionPageGlobals;
-    const stored = (await chrome.storage.session.get('pinroundReportCaptures')).pinroundReportCaptures as { items: Array<{ pins: StoredPin[] }> } | undefined;
-    return (stored?.items ?? []).map((item) => item.pins);
-  });
+/** The pins of each picture in the person's report drafts, as the stub saved them, in order. */
+function reportPinsOf(stub: PinroundStub): StoredPin[][] {
+  return stub.myReportDrafts().flatMap((draft) => draft.screenshots.map((screenshot) => screenshot.pins));
 }
 
 async function pinNamesOf(inspector: PageInspector): Promise<string[]> {
@@ -208,11 +154,11 @@ test.describe('in a window the test resizes', () => {
   test.use({ viewportFollowsWindow: true });
 
   test('a pin dropped by click and one by keyboard land at their percent of the captured picture after a resize, with no overlay in it', async ({ context, testPage }) => {
-    const { storedPictures } = await answerPinround(context);
+    const stub = await answerPinroundApi(context);
     await paintPageGreen(testPage);
     await resizeWindowOf(context, testPage, { width: 1280, height: 800 });
     const popup = await pairedPopupFor(context, testPage);
-    await popup.getByLabel('Project key').fill('SHOP');
+    await chooseNewReport(popup);
     const { width, height } = await viewportOf(testPage);
     const inspector = await PageInspector.of(context, testPage);
 
@@ -237,13 +183,13 @@ test.describe('in a window the test resizes', () => {
     const resized = await viewportOf(testPage);
     const withOverlay = decodedPng(pngOfDataUrl(await captureVisibleTabOf(context, testPage)));
     await popup.getByRole('button', { name: 'Capture this page' }).click();
-    await expect(popup.getByRole('status')).toHaveText('Screenshot 1 saved for the report. Capture more pages, or make the report draft.');
+    await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
 
-    const [pins] = await storedReportPins(popup);
+    const [pins] = reportPinsOf(stub);
     expect(pins.map((pin) => pin.note)).toEqual(['Logo is cut off', 'Price is wrong']);
     expectPinsAt(pins, [[25, 25], [70, 55]]);
-    expect(storedPictures.length).toBe(1);
-    const captured = decodedPng(storedPictures[0]);
+    expect(stub.storedPictures.length).toBe(1);
+    const captured = decodedPng(stub.storedPictures[0]);
     expect(resized).not.toEqual({ width, height });
     expect({ width: captured.width, height: captured.height }).toEqual(resized);
     expect({ width: withOverlay.width, height: withOverlay.height }).toEqual(resized);
@@ -256,10 +202,10 @@ test.describe('on a screen with a devicePixelRatio of 2', () => {
   test.use({ viewportFollowsWindow: true, screenDeviceScaleFactor: 2 });
 
   test('a pin lands at its percent of a picture with twice as many pixels as the viewport has CSS pixels', async ({ context, testPage }) => {
-    const { storedPictures } = await answerPinround(context);
+    const stub = await answerPinroundApi(context);
     await paintPageGreen(testPage);
     const popup = await pairedPopupFor(context, testPage);
-    await popup.getByLabel('Project key').fill('SHOP');
+    await chooseNewReport(popup);
     const viewport = await viewportOf(testPage);
     expect(await testPage.evaluate(() => window.devicePixelRatio)).toBe(2);
 
@@ -269,12 +215,12 @@ test.describe('on a screen with a devicePixelRatio of 2', () => {
     await testPage.keyboard.press('Enter');
     const withOverlay = decodedPng(pngOfDataUrl(await captureVisibleTabOf(context, testPage)));
     await popup.getByRole('button', { name: 'Capture this page' }).click();
-    await expect(popup.getByRole('status')).toHaveText('Screenshot 1 saved for the report. Capture more pages, or make the report draft.');
+    await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
 
-    const [pins] = await storedReportPins(popup);
+    const [pins] = reportPinsOf(stub);
     expectPinsAt(pins, [[30, 40]]);
-    expect(storedPictures.length).toBe(1);
-    const captured = decodedPng(storedPictures[0]);
+    expect(stub.storedPictures.length).toBe(1);
+    const captured = decodedPng(stub.storedPictures[0]);
     expect({ width: captured.width, height: captured.height }).toEqual({ width: viewport.width * 2, height: viewport.height * 2 });
     expect({ width: withOverlay.width, height: withOverlay.height }).toEqual({ width: viewport.width * 2, height: viewport.height * 2 });
     expectRingsWherePinsAre(withOverlay, captured, pins, 2);
@@ -282,11 +228,11 @@ test.describe('on a screen with a devicePixelRatio of 2', () => {
 });
 
 test('a capture into my draft round on a ticket sends the pins with the picture and closes the overlay', async ({ context, testPage }) => {
-  const stub = await answerPinround(context, { tickets: TICKETS });
+  const stub = await answerPinroundApi(context, { tickets: TICKETS });
   const popup = await pairedPopupFor(context, testPage);
   const viewport = await viewportOf(testPage);
-  await expect(popup.getByLabel('Put the screenshot in').locator('option')).toHaveText(['A new report', 'My draft round on SHOP-7', 'My draft round on SHOP-12']);
-  await popup.getByLabel('Put the screenshot in').selectOption('SHOP-12');
+  await expect(popup.getByLabel('Put the screenshot in').locator('option')).toHaveText(['Choose where to put it', 'A new report', 'My draft round on SHOP-7', 'My draft round on SHOP-12', 'A new notebook']);
+  await popup.getByLabel('Put the screenshot in').selectOption({ label: 'My draft round on SHOP-12' });
 
   await popup.getByRole('button', { name: 'Pin this page' }).click();
   await testPage.mouse.click(viewport.width * 0.3, viewport.height * 0.6);
@@ -297,21 +243,24 @@ test('a capture into my draft round on a ticket sends the pins with the picture 
   await popup.getByRole('button', { name: 'Capture this page' }).click();
 
   await expect(popup.getByRole('status')).toHaveText('Added to your draft round on SHOP-12. Only you see it.');
-  expect(stub.uploadBodies.map((body) => [body.ticket, body.project, body.mime])).toEqual([['SHOP-12', undefined, 'image/png']]);
-  expect(stub.draftRoundAdds.map(({ ticketKey, body }) => [ticketKey, Object.keys(body).sort(), body.upload_id])).toEqual([['SHOP-12', ['pins', 'upload_id'], 'upload-1']]);
-  const sentPins = stub.draftRoundAdds[0].body.pins as StoredPin[];
+  const posts = stub.requests.filter((request) => request.method === 'POST');
+  expect(posts.map((request) => [request.path, request.answerStatus])).toEqual([['/api/v1/uploads', 201], ['/api/v1/tickets/SHOP-12/draft/screenshots', 200]]);
+  expect([posts[0].body?.ticket, posts[0].body?.project, posts[0].body?.mime]).toEqual(['SHOP-12', undefined, 'image/png']);
+  const draftRoundBody = posts[1].body ?? {};
+  expect([Object.keys(draftRoundBody).sort(), draftRoundBody.upload_id]).toEqual([['pins', 'upload_id'], 'upload-1']);
+  const sentPins = draftRoundBody.pins as StoredPin[];
   expect(sentPins.map((pin) => pin.note)).toEqual(['Logo is cut off', '']);
   expectPinsAt(sentPins, [[30, 60], [80, 20]]);
   expect(stub.storedPictures.length).toBe(1);
-  expect(await storedReportPins(popup)).toEqual([]);
+  expect(stub.myReportDrafts()).toEqual([]);
   await expect(testPage.locator('pinround-overlay')).toHaveCount(0);
 });
 
 test('a capture pinround refuses leaves the pins on the page, saves nothing, and puts focus back in the overlay', async ({ context, testPage }) => {
-  await answerPinround(context, { uploadRefusal: 'This token may not make reports.' });
+  const stub = await answerPinroundApi(context, { scopes: ALL_TOKEN_SCOPES.filter((scope) => scope !== 'reports:write') });
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
-  await popup.getByLabel('Project key').fill('SHOP');
+  await chooseNewReport(popup);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
   await testPage.mouse.click(640, 360);
   await testPage.keyboard.type('Total is wrong');
@@ -319,17 +268,18 @@ test('a capture pinround refuses leaves the pins on the page, saves nothing, and
 
   await popup.getByRole('button', { name: 'Capture this page' }).click();
 
-  await expect(popup.getByRole('status')).toHaveText('This token may not make reports.');
+  await expect(popup.getByRole('status')).toHaveText('Your pinround token cannot make reports. Make a token that may prepare report drafts on the API tokens page, then pair the extension again.');
   await expect(testPage.locator('pinround-overlay')).toHaveCount(1);
   await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Total is wrong']);
-  expect(await storedReportPins(popup)).toEqual([]);
+  expect(stub.myReportDrafts()).toEqual([]);
+  expect(stub.storedPictures).toEqual([]);
   await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
   await testPage.keyboard.press('Tab');
   await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Pin 1: Total is wrong' });
 });
 
 test('pressing "Pin this page" twice keeps one overlay with its pins', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -345,7 +295,7 @@ test('pressing "Pin this page" twice keeps one overlay with its pins', async ({ 
 });
 
 test('without a mouse: Escape leaves a note, Delete removes the focused pin and the rest renumber, Escape closes and drops the pins', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -375,7 +325,7 @@ test('without a mouse: Escape leaves a note, Delete removes the focused pin and 
 });
 
 test('a click on a pin opens its note to change, Backspace removes a pin and the rest renumber, and each note opens away from the nearer edges', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   const viewport = await viewportOf(testPage);
@@ -420,7 +370,7 @@ test('a click on a pin opens its note to change, Backspace removes a pin and the
 });
 
 test('Tab and Shift+Tab wrap inside the overlay, so Enter never presses the page\'s own button under it', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -458,7 +408,7 @@ test('Tab and Shift+Tab wrap inside the overlay, so Enter never presses the page
 });
 
 test('the page does not scroll under the overlay by wheel or keys, a long note still scrolls, and the page scrolls again once the overlay is closed', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await testPage.evaluate(() => {
@@ -500,7 +450,7 @@ test('the page does not scroll under the overlay by wheel or keys, a long note s
 });
 
 test('Ctrl+wheel over the overlay is left to the browser to zoom, and a plain wheel is still cancelled', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await testPage.evaluate(() => {
@@ -523,7 +473,7 @@ test('Ctrl+wheel over the overlay is left to the browser to zoom, and a plain wh
 });
 
 test('the short hint shows until the first pin and again once the last is gone, and the keys stay in the overlay\'s description', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -545,9 +495,9 @@ test('the short hint shows until the first pin and again once the last is gone, 
 });
 
 test('the page\'s own script can neither reach the overlay nor drop, change or remove a pin with events it makes', async ({ context, testPage }) => {
-  const { storedPictures } = await answerPinround(context);
+  const stub = await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
-  await popup.getByLabel('Project key').fill('SHOP');
+  await chooseNewReport(popup);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
   await testPage.mouse.click(320, 180);
@@ -605,10 +555,10 @@ test('the page\'s own script can neither reach the overlay nor drop, change or r
 
   await testPage.keyboard.press('Enter');
   await popup.getByRole('button', { name: 'Capture this page' }).click();
-  await expect(popup.getByRole('status')).toHaveText('Screenshot 1 saved for the report. Capture more pages, or make the report draft.');
-  const [pins] = await storedReportPins(popup);
+  await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
+  const [pins] = reportPinsOf(stub);
   expect(pins.map((stored) => stored.note)).toEqual(['Price is wrong', 'Logo is cut off']);
-  expect(storedPictures.length).toBe(1);
+  expect(stub.storedPictures.length).toBe(1);
 });
 
 interface PageWrites {
@@ -619,7 +569,7 @@ interface PageWrites {
 const pageWritesOf = (page: Page) => page.evaluate(() => (window as unknown as { pageWrites: PageWrites }).pageWrites);
 
 test('a key whose beforeinput the page cancelled does not let the page\'s execCommand into the note', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -648,7 +598,7 @@ test('a key whose beforeinput the page cancelled does not let the page\'s execCo
 });
 
 test('a note key\'s beforeinput stops at the overlay, so the page cannot cancel it after the overlay heard it and write instead', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -673,7 +623,7 @@ test('a note key\'s beforeinput stops at the overlay, so the page cannot cancel 
 });
 
 test('a key into a full note brings a beforeinput with no input, and that lets no execCommand of the page in, before or after the overlay\'s timer', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   const fullNote = 'Prix faux, 価格が違う. '.repeat(60).slice(0, 1000);
@@ -709,7 +659,7 @@ test('a key into a full note brings a beforeinput with no input, and that lets n
 });
 
 test('an execCommand the page runs while a typed key\'s input is under way leaves the note with that key and without the page\'s text', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -738,9 +688,9 @@ test('an execCommand the page runs while a typed key\'s input is under way leave
 });
 
 test('the page replaying every note input over the whole note from its capture-phase input listener changes nothing the person writes', async ({ context, testPage }) => {
-  await answerPinround(context);
+  const stub = await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
-  await popup.getByLabel('Project key').fill('SHOP');
+  await chooseNewReport(popup);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
   await testPage.mouse.click(400, 300);
@@ -780,13 +730,13 @@ test('the page replaying every note input over the whole note from its capture-p
   expect((await inspector.node('textbox', 'Note for pin 1')).value).toBe(fullNote);
   await testPage.keyboard.press('Enter');
   await popup.getByRole('button', { name: 'Capture this page' }).click();
-  await expect(popup.getByRole('status')).toHaveText('Screenshot 1 saved for the report. Capture more pages, or make the report draft.');
-  const [pins] = await storedReportPins(popup);
+  await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
+  const [pins] = reportPinsOf(stub);
   expect(pins.map((stored) => stored.note)).toEqual([fullNote]);
 });
 
 test('the person\'s own inserts, deletions, composition and a cut at the note\'s length all reach the note, and undo is refused', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -825,7 +775,7 @@ test('the person\'s own inserts, deletions, composition and a cut at the note\'s
 });
 
 test('the 101st pin is refused with a plain message and the 100 stay', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
@@ -843,7 +793,7 @@ test('the 101st pin is refused with a plain message and the 100 stay', async ({ 
 });
 
 test('the page\'s styles do not reach the overlay, and the overlay\'s do not reach the page', async ({ context, testPage }) => {
-  await answerPinround(context);
+  await answerPinroundApi(context);
   await testPage.addStyleTag({ content: 'pinround-overlay { display: none !important; } button { width: 3px !important; border: 9px solid red !important; }' });
   const payStyle = () => testPage.locator('#pay').evaluate((button) => { const style = getComputedStyle(button); return [style.width, style.borderTopWidth, style.font, style.color]; });
   const payBefore = await payStyle();
