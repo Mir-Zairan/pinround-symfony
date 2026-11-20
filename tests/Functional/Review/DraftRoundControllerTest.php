@@ -116,19 +116,6 @@ final class DraftRoundControllerTest extends WebTestCase
         });
     }
 
-    /**
-     * The turn read model says it is $person's turn on the ticket, which stays in To do.
-     */
-    private function addTurnRowOf(string $ticketId, string $person): void
-    {
-        $personId = $this->people[$person]->id()->toString();
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id, tester_id)
-             SELECT organization_id, id, team_id, project_id, 'todo', ?, NULL, 'build', 10, '2026-11-06 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
-            [$personId, $ticketId],
-        ));
-    }
-
     protected function tearDown(): void
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
