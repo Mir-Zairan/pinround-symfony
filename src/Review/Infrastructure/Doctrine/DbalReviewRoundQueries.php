@@ -163,7 +163,7 @@ final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
         }
         // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
         $pinRows = $this->connection->fetchAllAssociative(
-            'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id'
+            'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id, pin.fixed_on_try'
             .' FROM rvw_pin AS pin'
             .' WHERE pin.organization_id = CAST(:organization AS uuid) AND pin.screenshot_id = ANY(CAST(:screenshots AS uuid[]))'
             .' AND '.self::COUNTED_PIN
@@ -183,6 +183,7 @@ final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
                 self::text($pinRow['source'], 'source'),
                 self::textOrNull($pinRow['ai_state'], 'ai_state'),
                 new UserId(self::text($pinRow['author_id'], 'author_id')),
+                self::integerOrNull($pinRow['fixed_on_try'], 'fixed_on_try'),
             );
         }
 

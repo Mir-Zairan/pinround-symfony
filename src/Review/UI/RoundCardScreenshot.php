@@ -18,8 +18,10 @@ final readonly class RoundCardScreenshot
     public const string NOT_RIGHT = 'Not right yet';
 
     public const string TRY_OF = 'Try %d of %d';
-    /** %d is the chain's latest try, the one that fixed the pin. */
+    /** %d is the try that fixed the pin: the chain's latest when it was marked, which a later retake leaves as it was. */
     public const string PIN_FIXED_ON_TRY = 'Fixed on try %d';
+    /** A pin marked fixed before the try that fixed it was stored with the mark. */
+    public const string PIN_FIXED = 'Fixed';
     public const string PIN_STILL_WRONG = 'Still wrong';
     public const string PIN_NOT_CHECKED = 'Not checked yet';
 
@@ -78,16 +80,17 @@ final readonly class RoundCardScreenshot
     }
 
     /**
-     * The mark a pin of an earlier try gets when the latest try fixed it.
+     * The Fixed chip of a pin of an earlier try: the mark it has when it is fixed, which pressing takes back, else the
+     * mark it would get now, which names the chain's latest try.
      */
-    public function pinFixedLabel(): string
+    public function pinFixedLabel(EarlierPinRow $pin): string
     {
-        return \sprintf(self::PIN_FIXED_ON_TRY, $this->tryCount);
+        return $pin->isFixed ? $pin->verdictLabel : \sprintf(self::PIN_FIXED_ON_TRY, $this->tryCount);
     }
 
     public function isPinFixed(EarlierPinRow $pin): bool
     {
-        return $this->pinFixedLabel() === $pin->verdictLabel;
+        return $pin->isFixed;
     }
 
     public function isPinStillWrong(EarlierPinRow $pin): bool

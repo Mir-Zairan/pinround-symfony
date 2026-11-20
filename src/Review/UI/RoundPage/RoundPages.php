@@ -224,7 +224,7 @@ final readonly class RoundPages
     {
         [$label, $class] = self::pinVerdictTagOf($pin->verdict);
 
-        return new EarlierPinRow($pin->id, $pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $label, $class, null !== $pin->verdict);
+        return new EarlierPinRow($pin->id, $pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $label, $class, null !== $pin->verdict, VerdictCommands::PIN_FIXED === $pin->verdict);
     }
 
     /**

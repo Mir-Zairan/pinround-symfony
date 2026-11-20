@@ -148,10 +148,9 @@ final readonly class RoundCards
                 ++$looksRightCount;
             }
             if (null === $pictureLimit || \count($screenshots) < $pictureLimit) {
-                // The owner's draft numbers its chains; a shared round keeps the numbers of its stored positions, which
-                // ChecklistCard's pin labels use too.
-                $number = $round->isUnsharedDraft() ? $chainIndex + 1 : $latestTry->position + 1;
-                $screenshots[] = $this->cardScreenshotOf($round, $tries, $number, $images);
+                // Numbered by chain in the order of their first tries, before and after share alike, as ChecklistCard
+                // numbers the pins of a findings round (DbalChecklistQueries).
+                $screenshots[] = $this->cardScreenshotOf($round, $tries, $chainIndex + 1, $images);
             }
         }
         $notShown = \count($chains) - \count($screenshots);
@@ -216,7 +215,7 @@ final readonly class RoundCards
         }
         $earlierTries = [];
         foreach (\array_slice($tries, 0, -1) as $index => $earlierTry) {
-            $earlierTries[] = $this->draftScreenshotOf($round, $earlierTry, $number, $images, $index + 1, $tryCount, [], self::earlierPinRowsOf($earlierTry, $tryCount));
+            $earlierTries[] = $this->draftScreenshotOf($round, $earlierTry, $number, $images, $index + 1, $tryCount, [], self::earlierPinRowsOf($earlierTry));
         }
 
         return $this->draftScreenshotOf($round, $latestTry, $number, $images, $tryCount, $tryCount, $earlierTries, []);
@@ -249,11 +248,10 @@ final readonly class RoundCards
     }
 
     /**
-     * @param int $tryCount the tries of its chain, which the latest try's "Fixed on try N" names
-     *
-     * @return list<EarlierPinRow> the pins of an earlier try but the AI's that were dismissed, by number
+     * @return list<EarlierPinRow> the pins of an earlier try but the AI's that were dismissed, by number; a fixed one
+     *                             names the try it was fixed on when it was marked, not the latest try now
      */
-    private static function earlierPinRowsOf(RoundScreenshotView $earlierTry, int $tryCount): array
+    private static function earlierPinRowsOf(RoundScreenshotView $earlierTry): array
     {
         $rows = [];
         foreach ($earlierTry->pins as $pin) {
@@ -261,11 +259,15 @@ final readonly class RoundCards
                 continue;
             }
             [$verdictLabel, $verdictClass, $isChecked] = match ($pin->verdict) {
-                VerdictCommands::PIN_FIXED => [\sprintf(RoundCardScreenshot::PIN_FIXED_ON_TRY, $tryCount), 'verdict-tag--looks-right', true],
+                VerdictCommands::PIN_FIXED => [
+                    null === $pin->fixedOnTry ? RoundCardScreenshot::PIN_FIXED : \sprintf(RoundCardScreenshot::PIN_FIXED_ON_TRY, $pin->fixedOnTry),
+                    'verdict-tag--looks-right',
+                    true,
+                ],
                 VerdictCommands::PIN_STILL_WRONG => [RoundCardScreenshot::PIN_STILL_WRONG, 'verdict-tag--not-right', true],
                 default => [RoundCardScreenshot::PIN_NOT_CHECKED, 'verdict-tag--none', false],
             };
-            $rows[] = new EarlierPinRow($pin->id, $pin->number, $pin->note, null, $verdictLabel, $verdictClass, $isChecked);
+            $rows[] = new EarlierPinRow($pin->id, $pin->number, $pin->note, null, $verdictLabel, $verdictClass, $isChecked, VerdictCommands::PIN_FIXED === $pin->verdict);
         }
 
         return $rows;
@@ -284,10 +286,11 @@ final readonly class RoundCards
 
     /**
      * The owner's unshared draft shows each chain with every try (ADR-0048). Any other round shows what the team sees,
-     * the latest try of each chain by position, each as a chain of its own: RoundQueries lists only those for a shared
-     * round on the ticket, but every try for its owner's draftOf.
+     * the latest try of each chain, each as a chain of its own: RoundQueries lists only those for a shared round on the
+     * ticket, but every try for its owner's draftOf.
      *
-     * @return list<non-empty-list<RoundScreenshotView>> each chain's tries by position, the latest last
+     * @return list<non-empty-list<RoundScreenshotView>> by their first try's position, as RoundView lists them; each
+     *                                                   chain's tries by position, the latest last
      */
     private static function shownChainsOf(RoundView $round): array
     {
@@ -298,10 +301,8 @@ final readonly class RoundCards
         if ($round->isUnsharedDraft()) {
             return array_values($chains);
         }
-        $latestTries = array_map(static fn (array $tries): RoundScreenshotView => $tries[\count($tries) - 1], array_values($chains));
-        usort($latestTries, static fn (RoundScreenshotView $one, RoundScreenshotView $other): int => $one->position <=> $other->position);
 
-        return array_map(static fn (RoundScreenshotView $latestTry): array => [$latestTry], $latestTries);
+        return array_map(static fn (array $tries): array => [$tries[\count($tries) - 1]], array_values($chains));
     }
 
     /**

@@ -25,6 +25,7 @@ final readonly class Pin
         private PinSource $source,
         private ?AiPinState $aiState,
         private ?PinVerdict $verdict,
+        private ?int $fixedOnTry,
     ) {
     }
 
@@ -48,27 +49,43 @@ final readonly class Pin
             throw new \InvalidArgumentException(\sprintf('A pin note holds at most %d characters.', self::NOTE_MAX_LENGTH));
         }
 
-        return new self($id, $number, round($xPercent, 2), round($yPercent, 2), $trimmedNote, $authorId, PinSource::Human, null, null);
+        return new self($id, $number, round($xPercent, 2), round($yPercent, 2), $trimmedNote, $authorId, PinSource::Human, null, null, null);
     }
 
     /**
-     * A stored pin as Rounds reads it back, under the rules of placedBy.
+     * A stored pin as Rounds reads it back, under the rules of placedBy and withVerdict.
      *
-     * @throws \InvalidArgumentException when placedBy would refuse it, or an AI pin has no AI state or a person's pin has one
+     * @throws \InvalidArgumentException when placedBy or withVerdict would refuse it, or an AI pin has no AI state or a
+     *                                   person's pin has one
      */
-    public static function restored(PinId $id, int $number, float $xPercent, float $yPercent, string $note, UserId $authorId, PinSource $source, ?AiPinState $aiState, ?PinVerdict $verdict): self
+    public static function restored(PinId $id, int $number, float $xPercent, float $yPercent, string $note, UserId $authorId, PinSource $source, ?AiPinState $aiState, ?PinVerdict $verdict, ?int $fixedOnTry): self
     {
         if ((PinSource::Ai === $source) !== (null !== $aiState)) {
             throw new \InvalidArgumentException('Only an AI pin has an AI state, and every AI pin has one.');
         }
         $placed = self::placedBy($id, $number, $xPercent, $yPercent, $note, $authorId);
 
-        return new self($id, $number, $placed->xPercent, $placed->yPercent, $placed->note, $authorId, $source, $aiState, $verdict);
+        return new self($id, $number, $placed->xPercent, $placed->yPercent, $placed->note, $authorId, $source, $aiState, null, null)
+            ->withVerdict($verdict, $fixedOnTry);
     }
 
-    public function withVerdict(?PinVerdict $verdict): self
+    /**
+     * @param int|null $fixedOnTry the try of the pin's chain that fixed it, as the chain counted when it was marked
+     *                             (ADR-0048); null for any other verdict, or for a verdict given outside a draft
+     *
+     * @throws \InvalidArgumentException when $fixedOnTry is set for a verdict other than Fixed, or is not a later try
+     *                                   than the first, from 2 to Screenshot::MAX_TRIES
+     */
+    public function withVerdict(?PinVerdict $verdict, ?int $fixedOnTry): self
     {
-        return new self($this->id, $this->number, $this->xPercent, $this->yPercent, $this->note, $this->authorId, $this->source, $this->aiState, $verdict);
+        if (null !== $fixedOnTry && PinVerdict::Fixed !== $verdict) {
+            throw new \InvalidArgumentException('Only a pin marked fixed names the try that fixed it.');
+        }
+        if (null !== $fixedOnTry && ($fixedOnTry < 2 || $fixedOnTry > Screenshot::MAX_TRIES)) {
+            throw new \InvalidArgumentException(\sprintf('A pin is fixed on a later try than the first, from 2 to %d.', Screenshot::MAX_TRIES));
+        }
+
+        return new self($this->id, $this->number, $this->xPercent, $this->yPercent, $this->note, $this->authorId, $this->source, $this->aiState, $verdict, $fixedOnTry);
     }
 
     public function id(): PinId
@@ -117,6 +134,14 @@ final readonly class Pin
     public function verdict(): ?PinVerdict
     {
         return $this->verdict;
+    }
+
+    /**
+     * The try of its chain that fixed the pin, as Round::setPinVerdict stored it; null unless the verdict is Fixed.
+     */
+    public function fixedOnTry(): ?int
+    {
+        return $this->fixedOnTry;
     }
 
     // NaN fails both comparisons, so it is refused too.

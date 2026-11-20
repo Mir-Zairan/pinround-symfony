@@ -232,11 +232,11 @@ final class DbalRoundQueriesTest extends KernelTestCase
         self::assertEquals([
             new RoundView(self::REPORT, 0, 'report', new UserId(self::MIA), $sharedAt(self::REPORTED_AT), 'open', [
                 new RoundScreenshotView(self::REPORT_FIRST_SCREENSHOT, self::FIRST_MEDIA, 0, null, 'looks_right', 'Checkout — the total', null, [
-                    new RoundPinView(self::FIRST_PIN_ONE, 1, 0.0, 100.0, 'Prix affiché en €', 'still_wrong', 'human', null, new UserId(self::MIA)),
-                    new RoundPinView(self::FIRST_PIN_THREE, 3, 12.35, 7.1, 'The total is off', null, 'human', null, new UserId(self::LENA)),
+                    new RoundPinView(self::FIRST_PIN_ONE, 1, 0.0, 100.0, 'Prix affiché en €', 'still_wrong', 'human', null, new UserId(self::MIA), null),
+                    new RoundPinView(self::FIRST_PIN_THREE, 3, 12.35, 7.1, 'The total is off', null, 'human', null, new UserId(self::LENA), null),
                 ]),
                 new RoundScreenshotView(self::REPORT_SECOND_SCREENSHOT, self::SECOND_MEDIA, 1, null, 'not_right', null, 'The button sits under the footer.', [
-                    new RoundPinView(self::SECOND_PIN_ONE, 1, 99.99, 50.0, 'Hidden here', 'fixed', 'ai', 'kept', new UserId(self::MIA)),
+                    new RoundPinView(self::SECOND_PIN_ONE, 1, 99.99, 50.0, 'Hidden here', 'fixed', 'ai', 'kept', new UserId(self::MIA), null),
                 ]),
             ]),
             new RoundView(self::ROUND_ONE, 1, 'checklist', new UserId(self::OMAR), $sharedAt(self::ROUND_ONE_SHARED_AT), 'closed', []),
@@ -244,7 +244,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
             new RoundView(self::OMAR_SHARED_DRAFT, 3, 'draft', new UserId(self::OMAR), $sharedAt(self::DRAFT_SHARED_AT), 'open', []),
             new RoundView(self::OMAR_DRAFT, null, 'draft', new UserId(self::OMAR), null, 'open', [
                 new RoundScreenshotView(self::OMAR_DRAFT_SCREENSHOT, self::FIRST_MEDIA, 0, null, null, null, null, [
-                    new RoundPinView(self::OMAR_DRAFT_PIN, 1, 40.0, 60.0, 'Mine only', null, 'human', null, new UserId(self::OMAR)),
+                    new RoundPinView(self::OMAR_DRAFT_PIN, 1, 40.0, 60.0, 'Mine only', null, 'human', null, new UserId(self::OMAR), null),
                 ]),
             ]),
         ], $rounds);

@@ -128,7 +128,7 @@ final class PinTest extends TestCase
     #[Test]
     public function aRestoredHumanPinKeepsItsVerdictAndHasNoAiState(): void
     {
-        $pin = Pin::restored(new PinId(self::PIN), 3, 12.5, 40.0, ' Note ', new UserId(self::MIA), PinSource::Human, null, PinVerdict::Fixed);
+        $pin = Pin::restored(new PinId(self::PIN), 3, 12.5, 40.0, ' Note ', new UserId(self::MIA), PinSource::Human, null, PinVerdict::Fixed, null);
 
         self::assertSame(PinVerdict::Fixed, $pin->verdict());
         self::assertSame(PinSource::Human, $pin->source());
@@ -139,7 +139,7 @@ final class PinTest extends TestCase
     #[Test]
     public function aRestoredAiPinKeepsItsAiState(): void
     {
-        $pin = Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Ai, AiPinState::Suggested, null);
+        $pin = Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Ai, AiPinState::Suggested, null, null);
 
         self::assertSame(PinSource::Ai, $pin->source());
         self::assertSame(AiPinState::Suggested, $pin->aiState());
@@ -150,7 +150,7 @@ final class PinTest extends TestCase
     {
         foreach ([[PinSource::Human, AiPinState::Kept], [PinSource::Ai, null]] as [$source, $aiState]) {
             try {
-                Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), $source, $aiState, null);
+                Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), $source, $aiState, null, null);
                 self::fail('A pin with a mismatched AI state was restored.');
             } catch (\InvalidArgumentException $refused) {
                 self::assertSame('Only an AI pin has an AI state, and every AI pin has one.', $refused->getMessage());
@@ -164,7 +164,62 @@ final class PinTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('A pin number starts at 1.');
 
-        Pin::restored(new PinId(self::PIN), 0, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Human, null, null);
+        Pin::restored(new PinId(self::PIN), 0, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Human, null, null, null);
+    }
+
+    #[Test]
+    public function aFixedVerdictKeepsTheTryThatFixedItAndAnotherVerdictDropsIt(): void
+    {
+        $fixed = self::pin(1, 10.0, 10.0, 'Header is cut off')->withVerdict(PinVerdict::Fixed, 3);
+
+        self::assertSame(PinVerdict::Fixed, $fixed->verdict());
+        self::assertSame(3, $fixed->fixedOnTry());
+        self::assertSame('Header is cut off', $fixed->note(), 'The mark keeps the pin as it was.');
+        self::assertNull($fixed->withVerdict(PinVerdict::StillWrong, null)->fixedOnTry());
+        self::assertNull($fixed->withVerdict(null, null)->fixedOnTry());
+        self::assertNull(self::pin(1, 10.0, 10.0, '')->fixedOnTry(), 'A placed pin names no try.');
+    }
+
+    #[Test]
+    public function aRestoredPinKeepsTheTryThatFixedIt(): void
+    {
+        $pin = Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Human, null, PinVerdict::Fixed, 5);
+
+        self::assertSame(5, $pin->fixedOnTry());
+        self::assertSame(2, $pin->withVerdict(PinVerdict::Fixed, 2)->fixedOnTry(), 'From 2, the first later try.');
+    }
+
+    /**
+     * @return iterable<string, array{?PinVerdict, int, string}>
+     */
+    public static function triesThatCannotHaveFixedThePin(): iterable
+    {
+        $notALaterTry = 'A pin is fixed on a later try than the first, from 2 to 5.';
+        $notFixed = 'Only a pin marked fixed names the try that fixed it.';
+
+        yield 'the first try' => [PinVerdict::Fixed, 1, $notALaterTry];
+        yield 'past the cap of tries' => [PinVerdict::Fixed, 6, $notALaterTry];
+        yield 'zero' => [PinVerdict::Fixed, 0, $notALaterTry];
+        yield 'still wrong' => [PinVerdict::StillWrong, 3, $notFixed];
+        yield 'no verdict' => [null, 3, $notFixed];
+    }
+
+    #[Test]
+    #[DataProvider('triesThatCannotHaveFixedThePin')]
+    public function aTryThatCannotHaveFixedThePinIsRefusedOnAMarkAndOnRestore(?PinVerdict $verdict, int $fixedOnTry, string $reason): void
+    {
+        $pin = self::pin(1, 10.0, 10.0, '');
+        try {
+            $pin->withVerdict($verdict, $fixedOnTry);
+            self::fail('A try that cannot have fixed the pin was accepted.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame($reason, $refused->getMessage());
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains($reason);
+
+        Pin::restored(new PinId(self::PIN), 1, 5.0, 6.0, '', new UserId(self::MIA), PinSource::Human, null, $verdict, $fixedOnTry);
     }
 
     private static function pin(int $number, float $x, float $y, string $note): Pin

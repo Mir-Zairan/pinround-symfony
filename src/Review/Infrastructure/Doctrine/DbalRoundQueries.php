@@ -380,22 +380,26 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
      * @param list<string> $roundIdsWithEveryTry those of $roundIds the owner reads, whose earlier tries come back too;
      *                                           the other rounds give only the latest try of each screenshot
      *
-     * @return array<string, list<RoundScreenshotView>> by round id, each by position
+     * @return array<string, list<RoundScreenshotView>> by round id, each by its chain's first try's position, then by
+     *                                                  position
      */
     private function screenshotsOf(string $organizationId, array $roundIds, array $roundIdsWithEveryTry): array
     {
         if ([] === $roundIds) {
             return [];
         }
-        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
+        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace. Ordered by
+        // the place of the chain's first try, so a shared round lists its latest tries in the order, and with the numbers,
+        // its owner's draft gave them; the first try is found by its primary key, also when the team does not see it.
         $screenshotRows = $this->connection->fetchAllAssociative(
             'SELECT screenshot.id, screenshot.round_id, screenshot.media_id, screenshot.position, screenshot.variant_label,'
             .' screenshot.verdict, screenshot.title, screenshot.summary, screenshot.retake_of,'
             .' EXISTS (SELECT 1 FROM rvw_pin AS pin WHERE pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id) AS has_pins'
             .' FROM rvw_screenshot AS screenshot'
+            .' LEFT JOIN rvw_screenshot AS first_try ON first_try.organization_id = screenshot.organization_id AND first_try.id = screenshot.retake_of'
             .' WHERE screenshot.organization_id = CAST(:organization AS uuid) AND screenshot.round_id = ANY(CAST(:rounds AS uuid[]))'
             .' AND (screenshot.round_id = ANY(CAST(:roundsWithEveryTry AS uuid[])) OR '.self::latestTrySql('screenshot').')'
-            .' ORDER BY screenshot.position, screenshot.id',
+            .' ORDER BY COALESCE(first_try.position, screenshot.position), screenshot.position, screenshot.id',
             [
                 'organization' => $organizationId,
                 'rounds' => '{'.implode(',', $roundIds).'}',
@@ -440,7 +444,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             return [];
         }
         $pinRows = $this->connection->fetchAllAssociative(
-            'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id'
+            'SELECT pin.id, pin.screenshot_id, pin.number, pin.x_pct, pin.y_pct, pin.note, pin.verdict, pin.source, pin.ai_state, pin.author_id, pin.fixed_on_try'
             .' FROM rvw_pin AS pin'
             .' WHERE pin.organization_id = CAST(:organization AS uuid) AND pin.screenshot_id = ANY(CAST(:screenshots AS uuid[]))'
             .' ORDER BY pin.number, pin.id',
@@ -459,6 +463,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
                 self::text($pinRow['source'], 'source'),
                 self::textOrNull($pinRow['ai_state'], 'ai_state'),
                 new UserId(self::text($pinRow['author_id'], 'author_id')),
+                self::integerOrNull($pinRow['fixed_on_try'], 'fixed_on_try'),
             );
         }
 

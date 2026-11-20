@@ -242,11 +242,11 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
                 'Per order',
                 0,
                 new RoundScreenshotView(self::ROUND_ONE_FIRST_AFTER, self::FIRST_MEDIA, 0, 'after', null, 'Per order', 'Sum fixed.', [
-                    new RoundPinView(self::ORDER_BEFORE_PIN, 1, 25.0, 75.0, 'Was cut off', null, 'human', null, new UserId(self::MIA)),
+                    new RoundPinView(self::ORDER_BEFORE_PIN, 1, 25.0, 75.0, 'Was cut off', null, 'human', null, new UserId(self::MIA), null),
                 ]),
                 1,
                 new RoundScreenshotView(self::ORDER_AFTER, self::SECOND_MEDIA, 0, 'after', null, null, null, [
-                    new RoundPinView(self::ORDER_AFTER_PIN, 1, 60.0, 40.0, 'Still a gap', null, 'human', null, new UserId(self::OMAR)),
+                    new RoundPinView(self::ORDER_AFTER_PIN, 1, 60.0, 40.0, 'Still a gap', null, 'human', null, new UserId(self::OMAR), null),
                 ]),
                 'pass',
                 'Totals match now.',
@@ -258,8 +258,8 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
                 'Per product',
                 1,
                 new RoundScreenshotView(self::ROUND_ONE_SECOND_AFTER, self::SECOND_MEDIA, 1, 'after', null, 'Per product', null, [
-                    new RoundPinView(self::PRODUCT_BEFORE_KEPT_PIN, 1, 50.0, 50.0, 'Column left-aligned', null, 'ai', 'kept', new UserId(self::MIA)),
-                    new RoundPinView(self::PRODUCT_BEFORE_FIXED_PIN, 2, 40.0, 60.0, 'Planned is 2,850', 'fixed', 'human', null, new UserId(self::MIA)),
+                    new RoundPinView(self::PRODUCT_BEFORE_KEPT_PIN, 1, 50.0, 50.0, 'Column left-aligned', null, 'ai', 'kept', new UserId(self::MIA), null),
+                    new RoundPinView(self::PRODUCT_BEFORE_FIXED_PIN, 2, 40.0, 60.0, 'Planned is 2,850', 'fixed', 'human', null, new UserId(self::MIA), null),
                 ]),
                 1,
                 new RoundScreenshotView(self::PRODUCT_AFTER, self::FIRST_MEDIA, 1, 'after', null, 'Per product', null, []),
@@ -329,9 +329,9 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
         self::assertSame([self::ROUND_ONE_FIRST_AREA, self::ROUND_ONE_SECOND_AREA], array_map(static fn (AreaView $area): string => $area->id, $round->areas));
         self::assertEquals(
             new RoundScreenshotView(self::REPORT_FIRST, self::FIRST_MEDIA, 0, null, 'looks_right', 'Checkout — the total', 'Totals counted twice.', [
-                new RoundPinView(self::REPORT_PIN_ONE, 1, 0.0, 100.0, 'Prix affiché en €', 'still_wrong', 'human', null, new UserId(self::MIA)),
-                new RoundPinView(self::REPORT_KEPT_PIN_TWO, 2, 99.99, 50.0, 'Hidden here', 'fixed', 'ai', 'kept', new UserId(self::MIA)),
-                new RoundPinView(self::REPORT_PIN_THREE, 3, 12.35, 7.1, 'The total is off', null, 'human', null, new UserId(self::LENA)),
+                new RoundPinView(self::REPORT_PIN_ONE, 1, 0.0, 100.0, 'Prix affiché en €', 'still_wrong', 'human', null, new UserId(self::MIA), null),
+                new RoundPinView(self::REPORT_KEPT_PIN_TWO, 2, 99.99, 50.0, 'Hidden here', 'fixed', 'ai', 'kept', new UserId(self::MIA), null),
+                new RoundPinView(self::REPORT_PIN_THREE, 3, 12.35, 7.1, 'The total is off', null, 'human', null, new UserId(self::LENA), null),
             ]),
             $round->areas[0]->before,
         );
