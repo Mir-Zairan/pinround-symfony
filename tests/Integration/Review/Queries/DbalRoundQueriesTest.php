@@ -620,8 +620,9 @@ final class DbalRoundQueriesTest extends KernelTestCase
                 if (1 === preg_match('/\b(FROM|JOIN) org_/', $sql)) {
                     continue;
                 }
-                // The outer query's table: the one filtered by the bound organization, never an EXISTS below it.
-                self::assertSame(1, preg_match('/FROM (\w+) AS \w+ WHERE \w+\.organization_id = CAST\(/', $sql, $match), $sql);
+                // The outer query's table: the one filtered by the bound organization, never an EXISTS below it nor a
+                // table joined to it.
+                self::assertSame(1, preg_match('/FROM (\w+) AS (\w+) (?:(?:LEFT )?JOIN .+? )?WHERE \2\.organization_id = CAST\(/', $sql, $match), $sql);
                 $tables[] = $match[1];
             }
 

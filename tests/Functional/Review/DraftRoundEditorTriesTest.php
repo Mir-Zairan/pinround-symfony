@@ -7,9 +7,11 @@ namespace App\Tests\Functional\Review;
 use App\Identity\Domain\User;
 use App\Review\Api\RoundRefused;
 use App\Review\Domain\Round;
+use App\Review\UI\DraftRoundController;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Tests\Functional\Web\IssuesCsrfTokens;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -32,6 +34,7 @@ final class DraftRoundEditorTriesTest extends WebTestCase
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
+    use IssuesCsrfTokens;
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
@@ -367,6 +370,106 @@ final class DraftRoundEditorTriesTest extends WebTestCase
         self::assertSame($before, $this->stored());
     }
 
+    /**
+     * ADR-0048: "Fixed on try N" names the try the chain had when Omar marked the pin, so a later retake leaves it; an
+     * unmarked pin's Fixed chip offers the latest try as it is now.
+     */
+    #[Test]
+    public function aPinFixedOnTryThreeStaysFixedOnTryThreeAfterAFourthTryIsAdded(): void
+    {
+        $this->seedWorld();
+        $this->addRetake($this->draft, $this->firstTry, 3);
+        $this->props = $this->propsOf($this->draft);
+        $this->act('showTry', ['screenshotId' => $this->firstTry]);
+        $this->props = $this->propsOfResponse();
+
+        $this->act('setPinVerdict', ['pinId' => $this->firstTryPin, 'verdict' => 'fixed']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertNull($this->refusalShown());
+        self::assertSame(['fixed', 3], $this->storedMarkOf($this->firstTryPin));
+
+        $this->addRetake($this->draft, $this->firstTry, 4);
+        $this->props = $this->propsOf($this->draft);
+        $this->act('showTry', ['screenshotId' => $this->firstTry]);
+
+        self::assertResponseStatusCodeSame(200);
+        $first = $this->sectionOf($this->firstTry);
+        self::assertSame('Try 1 of 4', $first->filter('[data-try-label]')->text());
+        self::assertSame([[$this->firstTryPin, self::FIRST_TRY_NOTE, 'Fixed on try 3', ['Fixed on try 3', 'Still wrong']]], $this->pinRowsShown($first));
+        self::assertSame(['true', 'false'], $first->filter('li[data-pin-id] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
+        self::assertSame(['fixed', 3], $this->storedMarkOf($this->firstTryPin), 'Showing the try saves nothing.');
+
+        $this->props = $this->propsOfResponse();
+        $this->act('showTry', ['screenshotId' => $this->latestTry]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [[$this->latestTryPin, self::LATEST_TRY_NOTE, 'Not checked yet', ['Fixed on try 4', 'Still wrong']]],
+            $this->pinRowsShown($this->sectionOf($this->latestTry)),
+            'A pin not marked yet would be fixed on the latest try, now try 4.',
+        );
+        self::assertSame([null, null], $this->storedMarkOf($this->latestTryPin));
+    }
+
+    /**
+     * A mark stored before rvw_pin.fixed_on_try names no try, so it reads plain "Fixed", pressed, rather than the
+     * latest try it may not have been fixed on.
+     */
+    #[Test]
+    public function aPinMarkedFixedBeforeTheTryWasStoredShowsPlainFixed(): void
+    {
+        $this->seedWorld();
+        $this->setPinVerdict($this->firstTry, 1, 'fixed');
+        self::assertSame(['fixed', null], $this->storedMarkOf($this->firstTryPin));
+        $this->props = $this->propsOf($this->draft);
+
+        $this->act('showTry', ['screenshotId' => $this->firstTry]);
+
+        self::assertResponseStatusCodeSame(200);
+        $first = $this->sectionOf($this->firstTry);
+        self::assertSame([[$this->firstTryPin, self::FIRST_TRY_NOTE, 'Fixed', ['Fixed', 'Still wrong']]], $this->pinRowsShown($first));
+        self::assertSame(['true', 'false'], $first->filter('li[data-pin-id] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
+    }
+
+    /**
+     * Mia's chain A has its first try at 0 and its retake at 3, with B at 1 and C at 2 between them: her draft numbers
+     * the chains 1, 2, 3 by their first tries, the shared card Omar sees keeps those numbers though A's latest try is
+     * stored last, and the findings checklist labels each pin with the number of its picture on the card.
+     */
+    #[Test]
+    public function aRetakenScreenshotKeepsItsNumberOnShareAndTheFindingsChecklistLabelsItsPinsWithIt(): void
+    {
+        $this->seedWorld();
+        $miasFirstTry = $this->screenshotRowsOf($this->miasDraft)[0]['id'];
+        self::assertIsString($miasFirstTry);
+        $miasOtherShot = $this->addScreenshot($this->miasDraft, $this->addMedia('ready', 'Mia'), 1, null, null);
+        $miasThirdShot = $this->addScreenshot($this->miasDraft, $this->addMedia('ready', 'Mia'), 2, null, null);
+        $miasRetake = $this->addRetake($this->miasDraft, $miasFirstTry, 3, null, 'Mia');
+        $this->addPin($miasRetake, 1, '15.00', '25.00', 'Still cut off on the retake', 'Mia');
+        $this->addPin($miasOtherShot, 1, '35.00', '45.00', 'The basket badge', 'Mia');
+        $expectedCard = [[$miasRetake, 'Screenshot 1'], [$miasOtherShot, 'Screenshot 2'], [$miasThirdShot, 'Screenshot 3']];
+
+        $this->logIn($this->client, $this->people['Mia']);
+        self::assertSame($expectedCard, $this->screenshotsOnTheCardOf($this->miasDraft), 'Mia\'s draft, before the share.');
+
+        $this->client->request(
+            'POST',
+            '/t/SHOP-1/rounds/'.$this->miasDraft.'/share',
+            [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))],
+        );
+        self::assertResponseStatusCodeSame(303);
+
+        $this->logIn($this->client, $this->people['Omar']);
+        self::assertSame($expectedCard, $this->screenshotsOnTheCardOf($this->miasDraft), 'The shared round Omar sees.');
+        $checklist = new Crawler((string) $this->client->getResponse()->getContent())->filter('div#checklist-'.$this->miasDraft.' .checklist__row');
+        self::assertSame(
+            [['Screenshot 1 · pin 1', 'Still cut off on the retake'], ['Screenshot 2 · pin 1', 'The basket badge']],
+            $checklist->each(static fn (Crawler $row): array => [$row->filter('.checklist__pin')->text(), $row->filter('.checklist__note')->text()]),
+            'Only the latest tries\' pins are findings, each labelled with its picture\'s number on the card.',
+        );
+    }
+
     private function seedWorld(): void
     {
         $this->ticketId = $this->addTicket('SHOP-1');
@@ -388,10 +491,10 @@ final class DraftRoundEditorTriesTest extends WebTestCase
     /**
      * A later try of $firstTryId's chain, as the retake commands store it: pointing at the chain's first try.
      */
-    private function addRetake(string $roundId, string $firstTryId, int $position, ?string $verdict = null): string
+    private function addRetake(string $roundId, string $firstTryId, int $position, ?string $verdict = null, string $owner = 'Omar'): string
     {
         $screenshotId = Uuid::v7()->toRfc4122();
-        $parameters = [$this->acmeFoods->toString(), $screenshotId, $roundId, $this->addMedia('ready', 'Omar'), $position, $verdict, $firstTryId];
+        $parameters = [$this->acmeFoods->toString(), $screenshotId, $roundId, $this->addMedia('ready', $owner), $position, $verdict, $firstTryId];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, verdict, retake_of, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, '2026-11-05 08:30:00+00')",
@@ -552,6 +655,41 @@ final class DraftRoundEditorTriesTest extends WebTestCase
         self::assertNotSame([], $verdicts);
 
         return $verdicts;
+    }
+
+    /**
+     * @return array{mixed, mixed} the pin's stored verdict and fixed_on_try
+     */
+    private function storedMarkOf(string $pinId): array
+    {
+        $row = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($pinId, &$row): int {
+            $row = $migrator->fetchNumeric('SELECT verdict, fixed_on_try FROM rvw_pin WHERE id = ?', [$pinId]);
+
+            return 0;
+        });
+        self::assertCount(2, $row, 'The pin is stored.');
+
+        return [$row[0], $row[1]];
+    }
+
+    /**
+     * The draft editor and a shared round's card mark up a screenshot differently, but both show one picture and one
+     * label per screenshot, in the card's order.
+     *
+     * @return list<array{string, string}> each screenshot on the round's card in the rounds frame, as the logged-in
+     *                                     person sees it: its id and its "Screenshot N" label, in order
+     */
+    private function screenshotsOnTheCardOf(string $roundId): array
+    {
+        $card = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS)->filter('#round-'.$roundId);
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $card, 'The frame holds the round\'s card.');
+        $ids = $card->filter('figure.screenshot')->each(static fn (Crawler $picture): string => substr((string) $picture->attr('id'), \strlen('screenshot-')));
+        $labels = $card->filter('.round-card__screenshot-label > span:first-child')->each(static fn (Crawler $label): string => $label->text());
+        self::assertCount(\count($ids), $labels, 'One label per picture.');
+
+        return array_map(static fn (string $id, string $label): array => [$id, $label], $ids, $labels);
     }
 
     private function draftVersion(): int

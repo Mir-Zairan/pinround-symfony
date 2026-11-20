@@ -342,7 +342,7 @@ final class Round
                 $latestTryNumber = \count($this->triesOfChain($screenshot->firstTryId()));
                 $pins = $screenshot->pins();
                 $pins[$pinIndex] = $pin->withVerdict($verdict, PinVerdict::Fixed === $verdict ? $latestTryNumber : null);
-                $this->replaceScreenshotAt($index, $screenshot->withPins($pins));
+                $this->replaceScreenshotAt($index, $screenshot->withPins(array_values($pins)));
                 ++$this->version;
 
                 return;
