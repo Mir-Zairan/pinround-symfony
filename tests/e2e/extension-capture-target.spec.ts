@@ -5,6 +5,7 @@ import {
   CAPTURE_HOST_PERMISSIONS,
   PINROUND_TEST_ORIGIN,
   STUB_REPORT_FULL_TEXT,
+  TEST_PAGE_FILE,
   TEST_PAGE_ORIGIN,
   answerPinroundApi,
   chooseNewReport,
@@ -161,7 +162,9 @@ test('a capture for "My draft round on SHOP-7" goes to that draft round and to n
 
 test('the title and summary start from the page, its title cleaned and its address without credentials, query or fragment, and stay editable', async ({ context, testPage }) => {
   const stub = await answerPinroundApi(context, { tickets: TICKETS });
-  await testPage.goto(`http://omar:s3cret@shop.acme-foods.test/?token=abc123&x=1#frag`);
+  // The request URL keeps the credentials, so the fixture's route for TEST_PAGE_ORIGIN does not match it.
+  await context.route('http://omar:s3cret@shop.acme-foods.test/**', (route) => route.fulfill({ path: TEST_PAGE_FILE, contentType: 'text/html' }));
+  await testPage.goto('http://omar:s3cret@shop.acme-foods.test/?token=abc123&x=1#frag');
   await testPage.evaluate(() => {
     document.title = '\uFEFFBestellübersicht\r\n– 注文\u2028Acme Foods';
   });

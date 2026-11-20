@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const SHIPPED_EXTENSION = path.join(__dirname, '..', '..', 'extension');
-const TEST_PAGE_FILE = path.join(__dirname, 'fixtures', 'extension', 'test-page.html');
+export const TEST_PAGE_FILE =path.join(__dirname, 'fixtures', 'extension', 'test-page.html');
 
 // A page of the shop under test, on an origin that is not pinround's. Nothing serves it: context.route answers it.
 export const TEST_PAGE_ORIGIN = 'http://shop.acme-foods.test';
