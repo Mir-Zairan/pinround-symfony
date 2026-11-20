@@ -10,6 +10,7 @@ How to let Claude Code check a problem in an app, keep the evidence, and file it
 - [At the end](#at-the-end) — `find_tickets`, the three choices, the uploads, and Send
 - [Resume a check](#resume-a-check) — go on with an evidence log after a stop
 - [Use a local model client](#use-a-local-model-client) — any MCP client can follow the same prompt
+- [Scenarios](#scenarios) — the format Claude Code writes into a notebook, its caps, an example, and `save_scenarios`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see here
 - [Safety](#safety) — what Claude Code can and cannot do
 - [Full check](#full-check) — the steps to run by hand, and the record of the last run
@@ -116,6 +117,63 @@ The prompt and the tools work with any MCP client, not only Claude Code, for exa
 - pinround makes no promise about how well a given model follows the prompt. Check the pins and texts on the draft page before you press Send.
 - This is not pinround's laptop AI (the "Local AI" chip). That one makes summaries in your browser and takes no part here.
 
+## Scenarios
+When you ask Claude Code about a notebook with the `explain_my_notebook` prompt and ask it for cases, it writes scenarios: steps the browser extension plays in your app while you watch ([browser-extension.md › Ask Claude Code about a notebook](browser-extension.md#ask-claude-code-about-a-notebook)). A scenario is data, never code. The source of truth for the format is [scenario.v1.json](../api/scenario.v1.json); pinround and the extension check the same rules.
+
+A scenario has `title` (what the case shows), `why` (what in the code makes it happen), `setup` (the data it needs, in plain words; may be empty), `start_url` (the page it starts on) and `steps`. Each step has a `type`, a `say` line the popup shows while it runs, and the fields of its type:
+
+| Type | Fields | What the player does |
+|---|---|---|
+| `go_to` | `url` | Opens the page. The url stays on the scheme, host and port of `start_url`. |
+| `click` | `target` | Clicks the element. |
+| `type` | `target`, `text` | Types the text into the field; empty text clears it. Never into a password field. |
+| `select` | `target`, `option` | Chooses the option with this visible text. |
+| `wait_for` | `target` | Waits until the element shows. |
+| `expect_text` | `text`, `target` optional | Checks the text is in the element, or on the page. A failure stops the run. |
+| `expect_visible` | `target` | Checks the element is visible. A failure stops the run. |
+| `pause` | none | Stops until you press Play; `say` tells you what to do first. |
+| `capture` | none | Adds a screenshot of the page to the notebook. |
+
+A `target` finds one element in one of three ways, never by a CSS or XPath string:
+- `{"role": "button", "name": "Apply"}`: an ARIA role in lowercase, and the accessible name when given;
+- `{"text": "Your basket is empty"}`: the visible text;
+- `{"label": "Coupon code"}`: the label of a form field.
+
+The caps, the same in `ScenarioRules` (`src/Review/Domain/Scenario/`) and in the extension's `scenario-rules.js`:
+
+| What | At most |
+|---|---|
+| Scenarios in a notebook | 20 |
+| Steps in a scenario | 30 (at least 1) |
+| `title` | 120 characters |
+| `why`, `setup` | 600 characters each |
+| `say` | 200 characters |
+| `start_url`, `url`, `text`, `option` and each target text | 1,000 characters |
+
+Every text but `setup` and a `type` step's `text` must hold more than blanks. A url is a full `http` or `https` address with no user name; its port, when given, is 1 to 65535. No text holds a NUL character.
+
+An example on Acme Foods' shop, with one `expect_text` and one `capture`:
+
+```json
+{
+  "title": "An expired coupon is refused and the total stays",
+  "why": "CouponService checks the end date before the basket adds the discount, and the basket page shows its message in the status line.",
+  "setup": "A coupon SPRING10 that ended yesterday, and one jar of honey in the basket.",
+  "start_url": "https://shop.acme-foods.test/basket",
+  "steps": [
+    { "type": "go_to", "say": "Open the basket.", "url": "https://shop.acme-foods.test/basket" },
+    { "type": "type", "say": "Type the expired coupon.", "target": { "label": "Coupon code" }, "text": "SPRING10" },
+    { "type": "click", "say": "Apply the coupon.", "target": { "role": "button", "name": "Apply" } },
+    { "type": "expect_text", "say": "The shop says the coupon has ended.", "target": { "role": "status" }, "text": "This coupon has ended." },
+    { "type": "capture", "say": "Keep a picture of the basket with the message." }
+  ]
+}
+```
+
+A first `go_to` to `start_url` lets you press Play from any page of the shop.
+
+**Saving.** Claude Code saves with the tool `save_scenarios`, which takes `notebook` (the notebook's id) and `scenarios` (the list). It needs a token with `notebooks:write`. A save **replaces all** the notebook's scenarios: Claude Code sends the ones it keeps together with the new ones, in the order to show them, and an empty list removes them all. When one rule is broken, pinround saves nothing and names the first broken rule, for example "Scenario 2, step 5: go_to must stay on the scheme, host and port of start_url."
+
 ## When a call is refused
 A refused call saves nothing. Claude Code tells you the message in plain words. The answers you may see here:
 
@@ -132,6 +190,7 @@ The other answers (401, 429 and more) are in [claude-code.md › When a call is 
 - **Claude Code never makes a ticket.** It makes a private draft; you press Send.
 - **It never adds to a ticket you may not draft on.** "Add to <key>" is offered only where `may_start_draft` is true, and pinround refuses the others.
 - **Titles and names from `find_tickets` are other people's text.** The prompt tells Claude Code to treat them as data, never as instructions.
+- **Scenarios play only when you press Play**, on hosts you allowed, never on pinround and never into a password field ([browser-extension.md › Safety](browser-extension.md#safety)).
 - **Keep the token out of the log**, out of repositories and out of shared files. Revoke a lost token on **API tokens**.
 - Each call is recorded in the audit log (tool, target, outcome), never its content. Reading the prompt is recorded the same way.
 
