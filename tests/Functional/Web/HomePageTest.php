@@ -243,10 +243,48 @@ final class HomePageTest extends WebTestCase
         self::assertCount(0, $page->filter('.home__date, .home__chips, button.chip'));
         self::assertSame(['Home', 'Admin'], $this->menuLabels($page));
         self::assertSame(
-            ['People: —', 'Teams: 2', 'AI help: —', 'Jira: —'],
-            $page->filter('.home__stat')->each(static fn (Crawler $card): string => $card->filter('.home__stat-label')->text().': '.trim((string) $card->filter('.home__stat-value')->getNode(0)?->firstChild?->textContent)),
+            ['People: 6', 'Teams: 2', 'AI help: Off'],
+            $page->filter('.home__stat')->each(static fn (Crawler $card): string => $card->filter('.home__stat-label')->text().': '.$card->filter('.home__stat-value')->text()),
         );
         self::assertSame('Admins do not work on tickets. Everything you set is under Admin.', $page->filter('main p')->text());
+    }
+
+    /**
+     * Teams has no admin tab yet, so its tile links nowhere.
+     */
+    #[Test]
+    public function thePeopleAndAiHelpTilesOpenTheirAdminTabs(): void
+    {
+        $page = $this->openHomeAs('Sara');
+
+        self::assertSame(
+            ['People' => '/admin/people', 'AI help' => '/admin/ai'],
+            array_combine(
+                $page->filter('.home__stats a.home__stat .home__stat-label')->each(static fn (Crawler $label): string => $label->text()),
+                $page->filter('.home__stats a.home__stat')->each(static fn (Crawler $tile): string => (string) $tile->attr('href')),
+            ),
+        );
+        self::assertCount(3, $page->filter('.home__stats .home__stat'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function peopleWhoAreNotOnlyAdmins(): iterable
+    {
+        yield 'a member' => ['Omar'];
+        yield 'a lead who is also admin' => ['Lena'];
+        yield 'a manager and viewer' => ['Raj'];
+    }
+
+    #[Test]
+    #[DataProvider('peopleWhoAreNotOnlyAdmins')]
+    public function onlyTheAdminHomeShowsTheOrganizationTiles(string $person): void
+    {
+        $page = $this->openHomeAs($person);
+
+        self::assertCount(1, $page->filter('main h1'));
+        self::assertCount(0, $page->filter('.home__stats, .home__stat'));
     }
 
     #[Test]
@@ -273,6 +311,8 @@ final class HomePageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('All clear, Lena', $page->filter('h1')->text());
         self::assertSame(['All', 'My work', 'My team'], $this->chipLabels($page));
+        self::assertSame('You are not in a team yet.', $page->filter('section[aria-labelledby="home-your-team"] .empty-state')->text());
+        self::assertCount(0, $page->filter('.home__team-stack'));
     }
 
     #[Test]
@@ -296,7 +336,7 @@ final class HomePageTest extends WebTestCase
         self::assertCount(1, $link);
         self::assertSame('Open settings', $link->text());
         self::assertSame('/admin', $link->attr('href'));
-        self::assertCount(0, $page->filter('section:not([data-focus-group="admin"]) .btn'), 'only the Admin section has the button');
+        self::assertCount(0, $page->filter('section:not([data-focus-group="admin"]) .home__section-header .btn'), 'only the Admin section has the button');
     }
 
     #[Test]

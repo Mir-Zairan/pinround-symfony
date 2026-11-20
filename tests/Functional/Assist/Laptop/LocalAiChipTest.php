@@ -165,8 +165,12 @@ final class LocalAiChipTest extends WebTestCase
         self::assertCount(1, $aiSettingsReads);
     }
 
+    /**
+     * The admin Home's AI help tile reads the settings; the header, which shows no chip to an admin of no team, must
+     * not read them a second time.
+     */
     #[Test]
-    public function anAdminOnlyPageNeverReadsTheAiSettings(): void
+    public function anAdminOnlyHomeReadsTheAiSettingsOnceForItsTileAndShowsNoChip(): void
     {
         $this->storeAiSettings($this->acmeFoods, self::laptopAi());
         $this->setOrgRoles($this->omar, $this->acmeFoods, '{admin}');
@@ -174,12 +178,15 @@ final class LocalAiChipTest extends WebTestCase
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
         $debugData->reset();
 
-        $this->client->request('GET', '/');
+        $page = $this->client->request('GET', '/');
 
         self::assertResponseStatusCodeSame(200);
-        $sql = $this->queriesOf($debugData->getData());
-        self::assertNotSame([], $sql);
-        self::assertSame([], preg_grep(self::AI_SETTINGS_QUERY, $sql));
+        self::assertSame('Your organization', $page->filter('h1')->text());
+        self::assertSame('On', $page->filter('a.home__stat[href="/admin/ai"] .home__stat-value')->text());
+        $aiSettingsReads = preg_grep(self::AI_SETTINGS_QUERY, $this->queriesOf($debugData->getData()));
+        self::assertIsArray($aiSettingsReads);
+        self::assertCount(1, $aiSettingsReads);
+        self::assertCount(0, $page->filter('.local-ai'));
     }
 
     /**
