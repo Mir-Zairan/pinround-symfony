@@ -89,6 +89,8 @@ globalThis.pinroundPagePlayer ??= (() => {
     // What typing can fill: the types whose value is the text itself.
     const TYPEABLE_INPUT_TYPES = new Set(['text', 'email', 'search', 'tel', 'url', 'number']);
     const PASSWORD_AUTOCOMPLETE = new Set(['current-password', 'new-password']);
+    // Neither found nor a pass may tell what a password field holds, or a scenario could test guesses one by one.
+    const PASSWORD_NOT_READ = 'The player never reads a password field. Look at it yourself, then play on.';
 
     const make = (tag, className) => Object.assign(document.createElement(tag), { className });
     const stopped = (message, details = {}) => ({ stopped: true, message, ...details });
@@ -378,6 +380,10 @@ globalThis.pinroundPagePlayer ??= (() => {
             if ('select' !== list.localName) {
                 return stopped(`The element ${describedTarget(step.target)} is no list to choose from.`);
             }
+            // A step names one option, and choosing it would leave the others as they were.
+            if (list.multiple) {
+                return stopped(`The list ${describedTarget(step.target)} takes more than one choice, and a step chooses one, so nothing was chosen.`);
+            }
             if (list.disabled) {
                 return stopped(`The list ${describedTarget(step.target)} cannot be changed, so nothing was chosen.`);
             }
@@ -406,7 +412,7 @@ globalThis.pinroundPagePlayer ??= (() => {
                     return ok();
                 }
                 if (attempt >= attempts) {
-                    return stopped(`Waited ${Math.round(timeoutMs / 1000)} seconds. ${found.message}`);
+                    return stopped(`Waited ${Number((timeoutMs / 1000).toFixed(1))} seconds. ${found.message}`);
                 }
                 await wait(pollMs);
             }
@@ -417,6 +423,9 @@ globalThis.pinroundPagePlayer ??= (() => {
                 const found = locateAndHighlight(step.target);
                 if (undefined === found.element) {
                     return stopped(found.message);
+                }
+                if (isPasswordField(found.element)) {
+                    return stopped(PASSWORD_NOT_READ);
                 }
                 foundText = shownTextOf(found.element);
             }

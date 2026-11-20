@@ -303,7 +303,7 @@ test('a page out of reach stops the step with a plain message; any other refusal
     assert.deepEqual(browser.injectedFiles, []);
 
     const goneTab = stepRunnerFor(browser, { tabId: 99, openUrl: async () => undefined, captureToNotebook: async () => undefined });
-    assert.deepEqual(await goneTab(click('Pay')), { stopped: true, message: 'The step could not run: No tab with id: 99' });
+    assert.deepEqual(await goneTab(click('Pay')), { stopped: true, message: 'The step could not run: No tab with id: 99.' });
 });
 
 test('go_to opens the url through the given navigation, capture adds to the notebook, and pause does nothing in the tab', async () => {
@@ -332,6 +332,7 @@ test('go_to opens the url through the given navigation, capture adds to the note
 
 test('a navigation or capture that fails stops the step with its message, control characters shown safely', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
+    browser.clickIcon(SHOP_PAGE.id);
     const runStep = stepRunnerFor(browser, {
         tabId: SHOP_PAGE.id,
         openUrl: async () => {

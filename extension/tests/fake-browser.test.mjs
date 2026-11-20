@@ -285,16 +285,16 @@ test('a host permission keeps reaching the tab after it navigates within that or
 
     browser.navigate(SHOP_PAGE.id, 'https://shop.acme-foods.example/checkout');
 
-    assert.deepEqual(await browser.tabs.query({ active: true }), [{ ...SHOP_PAGE, url: 'https://shop.acme-foods.example/checkout' }]);
+    assert.deepEqual(await browser.tabs.query({ active: true }), [{ ...SHOP_PAGE, url: 'https://shop.acme-foods.example/checkout', status: 'loading' }]);
     assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), 'reached');
 });
 
 test('tabs.query filters on active and hides the address of a tab the extension may not reach', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE] });
 
-    assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [{ id: SHOP_PAGE.id, active: true }]);
+    assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [{ id: SHOP_PAGE.id, active: true, status: 'complete' }]);
     browser.clickIcon(SHOP_PAGE.id);
-    assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [SHOP_PAGE]);
+    assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [{ ...SHOP_PAGE, status: 'complete' }]);
     assert.deepEqual((await browser.tabs.query({})).map((tab) => tab.id), [SHOP_PAGE.id, OTHER_PAGE.id]);
     await assert.rejects(browser.tabs.query({ url: SHOP_PAGE.url }), /does not model the query key url/);
 });
@@ -310,4 +310,56 @@ test('tabs.create opens an active tab and runtime.openOptionsPage is counted', a
     assert.deepEqual((await browser.tabs.query({ active: true })).map((tab) => tab.id), [created.id]);
     assert.equal(browser.tabUrl(created.id), 'https://pinround.acme-foods.example/reports/1');
     assert.equal(browser.optionsPageOpenings, 1);
+});
+
+test('tabs.get answers the tab with its status, hides an address out of reach, rejects a missing tab and throws on an id that is no integer', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE, { ...OTHER_PAGE, status: 'loading' }], hostOrigins: [SHOP_ORIGIN] });
+
+    assert.deepEqual(await browser.tabs.get(SHOP_PAGE.id), { ...SHOP_PAGE, status: 'complete' });
+    assert.deepEqual(await browser.tabs.get(OTHER_PAGE.id), { id: OTHER_PAGE.id, active: false, status: 'loading' });
+    await assert.rejects(browser.tabs.get(99), { message: 'No tab with id: 99.' });
+    assert.throws(() => browser.tabs.get('7'), { name: 'TypeError', message: 'Error in invocation of tabs.get(integer tabId, optional function callback): No matching signature.' });
+});
+
+test('a page\'s own navigation loads until finishLoading, and a func still running in the left document answers null with its id', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    const pending = browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => new Promise(() => { globalThis.waiting = true; }) });
+    const [{ documentId: leftDocumentId, result: waiting }] = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => globalThis.waiting });
+    assert.equal(waiting, true);
+
+    browser.navigate(SHOP_PAGE.id, 'https://shop.acme-foods.example/receipt');
+
+    assert.deepEqual(await pending, [{ documentId: leftDocumentId, frameId: 0, result: null }]);
+    assert.deepEqual(await browser.tabs.get(SHOP_PAGE.id), { ...SHOP_PAGE, url: 'https://shop.acme-foods.example/receipt', status: 'loading' });
+    browser.finishLoading(SHOP_PAGE.id);
+    assert.equal((await browser.tabs.get(SHOP_PAGE.id)).status, 'complete');
+    const [afterwards] = await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => globalThis.waiting ?? 'a new document' });
+    assert.deepEqual([afterwards.result, afterwards.documentId === leftDocumentId], ['a new document', false]);
+});
+
+test('tabs.update navigates: it answers the loading tab with the old url and the new one pending, which is the url once loaded', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE], hostOrigins: [SHOP_ORIGIN] });
+    await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => { globalThis.kept = 'old document'; } });
+
+    const answered = await browser.tabs.update(SHOP_PAGE.id, { url: 'https://shop.acme-foods.example/orders' });
+
+    assert.deepEqual(answered, { ...SHOP_PAGE, status: 'loading', pendingUrl: 'https://shop.acme-foods.example/orders' });
+    assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => globalThis.kept ?? 'gone' }), 'gone');
+    browser.finishLoading(SHOP_PAGE.id);
+    assert.deepEqual(await browser.tabs.get(SHOP_PAGE.id), { ...SHOP_PAGE, url: 'https://shop.acme-foods.example/orders', status: 'complete' });
+});
+
+test('tabs.update to another origin ends activeTab and hides both addresses; a missing tab rejects, an id that is no integer throws', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE] });
+    browser.clickIcon(SHOP_PAGE.id);
+
+    const answered = await browser.tabs.update(SHOP_PAGE.id, { url: 'https://bank.acme-foods.example/' });
+
+    assert.deepEqual(answered, { id: SHOP_PAGE.id, active: true, status: 'loading' });
+    await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_PAGE });
+    await assert.rejects(browser.tabs.update(99, { url: SHOP_PAGE.url }), { message: 'No tab with id: 99.' });
+    assert.throws(() => browser.tabs.update('7', { url: SHOP_PAGE.url }), {
+        name: 'TypeError',
+        message: 'Error in invocation of tabs.update(optional integer tabId, object updateProperties, optional function callback): No matching signature.',
+    });
 });

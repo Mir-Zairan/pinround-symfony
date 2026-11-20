@@ -20,7 +20,7 @@ test('the fake offers exactly what the adapter offers, so a test cannot use a ca
     assert.deepEqual(shapeOf({ storage, tabs, runtime, scripting }), shapeOf(browser));
     assert.deepEqual(shapeOf(browser), {
         storage: { local: { get: 'function', set: 'function', remove: 'function' }, session: { get: 'function', set: 'function', remove: 'function' } },
-        tabs: { query: 'function', captureVisibleTab: 'function', create: 'function' },
+        tabs: { query: 'function', captureVisibleTab: 'function', create: 'function', get: 'function', update: 'function' },
         runtime: { openOptionsPage: 'function' },
         scripting: { executeScript: 'function' },
     });
@@ -34,7 +34,13 @@ test('the adapter hands each call to the chrome API with its arguments and answe
             local: { get: answering('local.get'), set: answering('local.set'), remove: answering('local.remove') },
             session: { get: answering('session.get'), set: answering('session.set'), remove: answering('session.remove') },
         },
-        tabs: { query: answering('tabs.query'), captureVisibleTab: answering('tabs.captureVisibleTab'), create: answering('tabs.create') },
+        tabs: {
+            query: answering('tabs.query'),
+            captureVisibleTab: answering('tabs.captureVisibleTab'),
+            create: answering('tabs.create'),
+            get: answering('tabs.get'),
+            update: answering('tabs.update'),
+        },
         runtime: { openOptionsPage: answering('runtime.openOptionsPage') },
         scripting: { executeScript: answering('scripting.executeScript') },
     };
@@ -46,6 +52,8 @@ test('the adapter hands each call to the chrome API with its arguments and answe
     assert.equal(await browser.tabs.captureVisibleTab({ format: 'png' }), 'tabs.captureVisibleTab answer');
     assert.equal(await browser.tabs.create({ url: 'https://pinround.acme-foods.example/' }), 'tabs.create answer');
     assert.equal(await browser.tabs.query({ active: true }), 'tabs.query answer');
+    assert.equal(await browser.tabs.get(7), 'tabs.get answer');
+    assert.equal(await browser.tabs.update(7, { url: 'https://shop.acme-foods.example/orders' }), 'tabs.update answer');
     assert.equal(await browser.runtime.openOptionsPage(), 'runtime.openOptionsPage answer');
     assert.equal(await browser.scripting.executeScript(injection), 'scripting.executeScript answer');
 
@@ -56,6 +64,8 @@ test('the adapter hands each call to the chrome API with its arguments and answe
         ['tabs.captureVisibleTab', { format: 'png' }],
         ['tabs.create', { url: 'https://pinround.acme-foods.example/' }],
         ['tabs.query', { active: true }],
+        ['tabs.get', 7],
+        ['tabs.update', 7, { url: 'https://shop.acme-foods.example/orders' }],
         ['runtime.openOptionsPage'],
         ['scripting.executeScript', injection],
     ]);

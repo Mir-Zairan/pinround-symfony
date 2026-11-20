@@ -8,7 +8,12 @@
 // the extension's root as refusalOfInjectedFile reads them, each refusal with Chrome's message. Only documented:
 // storage answers {} for a missing key; and, as Playwright cannot click the toolbar icon that grants it, activeTab
 // reaches only the tab whose icon was clicked and keeps it after a navigation within the origin but not to another. A
-// `files` injection is recorded, not run: the page scope has no document. One window only.
+// `files` injection is recorded, not run: the page scope has no document. One window only. Proved by
+// tests/e2e/extension-player.spec.ts: tabs.get and tabs.update answer the tab with Chrome's status, and update's with the
+// old url and the new one as pendingUrl until the load ends; a missing tab rejects, an id that is no integer throws at
+// once; a func still running when its document navigates away answers null with that document's id. Not modelled:
+// Chrome's "Frame with ID 0 was removed." refusal of an injection into a page that is leaving, which comes and goes
+// with timing; a test that needs it wraps executeScript.
 
 import { statSync } from 'node:fs';
 import path from 'node:path';
@@ -179,12 +184,12 @@ const isChromeUrl = (url) => url.startsWith('chrome://');
 const isWebUrl = (url) => ['http:', 'https:'].includes(new URL(url).protocol);
 
 /**
- * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean}>, hostOrigins?: string[]}} options
- *   the open tabs, at most one of them active, and the manifest's host permissions: origins such as
- *   'https://shop.acme-foods.example', or ALL_URLS for every web page
+ * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean, status?: string}>, hostOrigins?: string[]}} options
+ *   the open tabs, at most one of them active, each loaded unless its status says 'loading', and the manifest's host
+ *   permissions: origins such as 'https://shop.acme-foods.example', or ALL_URLS for every web page
  */
 export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
-    const openTabs = tabs.map((tab) => ({ active: false, ...structuredClone(tab) }));
+    const openTabs = tabs.map((tab) => ({ active: false, status: 'complete', ...structuredClone(tab) }));
     const hostOriginSet = new Set(hostOrigins);
     const hasAllUrls = hostOriginSet.has(ALL_URLS);
     const activeTabGrants = new Set();
@@ -202,7 +207,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
         if (mayReach(tab)) {
             return structuredClone(tab);
         }
-        const { url, title, ...withoutAddress } = tab;
+        const { url, pendingUrl, title, ...withoutAddress } = tab;
 
         return structuredClone(withoutAddress);
     };
@@ -213,20 +218,48 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             documentsLoaded += 1;
             const globals = vm.createContext({ console });
             vm.runInContext('globalThis.window = globalThis; globalThis.self = globalThis;', globals);
-            pageDocuments.set(tabId, { documentId: `document-${documentsLoaded}`, globals });
+            let leave;
+            const left = new Promise((resolve) => {
+                leave = resolve;
+            });
+            pageDocuments.set(tabId, { documentId: `document-${documentsLoaded}`, globals, left, leave });
         }
 
         return pageDocuments.get(tabId);
+    };
+    const leaveDocument = (tabId) => {
+        pageDocuments.get(tabId)?.leave(LEFT_OUT);
+        pageDocuments.delete(tabId);
     };
     const runInPage = async (pageDocument, func, args) => {
         try {
             const pageFunction = vm.runInContext(`(${func.toString()})`, pageDocument.globals);
             const pageArgs = vm.runInContext('JSON.parse', pageDocument.globals)(JSON.stringify(args));
-            const result = copyAcrossChrome(await pageFunction(...pageArgs), SCRIPT_RESULT);
+            const result = copyAcrossChrome(await Promise.race([pageFunction(...pageArgs), pageDocument.left]), SCRIPT_RESULT);
 
             return LEFT_OUT === result ? null : result;
         } catch {
             return null;
+        }
+    };
+    const startLoading = (tab, url) => {
+        if (new URL(url).origin !== new URL(tab.url).origin) {
+            activeTabGrants.delete(tab.id);
+        }
+        tab.status = 'loading';
+        leaveDocument(tab.id);
+    };
+    const existingTab = (tabId) => {
+        const tab = tabOf(tabId);
+        if (undefined === tab) {
+            throw new Error(`No tab with id: ${tabId}.`);
+        }
+
+        return tab;
+    };
+    const checkTabId = (signature, tabId) => {
+        if (!Number.isInteger(tabId)) {
+            throw new TypeError(`Error in invocation of tabs.${signature}: No matching signature.`);
         }
     };
 
@@ -261,6 +294,27 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
                 }
 
                 return asSeen(tab);
+            },
+            get(tabId) {
+                checkTabId('get(integer tabId, optional function callback)', tabId);
+
+                return answerLater(() => asSeen(existingTab(tabId)));
+            },
+            /** Navigates the tab to properties.url, the only property modelled; finishLoading ends the load. */
+            update(tabId, properties) {
+                checkTabId('update(optional integer tabId, object updateProperties, optional function callback)', tabId);
+                const unmodelled = Object.keys(properties ?? {}).filter((key) => 'url' !== key);
+                if (unmodelled.length > 0 || 'string' !== typeof properties?.url) {
+                    throw new Error(`The fake browser models tabs.update with a url only, not ${unmodelled.join(', ') || 'without one'}.`);
+                }
+
+                return answerLater(() => {
+                    const tab = existingTab(tabId);
+                    startLoading(tab, properties.url);
+                    tab.pendingUrl = properties.url;
+
+                    return asSeen(tab);
+                });
             },
         },
         runtime: {
@@ -311,14 +365,18 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             activate(tabId);
             activeTabGrants.add(tabId);
         },
-        /** A navigation: a new document with empty globals; only leaving the origin ends the activeTab grant. */
+        /** A link's or form's navigation: a new document, loading until finishLoading; leaving the origin ends activeTab. */
         navigate(tabId, url) {
             const tab = tabOf(tabId);
-            if (new URL(url).origin !== new URL(tab.url).origin) {
-                activeTabGrants.delete(tabId);
-            }
+            startLoading(tab, url);
             tab.url = url;
-            pageDocuments.delete(tabId);
+        },
+        /** The load of the tab's page ends: the address it was going to is its url and its status is complete. */
+        finishLoading(tabId) {
+            const tab = tabOf(tabId);
+            tab.url = tab.pendingUrl ?? tab.url;
+            delete tab.pendingUrl;
+            tab.status = 'complete';
         },
         tabUrl: (tabId) => tabOf(tabId)?.url,
         injectedFiles,
