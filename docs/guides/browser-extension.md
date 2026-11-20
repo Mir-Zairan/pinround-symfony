@@ -8,6 +8,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Let pinround accept it](#let-pinround-accept-it) — the two origin settings an admin sets once
 - [Connect it](#connect-it) — make a token and paste it
 - [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket
+- [Allowed hosts for scenarios](#allowed-hosts-for-scenarios) — where scenarios may play, and the question before a run
 - [Sign out](#sign-out) — the token stops working everywhere
 - [Permissions and why](#permissions-and-why) — the three Chrome permissions it asks for
 - [Manual check](#manual-check) — the steps to run by hand, and the record of the last run
@@ -45,8 +46,17 @@ A browser sends the extension's origin with every request. pinround and its stor
 5. Press **Capture this page**. For a draft round the picture is added at once; pinround processes it first, which can take a few seconds.
 6. For a new report, open the next page and capture again, up to 10 pictures; each goes into the same report draft. Then press **Done**. pinround opens the draft: check it and press **Send**.
 
+## Allowed hosts for scenarios
+A notebook's scenarios click and type on a page, so they play only on hosts you list. Nothing is allowed at first.
+- **The list.** In the options, under **Allowed hosts**, type a host in **Host to add** and press **Add**, for example `http://localhost:8000` or `https://shop.acme-foods.test`. Type the scheme, host and port only: no path, no user name. Only the port may be `*`. **Add http://localhost:\*** adds that entry with one press; it is hidden once the entry is listed.
+- **At most 50 entries.** Past that, the page says "Your list holds 50 hosts, the most it can. Remove one first."
+- **Never pinround.** A scenario never plays on the pinround address you connected to, also when the list allows it: "Scenarios never play on pinround itself." A host is its scheme, host and port, so the same host on another port is not pinround.
+- **One question per host.** Before a run, the popup asks once about each host the run needs that you have not answered yet: "This scenario clicks and types on shop.acme-foods.test. It can change data there." Press **Play anyway** to run; the extension keeps the answer, so the next run there asks nothing. **Cancel** runs nothing.
+- **Remove** next to an entry takes it off the list and forgets your answers for every host the list no longer allows, so a later run there asks again. **Sign out** forgets all answers; the list stays.
+- **A click that leaves.** If a click takes the page to a host you have not said yes to, the run stops before the next step: "Stopped: this page is on bakery.acme-foods.test, which you have not said yes to." Nothing runs there. A host that is not on the list stops the run too.
+
 ## Sign out
-In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it. If pinround cannot be reached, the extension still forgets it and tells you to revoke it on the **API tokens** page.
+In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it, with your "Play anyway" answers. If pinround cannot be reached, the extension still forgets it and tells you to revoke it on the **API tokens** page.
 
 ## Permissions and why
 | Permission | Why |
