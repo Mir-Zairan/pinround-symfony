@@ -9,7 +9,7 @@ with a consent page instead of a pasted token. Pasted personal access tokens kee
 - [Context and problem statement](#context-and-problem-statement) — Mia and Omar paste tokens; a Claude connector cannot.
 - [Decision drivers](#decision-drivers) — one click, same scopes and voters, short-lived tokens, nothing in logs.
 - [Considered options](#considered-options) — our own OAuth server, pasted tokens only, an outside identity server.
-- [Decision outcome](#decision-outcome) — the flow, redirect URIs, consent and its organization, the tokens, the clients, pasted tokens.
+- [Decision outcome](#decision-outcome) — the flow, redirect URIs, consent (its organization, its CSRF token), the tokens, the clients, pasted tokens.
   - [Consequences](#consequences) — what gets easier and what it costs.
 - [Confirmation](#confirmation) — the tests of P14.T20.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — the trade-offs.
@@ -65,7 +65,9 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
   page itself, with no redirect and no code.
 - **Consent.** A consent page in the signed-in browser lists the client and the scopes it asks for. The person picks
   one organization they are a member of, then allows or denies. The consent POST checks on the server that the
-  person is a member of the posted organization; otherwise it answers 404 and issues no code.
+  person is a member of the posted organization; otherwise it answers 404 and issues no code. The Allow POST needs a
+  valid CSRF token; without one it answers 422 ("The page was open too long. Try again.", as the other forms do) and
+  issues no code.
 - **One organization per grant.** The code, the access token and the refresh token are bound to the organization
   picked on the consent page, as a personal access token is bound to its organization. A token reads and writes only
   that organization, and stops working (access and refresh) when the person's membership of it ends.
@@ -106,6 +108,7 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
   access token of Acme Foods. After the person leaves Acme Foods, its access and refresh tokens are refused.
 - A consent submitted with the id of an organization the person is not a member of answers 404, and no code is
   issued.
+- An Allow POST with a missing or wrong CSRF token answers 422, and no code is issued.
 - Tokens never appear in logs (log test).
 - The MCP and REST integration tests of ADR-0021 run with an issued token as with a personal access token: wrong
   tenant not found, missing scope refused, another person's draft not found.
