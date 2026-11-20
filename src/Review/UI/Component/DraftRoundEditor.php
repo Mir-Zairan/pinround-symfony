@@ -33,7 +33,9 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
 /**
  * The owner's unshared draft round on the ticket page (P05.T8 step 2, ADR-0017, ticket-page.md "Draft round"): its
  * card with the screenshots, each with its "Looks right" / "Not right yet" toggle, title, note (the summary), pins and
- * "Remove screenshot", "k of n look right", and "Add screenshot". Each change is saved at once through RoundCommands'
+ * "Remove screenshot", "k of n look right", and "Add screenshot". A retaken screenshot shows its latest try with
+ * "Try 2 of 2" and a switch to its earlier tries (ADR-0048); an earlier try is read-only but for marking its pins
+ * "Fixed on try N" or "Still wrong" and "Remove this try". Each change is saved at once through RoundCommands'
  * draft commands, in the request transaction: a RoundRefused other than NOT_FOUND is shown in the card and saves
  * nothing; NOT_FOUND is the round's 404.
  *
@@ -56,6 +58,14 @@ final class DraftRoundEditor
 
     #[LiveProp]
     public string $roundId = '';
+
+    /**
+     * The earlier tries the owner switched to, at most one per chain; a chain with none here shows its latest try.
+     *
+     * @var list<string>
+     */
+    #[LiveProp]
+    public array $shownTryIds = [];
 
     /** The draft's card as the Rounds frame read it; null on a live request, which reads it again after its change. */
     public ?RoundCard $card = null;
@@ -104,10 +114,47 @@ final class DraftRoundEditor
         $this->change(fn (UserId $owner, \DateTimeImmutable $now): string => $this->roundCommands->addDraftScreenshot($this->roundId, $owner, $mediaId, $now));
     }
 
+    /**
+     * Removes a screenshot, or one try of it: "Remove this try" on an earlier try sends that try's id.
+     */
     #[LiveAction]
     public function removeScreenshot(#[LiveArg] string $screenshotId): void
     {
         $this->change(fn (UserId $owner, \DateTimeImmutable $now) => $this->roundCommands->removeDraftScreenshot($this->roundId, $owner, $screenshotId, $now));
+    }
+
+    /**
+     * Shows one try of a screenshot in place of the one shown; the latest try is what a chain shows by default. Reads
+     * the draft and changes nothing stored.
+     */
+    #[LiveAction]
+    public function showTry(#[LiveArg] string $screenshotId): void
+    {
+        foreach ($this->draftCard()->screenshots ?? [] as $item) {
+            $tryIds = array_map(static fn (RoundCardScreenshot $try): string => $try->screenshotId, $item->tries());
+            if (!\in_array($screenshotId, $tryIds, true)) {
+                continue;
+            }
+            $this->shownTryIds = array_values(array_diff($this->shownTryIds, $tryIds));
+            if ($item->screenshotId !== $screenshotId) {
+                $this->shownTryIds[] = $screenshotId;
+            }
+
+            return;
+        }
+        $this->refusal = RoundRefused::SCREENSHOT_NOT_FOUND;
+    }
+
+    /**
+     * Marks a pin of an earlier try (ADR-0048).
+     *
+     * @param string $verdict VerdictCommands::PIN_FIXED, PIN_STILL_WRONG, or '' to clear it: a pressed chip sends '', so
+     *                        pressing it again takes the mark back
+     */
+    #[LiveAction]
+    public function setPinVerdict(#[LiveArg] string $pinId, #[LiveArg] string $verdict): void
+    {
+        $this->change(fn (UserId $owner, \DateTimeImmutable $now) => $this->roundCommands->setDraftPinVerdict($this->roundId, $owner, $pinId, '' === $verdict ? null : $verdict, $now));
     }
 
     /**
@@ -172,6 +219,20 @@ final class DraftRoundEditor
         return new ScreenshotView($view->domId, $view->imageUrl, $view->width, $view->height, $view->altText, null, null, $view->pins, $view->status);
     }
 
+    /**
+     * The try of the screenshot the owner switched to, or its latest.
+     */
+    public function shownTryOf(RoundCardScreenshot $screenshot): RoundCardScreenshot
+    {
+        foreach ($screenshot->earlierTries as $earlierTry) {
+            if (\in_array($earlierTry->screenshotId, $this->shownTryIds, true)) {
+                return $earlierTry;
+            }
+        }
+
+        return $screenshot;
+    }
+
     public function draftCsrfId(): string
     {
         return DraftRoundController::csrfIdOf($this->ticketKey);
@@ -213,6 +274,22 @@ final class DraftRoundEditor
             }
             $this->refusal = $refused->getMessage();
         }
+        $this->forgetShownTriesThatAreNoLongerEarlier();
+    }
+
+    /**
+     * A removed try, or one that became the latest when the try after it was removed, leaves the switch; otherwise a
+     * later retake would open on it. Reads the draft as stored now, which the render then reuses.
+     */
+    private function forgetShownTriesThatAreNoLongerEarlier(): void
+    {
+        $earlierTryIds = [];
+        foreach ($this->draftCard()->screenshots ?? [] as $item) {
+            foreach ($item->earlierTries as $earlierTry) {
+                $earlierTryIds[] = $earlierTry->screenshotId;
+            }
+        }
+        $this->shownTryIds = array_values(array_intersect($this->shownTryIds, $earlierTryIds));
     }
 
     /**
