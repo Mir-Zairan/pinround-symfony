@@ -1,6 +1,7 @@
 // The popup: choose once where captures go (a new report, my draft round on a ticket, a notebook), pin the page, then
 // capture the visible tab with its pins into that target. Nothing becomes a ticket here: the person sends a report
-// draft in pinround (ADR-0039).
+// draft in pinround (ADR-0039). A notebook target also shows its scenarios (scenario-panel.js), played from here: the
+// run lives as long as the popup.
 import { PinroundApi } from '../shared/api.js';
 import { browser } from '../shared/browser.js';
 import { loadSettings } from '../shared/settings.js';
@@ -8,16 +9,24 @@ import { captureTexts } from '../capture/capture.js';
 import { NEW_NOTEBOOK, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, notebookChoice, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
 import { captureToTarget, newReportSavedMessage } from '../capture/capture-to-target.js';
 import { OLD_CAPTURES_DROPPED, clearNewReport, dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture } from '../capture/new-report.js';
-import { makeNotebook } from '../capture/notebook-capture.js';
-import { activeTabId, closePinOverlay, openPinOverlay } from '../capture/page-pins.js';
+import { captureToNotebook, makeNotebook } from '../capture/notebook-capture.js';
+import { activeTabId, openPinOverlay } from '../capture/page-pins.js';
+import { StepRefusal } from '../player/step-runner.js';
 import { fillReportInputs, showTargetFields } from './report-captures.js';
+import { ScenarioPanel } from './scenario-panel.js';
 import { NO_CHOICE, forgetGoneTarget } from './target-picker.js';
+import { focusFirstVisible } from './visible-focus.js';
 
 const element = (id) => document.getElementById(id);
 const extensionSession = browser.storage.session;
 
 /** The targets the picker offers, by option value; "A new notebook" and the empty choice are no target. */
 const offeredTargets = new Map();
+/** Where focus goes when the pressed control is hidden by what the press changed. */
+const FALLBACK_FOCUS_IDS = ['capture', 'target'];
+
+/** @type {ScenarioPanel|null} */
+let scenarioPanel = null;
 
 function showStatus(message, isError = false) {
     const status = element('status');
@@ -50,6 +59,37 @@ function chosenTarget() {
     }
 
     return target;
+}
+
+/** The scenarios of the picker's choice; any choice but a notebook hides them. */
+function showScenariosOfPicker() {
+    scenarioPanel.showFor(offeredTargets.get(element('target').value));
+}
+
+/** Takes a target pinround says is gone out of the picker, and the scenarios out of sight when the picker showed it. */
+async function forgetGoneTargetOfPicker(goneTarget) {
+    const shownValue = element('target').value;
+    await forgetGoneTarget(extensionSession, element('target'), offeredTargets, goneTarget);
+    if (shownValue !== element('target').value) {
+        showScenariosOfPicker();
+    }
+}
+
+/**
+ * A scenario's capture step into the notebook the panel shows. A notebook that is gone leaves the picker as a capture
+ * of the page would, and the step stops with pinround's plain message.
+ */
+async function captureStepToNotebook(api, notebook, tabId, texts) {
+    try {
+        await captureToNotebook(api, browser, notebook, tabId, texts);
+    } catch (error) {
+        if (!(error instanceof TargetGoneError)) {
+            throw error;
+        }
+        await forgetGoneTargetOfPicker(error.target);
+        showStatus(error.message, true);
+        throw new StepRefusal(error.message);
+    }
 }
 
 async function pinPage() {
@@ -85,6 +125,7 @@ async function newNotebook(api) {
     await saveCaptureTarget(extensionSession, choice.target);
     element('notebook-title').value = '';
     await showFields();
+    showScenariosOfPicker();
     showStatus('Notebook made. Captures now go to it.');
 }
 
@@ -120,7 +161,7 @@ async function run(work) {
     } catch (error) {
         isTargetGone = error instanceof TargetGoneError;
         if (isTargetGone) {
-            await forgetGoneTarget(extensionSession, element('target'), offeredTargets, error.target);
+            await forgetGoneTargetOfPicker(error.target);
         }
         showStatus(error.message, true);
     } finally {
@@ -131,8 +172,9 @@ async function run(work) {
     }
     if (isTargetGone) {
         element('target').focus();
-    } else if (controls.includes(focusedControl) && !focusedControl.hidden) {
-        focusedControl.focus();
+    } else if (controls.includes(focusedControl)) {
+        // Done, Start over and Send it again hide themselves once they worked, and the notebook title's button too.
+        focusFirstVisible([focusedControl, ...FALLBACK_FOCUS_IDS.map(element)]);
     }
 }
 
@@ -146,6 +188,14 @@ async function start() {
     }
     const api = new PinroundApi(settings.origin, settings.token);
     element('capture-form').hidden = false;
+    scenarioPanel = new ScenarioPanel(element, showStatus, {
+        api,
+        browser,
+        storage: browser.storage.local,
+        pinroundOrigin: settings.origin,
+        activeTabId: () => activeTabId(browser),
+        captureToNotebook: (notebook, tabId, texts) => captureStepToNotebook(api, notebook, tabId, texts),
+    }, FALLBACK_FOCUS_IDS);
     const hadOldCaptures = await dropOldReportCaptures(extensionSession);
     fillReportInputs(element, await loadNewReport(extensionSession));
     const { choices, target, droppedMessage, loadProblems } = await targetChoices(api, await loadCaptureTarget(extensionSession));
@@ -154,6 +204,7 @@ async function start() {
         await forgetCaptureTarget(extensionSession);
     }
     await showFields();
+    showScenariosOfPicker();
     const problems = [droppedMessage, ...loadProblems, hadOldCaptures ? OLD_CAPTURES_DROPPED : null].filter((problem) => null !== problem);
     if (problems.length > 0) {
         showStatus(problems.join(' '), true);
@@ -167,6 +218,7 @@ async function start() {
             await saveCaptureTarget(extensionSession, target);
         }
         await showFields();
+        showScenariosOfPicker();
     });
     for (const id of ['project', 'report-title']) {
         element(id).addEventListener('change', () => saveTypedReport(extensionSession, { project: element('project').value, reportTitle: element('report-title').value }));

@@ -1,6 +1,9 @@
-// The options page: pair with a pasted token, or sign out (pairing.js).
+// The options page: pair with a pasted token, or sign out (pairing.js), and the hosts scenarios may play on
+// (allowed-host-list.js).
 import { ApiError } from '../shared/api.js';
+import { browser } from '../shared/browser.js';
 import { SettingsError, loadSettings } from '../shared/settings.js';
+import { AllowedHostList } from './allowed-host-list.js';
 import { pair, signOut } from './pairing.js';
 
 const element = (id) => document.getElementById(id);
@@ -32,3 +35,4 @@ element('sign-out').addEventListener('click', async () => {
     showPaired(null);
 });
 loadSettings().then(showPaired);
+new AllowedHostList(document, browser.storage.local).show();

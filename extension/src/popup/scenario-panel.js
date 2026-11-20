@@ -5,6 +5,7 @@
 import { shownText } from '../capture/untrusted-text.js';
 import { NOTEBOOK_PLAYER_TEXTS, NotebookPlayer, loadNotebookScenarios } from '../player/notebook-player.js';
 import { SAY_MAX_LENGTH, SETUP_MAX_LENGTH, TITLE_MAX_LENGTH, WHY_MAX_LENGTH } from '../player/scenario-rules.js';
+import { focusFirstVisible } from './visible-focus.js';
 
 export const PANEL_TEXTS = Object.freeze({
     loading: 'Loading the scenarios…',
@@ -19,7 +20,10 @@ export class ScenarioPanel {
     #element;
     #showStatus;
     #playerDeps;
+    #fallbackFocusIds;
     #player = null;
+    /** Answers an open host question with Cancel, for a player that is closed before the person answered. */
+    #cancelQuestion = null;
     #loadsStarted = 0;
     /** Where focus goes back to when a run ends under the keyboard. */
     #lastPressedId = 'player-play';
@@ -29,11 +33,14 @@ export class ScenarioPanel {
      * @param {(message: string, isError?: boolean) => void} showStatus the popup's status line
      * @param {{api: object, browser: object, storage: object, pinroundOrigin: string, activeTabId: () => Promise<number>,
      *   captureToNotebook: (notebook: object, tabId: number, texts: object) => Promise<unknown>}} playerDeps
+     * @param {string[]} fallbackFocusIds the popup controls outside the section that take focus, the first one seen,
+     *   when the section hides the control that had it
      */
-    constructor(element, showStatus, playerDeps) {
+    constructor(element, showStatus, playerDeps, fallbackFocusIds = []) {
         this.#element = element;
         this.#showStatus = showStatus;
         this.#playerDeps = playerDeps;
+        this.#fallbackFocusIds = fallbackFocusIds;
         element('player-play').addEventListener('click', () => this.#press('player-play', (player) => player.play()));
         element('player-step').addEventListener('click', () => this.#press('player-step', (player) => player.step()));
         element('player-back').addEventListener('click', () => this.#press('player-back', (player) => player.back()));
@@ -52,16 +59,20 @@ export class ScenarioPanel {
      */
     async showFor(target) {
         const load = ++this.#loadsStarted;
+        const wasFocused = document.activeElement;
+        this.#cancelQuestion?.();
         await this.#player?.close();
         this.#player = null;
         this.#element('scenario-player').hidden = true;
         if ('notebook' !== target?.kind) {
             this.#element('scenarios').hidden = true;
+            this.#keepFocusVisible(wasFocused);
 
             return;
         }
         this.#element('scenarios').hidden = false;
         this.#showMessage(PANEL_TEXTS.loading);
+        this.#keepFocusVisible(wasFocused);
         let made;
         try {
             const scenarios = await loadNotebookScenarios(this.#playerDeps.api, target.notebookId);
@@ -195,6 +206,14 @@ export class ScenarioPanel {
         return null === document.activeElement || document.body === document.activeElement;
     }
 
+    /** After the section hid the control that had focus, unless the person has since moved it elsewhere. */
+    #keepFocusVisible(wasFocused) {
+        const isFocusUnmoved = wasFocused === document.activeElement || this.#isFocusLost();
+        if (isFocusUnmoved && this.#element('scenarios').contains(wasFocused) && !wasFocused.checkVisibility()) {
+            focusFirstVisible(this.#fallbackFocusIds.map((id) => this.#element(id)));
+        }
+    }
+
     #askToPlay(host) {
         const element = this.#element;
         element('host-question-text').textContent = NOTEBOOK_PLAYER_TEXTS.hostQuestion(host);
@@ -205,12 +224,19 @@ export class ScenarioPanel {
             const listening = new AbortController();
             const answer = (isPlayAnyway) => {
                 listening.abort();
+                this.#cancelQuestion = null;
                 element('host-question').hidden = true;
-                element('player-stop-run').focus();
                 resolve(isPlayAnyway);
             };
-            element('host-question-play').addEventListener('click', () => answer(true), { signal: listening.signal });
-            element('host-question-cancel').addEventListener('click', () => answer(false), { signal: listening.signal });
+            this.#cancelQuestion = () => answer(false);
+            element('host-question-play').addEventListener('click', () => {
+                answer(true);
+                element('player-stop-run').focus();
+            }, { signal: listening.signal });
+            element('host-question-cancel').addEventListener('click', () => {
+                answer(false);
+                element('player-stop-run').focus();
+            }, { signal: listening.signal });
         });
     }
 }
