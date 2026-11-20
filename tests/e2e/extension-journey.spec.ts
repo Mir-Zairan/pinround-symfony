@@ -35,16 +35,23 @@ const RAN_TO_ITS_END = 'The scenario ran to its end.';
 
 test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS });
 
-const madeReportDraftIds: string[] = [];
-const madeNotebookIds: string[] = [];
+/** A report draft or notebook a test is about to make, found again by its owner and its run-unique title. */
+interface MadeByTitle {
+  ownerEmail: string;
+  title: string;
+}
+
+// Recorded before the popup makes them, so a run that fails before the id is read back still deletes them.
+const madeReportDrafts: MadeByTitle[] = [];
+const madeNotebooks: MadeByTitle[] = [];
 
 test.afterEach(() => {
   revokeTokensLeftOpen();
-  for (const id of madeReportDraftIds.splice(0)) {
-    runAsDatabaseOwner(`DELETE FROM rvw_report_draft WHERE id = '${id}'`);
+  for (const { ownerEmail, title } of madeReportDrafts.splice(0)) {
+    runAsDatabaseOwner(`DELETE FROM rvw_report_draft d USING idn_user u WHERE u.id = d.owner_id AND u.email = '${ownerEmail}' AND d.title = '${title}'`);
   }
-  for (const id of madeNotebookIds.splice(0)) {
-    runAsDatabaseOwner(`DELETE FROM rvw_notebook WHERE id = '${id}'`);
+  for (const { ownerEmail, title } of madeNotebooks.splice(0)) {
+    runAsDatabaseOwner(`DELETE FROM rvw_notebook n USING idn_user u WHERE u.id = n.owner_id AND u.email = '${ownerEmail}' AND n.title = '${title}'`);
   }
 });
 
@@ -124,11 +131,11 @@ test('two captures on two test pages for "A new report" make one report draft in
 
   const popup = await openPopupFor(context, testPage);
   await chooseNewReport(popup, { project: 'SHOP', title: reportTitle });
+  madeReportDrafts.push({ ownerEmail: OMAR_EMAIL, title: reportTitle });
   await pinAndCapture(popup, testPage, 'Total is wrong', [0.3, 0.4]);
   await expect(popup.getByRole('status')).toHaveText(FIRST_REPORT_CAPTURE_SAVED);
   const draftId = String((await inSession(popup, 'pinroundNewReport'))?.draftId);
   expect(draftId).toMatch(UUID);
-  madeReportDraftIds.push(draftId);
 
   await testPage.goto(BASKET_PAGE_URL);
   const popupOnBasket = await openPopupFor(context, testPage);
@@ -221,11 +228,11 @@ test('a capture makes "A new notebook" in the app, Claude Code saves three scena
   const popup = await openPopupFor(context, testPage);
   await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'A new notebook' });
   await popup.getByLabel('Notebook title').fill(notebookTitle);
+  madeNotebooks.push({ ownerEmail: OMAR_EMAIL, title: notebookTitle });
   await popup.getByRole('button', { name: 'Make the notebook' }).click();
   await expect(popup.getByRole('status')).toHaveText('Notebook made. Captures now go to it.');
   const notebookId = String((await inSession(popup, 'pinroundCaptureTarget'))?.notebookId);
   expect(notebookId).toMatch(UUID);
-  madeNotebookIds.push(notebookId);
   await pinAndCapture(popup, testPage, 'Coupon field is too short', [0.4, 0.6]);
   await expect(popup.getByRole('status')).toHaveText('Screenshot 1 added to the notebook. Only you see it.');
   await popup.close();
@@ -262,6 +269,10 @@ test('a capture makes "A new notebook" in the app, Claude Code saves three scena
   await player.getByRole('button', { name: 'Next' }).click();
   await expect(player.locator('#scenario-title')).toHaveText('Delivery day');
   await expect(player.locator('#scenario-position')).toHaveText('Scenario 3 of 3');
+  await expect(testPage.locator('#day')).toHaveValue('Monday');
+  await player.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(player.getByRole('status')).toHaveText(RAN_TO_ITS_END);
+  await expect(testPage.locator('#day')).toHaveValue('Wednesday');
 
   await app.bringToFront();
   await app.goto(`${appOrigin}/notebooks`);
