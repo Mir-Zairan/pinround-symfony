@@ -60,7 +60,7 @@ final readonly class GatedToolCallHandler implements RequestHandlerInterface
         }
 
         try {
-            return new Response($request->getId(), $this->toolCallGate->call($tool, $request->arguments));
+            return new Response($request->getId(), $this->toolCallGate->callOverMcp($tool, $request->arguments));
         } catch (ToolRefusal $refusal) {
             if (ToolCallOutcome::InvalidInput === $refusal->outcome) {
                 return Error::forInvalidParams($refusal->getMessage(), $request->getId());

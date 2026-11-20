@@ -40,6 +40,22 @@ final class AgentToolLoaderTest extends TestCase
         self::assertSame(['type' => 'object', 'properties' => [], 'additionalProperties' => false], $listed['whoami']['inputSchema']);
     }
 
+    /**
+     * tools/list is MCP's, so it shows the schema that requires a picture's title and summary (P14.T11).
+     */
+    #[Test]
+    public function aPictureToolIsListedWithItsMcpDefinition(): void
+    {
+        $tool = new ScriptedPictureTool(new GateFixture(), new ToolTarget('ROUND_EDIT', 'a draft', 'round', 'a draft'));
+        $registry = new Registry();
+
+        new AgentToolLoader([$tool])->load($registry);
+
+        $listed = $registry->getTool(ScriptedPictureTool::NAME)->tool;
+        self::assertSame('A picture tool of the tests, over MCP.', $listed->description);
+        self::assertSame(['upload_id', 'title', 'summary'], $listed->inputSchema['required'] ?? null);
+    }
+
     #[Test]
     public function theRegistrysHandlerOfAToolOnlyRefuses(): void
     {

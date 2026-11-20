@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp;
 
 use App\AgentApi\Infrastructure\Mcp\GatedToolCallHandler;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use Mcp\Schema\Content\TextContent;
@@ -24,6 +25,7 @@ use PHPUnit\Framework\TestCase;
 final class GatedToolCallHandlerTest extends TestCase
 {
     private const string SHOP_42 = '019a5f00-0000-7000-8000-00000000e042';
+    private const string OMARS_DRAFT = '019a5f00-0000-7000-8000-00000000e741';
     private const int REQUEST_ID = 7;
 
     #[Test]
@@ -93,6 +95,27 @@ final class GatedToolCallHandlerTest extends TestCase
             self::assertCount(1, $fixture->auditLog->entries, $case);
             self::assertSame(['tool' => ScriptedTool::NAME, 'outcome' => 'invalid_input'], $fixture->auditLog->entries[0]->data, $case);
         }
+    }
+
+    /**
+     * The handler runs the gate's MCP path, so a picture tool's title and summary are required here (P14.T11).
+     */
+    #[Test]
+    public function aPictureWithoutASummaryIsAnInvalidParamsErrorThatNamesItAndNothingRuns(): void
+    {
+        $fixture = new GateFixture(scopes: ['rounds:write'], grants: [['ROUND_EDIT', self::OMARS_DRAFT]]);
+        $tool = new ScriptedPictureTool($fixture, new ToolTarget('ROUND_EDIT', self::OMARS_DRAFT, 'round', self::OMARS_DRAFT));
+
+        $answer = new GatedToolCallHandler([$tool], $fixture->gate, $fixture->logger)->handle(self::callOf(ScriptedPictureTool::NAME, ['upload_id' => 'u1', 'title' => 'Cart']), self::createStub(SessionInterface::class));
+
+        self::assertInstanceOf(Error::class, $answer);
+        self::assertSame(
+            [self::REQUEST_ID, Error::INVALID_PARAMS, \sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, '/summary'))],
+            [$answer->id, $answer->code, $answer->message],
+        );
+        self::assertSame([0, 0], [$tool->targetLookups, $tool->calls]);
+        self::assertSame([], $fixture->writtenLabels());
+        self::assertSame(['tool' => ScriptedPictureTool::NAME, 'outcome' => 'invalid_input'], $fixture->auditLog->entries[0]->data ?? null);
     }
 
     #[Test]

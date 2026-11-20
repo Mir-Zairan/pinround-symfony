@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
-use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextRequiredOverMcp;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -43,8 +44,10 @@ use Psr\Clock\ClockInterface;
  * retake_of makes the picture the next try of a screenshot of the same draft (ADR-0048, P14.T6). Review finds it in the
  * draft the voter granted, so one of another round, another person's draft or another organization, or a malformed id,
  * is not found as an unknown one is, and a sixth try is Review's plain refusal; the savepoint takes the completion back.
+ *
+ * Over MCP the title and the summary are required (P14.T11); /api/v1 for the browser extension keeps them optional.
  */
-final readonly class AddScreenshot implements AgentTool
+final readonly class AddScreenshot implements ScreenshotContextRequiredOverMcp
 {
     public const string NAME = 'add_screenshot';
     public const string AUDIT_TARGET_TYPE = 'round';
@@ -66,26 +69,57 @@ final readonly class AddScreenshot implements AgentTool
     ) {
     }
 
+    /**
+     * /api/v1's, where the title and the summary stay optional.
+     */
     public function definition(): Tool
+    {
+        return self::toolOf(self::inputSchema(), 'title?, summary?', '');
+    }
+
+    public function mcpDefinition(): Tool
+    {
+        return self::toolOf(ScreenshotContextArguments::requiredIn(self::inputSchema()), 'title, summary', ' '.ScreenshotContextArguments::RULE);
+    }
+
+    public function refuseMissingScreenshotContext(array $arguments): void
+    {
+        ScreenshotContextArguments::refuseMissingIn($arguments, '');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function inputSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
+                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_upload gave, after the file was PUT to its put_url.'],
+                'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
+                'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
+                'pins' => PlacedPinArguments::schema(),
+                'retake_of' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The screenshot_id of a screenshot in this draft round that the picture retakes, any of its tries; leave it out for a new screenshot.'],
+            ],
+            'required' => ['key', 'upload_id'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $inputSchema
+     * @param string               $pictureFields how the description writes the title and the summary
+     * @param string               $pictureRule   appended to the description
+     */
+    private static function toolOf(array $inputSchema, string $pictureFields, string $pictureRule): Tool
     {
         return new Tool(
             name: self::NAME,
             title: 'Add a screenshot',
-            inputSchema: [
-                'type' => 'object',
-                'properties' => [
-                    'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
-                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_upload gave, after the file was PUT to its put_url.'],
-                    'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
-                    'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                    'pins' => PlacedPinArguments::schema(),
-                    'retake_of' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The screenshot_id of a screenshot in this draft round that the picture retakes, any of its tries; leave it out for a new screenshot.'],
-                ],
-                'required' => ['key', 'upload_id'],
-                'additionalProperties' => false,
-            ],
+            inputSchema: $inputSchema,
             description: 'Adds a picture you uploaded with create_upload to your own private draft round on a ticket:'
-                .' {key, upload_id, title?, summary?, pins?: [{x_pct, y_pct, note}], retake_of?}. With retake_of, the'
+                .' {key, upload_id, '.$pictureFields.', pins?: [{x_pct, y_pct, note}], retake_of?}.'.$pictureRule.' With retake_of, the'
                 .' screenshot_id of a screenshot in that draft, the picture becomes its next try (at most 5 tries) with'
                 .' its own pins; the earlier tries keep theirs. A retake_of that is not a screenshot of your draft round is'
                 .' not found. While the picture is still being'

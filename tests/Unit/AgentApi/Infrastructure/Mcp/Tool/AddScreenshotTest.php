@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
@@ -162,6 +163,60 @@ final class AddScreenshotTest extends TestCase
     public function argumentsPastACapOrOfAnotherShapeFailTheInputSchema(array $arguments): void
     {
         self::assertNotSame([], $this->problemsOf($arguments));
+    }
+
+    /**
+     * tools/list shows mcpDefinition(); /api/v1, which the browser extension calls, checks definition() (P14.T11).
+     */
+    #[Test]
+    public function overMcpTheSchemaRequiresTheTitleAndTheSummaryWhileApiV1sLeavesThemOptional(): void
+    {
+        $tool = $this->addScreenshot();
+
+        self::assertSame(['key', 'upload_id', 'title', 'summary'], $tool->mcpDefinition()->inputSchema['required'] ?? null);
+        self::assertSame(['key', 'upload_id'], $tool->definition()->inputSchema['required'] ?? null);
+        self::assertStringContainsString('{key, upload_id, title, summary, pins?', (string) $tool->mcpDefinition()->description);
+        self::assertStringContainsString(ScreenshotContextArguments::RULE, (string) $tool->mcpDefinition()->description);
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function argumentsWithoutPictureContext(): iterable
+    {
+        $upload = ['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD];
+        yield 'no title' => [[...$upload, 'summary' => 'The total.'], '/title'];
+        yield 'no summary' => [[...$upload, 'title' => 'Cart'], '/summary'];
+        yield 'a blank title' => [[...$upload, 'title' => " \r\n\u{3000}", 'summary' => 'The total.'], '/title'];
+        yield 'an empty summary' => [[...$upload, 'title' => 'Cart', 'summary' => ''], '/summary'];
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    #[Test]
+    #[DataProvider('argumentsWithoutPictureContext')]
+    public function overMcpAMissingOrBlankTitleOrSummaryIsRefusedWithTheReasonAndNothingIsAdded(array $arguments, string $pointer): void
+    {
+        $refusal = self::refusalOf(fn () => $this->addScreenshot()->refuseMissingScreenshotContext($arguments));
+
+        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
+        self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, $pointer)), $refusal->getMessage());
+        self::assertSame([], $this->draftScreenshots->added);
+    }
+
+    #[Test]
+    public function overMcpATitleAndSummaryWithCrLfAndMultibyteTextPassTheCheckAndTheSchema(): void
+    {
+        $tool = $this->addScreenshot();
+        $arguments = ['key' => 'SHOP-1', 'upload_id' => self::READY_UPLOAD, 'title' => "Cart\r\nPanier · 価格", 'summary' => "Der Gesamtbetrag ist doppelt.\r\n合計が二重です。"];
+
+        $tool->refuseMissingScreenshotContext($arguments);
+
+        self::assertSame([], new SchemaValidator()->validateAgainstJsonSchema(
+            json_decode(json_encode($arguments, \JSON_THROW_ON_ERROR), false, flags: \JSON_THROW_ON_ERROR),
+            $tool->mcpDefinition()->inputSchema,
+        ));
     }
 
     #[Test]

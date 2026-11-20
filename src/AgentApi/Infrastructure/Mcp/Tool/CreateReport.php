@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
-use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextRequiredOverMcp;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -37,9 +38,10 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * pictures the caller uploaded with create_report_upload for the same project. It never makes a ticket: the person opens
  * the draft in pinround, checks it and presses Send. The voter is MediaPermission UPLOAD on the project's new_report
  * target, the same right as the uploads; a key no project has, or one no team owns, is not found. Each upload is
- * finished in the gate's savepoint, so a refusal leaves the uploads unused. Holds no state (ADR-0008).
+ * finished in the gate's savepoint, so a refusal leaves the uploads unused. Over MCP each picture's title and summary
+ * are required (P14.T11); /api/v1 for the browser extension keeps them optional. Holds no state (ADR-0008).
  */
-final readonly class CreateReport implements AgentTool
+final readonly class CreateReport implements ScreenshotContextRequiredOverMcp
 {
     public const string NAME = 'create_report';
     public const string AUDIT_TARGET_TYPE = 'project';
@@ -64,7 +66,57 @@ final readonly class CreateReport implements AgentTool
     ) {
     }
 
+    /**
+     * /api/v1's, where each picture's title and summary stay optional.
+     */
     public function definition(): Tool
+    {
+        return self::toolOf(self::pictureSchema(), 'title?, summary?', '');
+    }
+
+    public function mcpDefinition(): Tool
+    {
+        return self::toolOf(ScreenshotContextArguments::requiredIn(self::pictureSchema()), 'title, summary', ' '.ScreenshotContextArguments::RULE);
+    }
+
+    /**
+     * A report without screenshots needs no picture context; the report's own title is Review's to refuse when blank.
+     */
+    public function refuseMissingScreenshotContext(array $arguments): void
+    {
+        $screenshots = $arguments['screenshots'] ?? null;
+        if (!\is_array($screenshots) || !array_is_list($screenshots)) {
+            return;
+        }
+        foreach ($screenshots as $position => $screenshot) {
+            ScreenshotContextArguments::refuseMissingIn($screenshot, '/screenshots/'.$position);
+        }
+    }
+
+    /**
+     * @return array<string, mixed> one item of screenshots
+     */
+    private static function pictureSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
+                'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
+                'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
+                'pins' => PlacedPinArguments::schema(),
+            ],
+            'required' => ['upload_id'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $pictureSchema one item of screenshots
+     * @param string               $pictureFields how the description writes a picture's title and summary
+     * @param string               $pictureRule   appended to the description
+     */
+    private static function toolOf(array $pictureSchema, string $pictureFields, string $pictureRule): Tool
     {
         return new Tool(
             name: self::NAME,
@@ -79,24 +131,14 @@ final readonly class CreateReport implements AgentTool
                         'type' => 'array',
                         'maxItems' => ReportDrafts::MAX_SCREENSHOTS,
                         'description' => 'The pictures in the order to show them, each uploaded with create_report_upload for this project.',
-                        'items' => [
-                            'type' => 'object',
-                            'properties' => [
-                                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave, after the file was PUT.'],
-                                'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
-                                'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                                'pins' => PlacedPinArguments::schema(),
-                            ],
-                            'required' => ['upload_id'],
-                            'additionalProperties' => false,
-                        ],
+                        'items' => $pictureSchema,
                     ],
                 ],
                 'required' => ['project', 'title'],
                 'additionalProperties' => false,
             ],
             description: 'Makes a private report draft from your text and screenshots: {project, title, detail?,'
-                .' screenshots?: [{upload_id, title?, summary?, pins?: [{x_pct, y_pct, note}]}]}. It never makes a'
+                .' screenshots?: [{upload_id, '.$pictureFields.', pins?: [{x_pct, y_pct, note}]}]}.'.$pictureRule.' It never makes a'
                 .' ticket: only the person can, by opening the draft at the returned url and pressing Send. Use it'
                 .' once the person said to file the report. A picture still processing is fine; Send waits for it.'
                 .' Answers draft_id, url and screenshot_count. The texts you send are shown as the person\'s own report.',

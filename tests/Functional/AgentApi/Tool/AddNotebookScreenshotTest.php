@@ -45,6 +45,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
     private const string LENAS_OTHER_NOTEBOOK = '0197a3c0-0000-7000-8000-0000000d0002';
     private const string OMARS_NOTEBOOK = '0197a3c0-0000-7000-8000-0000000d0003';
     private const string FIRST_PICTURE = '0197a3c0-0000-7000-8000-0000000e0001';
+    private const array PICTURE_CONTEXT = ['title' => 'The cart', 'summary' => 'The total goes below 0.'];
     private const string NOTEBOOK_FULL = 'A notebook holds at most 10 screenshots.';
 
     private KernelBrowser $client;
@@ -107,7 +108,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
         $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, null);
         [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(2, $this->answer()['screenshot_count'] ?? null);
         self::assertSame([[$uploadId, 'notebook', self::LENAS_NOTEBOOK, '2026-11-10 09:00:20']], $this->uploadIntentsOf($this->acmeFoods));
@@ -121,7 +122,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
         $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(AddNotebookScreenshot::PICTURE_REJECTED);
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
@@ -141,7 +142,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
         [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
         $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $fullNotebook, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $fullNotebook, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(self::NOTEBOOK_FULL);
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
@@ -157,11 +158,11 @@ final class AddNotebookScreenshotTest extends WebTestCase
     {
         $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, 'ready');
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
         self::assertSame(['notebook_id' => self::LENAS_NOTEBOOK, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ADDED, 'screenshot_count' => 2], $this->answer());
         $rowsAfterTheFirstCall = $this->notebookRowsOf($this->acmeFoods);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(['notebook_id' => self::LENAS_NOTEBOOK, 'media_id' => $uploadId, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 2], $this->answer());
         self::assertSame($rowsAfterTheFirstCall, $this->notebookRowsOf($this->acmeFoods));
@@ -182,11 +183,11 @@ final class AddNotebookScreenshotTest extends WebTestCase
         $this->addNotebook($this->acmeFoods, $this->people['Lena'], $nearlyFullNotebook, 'Nearly full', '2026-11-02 08:00:00+00', $pictures);
         $tenthPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', $nearlyFullNotebook, 'ready');
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $nearlyFullNotebook, 'upload_id' => $tenthPicture]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $nearlyFullNotebook, 'upload_id' => $tenthPicture, ...self::PICTURE_CONTEXT]);
         self::assertSame(['notebook_id' => $nearlyFullNotebook, 'media_id' => $tenthPicture, 'status' => AddNotebookScreenshot::ADDED, 'screenshot_count' => 10], $this->answer());
         $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $nearlyFullNotebook, 'upload_id' => $tenthPicture]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $nearlyFullNotebook, 'upload_id' => $tenthPicture, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(['notebook_id' => $nearlyFullNotebook, 'media_id' => $tenthPicture, 'status' => AddNotebookScreenshot::ALREADY_IN_NOTEBOOK, 'screenshot_count' => 10], $this->answer());
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
@@ -208,7 +209,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
         $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(AddNotebookScreenshot::UPLOAD_EXPIRED);
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
@@ -236,7 +237,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
             $uploadId = $this->addUpload($organizationId, $person, 'notebook', $notebookId, null);
             [$tokenId, $token] = $this->issueApiToken($person, $organizationId, scopes: [ApiTokenScope::NotebooksWrite]);
 
-            $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $notebookId, 'upload_id' => $uploadId]);
+            $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => $notebookId, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
             $this->assertRefused(ToolRefusal::NOT_FOUND);
             self::assertContains([$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, AddNotebookScreenshot::NAME, 'not_found'], $this->toolRowsOf($organizationId));
@@ -263,7 +264,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
         $intentsBefore = $this->uploadIntentsOf($this->acmeFoods);
 
         foreach ($uploads as $uploadId) {
-            $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+            $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
             $this->assertRefused(ToolRefusal::NOT_FOUND);
         }
@@ -280,7 +281,7 @@ final class AddNotebookScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::Read]);
         $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
 
-        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(\sprintf(ToolRefusal::MISSING_SCOPE, 'notebooks:write'));
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));

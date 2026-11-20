@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
+use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\CurrentApiToken;
@@ -19,6 +21,7 @@ use App\Review\Api\ScreenshotWithPins;
 use App\Review\Domain\Notebook\NotebookRefused as NotebookRule;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use Mcp\Capability\Discovery\SchemaValidator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -146,6 +149,64 @@ final class AddNotebookScreenshotTest extends TestCase
             self::assertSame(NotebookRefused::NOTEBOOK_CHANGED, $refused->getMessage());
         }
         self::assertSame([], $notebooks->added);
+    }
+
+    /**
+     * tools/list shows mcpDefinition(); /api/v1, which the browser extension calls, checks definition() (P14.T11).
+     */
+    #[Test]
+    public function overMcpTheSchemaRequiresTheTitleAndTheSummaryWhileApiV1sLeavesThemOptional(): void
+    {
+        $tool = $this->tool(new ScriptedNotebooks(null));
+
+        self::assertSame(['notebook', 'upload_id', 'title', 'summary'], $tool->mcpDefinition()->inputSchema['required'] ?? null);
+        self::assertSame(['notebook', 'upload_id'], $tool->definition()->inputSchema['required'] ?? null);
+        self::assertStringContainsString('{notebook, upload_id, title, summary, pins?', (string) $tool->mcpDefinition()->description);
+        self::assertStringContainsString(ScreenshotContextArguments::RULE, (string) $tool->mcpDefinition()->description);
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function argumentsWithoutPictureContext(): iterable
+    {
+        $upload = ['notebook' => self::NOTEBOOK, 'upload_id' => self::UPLOAD];
+        yield 'no title' => [[...$upload, 'summary' => 'The total.'], '/title'];
+        yield 'no summary' => [[...$upload, 'title' => 'Cart'], '/summary'];
+        yield 'a blank summary' => [[...$upload, 'title' => 'Cart', 'summary' => "\r\n\u{FEFF}\u{00A0}"], '/summary'];
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    #[Test]
+    #[DataProvider('argumentsWithoutPictureContext')]
+    public function overMcpAMissingOrBlankTitleOrSummaryIsRefusedWithTheReasonAndNothingIsAdded(array $arguments, string $pointer): void
+    {
+        $notebooks = new ScriptedNotebooks(self::notebookWithOnePicture());
+
+        try {
+            $this->tool($notebooks)->refuseMissingScreenshotContext($arguments);
+            self::fail('The call was not refused.');
+        } catch (ToolRefusal $refusal) {
+            self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
+            self::assertSame(\sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, $pointer)), $refusal->getMessage());
+        }
+        self::assertSame([], $notebooks->added);
+    }
+
+    #[Test]
+    public function overMcpATitleAndSummaryWithCrLfAndMultibyteTextPassTheCheckAndTheSchema(): void
+    {
+        $tool = $this->tool(new ScriptedNotebooks(null));
+        $arguments = ['notebook' => self::NOTEBOOK, 'upload_id' => self::UPLOAD, 'title' => "Cart\r\nPanier · 価格", 'summary' => "Der Gesamtbetrag ist doppelt.\r\n合計が二重です。"];
+
+        $tool->refuseMissingScreenshotContext($arguments);
+
+        self::assertSame([], new SchemaValidator()->validateAgainstJsonSchema(
+            json_decode(json_encode($arguments, \JSON_THROW_ON_ERROR), false, flags: \JSON_THROW_ON_ERROR),
+            $tool->mcpDefinition()->inputSchema,
+        ));
     }
 
     #[Test]

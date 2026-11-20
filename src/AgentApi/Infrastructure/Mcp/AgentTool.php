@@ -21,7 +21,8 @@ interface AgentTool
 
     /**
      * What tools/list shows: a name unique among the tools, a description that marks which output fields are text
-     * people entered (ADR-0020), and an input schema of type object, which every call is checked against.
+     * people entered (ADR-0020), and an input schema of type object, which every call is checked against. A
+     * ScreenshotContextRequiredOverMcp tool shows and checks a stricter one over MCP; this one stays /api/v1's.
      */
     public function definition(): Tool;
 
