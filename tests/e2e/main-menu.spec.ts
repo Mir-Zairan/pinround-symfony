@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { LENA_STORAGE_STATE } from './auth';
+import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // As Lena (auth.setup.ts), who leads Shop and Mobile in the demo seed, so her menu has the "Teams" disclosure. Nothing
@@ -126,6 +126,22 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(await seriousViolations(page)).toEqual([]);
   });
 }
+
+test.describe('as Omar, who holds no Admin role', () => {
+  test.use({ storageState: OMAR_STORAGE_STATE });
+
+  test('the menu shows no Admin item and /admin answers 404', async ({ page }) => {
+    await openHome(page);
+
+    await expect(mainMenu(page).getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+    await expect(mainMenu(page).getByText('Admin', { exact: true })).toHaveCount(0);
+
+    const response = await page.goto('/admin');
+
+    expect(response?.status()).toBe(404);
+    await expect(page).toHaveURL('/admin');
+  });
+});
 
 test.describe('narrow viewport', () => {
   test.use({ viewport: { width: 360, height: 800 } });
