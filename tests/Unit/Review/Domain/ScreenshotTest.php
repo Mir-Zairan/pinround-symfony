@@ -20,6 +20,7 @@ final class ScreenshotTest extends TestCase
     private const string SCREENSHOT = '0197a3c0-0000-7000-8000-000000000c01';
     private const string MEDIA = '0197a3c0-0000-7000-8000-000000000d01';
     private const string MIA = '0197a3c0-0000-7000-8000-000000000b03';
+    private const string FIRST_TRY = '0197a3c0-0000-7000-8000-000000000c00';
 
     /**
      * @return iterable<string, array{string}>
@@ -167,7 +168,7 @@ final class ScreenshotTest extends TestCase
     #[Test]
     public function withTextTrimsAndReplacesTheTextAndKeepsPinsVerdictAndLabel(): void
     {
-        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 3, 'Old', 'Old summary', [self::pin(2)], VariantLabel::After, ScreenshotVerdict::NotRight);
+        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 3, 'Old', 'Old summary', [self::pin(2)], VariantLabel::After, ScreenshotVerdict::NotRight, new ScreenshotId(self::FIRST_TRY));
 
         $changed = $original->withText("  New title\n", ' New summary ');
 
@@ -178,6 +179,7 @@ final class ScreenshotTest extends TestCase
         self::assertSame([2], array_map(static fn (Pin $pin): int => $pin->number(), $changed->pins()));
         self::assertSame(VariantLabel::After, $changed->variantLabel());
         self::assertSame(ScreenshotVerdict::NotRight, $changed->verdict());
+        self::assertSame(self::FIRST_TRY, $changed->retakeOf()?->toString());
         self::assertSame('Old', $original->title());
     }
 
@@ -205,7 +207,7 @@ final class ScreenshotTest extends TestCase
     #[Test]
     public function withPinsReplacesThePinsInNumberOrderAndKeepsTextAndVerdict(): void
     {
-        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 0, 'Title', 'Summary', [self::pin(1)], null, ScreenshotVerdict::LooksRight);
+        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 0, 'Title', 'Summary', [self::pin(1)], null, ScreenshotVerdict::LooksRight, new ScreenshotId(self::FIRST_TRY));
 
         $changed = $original->withPins([self::pin(4), self::pin(2)]);
 
@@ -213,6 +215,7 @@ final class ScreenshotTest extends TestCase
         self::assertSame('Title', $changed->title());
         self::assertSame('Summary', $changed->summary());
         self::assertSame(ScreenshotVerdict::LooksRight, $changed->verdict());
+        self::assertSame(self::FIRST_TRY, $changed->retakeOf()?->toString());
         self::assertSame([1], array_map(static fn (Pin $pin): int => $pin->number(), $original->pins()));
         self::assertSame([], $original->withPins([])->pins());
     }
@@ -257,18 +260,61 @@ final class ScreenshotTest extends TestCase
     #[Test]
     public function aRestoredScreenshotKeepsItsLabelAndVerdictAndStillObeysTheRulesOfOf(): void
     {
-        $restored = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), strtoupper(self::MEDIA), 1, ' Title ', null, [self::pin(2), self::pin(1)], VariantLabel::Before, ScreenshotVerdict::LooksRight);
+        $restored = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), strtoupper(self::MEDIA), 1, ' Title ', null, [self::pin(2), self::pin(1)], VariantLabel::Before, ScreenshotVerdict::LooksRight, new ScreenshotId(self::FIRST_TRY));
 
         self::assertSame(VariantLabel::Before, $restored->variantLabel());
         self::assertSame(ScreenshotVerdict::LooksRight, $restored->verdict());
         self::assertSame(self::MEDIA, $restored->mediaId());
         self::assertSame('Title', $restored->title());
         self::assertSame([1, 2], array_map(static fn (Pin $pin): int => $pin->number(), $restored->pins()));
+        self::assertSame(self::FIRST_TRY, $restored->retakeOf()?->toString());
+        self::assertSame(self::FIRST_TRY, $restored->firstTryId()->toString());
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('A screenshot needs the id of an uploaded picture.');
 
-        Screenshot::restored(new ScreenshotId(self::SCREENSHOT), 'screenshot.png', 1, null, null, [], null, null);
+        Screenshot::restored(new ScreenshotId(self::SCREENSHOT), 'screenshot.png', 1, null, null, [], null, null, null);
+    }
+
+    #[Test]
+    public function aNewScreenshotIsTheFirstTryOfItsOwnChain(): void
+    {
+        $screenshot = self::screenshot(0);
+
+        self::assertNull($screenshot->retakeOf());
+        self::assertSame(self::SCREENSHOT, $screenshot->firstTryId()->toString());
+    }
+
+    #[Test]
+    public function asATryItPointsAtTheFirstTryAndKeepsEverythingElseAndAsAFirstTryAgainItPointsNowhere(): void
+    {
+        $original = Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 3, 'Title', 'Summary', [self::pin(1)], VariantLabel::After, ScreenshotVerdict::NotRight, null);
+
+        $try = $original->asTryOf(new ScreenshotId(self::FIRST_TRY));
+
+        self::assertSame(self::FIRST_TRY, $try->retakeOf()?->toString());
+        self::assertSame(self::FIRST_TRY, $try->firstTryId()->toString());
+        self::assertSame([self::SCREENSHOT, self::MEDIA, 3, 'Title', 'Summary', [1], VariantLabel::After, ScreenshotVerdict::NotRight], [$try->id()->toString(), $try->mediaId(), $try->position(), $try->title(), $try->summary(), array_map(static fn (Pin $pin): int => $pin->number(), $try->pins()), $try->variantLabel(), $try->verdict()]);
+        self::assertNull($original->retakeOf());
+        self::assertNull($try->asFirstTry()->retakeOf());
+        self::assertSame(self::SCREENSHOT, $try->asFirstTry()->firstTryId()->toString());
+        self::assertSame(self::FIRST_TRY, $try->withVerdict(ScreenshotVerdict::LooksRight)->retakeOf()?->toString());
+    }
+
+    #[Test]
+    public function aScreenshotIsNeverARetakeOfItself(): void
+    {
+        try {
+            self::screenshot(0)->asTryOf(new ScreenshotId(strtoupper(self::SCREENSHOT)));
+            self::fail('A screenshot became a retake of itself.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('A screenshot cannot be a retake of itself.', $refused->getMessage());
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A screenshot cannot be a retake of itself.');
+
+        Screenshot::restored(new ScreenshotId(self::SCREENSHOT), self::MEDIA, 0, null, null, [], null, null, new ScreenshotId(self::SCREENSHOT));
     }
 
     /**

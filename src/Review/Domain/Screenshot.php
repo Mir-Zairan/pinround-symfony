@@ -17,6 +17,9 @@ final readonly class Screenshot
     // No requirement gives a limit; chosen so one screenshot's pins stay readable and one insert stays small.
     public const int MAX_PINS = 100;
 
+    /** ADR-0048: a screenshot keeps at most 5 tries, the first one included. ScreenshotTriesFull::REASON names it. */
+    public const int MAX_TRIES = 5;
+
     // Version nibble 7 and variant bits 10xx, as Media's ids are; \z, because $ would also accept a trailing newline.
     private const string CANONICAL_UUID_V7 = '/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/';
 
@@ -32,6 +35,7 @@ final readonly class Screenshot
         private array $pins,
         private ?VariantLabel $variantLabel,
         private ?ScreenshotVerdict $verdict,
+        private ?ScreenshotId $retakeOf,
     ) {
     }
 
@@ -76,21 +80,45 @@ final readonly class Screenshot
         }
         usort($pins, static fn (Pin $first, Pin $second): int => $first->number() <=> $second->number());
 
-        return new self($id, $lowercaseMediaId, $position, $trimmedTitle, $trimmedSummary, $pins, null, null);
+        return new self($id, $lowercaseMediaId, $position, $trimmedTitle, $trimmedSummary, $pins, null, null, null);
     }
 
     /**
-     * A stored screenshot as Rounds reads it back, under the rules of of().
+     * A stored screenshot as Rounds reads it back, under the rules of of() and asTryOf().
      *
-     * @param list<Pin> $pins
+     * @param list<Pin>         $pins
+     * @param ScreenshotId|null $retakeOf the first try of its chain; null when it is a first try itself
      *
-     * @throws \InvalidArgumentException when of() would refuse it
+     * @throws \InvalidArgumentException when of() or asTryOf() would refuse it
      */
-    public static function restored(ScreenshotId $id, string $mediaId, int $position, ?string $title, ?string $summary, array $pins, ?VariantLabel $variantLabel, ?ScreenshotVerdict $verdict): self
+    public static function restored(ScreenshotId $id, string $mediaId, int $position, ?string $title, ?string $summary, array $pins, ?VariantLabel $variantLabel, ?ScreenshotVerdict $verdict, ?ScreenshotId $retakeOf): self
     {
         $checked = self::of($id, $mediaId, $position, $title, $summary, $pins);
+        $restored = new self($id, $checked->mediaId, $position, $checked->title, $checked->summary, $checked->pins, $variantLabel, $verdict, null);
 
-        return new self($id, $checked->mediaId, $position, $checked->title, $checked->summary, $checked->pins, $variantLabel, $verdict);
+        return null === $retakeOf ? $restored : $restored->asTryOf($retakeOf);
+    }
+
+    /**
+     * This screenshot as a later try in the chain that $firstTryId starts (ADR-0048).
+     *
+     * @throws \InvalidArgumentException when $firstTryId is this screenshot's own id
+     */
+    public function asTryOf(ScreenshotId $firstTryId): self
+    {
+        if ($firstTryId->equals($this->id)) {
+            throw new \InvalidArgumentException('A screenshot cannot be a retake of itself.');
+        }
+
+        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $this->pins, $this->variantLabel, $this->verdict, $firstTryId);
+    }
+
+    /**
+     * This screenshot as the first try of its chain, as when the try before it was removed.
+     */
+    public function asFirstTry(): self
+    {
+        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $this->pins, $this->variantLabel, $this->verdict, null);
     }
 
     /**
@@ -103,7 +131,7 @@ final readonly class Screenshot
     {
         $checked = self::of($this->id, $this->mediaId, $this->position, $title, $summary, $this->pins);
 
-        return new self($this->id, $this->mediaId, $this->position, $checked->title, $checked->summary, $this->pins, $this->variantLabel, $this->verdict);
+        return new self($this->id, $this->mediaId, $this->position, $checked->title, $checked->summary, $this->pins, $this->variantLabel, $this->verdict, $this->retakeOf);
     }
 
     /**
@@ -117,12 +145,12 @@ final readonly class Screenshot
     {
         $checked = self::of($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $pins);
 
-        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $checked->pins, $this->variantLabel, $this->verdict);
+        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $checked->pins, $this->variantLabel, $this->verdict, $this->retakeOf);
     }
 
     public function withVerdict(?ScreenshotVerdict $verdict): self
     {
-        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $this->pins, $this->variantLabel, $verdict);
+        return new self($this->id, $this->mediaId, $this->position, $this->title, $this->summary, $this->pins, $this->variantLabel, $verdict, $this->retakeOf);
     }
 
     public function id(): ScreenshotId
@@ -166,6 +194,23 @@ final readonly class Screenshot
     public function verdict(): ?ScreenshotVerdict
     {
         return $this->verdict;
+    }
+
+    /**
+     * The first try of this screenshot's chain, which it is a later try of; null when it is a first try. Every later
+     * try of a chain points at the first, never at the try before it.
+     */
+    public function retakeOf(): ?ScreenshotId
+    {
+        return $this->retakeOf;
+    }
+
+    /**
+     * The id of the first try of this screenshot's chain, its own id when it is the first.
+     */
+    public function firstTryId(): ScreenshotId
+    {
+        return $this->retakeOf ?? $this->id;
     }
 
     private static function blankToNull(?string $text): ?string
