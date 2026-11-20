@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing;
 
+use App\Review\Api\RoundCommands;
+use App\Review\Api\RoundRefused;
 use App\Review\Domain\DraftDecision;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundId;
@@ -58,9 +60,11 @@ final class MoveTicketRoundClosingTest extends KernelTestCase
     private const string MIAS_DRAFT = '0197a3c0-0000-7000-8000-0000000c4786';
     private const string LENAS_DRAFT = '0197a3c0-0000-7000-8000-0000000c4787';
     private const string OTHER_TICKETS_FINDINGS = '0197a3c0-0000-7000-8000-0000000c4788';
+    private const string OMARS_DRAFT = '0197a3c0-0000-7000-8000-0000000c4789';
     private const string REPORT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000c4791';
     private const string MIAS_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000c4792';
     private const string LENAS_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000c4793';
+    private const string OMARS_DRAFT_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000c4794';
     private const string MEDIA = '0197a3c0-0000-7000-8000-0000000c47a1';
     private const string KEY = 'SHOP-7';
     private const string STARTED_AT = '2027-03-15 11:00:00+00:00';
@@ -266,6 +270,121 @@ final class MoveTicketRoundClosingTest extends KernelTestCase
         );
     }
 
+    /**
+     * Round 2, Omar's hand-off, is ready for Lena, who leads the team and reviews in Code review. Her lead-only Put on
+     * hold and Go on close nothing, so Omar's "Share now" waits; her Approve code in Code review is the verdict.
+     */
+    #[Test]
+    public function theLeadWhoReviewsLeavesTheRoundOpenOnHoldAndClosesItWithApproveCode(): void
+    {
+        $this->setColumns(['step_id' => self::CODE_REVIEW_STEP, 'previous_step_id' => self::IN_PROGRESS_STEP, 'reviewer_id' => self::LENA]);
+        $this->addRound(self::sharedRound(self::OMARS_HAND_OFF_ROUND, $this->ticketId, self::OMAR, 2, RoundState::Open, DraftDecision::Shared));
+        $this->addRound(self::draftWithAScreenshot(self::OMARS_DRAFT, $this->ticketId, self::OMAR, self::OMARS_DRAFT_SCREENSHOT));
+
+        $this->move(self::LENA, 'put_on_hold');
+
+        self::assertSame(self::ON_HOLD_STEP, $this->stepId());
+        $this->assertOmarsShareNowWaitsForRoundTwo();
+
+        $this->move(self::LENA, 'go_on');
+
+        self::assertSame(self::CODE_REVIEW_STEP, $this->stepId());
+        $this->assertOmarsShareNowWaitsForRoundTwo();
+
+        $this->move(self::LENA, 'approve_code');
+
+        self::assertSame(self::TESTING_STEP, $this->stepId());
+        self::assertSame(
+            [
+                self::OMARS_HAND_OFF_ROUND => [2, self::CLOSED, 'shared'],
+                self::OMARS_DRAFT => [null, self::OPEN, null],
+            ],
+            $this->roundsOf($this->ticketId),
+        );
+        $this->assertOtherTicketsRoundIsOpen();
+    }
+
+    /**
+     * Lena's "Move to another step…" to Testing passes her turn by, so Round 2 waits for Mia, whose turn it is now; her
+     * Pass it closes it, and Omar's next share takes Round 3.
+     */
+    #[Test]
+    public function afterTheLeadMovesTheTicketToTestingTheTestersPassItClosesTheRoundAndFreesTheNextShare(): void
+    {
+        $this->setColumns(['step_id' => self::CODE_REVIEW_STEP, 'previous_step_id' => self::IN_PROGRESS_STEP, 'reviewer_id' => self::LENA]);
+        $this->addRound(self::sharedRound(self::OMARS_HAND_OFF_ROUND, $this->ticketId, self::OMAR, 2, RoundState::Open, DraftDecision::Shared));
+        $this->addRound(self::draftWithAScreenshot(self::OMARS_DRAFT, $this->ticketId, self::OMAR, self::OMARS_DRAFT_SCREENSHOT));
+
+        $this->moveTo(self::LENA, self::TESTING_STEP);
+
+        self::assertSame(self::TESTING_STEP, $this->stepId());
+        $this->assertOmarsShareNowWaitsForRoundTwo();
+
+        $this->move(self::MIA, 'pass_it');
+
+        self::assertSame(self::DONE_STEP, $this->stepId());
+        self::assertSame(
+            [
+                self::OMARS_HAND_OFF_ROUND => [2, self::CLOSED, 'shared'],
+                self::OMARS_DRAFT => [null, self::OPEN, null],
+            ],
+            $this->roundsOf($this->ticketId),
+        );
+
+        self::assertSame(3, $this->shareNow(self::OMAR, self::OMARS_DRAFT));
+
+        self::assertSame(
+            [
+                self::OMARS_HAND_OFF_ROUND => [2, self::CLOSED, 'shared'],
+                self::OMARS_DRAFT => [3, self::OPEN, null],
+            ],
+            $this->roundsOf($this->ticketId),
+        );
+        $this->assertOtherTicketsRoundIsOpen();
+    }
+
+    /**
+     * Lena's "Move to another step…" back to In progress leaves Round 2 open for Omar, whose turn it is now; his Send to
+     * code review closes it and then shares his draft as Round 3, both in the one transaction of the move.
+     */
+    #[Test]
+    public function afterTheLeadMovesTheTicketBackTheDevelopersHandOffClosesTheRoundAndSharesTheirDraftInOneMove(): void
+    {
+        $this->setColumns(['step_id' => self::CODE_REVIEW_STEP, 'previous_step_id' => self::IN_PROGRESS_STEP, 'reviewer_id' => self::LENA]);
+        $this->addRound(self::sharedRound(self::OMARS_HAND_OFF_ROUND, $this->ticketId, self::OMAR, 2, RoundState::Open, DraftDecision::Shared));
+        $this->addRound(self::draftWithAScreenshot(self::OMARS_DRAFT, $this->ticketId, self::OMAR, self::OMARS_DRAFT_SCREENSHOT));
+
+        $this->moveTo(self::LENA, self::IN_PROGRESS_STEP);
+
+        self::assertSame(self::IN_PROGRESS_STEP, $this->stepId());
+        self::assertSame(
+            [
+                self::OMARS_HAND_OFF_ROUND => [2, self::OPEN, 'shared'],
+                self::OMARS_DRAFT => [null, self::OPEN, null],
+            ],
+            $this->roundsOf($this->ticketId),
+        );
+
+        $question = $this->refusalOf(fn () => $this->move(self::OMAR, 'send_to_code_review', null));
+
+        self::assertInstanceOf(DraftDecisionNeeded::class, $question);
+        self::assertSame([self::OMARS_DRAFT, 3, null, false], [$question->draft->roundId, $question->draft->roundNumber, $question->draft->openRoundNumber, $question->draft->isSharingBlocked()]);
+        self::assertSame(self::IN_PROGRESS_STEP, $this->stepId());
+
+        $this->move(self::OMAR, 'send_to_code_review', DraftChoice::Share);
+
+        self::assertSame(self::CODE_REVIEW_STEP, $this->stepId());
+        self::assertSame(
+            [
+                self::OMARS_HAND_OFF_ROUND => [2, self::CLOSED, 'shared'],
+                self::OMARS_DRAFT => [3, self::OPEN, 'shared'],
+            ],
+            $this->roundsOf($this->ticketId),
+        );
+        self::assertSame(['2027-03-16 09:30:00', '2027-03-16 09:30:00'], $this->sharedAndDecidedAtOf(self::OMARS_DRAFT));
+        $this->assertOtherTicketsRoundIsOpen();
+    }
+
     private static function sharedRound(string $roundId, TicketId $ticketId, string $ownerId, int $number, RoundState $state, ?DraftDecision $decision): Round
     {
         return Round::restored(
@@ -328,6 +447,36 @@ final class MoveTicketRoundClosingTest extends KernelTestCase
             null,
             new \DateTimeImmutable(self::MOVED_AT),
         ));
+    }
+
+    /**
+     * Omar's "Share now", outside a move, as the draft page shares.
+     *
+     * @return int the round number the draft took
+     */
+    private function shareNow(string $ownerId, string $draftId): int
+    {
+        return $this->transactions()->committedAs(self::ACME_FOODS, fn (): int => $this->roundCommands()->shareDraft(
+            $draftId,
+            new UserId($ownerId),
+            new \DateTimeImmutable(self::MOVED_AT),
+        ));
+    }
+
+    private function assertOmarsShareNowWaitsForRoundTwo(): void
+    {
+        $refusal = $this->refusalOf(fn (): int => $this->shareNow(self::OMAR, self::OMARS_DRAFT));
+
+        self::assertInstanceOf(RoundRefused::class, $refusal);
+        self::assertSame('Round 2 is still open. Wait for its verdict before you share.', $refusal->getMessage());
+        self::assertSame([true, 2], [$refusal->isSharingBlocked(), $refusal->openRoundNumber()]);
+        self::assertSame(
+            [
+                self::OMARS_HAND_OFF_ROUND => [2, self::OPEN, 'shared'],
+                self::OMARS_DRAFT => [null, self::OPEN, null],
+            ],
+            $this->roundsOf($this->ticketId),
+        );
     }
 
     /**
@@ -471,6 +620,11 @@ final class MoveTicketRoundClosingTest extends KernelTestCase
         self::assertInstanceOf(TicketCommands::class, $ticketCommands);
 
         return $ticketCommands;
+    }
+
+    private function roundCommands(): RoundCommands
+    {
+        return self::getContainer()->get(RoundCommands::class);
     }
 
     private function migrator(): Connection
