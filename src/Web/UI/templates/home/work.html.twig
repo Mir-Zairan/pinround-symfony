@@ -17,7 +17,15 @@
     <div class="home" {{ stimulus_controller('focus-chips') }}>
         <header class="home__header">
             <p class="home__date">{{ today|date('l, j F', app.user.timeZone) }}</p>
-            <h1 class="home__title">All clear, {{ firstName }}</h1>
+            <h1 class="home__title">
+                {%- if waitingCount == 0 -%}
+                    All clear, {{ firstName }}
+                {%- elseif waitingCount == 1 -%}
+                    1 ticket waits on you, {{ firstName }}
+                {%- else -%}
+                    {{ waitingCount|number_format }} tickets wait on you, {{ firstName }}
+                {%- endif -%}
+            </h1>
             {% include '@Web/home/_notices.html.twig' %}
             {% if isLead %}
                 <p class="home__subline">You lead the team, so reviews, decisions and unclear new tickets come to you.</p>
@@ -35,8 +43,41 @@
 
         <div class="home__row">
             <div class="home__column home__column--main">
-                {% include '@Web/home/_section.html.twig' with {id: 'needs-you-now', title: 'Needs you now', group: 'my_work', focus: focus.value, message: 'Nothing waits on you right now.'} only %}
-                {% include '@Web/home/_section.html.twig' with {id: 'also-waiting', title: 'Also waiting on you', group: 'my_work', focus: focus.value, message: 'Nothing else waits on you.'} only %}
+                {% embed '@Web/home/_section.html.twig' with {id: 'needs-you-now', title: 'Needs you now', group: 'my_work', focus: focus.value, needsYouNow: needsYouNow, waitingCount: waitingCount, notShownCount: notShownCount, seeAllUrl: seeAllUrl} only %}
+                    {% block header_extra %}
+                        {% if notShownCount > 0 %}
+                            <span class="home__section-note">top {{ needsYouNow|length }} of {{ waitingCount|number_format }}</span>
+                            <twig:Button variant="text" size="sm" href="{{ seeAllUrl }}" class="home__see-all">See all</twig:Button>
+                        {% endif %}
+                    {% endblock %}
+                    {% block body %}
+                        {% if needsYouNow is empty %}
+                            <twig:EmptyState message="Nothing waits on you right now."/>
+                        {% else %}
+                            {# No hover prefetch: each link would cost a ticket page's queries. #}
+                            <ol class="home__needs" data-turbo-prefetch="false">
+                                {% for ticket in needsYouNow %}
+                                    <li class="home__need">
+                                        <span class="home__rank{{ loop.first ? ' home__rank--first' }}" aria-hidden="true">{{ loop.index }}</span>
+                                        <a class="home__need-link" href="{{ ticket.url }}"><span class="home__need-key">{{ ticket.key }}</span> · <span class="home__need-title">{{ ticket.title }}</span></a>
+                                        <span class="home__need-wait">{{ ticket.wait }}</span>
+                                    </li>
+                                {% endfor %}
+                            </ol>
+                        {% endif %}
+                    {% endblock %}
+                {% endembed %}
+                {% embed '@Web/home/_section.html.twig' with {id: 'also-waiting', title: 'Also waiting on you', group: 'my_work', focus: focus.value, notShownCount: notShownCount} only %}
+                    {% block body %}
+                        {% if notShownCount == 0 %}
+                            <twig:EmptyState message="Nothing else waits on you."/>
+                        {% elseif notShownCount == 1 %}
+                            <p class="home__also-waiting">1 more ticket waits on you.</p>
+                        {% else %}
+                            <p class="home__also-waiting">{{ notShownCount|number_format }} more tickets wait on you.</p>
+                        {% endif %}
+                    {% endblock %}
+                {% endembed %}
             </div>
             <aside class="home__column home__column--aside" aria-label="More for you">
                 {% if isAdmin %}
@@ -46,7 +87,25 @@
                 {% if isLead %}
                     {% include '@Web/home/_section.html.twig' with {id: 'release', title: 'Release', group: 'my_team', focus: focus.value, message: 'Your team has no release yet.'} only %}
                 {% endif %}
-                {% include '@Web/home/_section.html.twig' with {id: 'your-team', title: 'Your team', group: 'my_team', focus: focus.value, message: 'The people of your team will show here.'} only %}
+                {% embed '@Web/home/_section.html.twig' with {id: 'your-team', title: 'Your team', group: 'my_team', focus: focus.value, teamStacks: teamStacks} only %}
+                    {% block body %}
+                        {% if teamStacks is empty %}
+                            <twig:EmptyState message="You are not in a team yet."/>
+                        {% else %}
+                            <ul class="home__team-stacks">
+                                {% for team in teamStacks %}
+                                    <li class="home__team-stack">
+                                        {% if teamStacks|length > 1 %}
+                                            <h3 class="home__team-stack-name">{{ team.name }}</h3>
+                                        {% endif %}
+                                        <twig:AvatarStack :names="team.names" />
+                                        <twig:Button variant="text" size="sm" href="{{ team.url }}" class="home__team-link">{{ team.peopleText }} · see who has what</twig:Button>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
+                    {% endblock %}
+                {% endembed %}
             </aside>
         </div>
 
