@@ -6,9 +6,9 @@ namespace App\Organization\Infrastructure\Doctrine;
 
 use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
-use App\Organization\Application\NotInTheOrganization;
 use App\Organization\Application\OrganizationPeopleQueries;
 use App\Organization\Application\OrganizationPerson;
+use App\Organization\Application\PeoplePageCursor;
 use App\Organization\Application\PersonInTeam;
 use App\Organization\Domain\OrgRole;
 use App\SharedKernel\Domain\OrganizationId;
@@ -28,7 +28,7 @@ final readonly class DbalOrganizationPeopleQueries implements OrganizationPeople
     {
     }
 
-    public function pageOf(OrganizationId $organizationId, int $limit, ?UserId $after = null): array
+    public function pageOf(OrganizationId $organizationId, int $limit, ?PeoplePageCursor $after = null): array
     {
         if ($limit < 1 || $limit > self::MAX_LIMIT) {
             throw new \InvalidArgumentException(\sprintf('A page of people holds 1 to %d, not %d.', self::MAX_LIMIT, $limit));
@@ -38,18 +38,16 @@ final readonly class DbalOrganizationPeopleQueries implements OrganizationPeople
             self::userIdOf(...),
             $this->connection->fetchFirstColumn('SELECT user_id FROM org_membership WHERE organization_id = ?', [$organizationId->toString()]),
         );
-        $members = [] === $memberIds ? [] : array_values($this->userQueries->byIds($memberIds));
-        usort($members, self::compareByName(...));
+        $members = array_map(
+            static fn (UserView $member): array => ['nameKey' => PeoplePageCursor::nameKeyOf($member->displayName), 'userId' => $member->id->toString(), 'member' => $member],
+            [] === $memberIds ? [] : array_values($this->userQueries->byIds($memberIds)),
+        );
+        usort($members, static fn (array $first, array $second): int => self::compareByName($first['nameKey'], $first['userId'], $second['nameKey'], $second['userId']));
 
-        $start = 0;
         if (null !== $after) {
-            $afterIndex = array_find_key($members, static fn (UserView $member): bool => $member->id->equals($after));
-            if (null === $afterIndex) {
-                throw new NotInTheOrganization('The person the page of people starts after is not in the organization.');
-            }
-            $start = $afterIndex + 1;
+            $members = array_filter($members, static fn (array $member): bool => self::compareByName($member['nameKey'], $member['userId'], $after->nameKey, $after->userId->toString()) > 0);
         }
-        $page = \array_slice($members, $start, $limit);
+        $page = array_column(\array_slice($members, 0, $limit), 'member');
         if ([] === $page) {
             return [];
         }
@@ -69,12 +67,14 @@ final readonly class DbalOrganizationPeopleQueries implements OrganizationPeople
     }
 
     /**
-     * Case is ignored first so "lena" sits beside "Lena"; the id then orders people with the same name, so every page
-     * starts where the last one ended.
+     * The id orders people with the same name key, so every page starts where the last one ended. strcmp, as <=> would
+     * compare names such as "10" and "9" as numbers, an order a cursor cannot follow.
      */
-    private static function compareByName(UserView $first, UserView $second): int
+    private static function compareByName(string $firstNameKey, string $firstUserId, string $secondNameKey, string $secondUserId): int
     {
-        return [mb_strtolower($first->displayName), $first->id->toString()] <=> [mb_strtolower($second->displayName), $second->id->toString()];
+        $byNameKey = strcmp($firstNameKey, $secondNameKey);
+
+        return 0 !== $byNameKey ? $byNameKey : strcmp($firstUserId, $secondUserId);
     }
 
     /**

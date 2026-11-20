@@ -113,6 +113,40 @@ final class AdminPeopleTokensTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('No API tokens work now.', $page->filter('main .people__tokens .empty-state')->text());
         self::assertCount(0, $page->filter('main .people__token-row'));
+        self::assertCount(0, $page->filter('main .people__tokens a'));
+    }
+
+    /**
+     * Past the last token to expire, a later page says there are no more and links back to the first page, with the
+     * people's page kept; "No API tokens work now." would be wrong there, as Omar's token works.
+     */
+    #[Test]
+    public function aLaterPageOfTokensWithNoneLeftLinksBackToTheFirstPage(): void
+    {
+        [$sara, $acmeFoods, $omar, $lena] = $this->acmeFoodsWithSaraOmarAndLena();
+        [$omarsToken] = $this->issueApiToken($omar, $acmeFoods, '2099-01-20 10:00:00 UTC');
+        $this->logInWithACode($this->client, $this->clock, $sara);
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [
+            PeopleController::PEOPLE_AFTER_NAME => 'lena berg',
+            PeopleController::PEOPLE_AFTER_ID => $lena->id()->toString(),
+            PeopleController::TOKENS_AFTER_EXPIRES_AT => '2100-01-01T00:00:00+00:00',
+            PeopleController::TOKENS_AFTER_ID => '0198f000-0000-7000-8000-0000000002ff',
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([], $this->tokenIdsOn($page));
+        self::assertCount(0, $page->filter('main .people__tokens .empty-state'));
+        $firstPageLink = $page->filter('main .people__tokens a');
+        self::assertCount(1, $firstPageLink);
+        self::assertSame('No more tokens. Back to the first page', $page->filter('main .people__tokens p.people__sub')->text());
+        self::assertSame('/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString(), $firstPageLink->attr('href'));
+
+        $page = $this->client->click($firstPageLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$omarsToken], $this->tokenIdsOn($page));
+        self::assertSame(['Omar Haddad', 'Sara Holm'], $this->peopleNamesOn($page));
     }
 
     /**
@@ -163,6 +197,8 @@ final class AdminPeopleTokensTest extends WebTestCase
         $this->logInWithACode($this->client, $this->clock, $sara);
 
         $page = $this->client->request('GET', self::PEOPLE_PAGE, [
+            PeopleController::PEOPLE_AFTER_NAME => 'lena berg',
+            PeopleController::PEOPLE_AFTER_ID => $lena->id()->toString(),
             PeopleController::AFTER_INVITED_AT => '2026-11-16T13:59:00.000000+00:00',
             PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
             PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00',
@@ -170,15 +206,18 @@ final class AdminPeopleTokensTest extends WebTestCase
         ]);
 
         self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Omar Haddad', 'Sara Holm'], $this->peopleNamesOn($page));
         self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__pending .people__row'));
         self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__token-row'));
         self::assertSame(
-            '/admin/people?tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff'
+            '/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString()
+            .'&tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff'
             .'&after_invited_at=2026-11-16T13:02:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-000000000102',
             $this->showMoreHrefOf($page, 'people__pending'),
         );
         self::assertSame(
-            '/admin/people?after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
+            '/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString()
+            .'&after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
             .'&tokens_after_expires_at=2099-04-20T10:00:00%2B00:00&tokens_after_id='.$soonestFirst[19],
             $this->showMoreHrefOf($page, 'people__tokens'),
         );
@@ -196,7 +235,8 @@ final class AdminPeopleTokensTest extends WebTestCase
         [$lenasToken] = $this->issueApiToken($lena, $acmeFoods);
         $this->logInWithACode($this->client, $this->clock, $sara);
         $page = $this->client->request('GET', self::PEOPLE_PAGE, [
-            PeopleController::PEOPLE_AFTER => $lena->id()->toString(),
+            PeopleController::PEOPLE_AFTER_NAME => 'lena berg',
+            PeopleController::PEOPLE_AFTER_ID => $lena->id()->toString(),
             PeopleController::AFTER_INVITED_AT => '2026-11-16T13:59:00.250000+00:00',
             PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
             PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00',
@@ -210,7 +250,7 @@ final class AdminPeopleTokensTest extends WebTestCase
         $this->client->submit($page->filter(\sprintf('main li[data-token-id="%s"] form', $omarsToken))->form());
 
         self::assertResponseRedirects(
-            '/admin/people?people_after='.$lena->id()->toString()
+            '/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString()
             .'&after_invited_at=2026-11-16T13:59:00.250000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
             .'&tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff',
             302,
@@ -223,13 +263,41 @@ final class AdminPeopleTokensTest extends WebTestCase
     }
 
     /**
+     * Lena, whom the page of people starts after, leaves while the page is open; the revoke still goes back to the
+     * place she marked, not to a 404.
+     */
+    #[Test]
+    public function aRevokeAfterThePersonThePeoplePageStartsAfterLeftGoesBackToTheirPlace(): void
+    {
+        [$sara, $acmeFoods, $omar, $lena] = $this->acmeFoodsWithSaraOmarAndLena();
+        [$omarsToken] = $this->issueApiToken($omar, $acmeFoods);
+        $this->logInWithACode($this->client, $this->clock, $sara);
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER_NAME => 'lena berg', PeopleController::PEOPLE_AFTER_ID => $lena->id()->toString()]);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Omar Haddad', 'Sara Holm'], $this->peopleNamesOn($page));
+        $this->committedAs($acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?',
+            [$acmeFoods->toString(), $lena->id()->toString()],
+        ));
+
+        $this->client->submit($page->filter(\sprintf('main li[data-token-id="%s"] form', $omarsToken))->form());
+
+        self::assertResponseRedirects('/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString(), 302);
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Omar Haddad', 'Sara Holm'], $this->peopleNamesOn($page));
+        self::assertSame([], $this->tokenIdsOn($page));
+    }
+
+    /**
      * @return iterable<string, array{array<string, string>}>
      */
     public static function notAPageInTheRevokeForm(): iterable
     {
         yield 'the token time only' => [[PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00']];
         yield 'an invite id that is no uuid' => [[PeopleController::AFTER_INVITED_AT => '2026-11-16T13:59:00.000000+00:00', PeopleController::AFTER_ID => 'not-a-uuid']];
-        yield 'a person who is no user id' => [[PeopleController::PEOPLE_AFTER => 'not-a-uuid']];
+        yield 'a person\'s name only' => [[PeopleController::PEOPLE_AFTER_NAME => 'lena berg']];
+        yield 'a person who is no user id' => [[PeopleController::PEOPLE_AFTER_NAME => 'lena berg', PeopleController::PEOPLE_AFTER_ID => 'not-a-uuid']];
     }
 
     /**

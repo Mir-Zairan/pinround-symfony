@@ -84,6 +84,38 @@ final class AdminPeopleTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('No open invites.', $page->filter('main .people__pending .empty-state')->text());
         self::assertCount(0, $page->filter('main .people__pending .people__row'));
+        self::assertCount(0, $page->filter('main .people__pending a'));
+    }
+
+    /**
+     * Past the oldest invite, a later page says there are no more and links back to the first page, with the tokens'
+     * page kept; "No open invites." would be wrong there, as Omar's invite is open.
+     */
+    #[Test]
+    public function aLaterPageOfInvitesWithNoneLeftLinksBackToTheFirstPage(): void
+    {
+        $acmeFoods = $this->adminLoggedInWithACode();
+        $this->storeInvitation($acmeFoods, 'omar@acme.test', '1 hour', false);
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [
+            PeopleController::AFTER_INVITED_AT => '2000-01-01T00:00:00.000000+00:00',
+            PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
+            PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00',
+            PeopleController::TOKENS_AFTER_ID => '0198f000-0000-7000-8000-0000000002ff',
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([], $this->pendingEmailsOn($page));
+        self::assertCount(0, $page->filter('main .people__pending .empty-state'));
+        $firstPageLink = $page->filter('main .people__pending a');
+        self::assertCount(1, $firstPageLink);
+        self::assertSame('No more invites. Back to the first page', $page->filter('main .people__pending p.people__sub')->text());
+        self::assertSame('/admin/people?tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff', $firstPageLink->attr('href'));
+
+        $page = $this->client->click($firstPageLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['omar@acme.test'], $this->pendingEmailsOn($page));
     }
 
     /**

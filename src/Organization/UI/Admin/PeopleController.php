@@ -17,8 +17,8 @@ use App\Organization\Application\AlreadyInTheOrganization;
 use App\Organization\Application\InvalidEmailAddress;
 use App\Organization\Application\InvitationSentMeanwhile;
 use App\Organization\Application\InviteMember;
-use App\Organization\Application\NotInTheOrganization;
 use App\Organization\Application\OrganizationPeopleQueries;
+use App\Organization\Application\PeoplePageCursor;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -30,7 +30,6 @@ use Symfony\Component\HttpFoundation\InputBag;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Uid\Uuid;
 
@@ -62,8 +61,12 @@ final class PeopleController extends AbstractController
     /** The query parameters of the next page of API tokens: the expiresAt and id of the last token shown, both or neither. */
     public const string TOKENS_AFTER_EXPIRES_AT = 'tokens_after_expires_at';
     public const string TOKENS_AFTER_ID = 'tokens_after_id';
-    /** The query parameter of the next page of people: the user id of the last person shown. */
-    public const string PEOPLE_AFTER = 'people_after';
+    /**
+     * The query parameters of the next page of people: the lowercased name (PeoplePageCursor::nameKeyOf) and user id
+     * of the last person shown, both or neither.
+     */
+    public const string PEOPLE_AFTER_NAME = 'people_after_name';
+    public const string PEOPLE_AFTER_ID = 'people_after_id';
 
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
@@ -88,8 +91,9 @@ final class PeopleController extends AbstractController
     }
 
     /**
-     * The page after the person PEOPLE_AFTER names, after the invitation that AFTER_INVITED_AT and AFTER_ID name, and
-     * after the API token that TOKENS_AFTER_EXPIRES_AT and TOKENS_AFTER_ID name, or the first page of each without them.
+     * The page after the person PEOPLE_AFTER_NAME and PEOPLE_AFTER_ID name, after the invitation that AFTER_INVITED_AT
+     * and AFTER_ID name, and after the API token that TOKENS_AFTER_EXPIRES_AT and TOKENS_AFTER_ID name, or the first
+     * page of each without them.
      */
     #[Route('/admin/people', name: self::ROUTE, methods: ['GET'])]
     public function show(Request $request): Response
@@ -249,20 +253,24 @@ final class PeopleController extends AbstractController
     /**
      * @param InputBag<string> $parameters the query of show, or the form of revokeToken
      *
-     * @return UserId|null the last person shown; null when the request names no page of people
+     * @return PeoplePageCursor|null the place of the last person shown; null when the request names no page of people
      *
-     * @throws BadRequestHttpException when the parameter is no user id
+     * @throws BadRequestHttpException when only one of the two parameters is given, or either is no valid value
      */
-    private function peoplePageCursorOf(InputBag $parameters): ?UserId
+    private function peoplePageCursorOf(InputBag $parameters): ?PeoplePageCursor
     {
-        if (!$parameters->has(self::PEOPLE_AFTER)) {
+        $hasName = $parameters->has(self::PEOPLE_AFTER_NAME);
+        if (!$hasName && !$parameters->has(self::PEOPLE_AFTER_ID)) {
             return null;
+        }
+        if (!$hasName) {
+            throw new BadRequestHttpException('The page of people to show is not valid.');
         }
 
         try {
-            return new UserId($parameters->getString(self::PEOPLE_AFTER));
-        } catch (\InvalidArgumentException $notAUserId) {
-            throw new BadRequestHttpException('The page of people to show is not valid.', $notAUserId);
+            return new PeoplePageCursor($parameters->getString(self::PEOPLE_AFTER_NAME), new UserId($parameters->getString(self::PEOPLE_AFTER_ID)));
+        } catch (\InvalidArgumentException $notAPlace) {
+            throw new BadRequestHttpException('The page of people to show is not valid.', $notAPlace);
         }
     }
 
@@ -271,10 +279,8 @@ final class PeopleController extends AbstractController
      * $organizationId.
      *
      * @param array{\DateTimeImmutable, string}|null $tokensAfter the expiresAt and id of the last API token shown
-     *
-     * @throws NotFoundHttpException when $peopleAfter is not a member of the organization
      */
-    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null, ?array $tokensAfter = null, ?UserId $peopleAfter = null): Response
+    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null, ?array $tokensAfter = null, ?PeoplePageCursor $peopleAfter = null): Response
     {
         $hasError = null !== $emailError || null !== $formError;
         // Each list's Show more keeps the pages the other lists are on.
@@ -282,18 +288,14 @@ final class PeopleController extends AbstractController
         $invitationsPageQuery = $this->invitationsPageQueryOf($after);
         $tokensPageQuery = $this->tokensPageQueryOf($tokensAfter);
 
-        try {
-            $people = $this->organizationPeopleQueries->pageOf($organizationId, self::PAGE_SIZE + 1, $peopleAfter);
-        } catch (NotInTheOrganization $notAMember) {
-            throw $this->createNotFoundException('The page of people to show starts after nobody of the organization.', $notAMember);
-        }
+        $people = $this->organizationPeopleQueries->pageOf($organizationId, self::PAGE_SIZE + 1, $peopleAfter);
         $peopleNextPage = null;
         if (\count($people) > self::PAGE_SIZE) {
             $people = \array_slice($people, 0, self::PAGE_SIZE);
             $peopleNextPage = [
                 ...$invitationsPageQuery,
                 ...$tokensPageQuery,
-                self::PEOPLE_AFTER => $people[self::PAGE_SIZE - 1]->userId->toString(),
+                ...$this->peoplePageQueryOf(PeoplePageCursor::after($people[self::PAGE_SIZE - 1])),
             ];
         }
         $pendingInvitations = $this->invitationQueries->pendingOf($organizationId, self::PAGE_SIZE + 1, $after);
@@ -328,6 +330,10 @@ final class PeopleController extends AbstractController
         return $this->render('@Organization/admin/people.html.twig', [
             'people' => $people,
             'peopleNextPage' => $peopleNextPage,
+            // Each null on the list's first page; on a later one, the list's first page with the other lists' pages kept.
+            'peopleFirstPage' => null === $peopleAfter ? null : [...$invitationsPageQuery, ...$tokensPageQuery],
+            'invitationsFirstPage' => null === $after ? null : [...$peoplePageQuery, ...$tokensPageQuery],
+            'tokensFirstPage' => null === $tokensAfter ? null : [...$peoplePageQuery, ...$invitationsPageQuery],
             'pendingInvitations' => $pendingInvitations,
             'nextPage' => $nextPage,
             'liveTokens' => $liveTokens,
@@ -342,11 +348,14 @@ final class PeopleController extends AbstractController
     }
 
     /**
-     * @return array<string, string> the parameter peoplePageCursorOf reads back as $peopleAfter; none for the first page
+     * @return array<string, string> the parameters peoplePageCursorOf reads back as $peopleAfter; none for the first page
      */
-    private function peoplePageQueryOf(?UserId $peopleAfter): array
+    private function peoplePageQueryOf(?PeoplePageCursor $peopleAfter): array
     {
-        return null === $peopleAfter ? [] : [self::PEOPLE_AFTER => $peopleAfter->toString()];
+        return null === $peopleAfter ? [] : [
+            self::PEOPLE_AFTER_NAME => $peopleAfter->nameKey,
+            self::PEOPLE_AFTER_ID => $peopleAfter->userId->toString(),
+        ];
     }
 
     /**

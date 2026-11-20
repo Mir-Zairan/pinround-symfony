@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Organization;
 
+use App\Organization\Application\PeoplePageCursor;
 use App\Organization\Domain\TeamSlug;
 use App\Organization\UI\Admin\PeopleController;
 use App\SharedKernel\Domain\OrganizationId;
@@ -92,9 +93,14 @@ final class AdminPeopleListTest extends WebTestCase
             $this->addPerson($acmeFoods, \sprintf('Omar %02d', $number));
         }
         $this->logInWithACode($this->client, $this->clock, $sara);
-        $invitationsPage = [PeopleController::AFTER_INVITED_AT => '2026-11-16T13:59:00.000000+00:00', PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff'];
+        $otherListsPages = [
+            PeopleController::AFTER_INVITED_AT => '2026-11-16T13:59:00.000000+00:00',
+            PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
+            PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00',
+            PeopleController::TOKENS_AFTER_ID => '0198f000-0000-7000-8000-0000000002ff',
+        ];
 
-        $page = $this->client->request('GET', self::PEOPLE_PAGE, $invitationsPage);
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, $otherListsPages);
 
         self::assertResponseStatusCodeSame(200);
         $firstPage = array_column($this->peopleOn($page), 0);
@@ -104,7 +110,9 @@ final class AdminPeopleListTest extends WebTestCase
         $lastShownId = $page->filter('main .people__person')->last()->attr('data-user-id');
         self::assertIsString($lastShownId);
         self::assertSame(
-            '/admin/people?after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff&people_after='.$lastShownId,
+            '/admin/people?after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
+            .'&tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff'
+            .\sprintf('&people_after_name=omar%%20%02d&people_after_id=%s', PeopleController::PAGE_SIZE, $lastShownId),
             $showMore->attr('href'),
         );
 
@@ -116,39 +124,126 @@ final class AdminPeopleListTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, int}>
+     * @return iterable<string, array{array<string, string>}>
      */
     public static function notAPageOfPeople(): iterable
     {
-        yield 'no uuid' => ['not-a-uuid', 400];
-        yield 'empty' => ['', 400];
-        yield 'a uuid with a trailing newline' => ["0198f000-0000-7000-8000-000000000001\n", 400];
-        yield 'nobody' => ['0198f000-0000-7000-8000-000000000001', 404];
+        $id = '0198f000-0000-7000-8000-000000000001';
+        yield 'the name only' => [[PeopleController::PEOPLE_AFTER_NAME => 'mia lund']];
+        yield 'the id only' => [[PeopleController::PEOPLE_AFTER_ID => $id]];
+        yield 'an id that is no uuid' => [[PeopleController::PEOPLE_AFTER_NAME => 'mia lund', PeopleController::PEOPLE_AFTER_ID => 'not-a-uuid']];
+        yield 'an empty id' => [[PeopleController::PEOPLE_AFTER_NAME => 'mia lund', PeopleController::PEOPLE_AFTER_ID => '']];
+        yield 'an id with a trailing newline' => [[PeopleController::PEOPLE_AFTER_NAME => 'mia lund', PeopleController::PEOPLE_AFTER_ID => $id."\n"]];
+        yield 'a name past the cap' => [[PeopleController::PEOPLE_AFTER_NAME => str_repeat('ä', PeoplePageCursor::NAME_KEY_MAX_LENGTH + 1), PeopleController::PEOPLE_AFTER_ID => $id]];
+        yield 'a name that is no UTF-8' => [[PeopleController::PEOPLE_AFTER_NAME => "mia \xFF", PeopleController::PEOPLE_AFTER_ID => $id]];
     }
 
+    /**
+     * @param array<string, string> $query
+     */
     #[Test]
     #[DataProvider('notAPageOfPeople')]
-    public function aBadOrUnknownPeopleCursorIsRefused(string $after, int $status): void
+    public function aPartOrBadPeopleCursorIsRefused(array $query): void
     {
         [$sara] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
         $this->logInWithACode($this->client, $this->clock, $sara);
 
-        $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER => $after]);
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, $query);
 
-        self::assertResponseStatusCodeSame($status);
+        self::assertResponseStatusCodeSame(400);
+        self::assertCount(0, $page->filter('.people__person'));
     }
 
+    /**
+     * Exactly the cap, in characters that take two bytes each, so a cap counted in bytes would refuse it.
+     */
     #[Test]
-    public function aPageAfterAPersonOfAnotherOrganizationIsNotFound(): void
+    public function aNameAtTheCapIsAPlaceInTheList(): void
     {
         [$sara] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
-        $anna = $this->addPerson($this->createOrganization('Beta Bakery'), 'Anna Baker');
         $this->logInWithACode($this->client, $this->clock, $sara);
 
-        $page = $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER => $anna]);
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [
+            PeopleController::PEOPLE_AFTER_NAME => str_repeat('ä', PeoplePageCursor::NAME_KEY_MAX_LENGTH),
+            PeopleController::PEOPLE_AFTER_ID => '0198f000-0000-7000-8000-000000000001',
+        ]);
 
-        self::assertResponseStatusCodeSame(404);
-        self::assertCount(0, $page->filter('.people__person'));
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('main .people__person'));
+    }
+
+    /**
+     * Mia leaves after the page that ended on her was shown: the next page goes on from her place.
+     */
+    #[Test]
+    public function aPageAfterSomeoneWhoLeftGoesOnFromTheirPlace(): void
+    {
+        [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
+        $this->addPerson($acmeFoods, 'Lena Berg');
+        $mia = $this->addPerson($acmeFoods, 'Mia Lund');
+        $this->addPerson($acmeFoods, 'Omar Haddad');
+        $this->committedAs($acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?',
+            [$acmeFoods->toString(), $mia],
+        ));
+        $this->logInWithACode($this->client, $this->clock, $sara);
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER_NAME => 'mia lund', PeopleController::PEOPLE_AFTER_ID => $mia]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Omar Haddad', 'Sara Holm'], array_column($this->peopleOn($page), 0));
+    }
+
+    /**
+     * Mia is renamed after the page that ended on her was shown: the next page goes on from her old place, so Omar is
+     * not skipped, and Mia shows at her new place.
+     */
+    #[Test]
+    public function aPageAfterSomeoneRenamedGoesOnFromTheirOldPlace(): void
+    {
+        [$sara, $acmeFoods] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
+        $this->addPerson($acmeFoods, 'Lena Berg');
+        $mia = $this->addPerson($acmeFoods, 'Mia Lund');
+        $this->addPerson($acmeFoods, 'Omar Haddad');
+        $this->migrator()->executeStatement('UPDATE idn_user SET name = ? WHERE id = ?', ['Raj Lund', $mia]);
+        $this->logInWithACode($this->client, $this->clock, $sara);
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER_NAME => 'mia lund', PeopleController::PEOPLE_AFTER_ID => $mia]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Omar Haddad', 'Raj Lund', 'Sara Holm'], array_column($this->peopleOn($page), 0));
+    }
+
+    /**
+     * Past the last person, a later page says there is nobody more and links back to the first page of people, with
+     * the invitations' page kept; "No one has joined yet." would be wrong there.
+     */
+    #[Test]
+    public function aLaterPageWithNobodyLeftLinksBackToTheFirstPage(): void
+    {
+        [$sara] = $this->memberWithOrgRoles('Sara Holm', '{admin}');
+        $this->logInWithACode($this->client, $this->clock, $sara);
+
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [
+            PeopleController::PEOPLE_AFTER_NAME => 'sara holm',
+            PeopleController::PEOPLE_AFTER_ID => $sara->id()->toString(),
+            PeopleController::AFTER_INVITED_AT => '2026-11-16T13:59:00.000000+00:00',
+            PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('main .people__person'));
+        self::assertCount(0, $page->filter('main .people__members .empty-state'));
+        self::assertStringNotContainsString('No one has joined yet.', $page->filter('main .people__members')->text());
+        $firstPageLink = $page->filter('main .people__members a');
+        self::assertCount(1, $firstPageLink);
+        self::assertSame('Back to the first page', $firstPageLink->text());
+        self::assertSame('/admin/people?after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff', $firstPageLink->attr('href'));
+
+        $page = $this->client->click($firstPageLink->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Sara Holm'], array_column($this->peopleOn($page), 0));
     }
 
     /**
@@ -161,7 +256,7 @@ final class AdminPeopleListTest extends WebTestCase
         $lena = $this->addPerson($acmeFoods, 'Lena Berg');
         $this->logInWithACode($this->client, $this->clock, $raj);
 
-        $page = $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER => $lena]);
+        $page = $this->client->request('GET', self::PEOPLE_PAGE, [PeopleController::PEOPLE_AFTER_NAME => 'lena berg', PeopleController::PEOPLE_AFTER_ID => $lena]);
 
         self::assertResponseStatusCodeSame(404);
         self::assertCount(0, $page->filter('.people__person'));

@@ -43,7 +43,10 @@
 
         <section class="people__members" aria-labelledby="people-members-title">
             <h2 class="admin-tab__heading" id="people-members-title">People</h2>
-            {% if people is empty %}
+            {% if people is empty and peopleFirstPage is not null %}
+                {# A later page of a list can be empty, as when the last ones left after the page before was shown. #}
+                <p class="people__sub">No more people. <a href="{{ path('organization_admin_people', peopleFirstPage) }}">Back to the first page</a></p>
+            {% elseif people is empty %}
                 <twig:EmptyState message="No one has joined yet."/>
             {% else %}
                 <ul class="people__list">
@@ -78,7 +81,9 @@
 
         <section class="people__pending" aria-labelledby="people-pending-title">
             <h2 class="admin-tab__heading" id="people-pending-title">Not joined yet</h2>
-            {% if pendingInvitations is empty %}
+            {% if pendingInvitations is empty and invitationsFirstPage is not null %}
+                <p class="people__sub">No more invites. <a href="{{ path('organization_admin_people', invitationsFirstPage) }}">Back to the first page</a></p>
+            {% elseif pendingInvitations is empty %}
                 <twig:EmptyState message="No open invites."/>
             {% else %}
                 <ul class="people__list">
@@ -100,7 +105,9 @@
         <section class="people__tokens" aria-labelledby="people-tokens-title">
             <h2 class="admin-tab__heading" id="people-tokens-title">API tokens</h2>
             <p>Tokens that work now, the first to stop working at the top. Revoke one to stop it at once.</p>
-            {% if liveTokens is empty %}
+            {% if liveTokens is empty and tokensFirstPage is not null %}
+                <p class="people__sub">No more tokens. <a href="{{ path('organization_admin_people', tokensFirstPage) }}">Back to the first page</a></p>
+            {% elseif liveTokens is empty %}
                 <twig:EmptyState message="No API tokens work now."/>
             {% else %}
                 <ul class="people__list">

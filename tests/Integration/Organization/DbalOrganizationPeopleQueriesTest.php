@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Organization;
 
-use App\Organization\Application\NotInTheOrganization;
 use App\Organization\Application\OrganizationPeopleQueries;
 use App\Organization\Application\OrganizationPerson;
+use App\Organization\Application\PeoplePageCursor;
 use App\Organization\Application\PersonInTeam;
 use App\Organization\Domain\TeamSlug;
 use App\SharedKernel\Application\TenantContext;
@@ -37,6 +37,11 @@ final class DbalOrganizationPeopleQueriesTest extends KernelTestCase
     private const string MIA_HIGHER_ID = '0197a3c0-0000-7000-8000-000000014025';
     private const string LENA = '0197a3c0-0000-7000-8000-000000014026';
     private const string ANNA = '0197a3c0-0000-7000-8000-000000014027';
+    /** Names that are numbers, members only in the test that orders them. */
+    private const string NAMED_TEN = '0197a3c0-0000-7000-8000-000000014028';
+    private const string NAMED_NINE = '0197a3c0-0000-7000-8000-000000014029';
+    /** A member with no idn_user row, as when Identity's row is gone. */
+    private const string NO_USER_ROW = '0197a3c0-0000-7000-8000-000000014000';
     private const array USERS = [
         self::SARA => 'Sara Holm',
         self::RAJ => 'Raj Patel',
@@ -45,6 +50,8 @@ final class DbalOrganizationPeopleQueriesTest extends KernelTestCase
         self::MIA_HIGHER_ID => 'Mia Lund',
         self::LENA => 'lena Berg',
         self::ANNA => 'Anna Baker',
+        self::NAMED_TEN => '10',
+        self::NAMED_NINE => '9',
     ];
     /** Acme Foods' people in the order the page must give: name ignoring case, then id. */
     private const array ACME_IN_NAME_ORDER = [
@@ -128,22 +135,86 @@ final class DbalOrganizationPeopleQueriesTest extends KernelTestCase
     #[Test]
     public function eachPageStartsAfterTheGivenPersonWithNoGapAndNoRepeat(): void
     {
-        $firstPage = self::namesOf($this->pageAs(self::ACME_FOODS, 2));
-        $secondPage = self::namesOf($this->pageAs(self::ACME_FOODS, 2, self::MIA_LOWER_ID));
-        $thirdPage = self::namesOf($this->pageAs(self::ACME_FOODS, 2, self::OMAR));
+        $firstPage = $this->pageAs(self::ACME_FOODS, 2);
+        self::assertCount(2, $firstPage);
+        $secondPage = $this->pageAs(self::ACME_FOODS, 2, PeoplePageCursor::after($firstPage[1]));
+        self::assertCount(2, $secondPage);
+        $thirdPage = $this->pageAs(self::ACME_FOODS, 2, PeoplePageCursor::after($secondPage[1]));
+        self::assertCount(2, $thirdPage);
 
-        self::assertSame(\array_slice(self::ACME_IN_NAME_ORDER, 0, 2), $firstPage);
-        self::assertSame(\array_slice(self::ACME_IN_NAME_ORDER, 2, 2), $secondPage);
-        self::assertSame(\array_slice(self::ACME_IN_NAME_ORDER, 4, 2), $thirdPage);
-        self::assertSame([], $this->pageAs(self::ACME_FOODS, 2, self::SARA));
+        self::assertSame(\array_slice(self::ACME_IN_NAME_ORDER, 0, 2), self::namesOf($firstPage));
+        self::assertSame(\array_slice(self::ACME_IN_NAME_ORDER, 2, 2), self::namesOf($secondPage));
+        self::assertSame(\array_slice(self::ACME_IN_NAME_ORDER, 4, 2), self::namesOf($thirdPage));
+        self::assertSame([], $this->pageAs(self::ACME_FOODS, 2, PeoplePageCursor::after($thirdPage[1])));
+    }
+
+    /**
+     * The first Mia is renamed after the first page ended on her: the next page goes on from her old place, so the
+     * second Mia and Omar are neither skipped nor shown twice, and she now shows at her new place.
+     */
+    #[Test]
+    public function aPersonRenamedBetweenPagesMovesNoneOfTheOthers(): void
+    {
+        $firstPage = $this->pageAs(self::ACME_FOODS, 2);
+        self::assertSame([self::LENA, self::MIA_LOWER_ID], array_column(self::namesOf($firstPage), 0));
+        $this->migrator()->executeStatement('UPDATE idn_user SET name = ? WHERE id = ?', ['Raj Lund', self::MIA_LOWER_ID]);
+
+        $nextPage = $this->pageAs(self::ACME_FOODS, 3, PeoplePageCursor::after($firstPage[1]));
+
+        self::assertSame([[self::MIA_HIGHER_ID, 'Mia Lund'], [self::OMAR, 'Omar Haddad'], [self::MIA_LOWER_ID, 'Raj Lund']], self::namesOf($nextPage));
+    }
+
+    /**
+     * The first Mia leaves after the first page ended on her: the next page goes on from her place, with no refusal.
+     */
+    #[Test]
+    public function aPersonWhoLeftBetweenPagesStillMarksWhereTheNextPageStarts(): void
+    {
+        $firstPage = $this->pageAs(self::ACME_FOODS, 2);
+        self::assertSame([self::LENA, self::MIA_LOWER_ID], array_column(self::namesOf($firstPage), 0));
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->connection()->executeStatement('DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?', [self::ACME_FOODS, self::MIA_LOWER_ID]);
+        });
+
+        $nextPage = $this->pageAs(self::ACME_FOODS, 2, PeoplePageCursor::after($firstPage[1]));
+
+        self::assertSame([[self::MIA_HIGHER_ID, 'Mia Lund'], [self::OMAR, 'Omar Haddad']], self::namesOf($nextPage));
+    }
+
+    /**
+     * Anna's id sorts after both Mias', so a cursor with her id and their name starts after both: another
+     * organization's person only marks a place, and never shows.
+     */
+    #[Test]
+    public function aPageAfterSomeoneOutsideTheOrganizationStartsAtTheirPlaceAndShowsOnlyTheOrganizationsPeople(): void
+    {
+        $page = $this->pageAs(self::ACME_FOODS, 2, new PeoplePageCursor('mia lund', new UserId(self::ANNA)));
+
+        self::assertSame([[self::OMAR, 'Omar Haddad'], [self::RAJ, 'Raj Patel']], self::namesOf($page));
+    }
+
+    /**
+     * As text "10" comes before "9"; compared as numbers it would come after, an order no page of names follows.
+     */
+    #[Test]
+    public function namesThatAreNumbersAreOrderedAsText(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->addMembership(self::ACME_FOODS, self::NAMED_NINE, '{}');
+            $this->addMembership(self::ACME_FOODS, self::NAMED_TEN, '{}');
+        });
+
+        self::assertSame([[self::NAMED_TEN, '10'], [self::NAMED_NINE, '9'], [self::LENA, 'lena Berg']], self::namesOf($this->pageAs(self::ACME_FOODS, 3)));
     }
 
     #[Test]
-    public function aPageAfterSomeoneOutsideTheOrganizationIsRefused(): void
+    public function aMemberIdentityDoesNotKnowIsLeftOut(): void
     {
-        $this->expectException(NotInTheOrganization::class);
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->addMembership(self::ACME_FOODS, self::NO_USER_ROW, '{admin}');
+        });
 
-        $this->pageAs(self::ACME_FOODS, 2, self::ANNA);
+        self::assertSame(self::ACME_IN_NAME_ORDER, self::namesOf($this->pageAs(self::ACME_FOODS, 100)));
     }
 
     #[Test]
@@ -170,9 +241,9 @@ final class DbalOrganizationPeopleQueriesTest extends KernelTestCase
     /**
      * @return list<OrganizationPerson>
      */
-    private function pageAs(string $organizationId, int $limit, ?string $after = null): array
+    private function pageAs(string $organizationId, int $limit, ?PeoplePageCursor $after = null): array
     {
-        return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->queries()->pageOf(new OrganizationId($organizationId), $limit, null === $after ? null : new UserId($after)));
+        return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->queries()->pageOf(new OrganizationId($organizationId), $limit, $after));
     }
 
     /**
