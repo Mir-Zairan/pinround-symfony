@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Organization\Infrastructure\Doctrine;
 
 use App\Organization\Api\MemberJob;
+use App\Organization\Domain\TeamRole;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -24,6 +25,14 @@ final class TeamMemberRows
     public static function jobOf(mixed $job): MemberJob
     {
         return (\is_string($job) ? MemberJob::tryFrom($job) : null) ?? throw new \LogicException('org_team_member holds an unknown job.');
+    }
+
+    /**
+     * @throws \LogicException when the stored team role is not one of TeamRole's values
+     */
+    public static function teamRoleOf(mixed $teamRole): TeamRole
+    {
+        return (\is_string($teamRole) ? TeamRole::tryFrom($teamRole) : null) ?? throw new \LogicException('org_team_member holds an unknown team role.');
     }
 
     /**

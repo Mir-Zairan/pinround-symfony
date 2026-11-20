@@ -56,7 +56,7 @@ final readonly class DbalMembershipQueries implements MembershipQueries
         foreach ($teamRows as $teamRow) {
             $teamId = self::teamId($teamRow['team_id']);
             $teamSlugsById[$teamId->toString()] = \is_string($teamRow['slug']) ? $teamRow['slug'] : throw new \LogicException('A team slug from the database is not a string.');
-            match (self::teamRole($teamRow['team_role'])) {
+            match (TeamMemberRows::teamRoleOf($teamRow['team_role'])) {
                 TeamRole::Lead => $leadTeamIds[] = $teamId,
                 TeamRole::Member => $memberTeamIds[] = $teamId,
                 TeamRole::Viewer => $viewerTeamIds[] = $teamId,
@@ -108,11 +108,6 @@ final readonly class DbalMembershipQueries implements MembershipQueries
     private static function orgRole(string $name): OrgRole
     {
         return OrgRole::tryFrom($name) ?? throw new \LogicException('org_membership holds an unknown org role.');
-    }
-
-    private static function teamRole(mixed $name): TeamRole
-    {
-        return (\is_string($name) ? TeamRole::tryFrom($name) : null) ?? throw new \LogicException('org_team_member holds an unknown team role.');
     }
 
     private static function teamId(mixed $teamId): TeamId

@@ -10,8 +10,11 @@
     <link rel="stylesheet" href="{{ asset('styles/people.css') }}">
 {% endblock %}
 
-{# TODO(P11): the role help cards and the list of people with their roles. #}
+{# TODO(P11): the role help cards, and changing roles in the list of people (P11.T2). #}
 {% block admin_tab %}
+    {% set teamRoleNames = {lead: 'Team lead', member: 'Team member', viewer: 'Team viewer'} %}
+    {# The job "other" says nothing, so it is left out of the line. #}
+    {% set jobNames = {developer: 'Developer', tester: 'Tester'} %}
     <div class="admin-tab">
         <h1 class="admin-tab__title">People and roles</h1>
         <p>A role says what someone may do. The job (tester, developer) is set by the team lead.</p>
@@ -37,6 +40,41 @@
                 <twig:Button type="submit" data-invite-email-target="submit">Invite</twig:Button>
             </form>
         </twig:Card>
+
+        <section class="people__members" aria-labelledby="people-members-title">
+            <h2 class="admin-tab__heading" id="people-members-title">People</h2>
+            {% if people is empty %}
+                <twig:EmptyState message="No one has joined yet."/>
+            {% else %}
+                <ul class="people__list">
+                    {% for person in people %}
+                        <li class="people__row people__person" data-user-id="{{ person.userId.toString }}">
+                            <div class="people__person-head">
+                                <twig:Avatar name="{{ person.displayName }}" aria-hidden="true"/>
+                                <span class="people__name">{{ person.displayName }}</span>
+                                {% if person.isAdmin %}<twig:Tag>Admin</twig:Tag>{% endif %}
+                                {% if person.isManager %}<twig:Tag>Manager</twig:Tag>{% endif %}
+                            </div>
+                            {% if person.teams is empty %}
+                                <span class="people__sub">No team yet</span>
+                            {% else %}
+                                <ul class="people__teams">
+                                    {% for team in person.teams %}
+                                        {% set job = jobNames[team.job.value] ?? null %}
+                                        <li class="people__sub">{{ job ? job ~ ' · ' }}{{ team.teamName }} · {{ teamRoleNames[team.teamRole.value] }}</li>
+                                    {% endfor %}
+                                </ul>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+                {% if peopleNextPage %}
+                    <div class="people__more">
+                        <twig:Button href="{{ path('organization_admin_people', peopleNextPage) }}" variant="outline">Show more</twig:Button>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </section>
 
         <section class="people__pending" aria-labelledby="people-pending-title">
             <h2 class="admin-tab__heading" id="people-pending-title">Not joined yet</h2>

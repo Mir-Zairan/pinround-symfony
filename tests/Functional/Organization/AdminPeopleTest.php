@@ -70,7 +70,7 @@ final class AdminPeopleTest extends WebTestCase
         self::assertSame('name@company.com', $page->filter('main form input[name="email"][type="email"]')->attr('placeholder'));
         self::assertSame('Invite', $page->filter('main form button[type="submit"]')->text());
         self::assertSame(['omar@acme.test', 'lena@acme.test'], $this->pendingEmailsOn($page));
-        self::assertSame([self::NOT_JOINED_YET, self::NOT_JOINED_YET], $page->filter('main .people__row .people__sub')->each(static fn (Crawler $row): string => $row->text()));
+        self::assertSame([self::NOT_JOINED_YET, self::NOT_JOINED_YET], $page->filter('main .people__pending .people__row .people__sub')->each(static fn (Crawler $row): string => $row->text()));
         self::assertCount(0, $page->filter('.toast-region .toast, noscript'));
     }
 
@@ -82,8 +82,8 @@ final class AdminPeopleTest extends WebTestCase
         $page = $this->client->request('GET', self::PEOPLE_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('No open invites.', $page->filter('main .empty-state')->text());
-        self::assertCount(0, $page->filter('main .people__row'));
+        self::assertSame('No open invites.', $page->filter('main .people__pending .empty-state')->text());
+        self::assertCount(0, $page->filter('main .people__pending .people__row'));
     }
 
     /**
@@ -127,7 +127,7 @@ final class AdminPeopleTest extends WebTestCase
         $page = $this->client->request('GET', self::PEOPLE_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__row'));
+        self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__pending .people__row'));
         self::assertCount(0, $page->filter('main .people__pending a'));
     }
 
