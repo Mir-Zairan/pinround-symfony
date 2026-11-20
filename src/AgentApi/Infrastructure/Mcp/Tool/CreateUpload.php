@@ -6,6 +6,7 @@ namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
+use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\Identity\Api\CurrentUser;
@@ -53,8 +54,6 @@ final readonly class CreateUpload implements AgentTool
     /** UploadPurpose::Screenshot, which this module may not read. */
     public const string SCREENSHOT_PURPOSE = 'screenshot';
 
-    /** A ticket key is far shorter; the cap only keeps a lookup from reading megabytes. */
-    private const int MAX_KEY_LENGTH = 64;
     /** The allowed types are 10 characters; the cap only keeps a refusal from echoing megabytes. */
     private const int MAX_MIME_LENGTH = 100;
 
@@ -82,7 +81,7 @@ final readonly class CreateUpload implements AgentTool
             inputSchema: [
                 'type' => 'object',
                 'properties' => [
-                    'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_KEY_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
+                    'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The ticket key, such as SHOP-12.'],
                     'mime' => ['type' => 'string', 'minLength' => 1, 'maxLength' => self::MAX_MIME_LENGTH, 'description' => 'The file type: image/png, image/jpeg or image/webp.'],
                     'bytes' => ['type' => 'integer', 'description' => 'The exact size of the file in bytes, at most 15 MB.'],
                     // maxLength too: a validator that reads the pattern as PCRE would let a trailing newline past $.
