@@ -172,7 +172,8 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         );
         self::assertSame(array_diff_key($before['rounds'], [$this->omarsDraft => true]), array_diff_key($after['rounds'], [$this->omarsDraft => true]), 'Lena\'s draft and Mia\'s round stay as they were.');
 
-        $this->assertASecondMoveAsksNothing($after);
+        // Round 2 was shared at a hand-off, so Omar's next move in his turn closes it (ADR-0048).
+        $this->assertASecondMoveAsksNothing([...$after['rounds'], $this->omarsDraft => [...$after['rounds'][$this->omarsDraft], 'state' => 'closed', 'version' => 4]]);
     }
 
     /**
@@ -298,7 +299,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertNull($after['rounds'][$this->omarsDraft]['number']);
         self::assertSame(array_diff_key($before['rounds'], [$this->omarsDraft => true]), array_diff_key($after['rounds'], [$this->omarsDraft => true]));
 
-        $this->assertASecondMoveAsksNothing($after);
+        $this->assertASecondMoveAsksNothing($after['rounds']);
     }
 
     /**
@@ -717,16 +718,19 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     }
 
     /**
-     * @param array{ticket: array<string, mixed>, rounds: array<string, array<string, mixed>>} $state the state after the first move
+     * Omar's Send to code review, in his turn, decides no draft; it may close the round he shared at the first move
+     * (ADR-0048), which the caller's expected rounds say.
+     *
+     * @param array<string, array<string, mixed>> $expectedRounds the rounds after the second move, by id
      */
-    private function assertASecondMoveAsksNothing(array $state): void
+    private function assertASecondMoveAsksNothing(array $expectedRounds): void
     {
         $this->client->request('POST', '/t/SHOP-1/move/send_to_code_review', $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 1)]));
 
         self::assertSame('Sent to code review. Lena’s turn now.', $this->toastAfterTheRedirect());
         $after = $this->stateOf();
         self::assertSame($this->steps['review'], $after['ticket']['step_id']);
-        self::assertSame($state['rounds'], $after['rounds']);
+        self::assertSame($expectedRounds, $after['rounds']);
     }
 
     /**

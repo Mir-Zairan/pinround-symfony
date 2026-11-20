@@ -935,10 +935,12 @@ final class MoveTicketTest extends KernelTestCase
     /**
      * The team's steps, people and rules come from the caches the first move filled, so a verb move reads the ticket,
      * the team's waiting reviews and tests and the mover's open draft round (P05.T9), then saves, locks the actor's
-     * open pings on the ticket, projects and publishes.
+     * open pings on the ticket, projects and publishes. Omar has the ticket and it is his turn, so the move may close a
+     * shared round (ADR-0048): Review takes the ticket's round-number lock and reads its open shared rounds FOR UPDATE.
+     * The turn itself comes from the facts the policy decided on, with no query.
      */
     #[Test]
-    public function aWarmVerbMoveRunsTenQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveByTheAssigneeRunsTwelveQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
 
@@ -947,12 +949,13 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT)),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED], $statements);
-        self::assertCount(10, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, plus P05.T9\'s read of the mover\'s draft');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::OPEN_SHARED_ROUNDS_LOCKED], $statements);
+        self::assertCount(12, self::queriesBesideSavepoints($statements), 'P04.T6\'s 9 queries of a move, P05.T9\'s read of the mover\'s draft, and ADR-0048\'s lock and read of the open shared rounds');
     }
 
     /**
-     * A move to a chosen step reads the mover's open draft round as a verb move does (P05.T9).
+     * A move to a chosen step reads the mover's open draft round as a verb move does (P05.T9). It is the lead's own
+     * move, which closes no round (ADR-0048), so it reads no shared round.
      */
     #[Test]
     public function aWarmMoveToAPlainStepRunsTenQueriesBesideItsSavepoints(): void
@@ -969,12 +972,13 @@ final class MoveTicketTest extends KernelTestCase
     }
 
     /**
-     * A verb move with the answer "share" reads only the facts of the mover's draft before the save, then reads the
-     * draft whole once, reads the ticket's open shared rounds under its locks (ADR-0048), takes the round number, and
-     * shares and decides it in one save (P05.T9).
+     * A verb move with the answer "share" reads only the facts of the mover's draft before the save. After the save the
+     * assignee's move reads the open shared rounds under their locks to close them (ADR-0048); the share then reads the
+     * draft whole once, reads the open shared rounds under the same locks again, as every share does, because the close
+     * may have changed them, takes the round number, and shares and decides it in one save (P05.T9).
      */
     #[Test]
-    public function aWarmVerbMoveThatSharesTheMoversDraftRunsTwentyQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveThatSharesTheMoversDraftRunsTwentyTwoQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
         $ticketId = $this->ticketId();
@@ -987,12 +991,16 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT), DraftChoice::Share),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::DRAFT_READ, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
-        self::assertCount(20, self::queriesBesideSavepoints($statements), 'The 10 of a move, the draft read whole, the open shared rounds under lock, its number and its one save');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_READ, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
+        self::assertCount(22, self::queriesBesideSavepoints($statements), 'The 12 of the assignee\'s move, the draft read whole, the open shared rounds under lock, its number and its one save');
     }
 
+    /**
+     * Keeping the draft private takes no number, but the assignee's move still reads the open shared rounds under their
+     * locks to close them (ADR-0048).
+     */
     #[Test]
-    public function aWarmVerbMoveThatKeepsTheMoversDraftPrivateRunsSixteenQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveThatKeepsTheMoversDraftPrivateRunsEighteenQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
         $ticketId = $this->ticketId();
@@ -1005,8 +1013,8 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT), DraftChoice::Keep),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::DRAFT_READ, ...self::DRAFT_SAVED], $statements);
-        self::assertCount(16, self::queriesBesideSavepoints($statements), 'The 10 of a move, the draft read whole and its one save, with no number');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_READ, ...self::DRAFT_SAVED], $statements);
+        self::assertCount(18, self::queriesBesideSavepoints($statements), 'The 12 of the assignee\'s move, the draft read whole and its one save, with no number');
     }
 
     /**
