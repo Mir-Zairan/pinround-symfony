@@ -66,7 +66,7 @@ function recordRoundRequests(page: Page, key: string, roundId: string): string[]
 }
 
 test.describe('Draft round', () => {
-  test('Omar starts a draft, sees the PRIVATE card and the Claude Code box, and sharing makes it read-only', async ({ browser }) => {
+  test('Omar starts a draft and sees the empty PRIVATE card and the Claude Code box', async ({ browser }) => {
     const { context, page, key } = await startDraftAsOmar(browser);
     const card = page.locator('article.round-card--private');
 
@@ -79,6 +79,13 @@ test.describe('Draft round', () => {
     await expect(card.getByLabel('Line to give Claude Code')).toHaveValue(`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`);
     await expect(card.locator('.claude-code-box__tools')).toContainText('get_round_notes, add_screenshot, set_verdict');
     await expect(page.getByRole('button', { name: 'Start a draft round' })).toHaveCount(0);
+    await context.close();
+  });
+
+  test('sharing a draft with a screenshot makes it read-only', async ({ browser }) => {
+    const { context, page } = await startDraftAsOmar(browser, true);
+    const card = page.locator('article.round-card--private');
+    await expect(card.locator('section.draft-shot')).toHaveCount(1);
 
     await card.getByRole('button', { name: 'Share with the team now' }).click();
 
