@@ -16,8 +16,7 @@ A tester or reviewer can gather new findings on a ticket in a private draft roun
 ## Status
 
 Accepted. Superseded in part by [ADR-0048](0048-tries-in-a-draft-and-one-open-round-per-ticket.md): the hand-off dialog
-drops "Share and move" when sharing is refused, and a findings round closes when the assignee moves the ticket on or
-shares the next round.
+drops "Share and move" when sharing is refused.
 
 - Date: 2026-11-19
 - Deciders: Zairan Mir (lead, product owner)

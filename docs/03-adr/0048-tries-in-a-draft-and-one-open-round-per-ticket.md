@@ -1,11 +1,11 @@
 # ADR-0048 — Tries in a draft, and one open shared round per ticket
 
 A retake is the next try of the same screenshot inside a private draft. A ticket has at most one open shared round, and
-it closes when the person it is ready for moves the ticket on.
+it closes when the person whose turn it is moves the ticket on.
 
 ## Index
 
-- [Status](#status) — accepted, dates, deciders, what it supersedes in ADR-0017 and ADR-0044.
+- [Status](#status) — accepted, amended before merge, deciders, what it supersedes in ADR-0017 and ADR-0044.
 - [Context and problem statement](#context-and-problem-statement) — Omar shares three empty rounds while Lena still checks one.
 - [Decision drivers](#decision-drivers) — one story per ticket, honest round numbers, no race, no data change.
 - [Considered options](#considered-options) — what closes a round, and what happens to old open rounds.
@@ -17,12 +17,14 @@ it closes when the person it is ready for moves the ticket on.
 
 ## Status
 
-Accepted · 2026-11-20 · Deciders: Zairan Mir (lead, product owner).
+Accepted 2026-11-20; amended 2026-11-21 before merge · Deciders: Zairan Mir (lead, product owner).
 
 The product owner accepted these decisions in a session on 2026-11-20, after testing pinround by hand
-([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)). On 2026-11-21 the product owner decided
-two more points, written here: only the person whose turn it is closes an open round (a lead's move does not), and a
-findings round closes when the assignee moves the ticket on.
+([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)). An ADR is accepted when it is merged
+([README](README.md#status-lifecycle)), and this one was not merged yet, so it was amended in place on 2026-11-21 with
+three points the product owner decided that day: a findings round closes when the assignee moves the ticket on; a
+lead's move does not close a round; after a lead's move, whoever's turn it is now closes the round when they move the
+ticket on.
 
 It supersedes in part:
 
@@ -32,9 +34,8 @@ It supersedes in part:
 - [ADR-0017](0017-private-draft-rounds.md) and [ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md),
   **hand-off choices** ("Share and move", "Keep private and move", Cancel): when sharing is refused, the dialog drops
   "Share and move" and shows the reason.
-- [ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md), **findings round**: it closes when the assignee moves
-  the ticket on or shares the next round.
 
+ADR-0044 set no rule for when a findings round closes, so the closing rules below add to it and supersede nothing.
 The rest of both stands: drafts stay private, the hand-off dialog stays, and the person whose turn it is may still
 keep a draft.
 
@@ -94,16 +95,21 @@ does not close them.
 **When a shared round closes.**
 
 - A round shared at a hand-off is ready for the person whose turn it is next (the reviewer after "Send to code
-  review", the tester after "Approve code"). It stays open until **that person moves the ticket on** with any verb
-  ("Approve code", "Ask for changes", "Pass it", "Needs changes" and the others in the
-  [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue)). The verb is the round's verdict.
-  The round becomes `RoundState::Closed` in the move's transaction.
+  review", the tester after "Approve code"). It stays open until **that person moves the ticket on** (after a lead's
+  move, whoever's turn it is now; see below) with any verb ("Approve code", "Ask for changes", "Pass it", "Needs
+  changes" and the others in the [transition catalogue](../02-architecture/workflow-engine.md#transition-catalogue)).
+  The verb is the round's verdict. The round becomes `RoundState::Closed` in the move's transaction.
 - **Only the person whose turn it is closes it** (product owner, 2026-11-21). A move by anyone else, such as a lead's
   "Move to another step…" or "Put on hold", leaves an open round open.
+- **After a lead's move, whoever's turn it is now closes it** (product owner, 2026-11-21). When a lead moves the
+  ticket past the turn of the person a round is ready for, the round stays open, and the person whose turn it is in
+  the new step closes it when they move the ticket on. For example, Round 2 is ready for Lena at code review; Raj
+  moves the ticket to Testing; Round 2 stays open; Mia's "Pass it" closes it, and Omar can then share Round 3.
 - A **findings round** ([ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md)) is ready for the assignee. It
-  closes when **the assignee moves the ticket on**, with any verb, like any other round (product owner, 2026-11-21).
-  That holds also when the assignee chooses "Keep private and move" and shares no new screenshots. It also closes when
-  **the assignee shares the next round**: that share closes it first, then numbers the new round, in one transaction.
+  closes when **the assignee moves the ticket on**, with any verb, like any other round (product owner, 2026-11-21);
+  after a lead's move, when whoever's turn it is now moves it on. That holds also when the assignee chooses "Keep
+  private and move" and shares no new screenshots. It also closes when **the assignee shares the next round**: that
+  share closes it first, then numbers the new round, in one transaction.
 - A tester's "Needs changes" with a draft does both in one move: it closes the open round with her verdict, then
   shares her draft as "Round N · findings by Mia".
 
@@ -140,8 +146,8 @@ that is not a findings round. An open findings round closes on the assignee's mo
   (`Ticketing\Api\ShareDraftQuestion`, called inside `MoveTicket`) shows the same-transaction way. P14.T5 picks the
   path and updates the "Depends on" lines in [modules.md](../02-architecture/modules.md) if it adds a call.
 - Bad: because a lead's "Move to another step…" or "Put on hold" does not close the round, the round can stay open
-  while the ticket sits in another step, and no new round can be shared until the person whose turn it is moves the
-  ticket on.
+  while the ticket sits in another step, and no new round can be shared until whoever's turn it is now moves the
+  ticket on. That person closes a round that was ready for someone else, with their own verb as its verdict.
 - Bad: the verb closes the round even when the person never opened the pictures.
 - Bad: old tickets with two open rounds look odd until someone moves them on.
 - Neutral: the database gains `rvw_screenshot.retake_of` (index led by `organization_id`, RLS on). The round table
@@ -154,7 +160,9 @@ that is not a findings round. An open findings round closes on the assignee's mo
   unnumbered (state, not only status); a test where Mia's "Needs changes" closes Round 2 and shares Round 3 · findings
   by Mia in one move, and Omar's next share closes Round 3; a test where Omar moves the ticket on with "Keep private
   and move" and no new screenshots, and Round 3 · findings by Mia closes with nothing new shared; a test where Lena's
-  "Put on hold" leaves the open round open.
+  "Put on hold" leaves the open round open; a test where Round 2 is ready for Lena at code review, Raj moves the ticket
+  to Testing, Round 2 stays open and a share is still refused, then Mia's "Pass it" closes Round 2 and Omar's next
+  share numbers Round 3.
 - P14.T6: domain, migration, repository and isolation tests for `retake_of`; a sixth try is refused and nothing is
   stored; `retake_of` pointing at another round, another person's draft or another organization answers 404; after
   share the round holds one screenshot per chain, the latest try.
@@ -166,7 +174,7 @@ that is not a findings round. An open findings round closes on the assignee's mo
 - Good, because it needs no new click and matches how people already finish a check.
 - Good, because the round's verdict and the ticket's step cannot disagree.
 - Bad, because it loses a verdict that is separate from the move: the round closes even if the pictures were never
-  looked at, and a lead's move by someone else leaves it open.
+  looked at, and a move by anyone else, such as a lead's, leaves it open.
 
 ### Option 2, every picture marked
 

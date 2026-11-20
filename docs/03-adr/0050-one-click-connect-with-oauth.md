@@ -64,7 +64,8 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
   as the authorize request that issued the code. An unregistered or changed redirect URI is refused on the authorize
   page itself, with no redirect and no code.
 - **Consent.** A consent page in the signed-in browser lists the client and the scopes it asks for. The person picks
-  one organization they are a member of, then allows or denies.
+  one organization they are a member of, then allows or denies. The consent POST checks on the server that the
+  person is a member of the posted organization; otherwise it answers 404 and issues no code.
 - **One organization per grant.** The code, the access token and the refresh token are bound to the organization
   picked on the consent page, as a personal access token is bound to its organization. A token reads and writes only
   that organization, and stops working (access and refresh) when the person's membership of it ends.
@@ -103,6 +104,8 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
   authorize request's is refused, and no token is issued.
 - A token issued for Acme Foods cannot read another organization: the same call answers not found, as with a personal
   access token of Acme Foods. After the person leaves Acme Foods, its access and refresh tokens are refused.
+- A consent submitted with the id of an organization the person is not a member of answers 404, and no code is
+  issued.
 - Tokens never appear in logs (log test).
 - The MCP and REST integration tests of ADR-0021 run with an issued token as with a personal access token: wrong
   tenant not found, missing scope refused, another person's draft not found.
