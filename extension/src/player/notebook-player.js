@@ -47,7 +47,8 @@ const unwrappedScenarioOf = (scenario) => unwrappedFieldsOf(scenario, (field, va
 
 /**
  * Plays one notebook's checked scenarios in the tab the popup was opened on. Every run (Play or Step) is refused, with
- * nothing run, unless the scenario's start_url, each of its go_to urls and the tab's address are on an allowed host
+ * nothing run, unless the scenario's start_url, each of its go_to urls and the tab's address (and the one it is
+ * loading) are on an allowed host
  * and not on pinround, and the person said "Play anyway" for each of those hosts once. go_to checks its url again
  * before it navigates, and every page step checks the loaded tab before it acts. The page's highlight is cleared when
  * a run ends or stops, before Next and Back, and on close.
@@ -219,7 +220,8 @@ export class NotebookPlayer {
         if (null !== tabRefusal) {
             return tabRefusal;
         }
-        for (const site of uniqueSites([scenario.start_url, tab.url])) {
+        // A tab still loading acts on its pendingUrl's page first, so that host is asked about too.
+        for (const site of uniqueSites([scenario.start_url, tab.url, tab.pendingUrl])) {
             if (await isConfirmedSite(this.#storage, site)) {
                 continue;
             }
