@@ -13,6 +13,7 @@ use App\Media\Api\UploadSlot;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
 use App\Review\Api\OpenDraftQueries;
+use App\Review\Api\OpenDraftScreenshots;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
@@ -115,6 +116,11 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Tick
         }
 
         return null;
+    }
+
+    public function openDraftScreenshotsOf(TicketId $ticketId, UserId $owner): ?OpenDraftScreenshots
+    {
+        throw new \LogicException('create_upload never lists a draft\'s screenshots.');
     }
 
     public function startDraft(TicketId $ticketId, UserId $ownerId, \DateTimeImmutable $startedAt): string

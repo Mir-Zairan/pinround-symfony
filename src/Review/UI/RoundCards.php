@@ -11,6 +11,7 @@ use App\Organization\Api\MemberNameQueries;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
+use App\Review\Api\ScreenshotChains;
 use App\Review\Api\VerdictCommands;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Checklist\ChecklistCard;
@@ -294,15 +295,12 @@ final readonly class RoundCards
      */
     private static function shownChainsOf(RoundView $round): array
     {
-        $chains = [];
-        foreach ($round->screenshots as $screenshot) {
-            $chains[$screenshot->retakeOf ?? $screenshot->id][] = $screenshot;
-        }
+        $chains = ScreenshotChains::of($round->screenshots);
         if ($round->isUnsharedDraft()) {
-            return array_values($chains);
+            return $chains;
         }
 
-        return array_map(static fn (array $tries): array => [$tries[\count($tries) - 1]], array_values($chains));
+        return array_map(static fn (array $tries): array => [$tries[\count($tries) - 1]], $chains);
     }
 
     /**

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Review\Infrastructure\Doctrine;
 
+use App\Review\Api\DraftScreenshotChain;
 use App\Review\Api\OpenDraftQueries;
+use App\Review\Api\OpenDraftScreenshots;
 use App\Review\Api\PinNote;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundNotes;
@@ -12,6 +14,7 @@ use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
+use App\Review\Api\ScreenshotChains;
 use App\Review\Api\ScreenshotNotes;
 use App\Review\Api\SharedRoundNotes;
 use App\Review\Api\TicketRounds;
@@ -31,9 +34,9 @@ use Doctrine\DBAL\Connection;
  * The rounds of a ticket from rvw_round, rvw_screenshot and rvw_pin through DBAL, after Ticketing's batch visibility
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
- * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, openDraftOf, roundNotes
- * and sharedRoundNotes send one query each and make no visibility check: the first two leave the decision to
- * RoundVoter, the next two read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
+ * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, openDraftOf,
+ * openDraftScreenshotsOf, roundNotes and sharedRoundNotes send one query each and make no visibility check: the first
+ * two leave the decision to RoundVoter, the next three read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
  * RoundVoter. draftOf reads one draft of its owner with its screenshots and pins, and needs none either. Of a shared
  * round, forTicket and sharedRoundNotes give only the latest try of each screenshot (ADR-0048), to everyone, and
  * draftScreenshotOf finds no earlier try; draftOf and the viewer's unshared draft give every try.
@@ -53,6 +56,19 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
      */
     private const string NOTE_PIN_JOIN = ' LEFT JOIN rvw_pin AS pin ON pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id'
         .' AND '.DbalReviewRoundQueries::COUNTED_PIN;
+
+    /**
+     * The chain's first try of the row of rvw_screenshot aliased screenshot, found by its primary key, also when the
+     * team does not see it; CHAIN_ORDER needs it.
+     */
+    private const string FIRST_TRY_JOIN = ' LEFT JOIN rvw_screenshot AS first_try ON first_try.organization_id = screenshot.organization_id AND first_try.id = screenshot.retake_of';
+
+    /**
+     * By the place of each chain's first try, then by position, as RoundView lists screenshots: the order ScreenshotChains
+     * numbers them in, so a shared round lists its latest tries in the order, and with the numbers, its owner's draft
+     * gave them.
+     */
+    private const string CHAIN_ORDER = ' ORDER BY COALESCE(first_try.position, screenshot.position), screenshot.position, screenshot.id';
 
     public function __construct(
         private Connection $connection,
@@ -206,6 +222,53 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         }
 
         return new RoundAccessFacts($organizationId, self::text($draftId, 'id'), $ticketId, $owner, true, false);
+    }
+
+    public function openDraftScreenshotsOf(TicketId $ticketId, UserId $owner): ?OpenDraftScreenshots
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // One row per try, or one for a draft with no screenshot; the round conditions are openDraftOf's.
+        $tryRows = $this->connection->fetchAllAssociative(
+            'SELECT round.id AS round_id, screenshot.id, screenshot.media_id, screenshot.position, screenshot.title, screenshot.retake_of'
+            .' FROM rvw_round AS round'
+            .' LEFT JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
+            .self::FIRST_TRY_JOIN
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            ." AND round.owner_id = CAST(:owner AS uuid) AND round.kind = 'draft' AND round.shared_at IS NULL AND round.state = 'open'"
+            .self::CHAIN_ORDER,
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'owner' => $owner->toString()],
+        );
+        if ([] === $tryRows) {
+            return null;
+        }
+
+        $tries = [];
+        foreach ($tryRows as $tryRow) {
+            $tryId = self::textOrNull($tryRow['id'], 'id');
+            if (null !== $tryId) {
+                // Only what ScreenshotChains and the chain's fields read: no pins, verdict or summary is selected.
+                $tries[] = new RoundScreenshotView(
+                    $tryId,
+                    self::text($tryRow['media_id'], 'media_id'),
+                    self::integer($tryRow['position'], 'position'),
+                    null,
+                    null,
+                    self::textOrNull($tryRow['title'], 'title'),
+                    null,
+                    [],
+                    self::textOrNull($tryRow['retake_of'], 'retake_of'),
+                );
+            }
+        }
+        $chains = [];
+        foreach (ScreenshotChains::of($tries) as $chainIndex => $chainTries) {
+            $chains[] = new DraftScreenshotChain($chainTries[0]->id, $chainIndex + 1, $chainTries[\count($chainTries) - 1]->title, \count($chainTries));
+        }
+
+        return new OpenDraftScreenshots(
+            new RoundAccessFacts($organizationId, self::text($tryRows[0]['round_id'], 'round_id'), $ticketId, $owner, true, false),
+            $chains,
+        );
     }
 
     public function roundNotes(TicketId $ticketId, UserId $owner): ?RoundNotes
@@ -388,18 +451,16 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         if ([] === $roundIds) {
             return [];
         }
-        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace. Ordered by
-        // the place of the chain's first try, so a shared round lists its latest tries in the order, and with the numbers,
-        // its owner's draft gave them; the first try is found by its primary key, also when the team does not see it.
+        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
         $screenshotRows = $this->connection->fetchAllAssociative(
             'SELECT screenshot.id, screenshot.round_id, screenshot.media_id, screenshot.position, screenshot.variant_label,'
             .' screenshot.verdict, screenshot.title, screenshot.summary, screenshot.retake_of,'
             .' EXISTS (SELECT 1 FROM rvw_pin AS pin WHERE pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id) AS has_pins'
             .' FROM rvw_screenshot AS screenshot'
-            .' LEFT JOIN rvw_screenshot AS first_try ON first_try.organization_id = screenshot.organization_id AND first_try.id = screenshot.retake_of'
+            .self::FIRST_TRY_JOIN
             .' WHERE screenshot.organization_id = CAST(:organization AS uuid) AND screenshot.round_id = ANY(CAST(:rounds AS uuid[]))'
             .' AND (screenshot.round_id = ANY(CAST(:roundsWithEveryTry AS uuid[])) OR '.self::latestTrySql('screenshot').')'
-            .' ORDER BY COALESCE(first_try.position, screenshot.position), screenshot.position, screenshot.id',
+            .self::CHAIN_ORDER,
             [
                 'organization' => $organizationId,
                 'rounds' => '{'.implode(',', $roundIds).'}',
