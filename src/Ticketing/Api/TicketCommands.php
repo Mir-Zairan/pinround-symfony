@@ -25,9 +25,10 @@ interface TicketCommands
      *
      * @return string the new ticket's key, for example "SHOP-12"
      *
-     * @throws \DomainException          when the organization has no project with that id, no team owns the project, or
-     *                                   the assignee is not a lead or member of that team in the organization; nothing
-     *                                   is saved
+     * @throws AssigneeRefused           when the assignee is not a lead or member of that team in the organization;
+     *                                   nothing is saved
+     * @throws \DomainException          when the organization has no project with that id or no team owns the project;
+     *                                   nothing is saved
      * @throws \InvalidArgumentException when the title is blank or over 200 characters, the description over 50,000
      *                                   characters, or the type or priority unknown; the number taken is given back only
      *                                   when the caller rolls back
@@ -52,9 +53,11 @@ interface TicketCommands
      * has no team and no assignee, and takes the organization's core steps through the project's team. The project's
      * row stays locked until the caller's transaction ends, as create does.
      *
-     * @throws \DomainException          when the organization has no such project, no team owns it, the project is not
-     *                                   the picked team's, the assignee is not a lead or member of the team, or the
-     *                                   reporter picked a person in a team they are not in; nothing is saved
+     * @throws AssigneeRefused           when the assignee is not a lead or member of the team, or the reporter picked a
+     *                                   person in a team they are not in, checked against the team as it is now, not
+     *                                   any cached list of its people; nothing is saved
+     * @throws \DomainException          when the organization has no such project, no team owns it, or the project is
+     *                                   not the picked team's; nothing is saved
      * @throws \InvalidArgumentException as create throws it, also for a person with no team, and for more than three
      *                                   duplicate keys
      * @throws \LogicException           when no transaction is open, or the team's steps lack Backlog or To do

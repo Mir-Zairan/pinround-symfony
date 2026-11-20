@@ -20,6 +20,7 @@ use App\Review\Application\PicturesToKeep;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\AssigneeRefused;
 use App\Ticketing\Api\ProblemReport;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
@@ -151,19 +152,24 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         $pinNotes = array_merge([], ...array_map(static fn (ScreenshotWithPins $screenshot): array => array_map(static fn (PlacedPin $pin): string => $pin->note, $screenshot->pins), $draft->screenshots));
         // Through report, as Report a problem makes a ticket: Ticketing works out the check reasons and team-only
         // visibility from the words, so a draft an agent filed is checked like any report.
-        $key = $this->ticketCommands->report(new ProblemReport(
-            $organizationId,
-            $owner,
-            $project->id(),
-            $project->teamId(),
-            $draft->title,
-            $draft->detail,
-            self::DEFAULT_TYPE,
-            self::DEFAULT_PRIORITY,
-            $assignee,
-            $pinNotes,
-            $at,
-        ))->key;
+        try {
+            $key = $this->ticketCommands->report(new ProblemReport(
+                $organizationId,
+                $owner,
+                $project->id(),
+                $project->teamId(),
+                $draft->title,
+                $draft->detail,
+                self::DEFAULT_TYPE,
+                self::DEFAULT_PRIORITY,
+                $assignee,
+                $pinNotes,
+                $at,
+            ))->key;
+        } catch (AssigneeRefused $refused) {
+            // The offer comes from the team people cache, which may still hold someone who has left the team since.
+            throw ReportDraftRefused::because(ReportGiveTo::NOT_OFFERED, $refused);
+        }
         if ([] !== $draft->screenshots) {
             $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new \LogicException('The ticket Send just made is not found by its key.');
             try {
