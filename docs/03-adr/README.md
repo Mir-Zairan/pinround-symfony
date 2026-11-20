@@ -9,7 +9,7 @@ This folder holds every important architecture decision for pinround, why we mad
 - [Status lifecycle](#status-lifecycle) — Proposed, Accepted, Deprecated, Superseded.
 - [Naming and format](#naming-and-format) — file names, numbering, the template.
 - [How to change a decision](#how-to-change-a-decision) — superseding instead of editing.
-- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0047.
+- [All decisions](#all-decisions) — the index table of ADR-0001 to ADR-0050.
 
 ## What an ADR is
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 and ADR-0043 on 2026-11-18) (deciders: Zairan Mir, lead, with the team), and ADR-0044 to ADR-0047 on 2026-11-19.
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 and ADR-0043 on 2026-11-18) (deciders: Zairan Mir, lead, with the team), ADR-0044 to ADR-0047 on 2026-11-19, and ADR-0048 on 2026-11-20. ADR-0049 and ADR-0050 are **Proposed**: the product owner has not accepted them yet.
 
 | ADR | Title | Decision in one line |
 |---|---|---|
@@ -116,3 +116,6 @@ All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026
 | [0045](0045-evidence-is-captured-where-the-person-works.md) | Evidence is captured where the person works | Claude Code or the extension keeps an evidence log while checking and files it in one step at the end, as a report draft or into the person's draft round; new tool `find_tickets` and MCP prompt `report_while_investigating`; extension pin overlay and session target. |
 | [0046](0046-notebooks-and-scenarios-for-understanding-an-app.md) | Notebooks and scenarios | An owner-only notebook (`rvw_notebook`) holds pins for questions; Claude Code saves data-only scenarios (fixed step types, `save_scenarios`, scope `notebooks:write`) that the extension plays live on allowed hosts and never as code. |
 | [0047](0047-a-sent-report-draft-is-a-report-and-its-pictures-upload-by-project.md) | A sent report draft is a report, and its pictures upload by project | A report draft's Send calls `Ticketing\Api\TicketCommands::report`, so a sent draft gets the same check reasons, team-only rule and checker as Report a problem; an agent begins a report's pictures with the MCP tool `create_report_upload` (scope `reports:write`, also `POST /api/v1/uploads` with `project`) on the Media upload target kind `new_report`, keyed by the project. Supersedes in part ADR-0040 (Send) and ADR-0039 (the upload line). |
+| [0048](0048-tries-in-a-draft-and-one-open-round-per-ticket.md) | Tries in a draft, and one open shared round per ticket | A retake is a try of the same screenshot (`retake_of`, at most 5); share copies the latest try; a ticket has one open shared round, which closes when the person whose turn it is moves the ticket on (a findings round when the assignee shares the next); an empty share or a share over an open round is refused with the reason; old open rounds are left as they are. Adds to ADR-0017 and ADR-0044. |
+| [0049](0049-demo-switch-for-two-step-login.md) | **Proposed.** A dev-only switch skips two-step login on a local demo | `PINROUND_DEMO_SKIP_2FA`, off by default, read only in `dev` by `RecentAuth` and `AdminAreaVoter`; the kernel refuses to boot with it set in any other environment; a banner shows while it is on. Would supersede ADR-0012's "no exception" rule in part. |
+| [0050](0050-one-click-connect-with-oauth.md) | **Proposed.** One-click connect with OAuth | OAuth 2.1 authorization code with PKCE in Identity, a consent page, 1-hour access tokens with rotating refresh tokens, the same scopes as personal tokens, for the extension, Claude Code and a Claude connector; pasted tokens keep working. Would supersede ADR-0021's "no OAuth flow for MCP in v1" in part. |
