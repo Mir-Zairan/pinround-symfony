@@ -24,6 +24,8 @@ use App\Review\Domain\RoundSlotTaken;
 use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
+use App\Review\Domain\ScreenshotTriesFull;
+use App\Review\Domain\ScreenshotTry;
 use App\Review\Domain\ScreenshotVerdict;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
@@ -68,6 +70,8 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     private const string UNKNOWN_MEDIA = '0197a3c0-0000-7000-8000-000000000d09';
     /** Ready, uploaded by Lena and by Mia, and in no round. */
     private const string FRESH_MEDIA = '0197a3c0-0000-7000-8000-000000000d06';
+    /** Ready, uploaded by Lena, and in no round. */
+    private const string SECOND_FRESH_MEDIA = '0197a3c0-0000-7000-8000-000000000d07';
 
     private const string DRAFT = '0197a3c0-0000-7000-8000-000000000e01';
     private const string OMARS_DRAFT = '0197a3c0-0000-7000-8000-000000000e02';
@@ -86,6 +90,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
     private const string OMARS_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000a03';
     private const string MIAS_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000a04';
     private const string CONCURRENT_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000a05';
+    private const string BETA_BAKERY_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000a07';
     private const string UNKNOWN_SCREENSHOT = '0197a3c0-0000-7000-8000-000000000a99';
     private const string OLD_PIN = '0197a3c0-0000-7000-8000-000000000c01';
 
@@ -113,6 +118,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             [self::ACME_FOODS, self::OMARS_MEDIA, self::OMAR, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::FRESH_MEDIA, self::LENA, MediaImageStatus::Ready],
             [self::ACME_FOODS, self::FRESH_MEDIA, self::MIA, MediaImageStatus::Ready],
+            [self::ACME_FOODS, self::SECOND_FRESH_MEDIA, self::LENA, MediaImageStatus::Ready],
         ]);
         $this->checklistCommands = new RecordingChecklistCommands();
         $this->commands = $this->commandsOver($this->interfering);
@@ -406,6 +412,91 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         $draft = $this->storedRound(self::DRAFT);
         self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, self::CONCURRENT_SCREENSHOT], self::screenshotIdsOf($draft));
         self::assertNull($draft->screenshots()[2]->title(), 'Only the other request\'s picture, with no title, may have landed.');
+    }
+
+    /**
+     * A retake of try 2 points at the chain's first try too, so both retakes are tries of the first screenshot, and the
+     * second screenshot stays a chain of its own.
+     */
+    #[Test]
+    public function aRetakeOfAnyTryIsAddedAsTheNextTryOfThatScreenshotsChainWithItsOwnTextAndPins(): void
+    {
+        $lena = new UserId(self::LENA);
+
+        $secondTry = $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::FRESH_MEDIA, 'Cart, fixed', null, [new PlacedPin(5.0, 6.0, 'Now right')]), self::at(), strtoupper(self::FIRST_SCREENSHOT));
+        $thirdTry = $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::SECOND_FRESH_MEDIA), self::at(), $secondTry->screenshotId);
+
+        $draft = $this->storedRound(self::DRAFT);
+        self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, $secondTry->screenshotId, $thirdTry->screenshotId], self::screenshotIdsOf($draft));
+        self::assertSame(
+            [null, null, self::FIRST_SCREENSHOT, self::FIRST_SCREENSHOT],
+            array_map(static fn (Screenshot $screenshot): ?string => $screenshot->retakeOf()?->toString(), $draft->screenshots()),
+        );
+        self::assertSame([[1, 2, 'Cart, fixed'], [0, 3, null]], [
+            [\count($draft->screenshots()[2]->pins()), $draft->screenshots()[2]->position(), $draft->screenshots()[2]->title()],
+            [\count($draft->screenshots()[3]->pins()), $draft->screenshots()[3]->position(), $draft->screenshots()[3]->title()],
+        ]);
+        self::assertCount(1, $draft->screenshots()[0]->pins(), 'The first try keeps its own pin.');
+        self::assertSame([[1, 3], [1, 1], [2, 3], [3, 3]], array_map(static fn (ScreenshotTry $try): array => [$try->number, $try->count], $draft->tries()));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function retakesOfNoScreenshotOfTheDraft(): iterable
+    {
+        yield 'a malformed id' => ['not-a-screenshot-id'];
+        yield 'an unknown id' => [self::UNKNOWN_SCREENSHOT];
+        yield 'a screenshot of another person\'s draft' => [self::OMARS_SCREENSHOT];
+        yield 'a screenshot of another round' => [self::MIAS_SCREENSHOT];
+        yield 'a screenshot of another organization' => [self::BETA_BAKERY_SCREENSHOT];
+    }
+
+    /**
+     * One answer for all, so Lena never learns that Omar's draft or Beta Bakery's round holds that screenshot.
+     */
+    #[Test]
+    #[DataProvider('retakesOfNoScreenshotOfTheDraft')]
+    public function aRetakeOfAScreenshotThatIsNotInTheOwnersDraftIsNotFoundAndStoresNothing(string $retakeOf): void
+    {
+        $refused = $this->assertRefusedAndNothingSaved(RoundRefused::SCREENSHOT_NOT_FOUND, fn () => $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(self::FRESH_MEDIA, 'Title'), self::at(), $retakeOf));
+
+        self::assertSame([true, false, false], self::kindsOf($refused));
+    }
+
+    /**
+     * The fifth try is the last one taken; the sixth is the domain's plain refusal, of no kind, so callers answer it
+     * as a refusal the person reads, not as invalid input.
+     */
+    #[Test]
+    public function aSixthTryIsRefusedWithTheCapReasonAndStoresNothing(): void
+    {
+        $lena = new UserId(self::LENA);
+        $draft = $this->rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('The seeded draft is missing.');
+        foreach (['0197a3c0-0000-7000-8000-000000000a11', '0197a3c0-0000-7000-8000-000000000a12', '0197a3c0-0000-7000-8000-000000000a13'] as $tryId) {
+            $draft->addScreenshot($lena, new ScreenshotId($tryId), self::MEDIA, new ScreenshotId(self::FIRST_SCREENSHOT));
+        }
+        $this->rounds->save($draft, self::at());
+        $fifthTry = $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::FRESH_MEDIA), self::at(), self::FIRST_SCREENSHOT);
+        self::assertSame([5, 5], [$this->storedRound(self::DRAFT)->tries()[5]->number, $this->storedRound(self::DRAFT)->tries()[5]->count]);
+
+        $refused = $this->assertRefusedAndNothingSaved(ScreenshotTriesFull::REASON, fn () => $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::SECOND_FRESH_MEDIA, 'Title'), self::at(), $fifthTry->screenshotId));
+
+        self::assertSame([false, false, false], self::kindsOf($refused));
+    }
+
+    /**
+     * The upload was added before, so a retry with another retake_of, even one of no screenshot, answers it as it is.
+     */
+    #[Test]
+    public function aPictureTheDraftHoldsAlreadyIsAnsweredAsAddedBeforeWhateverItRetakes(): void
+    {
+        $before = $this->snapshot();
+
+        $added = $this->commands->addDraftScreenshotOnce(self::DRAFT, new UserId(self::LENA), new ScreenshotWithPins(self::OTHER_MEDIA), self::at(), self::UNKNOWN_SCREENSHOT);
+
+        self::assertEquals(new AddedDraftScreenshot(self::SECOND_SCREENSHOT, true, 0), $added);
+        self::assertSame($before, $this->snapshot());
     }
 
     #[Test]
@@ -1079,7 +1170,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
 
         $this->rounds->add(self::draftOn(self::BETA_BAKERY_DRAFT, self::BETA_BAKERY, self::TICKET, self::LENA));
         $betaShared = self::draftOn(self::BETA_BAKERY_SHARED_ROUND, self::BETA_BAKERY, self::TICKET, self::OMAR);
-        $betaShared->addScreenshot(new UserId(self::OMAR), new ScreenshotId('0197a3c0-0000-7000-8000-000000000a07'), self::OMARS_MEDIA);
+        $betaShared->addScreenshot(new UserId(self::OMAR), new ScreenshotId(self::BETA_BAKERY_SCREENSHOT), self::OMARS_MEDIA);
         $betaShared->share(new UserId(self::OMAR), 9, self::at());
         $this->rounds->add($betaShared);
 
@@ -1127,6 +1218,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
                     $screenshot->summary(),
                     $screenshot->verdict()?->value,
                     array_map(static fn (Pin $pin): array => [$pin->id()->toString(), $pin->number(), $pin->xPercent(), $pin->yPercent(), $pin->note(), $pin->authorId()->toString()], $screenshot->pins()),
+                    $screenshot->retakeOf()?->toString(),
                 ], $round->screenshots()),
             ];
         }

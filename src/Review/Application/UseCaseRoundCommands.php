@@ -19,6 +19,7 @@ use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinVerdict;
+use App\Review\Domain\RetakenScreenshotNotFound;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
@@ -131,7 +132,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         return $screenshotId->toString();
     }
 
-    public function addDraftScreenshotOnce(string $roundId, UserId $ownerId, ScreenshotWithPins $screenshot, \DateTimeImmutable $addedAt): AddedDraftScreenshot
+    public function addDraftScreenshotOnce(string $roundId, UserId $ownerId, ScreenshotWithPins $screenshot, \DateTimeImmutable $addedAt, ?string $retakeOf = null): AddedDraftScreenshot
     {
         $organizationId = $this->tenantContext->require();
         self::refuseMorePinsThanAPictureHolds($screenshot->pins);
@@ -151,10 +152,11 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         if (null !== $refusal) {
             throw new RoundRefused($refusal);
         }
+        $retakenId = null === $retakeOf ? null : self::screenshotIdOf($retakeOf);
         $screenshotId = $this->rounds->nextScreenshotIdentity();
 
-        $this->changeAndSave($draft, $addedAt, function (Round $round) use ($ownerId, $screenshotId, $screenshot): void {
-            $round->addScreenshot($ownerId, $screenshotId, $screenshot->mediaId);
+        $this->changeAndSave($draft, $addedAt, function (Round $round) use ($ownerId, $screenshotId, $screenshot, $retakenId): void {
+            $round->addScreenshot($ownerId, $screenshotId, $screenshot->mediaId, $retakenId);
             $round->editScreenshotText($ownerId, $screenshotId, $screenshot->title, $screenshot->summary);
             $round->replacePins($ownerId, $screenshotId, $this->pinsOf($screenshot->pins, $ownerId));
         });
@@ -413,8 +415,9 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
      * @param \Closure(Round): void $change
      *
      * @throws RoundRefused   with the domain's reason when it refuses the change (read-only for a shared or closed
-     *                        draft, invalid content for content that breaks a rule), or DRAFT_CHANGED when another
-     *                        request saved the round since it was read; nothing is saved
+     *                        draft, invalid content for content that breaks a rule), SCREENSHOT_NOT_FOUND for a retake
+     *                        of a screenshot the round does not hold, or DRAFT_CHANGED when another request saved the
+     *                        round since it was read; nothing is saved
      * @throws RoundSlotTaken when another round has the number the change gave this one; nothing is saved
      */
     private function changeAndSave(Round $round, \DateTimeImmutable $at, \Closure $change): void
@@ -424,6 +427,10 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
             $change($round);
         } catch (\InvalidArgumentException $invalidContent) {
             throw RoundRefused::invalidContent($invalidContent->getMessage(), $invalidContent);
+        } catch (RetakenScreenshotNotFound $notInRound) {
+            // Not found, as for any other picture of no draft of the caller: the answer never tells another person's
+            // draft or organization apart from an unknown id (ADR-0017).
+            throw new RoundRefused(RoundRefused::SCREENSHOT_NOT_FOUND, 0, $notInRound);
         } catch (DraftHasNoScreenshots $empty) {
             throw RoundRefused::sharingBlocked($empty->getMessage(), $empty);
         } catch (\DomainException $refused) {

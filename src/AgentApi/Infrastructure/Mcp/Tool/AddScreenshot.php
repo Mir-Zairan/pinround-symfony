@@ -39,6 +39,10 @@ use Psr\Clock\ClockInterface;
  * The upload is finished with Media's UploadCompletions in the gate's savepoint. A picture still processing is a
  * non-error answer, not a refusal, so the completion is kept and the next call with the same upload_id finds it. Review
  * answers a picture already in the draft as it is, so the same upload_id never adds a second screenshot.
+ *
+ * retake_of makes the picture the next try of a screenshot of the same draft (ADR-0048, P14.T6). Review finds it in the
+ * draft the voter granted, so one of another round, another person's draft or another organization, or a malformed id,
+ * is not found as an unknown one is, and a sixth try is Review's plain refusal; the savepoint takes the completion back.
  */
 final readonly class AddScreenshot implements AgentTool
 {
@@ -75,16 +79,21 @@ final readonly class AddScreenshot implements AgentTool
                     'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
                     'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'pins' => PlacedPinArguments::schema(),
+                    'retake_of' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The screenshot_id of a screenshot in this draft round that the picture retakes, any of its tries; leave it out for a new screenshot.'],
                 ],
                 'required' => ['key', 'upload_id'],
                 'additionalProperties' => false,
             ],
             description: 'Adds a picture you uploaded with create_upload to your own private draft round on a ticket:'
-                .' {key, upload_id, title?, summary?, pins?: [{x_pct, y_pct, note}]}. While the picture is still being'
+                .' {key, upload_id, title?, summary?, pins?: [{x_pct, y_pct, note}], retake_of?}. With retake_of, the'
+                .' screenshot_id of a screenshot in that draft, the picture becomes its next try (at most 5 tries) with'
+                .' its own pins; the earlier tries keep theirs. A retake_of that is not a screenshot of your draft round is'
+                .' not found. While the picture is still being'
                 .' processed the answer has status "processing" and nothing is added yet: call again with the same'
                 .' upload_id in a few seconds. Calling again after it was added adds nothing and answers status'
-                .' "added_before" with the screenshot_id; the title, summary and pins of that call are not used. A'
-                .' rejected picture or a shared draft is refused. Nothing is saved when the call is refused.',
+                .' "added_before" with the screenshot_id; the title, summary, pins and retake_of of that call are not'
+                .' used. A rejected picture, a sixth try or a shared draft is refused. Nothing is saved when the call is'
+                .' refused.',
             annotations: new ToolAnnotations(readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false),
         );
     }
@@ -125,9 +134,10 @@ final readonly class AddScreenshot implements AgentTool
      * Finishes the upload, then adds the ready picture with its title, summary and pins in one Review command; the
      * gate's savepoint takes the completion back when Review refuses.
      *
-     * @throws ToolRefusal     not found, read-only (a round that is not an unshared draft, or one shared meanwhile),
-     *                         invalid input (content Review refuses), or a plain refusal (a rejected picture, an
-     *                         expired upload, a draft that is full or changed meanwhile)
+     * @throws ToolRefusal     not found (also a retake_of of no screenshot of the draft), read-only (a round that is not
+     *                         an unshared draft, or one shared meanwhile), invalid input (content Review refuses), or a
+     *                         plain refusal (a rejected picture, an expired upload, a sixth try, a draft that is full or
+     *                         changed meanwhile)
      * @throws \LogicException without a token, a user or a round target
      */
     public function call(array $arguments, ?ToolTarget $target): CallToolResult
@@ -158,7 +168,7 @@ final readonly class AddScreenshot implements AgentTool
     {
         $screenshot = new ScreenshotWithPins($mediaId, ToolArguments::optionalStringAt($arguments, 'title', self::NAME), ToolArguments::optionalStringAt($arguments, 'summary', self::NAME), PlacedPinArguments::of($arguments['pins'] ?? null, self::NAME));
         try {
-            $added = $this->draftScreenshotCommands->addDraftScreenshotOnce($roundId, $this->callerId(), $screenshot, $this->clock->now());
+            $added = $this->draftScreenshotCommands->addDraftScreenshotOnce($roundId, $this->callerId(), $screenshot, $this->clock->now(), ToolArguments::optionalStringAt($arguments, 'retake_of', self::NAME));
         } catch (RoundRefused $refused) {
             throw self::toolRefusalOf($refused);
         }
