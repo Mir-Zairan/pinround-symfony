@@ -22,10 +22,15 @@ use Twig\Attribute\AsTwigFunction;
  */
 final readonly class AdminTabRail
 {
+    /** The People and roles tab's page, which Home's People tile also opens. */
+    public const string PEOPLE_ROUTE = 'organization_admin_people';
+    /** The AI tab's page, which Home's AI help tile also opens. */
+    public const string AI_ROUTE = 'organization_admin_ai';
+
     /** Label, route of the page, and the attributes it asks on the organization besides ADMIN_AREA. */
     private const array TABS = [
-        ['People and roles', 'organization_admin_people', [OrganizationPermission::INVITE, OrganizationPermission::ADMIN]],
-        ['AI', 'organization_admin_ai', []],
+        ['People and roles', self::PEOPLE_ROUTE, [OrganizationPermission::INVITE, OrganizationPermission::ADMIN]],
+        ['AI', self::AI_ROUTE, []],
     ];
 
     public function __construct(

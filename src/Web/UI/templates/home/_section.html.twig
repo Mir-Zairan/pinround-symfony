@@ -1,12 +1,16 @@
 {#- One Home section. `group` is the focus chip that shows it; every section shows under All. `adminSettingsUrl` is given
-    (even as null) only to the Admin section, which then gets its "Open settings" button. -#}
+    (even as null) only to the Admin section, which then gets its "Open settings" button. Include it for an empty state
+    with `message`, or embed it and fill `body` (and `header_extra`, beside the title). -#}
 <section class="home__section" aria-labelledby="home-{{ id }}" data-focus-group="{{ group }}" data-focus-chips-target="section"
     {%- if focus != 'all' and focus != group %} hidden{% endif %}>
     <div class="home__section-header">
         <h2 class="home__section-title" id="home-{{ id }}">{{ title }}</h2>
+        {% block header_extra %}{% endblock %}
         {% if adminSettingsUrl is defined %}
             {% include '@Web/home/_admin_settings_button.html.twig' with {url: adminSettingsUrl, variant: 'text', size: 'sm', label: 'Open settings'} only %}
         {% endif %}
     </div>
-    <twig:EmptyState message="{{ message }}"/>
+    {% block body %}
+        <twig:EmptyState message="{{ message }}"/>
+    {% endblock %}
 </section>

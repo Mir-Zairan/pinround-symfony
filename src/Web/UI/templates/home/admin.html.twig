@@ -9,17 +9,16 @@
     <link rel="stylesheet" href="{{ asset('styles/home.css') }}">
 {% endblock %}
 
-{# TODO(P07/P11): People, AI help and Jira get their real values; only the team count is real now. #}
+{#- A tile opens its admin tab; Teams has no tab yet, so its tile opens nothing. -#}
 {% block main %}
     <div class="home home--admin">
         <h1 class="home__title">Your organization</h1>
         {% include '@Web/home/_notices.html.twig' %}
 
         <ul class="home__stats">
-            <li><twig:Card class="home__stat"><span class="home__stat-label">People</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>
-            <li><twig:Card class="home__stat"><span class="home__stat-label">Teams</span><span class="home__stat-value">{{ teamCount }}</span></twig:Card></li>
-            <li><twig:Card class="home__stat"><span class="home__stat-label">AI help</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>
-            <li><twig:Card class="home__stat"><span class="home__stat-label">Jira</span><span class="home__stat-value">—<span class="visually-hidden"> (not available yet)</span></span></twig:Card></li>
+            <li><a class="card home__stat home__stat--link" href="{{ peopleUrl }}"><span class="home__stat-label">People</span><span class="home__stat-value">{{ peopleCount|number_format }}</span></a></li>
+            <li><twig:Card class="home__stat"><span class="home__stat-label">Teams</span><span class="home__stat-value">{{ teamCount|number_format }}</span></twig:Card></li>
+            <li><a class="card home__stat home__stat--link" href="{{ aiUrl }}"><span class="home__stat-label">AI help</span><span class="home__stat-value">{{ isAiOn ? 'On' : 'Off' }}</span></a></li>
         </ul>
 
         <p>Admins do not work on tickets. Everything you set is under Admin.</p>
