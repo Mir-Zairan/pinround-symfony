@@ -40,6 +40,9 @@ final class RoundRefused extends \DomainException
     /** An unknown or malformed screenshot id, or one of another round; the same text as Round's refusal. */
     public const string SCREENSHOT_NOT_FOUND = 'This draft round has no such screenshot.';
     public const string UNKNOWN_VERDICT = 'Choose "Looks right" or "Not right yet".';
+    /** An unknown or malformed pin id, or one of another round; the same text as Round's refusal. */
+    public const string PIN_NOT_FOUND = 'This draft round has no such pin.';
+    public const string UNKNOWN_PIN_VERDICT = 'Mark the pin fixed or still wrong.';
     /** A round saved without RoundCommands took the number while the draft was being shared. */
     public const string NUMBER_TAKEN = 'Another round took this number just now. Try again.';
 
@@ -111,11 +114,12 @@ final class RoundRefused extends \DomainException
     }
 
     /**
-     * NOT_FOUND or SCREENSHOT_NOT_FOUND: no draft of the person with that id, or no such picture in it.
+     * NOT_FOUND, SCREENSHOT_NOT_FOUND or PIN_NOT_FOUND: no draft of the person with that id, or no such picture or pin
+     * in it.
      */
     public function isNotFound(): bool
     {
-        return \in_array($this->getMessage(), [self::NOT_FOUND, self::SCREENSHOT_NOT_FOUND], true);
+        return \in_array($this->getMessage(), [self::NOT_FOUND, self::SCREENSHOT_NOT_FOUND, self::PIN_NOT_FOUND], true);
     }
 
     public function isReadOnly(): bool

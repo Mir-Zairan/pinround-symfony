@@ -11,11 +11,14 @@ use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Api\VerdictCommands;
 use App\Review\Application\Checklist\RoundChecklistCommands;
 use App\Review\Application\Checklist\TodoStep;
 use App\Review\Domain\DraftDecision;
 use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\Domain\Pin;
+use App\Review\Domain\PinId;
+use App\Review\Domain\PinVerdict;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundChanged;
 use App\Review\Domain\RoundId;
@@ -191,6 +194,24 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         $id = self::screenshotIdOf($screenshotId);
 
         $this->changeAndSave($draft, $at, static fn (Round $round) => $round->setVerdict($ownerId, $id, $screenshotVerdict));
+    }
+
+    public function setDraftPinVerdict(string $roundId, UserId $ownerId, string $pinId, ?string $verdict, \DateTimeImmutable $at): void
+    {
+        $draft = $this->ownDraft($roundId, $ownerId);
+        $pinVerdict = match ($verdict) {
+            null => null,
+            VerdictCommands::PIN_FIXED => PinVerdict::Fixed,
+            VerdictCommands::PIN_STILL_WRONG => PinVerdict::StillWrong,
+            default => throw RoundRefused::invalidContent(RoundRefused::UNKNOWN_PIN_VERDICT),
+        };
+        try {
+            $id = new PinId($pinId);
+        } catch (\InvalidArgumentException) {
+            throw new RoundRefused(RoundRefused::PIN_NOT_FOUND);
+        }
+
+        $this->changeAndSave($draft, $at, static fn (Round $round) => $round->setPinVerdict($ownerId, $id, $pinVerdict));
     }
 
     public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void

@@ -358,7 +358,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a uuid holds no comma or brace.
         $screenshotRows = $this->connection->fetchAllAssociative(
             'SELECT screenshot.id, screenshot.round_id, screenshot.media_id, screenshot.position, screenshot.variant_label,'
-            .' screenshot.verdict, screenshot.title, screenshot.summary,'
+            .' screenshot.verdict, screenshot.title, screenshot.summary, screenshot.retake_of,'
             .' EXISTS (SELECT 1 FROM rvw_pin AS pin WHERE pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id) AS has_pins'
             .' FROM rvw_screenshot AS screenshot'
             .' WHERE screenshot.organization_id = CAST(:organization AS uuid) AND screenshot.round_id = ANY(CAST(:rounds AS uuid[]))'
@@ -385,6 +385,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
                 self::textOrNull($screenshotRow['title'], 'title'),
                 self::textOrNull($screenshotRow['summary'], 'summary'),
                 $pinsByScreenshot[$screenshotId] ?? [],
+                self::textOrNull($screenshotRow['retake_of'], 'retake_of'),
             );
         }
 

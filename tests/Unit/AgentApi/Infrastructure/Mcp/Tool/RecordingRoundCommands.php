@@ -38,6 +38,11 @@ final class RecordingRoundCommands implements RoundCommands
         throw new \LogicException('set_verdict saves a verdict with its summary, in one command.');
     }
 
+    public function setDraftPinVerdict(string $roundId, UserId $ownerId, string $pinId, ?string $verdict, \DateTimeImmutable $at): void
+    {
+        throw new \LogicException('No tool marks a pin of an earlier try.');
+    }
+
     public function editDraftScreenshot(string $roundId, UserId $ownerId, string $screenshotId, ?string $title, ?string $summary, \DateTimeImmutable $at): void
     {
         throw new \LogicException('set_verdict saves a summary with its verdict, in one command.');

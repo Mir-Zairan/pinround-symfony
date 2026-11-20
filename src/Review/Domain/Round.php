@@ -21,6 +21,9 @@ final class Round
 
     public const int REPORT_NUMBER = 0;
 
+    public const string NO_SUCH_PIN = 'This draft round has no such pin.';
+    public const string PIN_ON_LATEST_TRY = 'Only a pin on an earlier try can be marked fixed or still wrong.';
+
     /**
      * @param list<Screenshot> $screenshots by position
      */
@@ -289,6 +292,36 @@ final class Round
 
         $this->replaceScreenshotAt($index, $this->screenshots[$index]->withVerdict($verdict));
         ++$this->version;
+    }
+
+    /**
+     * Marks a pin on an earlier try of a screenshot as fixed by a later try or still wrong, or clears the mark with null
+     * (ADR-0048). A pin on the latest try of its chain takes no mark: no later try can have fixed it yet.
+     *
+     * @throws \DomainException when the round is not an open unshared draft of $actorId, has no such pin, or the pin is
+     *                          on the latest try of its chain; the round stays as it was
+     */
+    public function setPinVerdict(UserId $actorId, PinId $pinId, ?PinVerdict $verdict): void
+    {
+        $this->requireEditableDraft($actorId);
+        foreach ($this->screenshots as $index => $screenshot) {
+            foreach ($screenshot->pins() as $pinIndex => $pin) {
+                if (!$pin->id()->equals($pinId)) {
+                    continue;
+                }
+                if ($this->isLatestTry($screenshot)) {
+                    throw new \DomainException(self::PIN_ON_LATEST_TRY);
+                }
+                $pins = $screenshot->pins();
+                $pins[$pinIndex] = $pin->withVerdict($verdict);
+                $this->replaceScreenshotAt($index, $screenshot->withPins($pins));
+                ++$this->version;
+
+                return;
+            }
+        }
+
+        throw new \DomainException(self::NO_SUCH_PIN);
     }
 
     /**
@@ -589,6 +622,17 @@ final class Round
         }
 
         throw new RetakenScreenshotNotFound();
+    }
+
+    private function isLatestTry(Screenshot $screenshot): bool
+    {
+        foreach ($this->triesOfChain($screenshot->firstTryId()) as $try) {
+            if ($try->position() > $screenshot->position()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

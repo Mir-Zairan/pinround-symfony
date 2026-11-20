@@ -66,6 +66,11 @@ final readonly class Pin
         return new self($id, $number, $placed->xPercent, $placed->yPercent, $placed->note, $authorId, $source, $aiState, $verdict);
     }
 
+    public function withVerdict(?PinVerdict $verdict): self
+    {
+        return new self($this->id, $this->number, $this->xPercent, $this->yPercent, $this->note, $this->authorId, $this->source, $this->aiState, $verdict);
+    }
+
     public function id(): PinId
     {
         return $this->id;

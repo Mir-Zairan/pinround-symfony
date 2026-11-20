@@ -8,6 +8,7 @@ use App\Review\Domain\DraftDecision;
 use App\Review\Domain\DraftHasNoScreenshots;
 use App\Review\Domain\Pin;
 use App\Review\Domain\PinId;
+use App\Review\Domain\PinVerdict;
 use App\Review\Domain\RetakenScreenshotNotFound;
 use App\Review\Domain\Round;
 use App\Review\Domain\RoundId;
@@ -968,6 +969,57 @@ final class RoundTest extends TestCase
         self::assertSame(5, $draft->version());
     }
 
+    #[Test]
+    public function aPinOnAnEarlierTryIsMarkedFixedOrStillWrongAndClearedAndNoOtherPinChanges(): void
+    {
+        $draft = self::draftWithTries();
+        $owner = new UserId(self::OMAR);
+
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
+
+        self::assertSame([[PinVerdict::Fixed], [], [], [null], [null], []], self::pinVerdictsOf($draft));
+        self::assertSame(2, $draft->version());
+
+        $draft->setPinVerdict($owner, self::pin(3)->id(), PinVerdict::StillWrong);
+        $draft->setPinVerdict($owner, self::pin(1)->id(), null);
+
+        self::assertSame([[null], [], [], [null], [PinVerdict::StillWrong], []], self::pinVerdictsOf($draft));
+        self::assertSame(4, $draft->version());
+        self::assertSame(['Header is cut off'], array_map(static fn (Pin $pin): string => $pin->note(), $draft->screenshots()[0]->pins()), 'The mark keeps the pin as it was.');
+    }
+
+    #[Test]
+    public function aPinOnTheLatestTryOfItsChainTakesNoMarkAndTheDraftStaysAsItWas(): void
+    {
+        $draft = self::draftWithTries();
+        $before = self::snapshot($draft);
+
+        try {
+            $draft->setPinVerdict(new UserId(self::OMAR), self::pin(2)->id(), PinVerdict::Fixed);
+            self::fail('A pin on the latest try was marked.');
+        } catch (\DomainException $refused) {
+            self::assertSame('Only a pin on an earlier try can be marked fixed or still wrong.', $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($draft));
+    }
+
+    #[Test]
+    public function aPinTheDraftDoesNotHaveIsRefusedAndTheDraftStaysAsItWas(): void
+    {
+        $draft = self::draftWithTries();
+        $before = self::snapshot($draft);
+
+        try {
+            $draft->setPinVerdict(new UserId(self::OMAR), self::pin(9)->id(), PinVerdict::Fixed);
+            self::fail('An unknown pin was marked.');
+        } catch (\DomainException $refused) {
+            self::assertSame('This draft round has no such pin.', $refused->getMessage());
+        }
+
+        self::assertSame($before, self::snapshot($draft));
+    }
+
     /**
      * @return iterable<string, array{\Closure(Round, UserId): void}>
      */
@@ -979,6 +1031,7 @@ final class RoundTest extends TestCase
         yield 'edit the text' => [static fn (Round $round, UserId $actor) => $round->editScreenshotText($actor, self::screenshotId(0), 'Title', 'Summary')];
         yield 'replace the pins' => [static fn (Round $round, UserId $actor) => $round->replacePins($actor, self::screenshotId(0), [self::pin(1)])];
         yield 'set the verdict' => [static fn (Round $round, UserId $actor) => $round->setVerdict($actor, self::screenshotId(0), ScreenshotVerdict::LooksRight)];
+        yield 'mark a pin' => [static fn (Round $round, UserId $actor) => $round->setPinVerdict($actor, self::pin(1)->id(), PinVerdict::Fixed)];
         yield 'delete' => [static fn (Round $round, UserId $actor) => $round->delete($actor, new \DateTimeImmutable('2026-03-06 08:00:00+00:00'))];
     }
 
@@ -1474,6 +1527,14 @@ final class RoundTest extends TestCase
     }
 
     /**
+     * @return list<list<PinVerdict|null>> the verdict of each pin, by screenshot position
+     */
+    private static function pinVerdictsOf(Round $round): array
+    {
+        return array_map(static fn (Screenshot $screenshot): array => array_map(static fn (Pin $pin): ?PinVerdict => $pin->verdict(), $screenshot->pins()), $round->screenshots());
+    }
+
+    /**
      * Everything a refused change must leave as it was.
      *
      * @return array<string, mixed>
@@ -1497,7 +1558,7 @@ final class RoundTest extends TestCase
                 $screenshot->summary(),
                 $screenshot->verdict(),
                 $screenshot->retakeOf()?->toString(),
-                array_map(static fn (Pin $pin): array => [$pin->id()->toString(), $pin->number()], $screenshot->pins()),
+                array_map(static fn (Pin $pin): array => [$pin->id()->toString(), $pin->number(), $pin->verdict()], $screenshot->pins()),
             ], $round->screenshots()),
         ];
     }
