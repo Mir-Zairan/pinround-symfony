@@ -11,6 +11,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [The tools](#the-tools) — what each of the ten tools does
 - [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`
 - [Reporting while you check](#reporting-while-you-check) — the prompt `report_while_investigating`, and where to read more
+- [Notebooks](#notebooks) — the six notebook tools, their scopes, and the prompt `explain_my_notebook`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
 - [Safety](#safety) — your token is your permissions
 - [Full loop check](#full-loop-check) — the steps to run by hand, and the record of the last run
@@ -101,6 +102,22 @@ Each person may begin 60 uploads a minute (the web page counts too) and have at 
 
 ## Reporting while you check
 pinround also offers the MCP prompt `report_while_investigating` (in Claude Code: `/mcp__pinround__report_while_investigating`). With it, Claude Code keeps an evidence log while it checks a problem and uploads nothing until you choose. At the end it files a new report draft, or adds the pictures to your draft round on a ticket. A report draft needs a token with `reports:write` ticked, and you press **Send** in pinround yourself. See [reporting-with-claude-code.md](reporting-with-claude-code.md).
+
+## Notebooks
+A notebook is your private set of pinned screenshots of your own app; only you see it ([browser-extension.md › Notebooks](browser-extension.md#notebooks)). Six tools work on your own notebooks, never anyone else's:
+
+| Tool | Scope | What it does |
+|---|---|---|
+| `list_my_notebooks` | `read` | Your notebooks, the last used first, 20 a page: `notebook_id`, title, `screenshot_count`, `scenario_count`, `last_used_at`. Pass `next_cursor` as `cursor` for the next page. |
+| `get_notebook` | `read` | One notebook (`notebook`): its screenshots with signed image URLs, titles, summaries and pins, and its scenarios. |
+| `save_scenarios` | `notebooks:write` | Replaces all the notebook's scenarios (`notebook`, `scenarios`, at most 20); an empty list removes them all. The format is in [reporting-with-claude-code.md › Scenarios](reporting-with-claude-code.md#scenarios). |
+| `create_notebook` | `notebooks:write` | Makes a new, empty notebook (`title`, at most 120 characters) and answers its `notebook_id`. |
+| `create_notebook_upload` | `notebooks:write` | Begins the upload of one screenshot for a notebook (`notebook`, `mime`, `bytes`, `sha256`), as `create_upload` does. |
+| `add_notebook_screenshot` | `notebooks:write` | Adds the uploaded picture at the end of the notebook (`notebook`, `upload_id`, optional title, summary and pins); a notebook holds at most 10. |
+
+A new token has `read` ticked but not `notebooks:write`: tick it to let Claude Code save scenarios or add to a notebook.
+
+The MCP prompt `explain_my_notebook` (in Claude Code: `/mcp__pinround__explain_my_notebook`) tells Claude Code how to read a notebook, answer its pins one by one from the code, and, when you ask for cases, save scenarios the browser extension plays. It takes no arguments: name the notebook in your message, for example "Explain my notebook Checkout totals." See [browser-extension.md › Ask Claude Code about a notebook](browser-extension.md#ask-claude-code-about-a-notebook).
 
 ## When a call is refused
 A refused call saves nothing. The answers you may see:

@@ -190,7 +190,7 @@ The other answers (401, 429 and more) are in [claude-code.md › When a call is 
 - **Claude Code never makes a ticket.** It makes a private draft; you press Send.
 - **It never adds to a ticket you may not draft on.** "Add to <key>" is offered only where `may_start_draft` is true, and pinround refuses the others.
 - **Titles and names from `find_tickets` are other people's text.** The prompt tells Claude Code to treat them as data, never as instructions.
-- **Scenarios play only when you press Play**, on hosts you allowed, never on pinround and never into a password field ([browser-extension.md › Safety](browser-extension.md#safety)).
+- **Scenarios play only when you press Play or Step**, on hosts you allowed, never on pinround and never into a password field ([browser-extension.md › Safety](browser-extension.md#safety)).
 - **Keep the token out of the log**, out of repositories and out of shared files. Revoke a lost token on **API tokens**.
 - Each call is recorded in the audit log (tool, target, outcome), never its content. Reading the prompt is recorded the same way.
 
