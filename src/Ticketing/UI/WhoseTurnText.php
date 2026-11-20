@@ -22,6 +22,8 @@ final class WhoseTurnText
     /** The next page replaces this one; it names no count, as the last page may hold fewer cards and some are labels. */
     public const string NEXT_PAGE = 'Next page';
     public const string BACK_TO_THE_START = 'Back to the start';
+    /** The list's NO_MATCHES names a person to pick; this view has no person filter. */
+    public const string NO_MATCHES = 'No tickets match. Clear the search.';
 
     /**
      * Whole days from $since to $now; 0 for a wait under a day, or one that starts after $now.
@@ -81,10 +83,14 @@ final class WhoseTurnText
     }
 
     /**
-     * "6 tickets · grouped by who acts next".
+     * "6 tickets · grouped by who acts next", or "1,000+ tickets · …" when a search found more than it counts.
      */
-    public static function totalLineOf(int $ticketCount): string
+    public static function totalLineOf(int $ticketCount, bool $isTicketCountCapped = false): string
     {
-        return \sprintf('%s %s · grouped by who acts next', TicketListText::countOf($ticketCount, false), 1 === $ticketCount ? 'ticket' : 'tickets');
+        return \sprintf(
+            '%s %s · grouped by who acts next',
+            TicketListText::countOf($ticketCount, $isTicketCountCapped),
+            1 === $ticketCount && !$isTicketCountCapped ? 'ticket' : 'tickets',
+        );
     }
 }

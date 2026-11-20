@@ -9,6 +9,7 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
+use App\Ticketing\UI\Component\TicketFilters;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -17,6 +18,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Uid\Uuid;
+use Symfony\UX\LiveComponent\Test\InteractsWithLiveComponents;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -29,6 +31,7 @@ final class WhoseTurnTest extends WebTestCase
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
+    use InteractsWithLiveComponents;
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
@@ -38,6 +41,13 @@ final class WhoseTurnTest extends WebTestCase
     private const string SHELL = '/_test/menu/shell';
     /** A refused viewer must never get a word of it. */
     private const string HIDDEN_TITLE = 'Price rules for staff';
+    /**
+     * Beside the shell's, whatever the number of cards: the triager (RoleTicketVisibilities), the cards, every card's
+     * names, and the rail's three (team names, the team's projects, their counts); the team's people are cached.
+     */
+    private const int PAGE_QUERY_COUNT = 6;
+    private const string RAIL_FRAME = 'project-rail-frame';
+    private const string CARDS_FRAME = 'ticket-list-frame';
 
     private KernelBrowser $client;
 
@@ -47,6 +57,8 @@ final class WhoseTurnTest extends WebTestCase
     private string $shopProject;
 
     private string $doingStep;
+
+    private ?string $cartProject = null;
 
     private int $nextNumber = 1;
 
@@ -444,7 +456,7 @@ final class WhoseTurnTest extends WebTestCase
         // Vendor 19's oldest wait, 27 Oct 2026 11:00 UTC, in Unix seconds.
         $nextPageUrl = (string) $firstPage->filter('.turn__next-page')->attr('href');
         self::assertSame(self::TURN.'?after=1793098800.label.Vendor%2019', $nextPageUrl);
-        self::assertSame(3, $firstPageQueryCount);
+        self::assertSame(self::PAGE_QUERY_COUNT, $firstPageQueryCount);
 
         $secondPageQueryCount = $this->queryCountOf($nextPageUrl) - $shellQueryCount;
 
@@ -457,7 +469,7 @@ final class WhoseTurnTest extends WebTestCase
         self::assertCount(0, $secondPage->filter('.turn__next-page'));
         self::assertSame('Back to the start', $secondPage->filter('.turn__first-page')->text());
         self::assertSame(self::TURN, $secondPage->filter('.turn__first-page')->attr('href'));
-        self::assertSame(3, $secondPageQueryCount);
+        self::assertSame(self::PAGE_QUERY_COUNT, $secondPageQueryCount);
     }
 
     /**
@@ -539,18 +551,18 @@ final class WhoseTurnTest extends WebTestCase
 
     /**
      * Omar waits 30 days on 6 tickets, so his card shows "Show 1 more"; Vendor 01 to 19 wait 28 to 10 days and fill the
-     * page, and Vendor 20 waits 9 days, on the next one.
+     * page, and Vendor 20 waits 9 days, on the next one. Every title holds the search word.
      */
     #[Test]
     public function nextPageShowMoreAndShowFewerKeepTheProjectAndTheSearch(): void
     {
         $this->addWaitingTicket('Lena', 'review', 1, 'Cart total shows the wrong sum');
         foreach ([25, 26, 27, 28, 29, 30] as $waitDays) {
-            $this->addWaitingTicket('Omar', 'build', $waitDays, 'Omar waits '.$waitDays);
+            $this->addWaitingTicket('Omar', 'build', $waitDays, 'Cart of Omar waits '.$waitDays);
         }
         for ($vendor = 20; $vendor >= 1; --$vendor) {
             $label = \sprintf('Vendor %02d', $vendor);
-            $this->addTicketWaitingOn(null, 'input', 29 - $vendor, 'Ticket of '.$label, turnLabel: $label);
+            $this->addTicketWaitingOn(null, 'input', 29 - $vendor, 'Cart of '.$label, turnLabel: $label);
         }
         $omarId = $this->people['Omar']->id()->toString();
         $omarCardId = 'turn-'.$omarId;
@@ -628,24 +640,352 @@ final class WhoseTurnTest extends WebTestCase
         $sixCardsQueryCount = $this->queryCountOf(self::TURN) - $shellQueryCount;
 
         self::assertCount(6, $this->client->getCrawler()->filter('.turn__card'));
-        self::assertSame($twoCardsQueryCount, $sixCardsQueryCount);
-        // The triager (RoleTicketVisibilities), the cards, and every card's names; the team's people are cached.
-        self::assertSame(3, $sixCardsQueryCount);
+        self::assertSame([self::PAGE_QUERY_COUNT, self::PAGE_QUERY_COUNT], [$twoCardsQueryCount, $sixCardsQueryCount]);
+        // The search runs inside the cards' query; the open steps it takes are cached after the first read.
+        $this->queryCountOf(self::TURN.'?q=coupon');
+        $searchQueryCount = $this->queryCountOf(self::TURN.'?q=coupon') - $shellQueryCount;
+        self::assertSame(['Coupon field takes any text'], $this->client->getCrawler()->filter('.turn__title')->each(static fn (Crawler $title): string => $title->text()));
+        self::assertSame(self::PAGE_QUERY_COUNT, $searchQueryCount);
+    }
+
+    /**
+     * SHOP and CART are both Shop's. Omar waits on a SHOP ticket with "cart" in its title, an older SHOP one without it
+     * and the oldest, a CART one with it; Customer waits on one SHOP ticket with it.
+     */
+    #[Test]
+    public function theProjectAndTheSearchNarrowTheCardsTheirCountsAndTheirOldestWait(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 4, 'Cart total shows the wrong sum');
+        $this->addWaitingTicket('Omar', 'build', 9, 'Checkout button is hidden');
+        $this->addTicketWaitingOn($this->people['Omar']->id()->toString(), 'build', 20, 'Cart badge shows no number', projectKey: 'CART');
+        $this->addWaitingTicket(null, 'input', 2, 'Cart coupon is lost');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $both = $this->client->request('GET', self::TURN.'?project=SHOP&q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['1 ticket waits on Omar · for 4 days', '1 ticket waits on Customer · for 2 days · outside the team'], self::textsOf($both, '.turn__sentence'));
+        self::assertSame(['Cart total shows the wrong sum', 'Cart coupon is lost'], self::textsOf($both, '.turn__title'));
+        self::assertSame('2 tickets · grouped by who acts next', $both->filter('.tickets__total')->text());
+        self::assertSame('2 tickets · grouped by who acts next', $both->filter('[data-total-line]')->attr('data-total-line'));
+
+        $searchOnly = $this->client->request('GET', self::TURN.'?q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['2 tickets wait on Omar · the oldest for 20 days', '1 ticket waits on Customer · for 2 days · outside the team'], self::textsOf($searchOnly, '.turn__sentence'));
+        self::assertSame(['Cart badge shows no number', 'Cart total shows the wrong sum', 'Cart coupon is lost'], self::textsOf($searchOnly, '.turn__title'));
+        self::assertSame('3 tickets · grouped by who acts next', $searchOnly->filter('.tickets__total')->text());
+
+        $projectOnly = $this->client->request('GET', self::TURN.'?project=SHOP');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['2 tickets wait on Omar · the oldest for 9 days', '1 ticket waits on Customer · for 2 days · outside the team'], self::textsOf($projectOnly, '.turn__sentence'));
+        self::assertSame('3 tickets · grouped by who acts next', $projectOnly->filter('.tickets__total')->text());
+    }
+
+    #[Test]
+    public function aSearchThatFindsNothingSaysToClearTheSearch(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 4, 'Cart total shows the wrong sum');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN.'?q=invoice');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.turn__card'));
+        self::assertSame('No tickets match. Clear the search.', $page->filter('.empty-state')->text());
+        self::assertSame('0 tickets · grouped by who acts next', $page->filter('.tickets__total')->text());
+    }
+
+    /**
+     * The search runs under the viewer's own visibility and organization: Raj, outside Shop, never finds its team-only
+     * ticket, and a person of another organization finds none of Acme Foods' tickets.
+     */
+    #[Test]
+    public function aSearchFindsNoTicketTheViewerMayNotSee(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 3, 'Price shows in the wrong currency');
+        $this->addWaitingTicket('Omar', 'build', 40, self::HIDDEN_TITLE, 'team');
+        $this->logIn($this->client, $this->people['Lena']);
+        $lenasPage = $this->client->request('GET', self::TURN.'?q=price');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([self::HIDDEN_TITLE, 'Price shows in the wrong currency'], self::textsOf($lenasPage, '.turn__title'));
+        $this->logIn($this->client, $this->people['Raj']);
+
+        $rajsPage = $this->client->request('GET', self::TURN.'?q=price');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['1 ticket waits on Omar · for 3 days'], self::textsOf($rajsPage, '.turn__sentence'));
+        self::assertStringNotContainsString(self::HIDDEN_TITLE, (string) $this->client->getResponse()->getContent());
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $ben = $this->createUserWithoutOrganization('Ben');
+        $this->addMembership($ben, $betaBakery);
+        $this->logIn($this->client, $ben);
+
+        $bensPage = $this->client->request('GET', self::TURN.'?q=price');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $bensPage->filter('.turn__card'));
+        self::assertSame('0 tickets · grouped by who acts next', $bensPage->filter('.tickets__total')->text());
+        $body = (string) $this->client->getResponse()->getContent();
+        self::assertStringNotContainsString(self::HIDDEN_TITLE, $body);
+        self::assertStringNotContainsString('Price shows in the wrong currency', $body);
+    }
+
+    /**
+     * The search keeps its best 1,000 matches, as the tickets list does, so 1,001 matches show as "1,000+".
+     */
+    #[Test]
+    public function aSearchPastTheCapShowsTheCountAsALowerBound(): void
+    {
+        $this->addManyTicketsWaitingOnOmar(1001, 'Cart total shows the wrong sum');
+        $this->addWaitingTicket('Raj', 'decide', 3, 'Checkout button is hidden');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $capped = $this->client->request('GET', self::TURN.'?q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('1,000+ tickets · grouped by who acts next', $capped->filter('.tickets__total')->text());
+        self::assertSame(['Omar'], self::textsOf($capped, '.turn__name'));
+
+        $plain = $this->client->request('GET', self::TURN);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('1,002 tickets · grouped by who acts next', $plain->filter('.tickets__total')->text());
+    }
+
+    /**
+     * The toolbar is the list's without the people: the search and "Show done" open this view, keeping the project.
+     */
+    #[Test]
+    public function theToolbarHasTheSearchAndShowDoneButNoPeopleAndOpensThisView(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN.'?project=SHOP&q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.ticket-filters'));
+        self::assertCount(0, $page->filter('.ticket-filters__people, [data-person-chip], [data-person-picker-trigger]'));
+        $form = $page->filter('.ticket-filters form[method="get"]');
+        self::assertSame(self::TURN, $form->attr('action'));
+        self::assertSame('cart', $form->filter('input[name="q"]')->attr('value'));
+        self::assertSame(['project=SHOP'], $form->filter('input[type="hidden"]')->each(static fn (Crawler $input): string => $input->attr('name').'='.$input->attr('value')));
+        self::assertSame(self::TURN.'?project=SHOP&done=1&q=cart', $page->filter('[data-done-chip]')->attr('href'));
+        self::assertNull($page->filter('[data-done-chip]')->attr('aria-current'));
+        self::assertSame('Shop', $page->filter('.project-rail__team')->text());
+        self::assertSame(
+            [self::TURN.'?team='.$this->shop->toString().'&q=cart', self::TURN.'?project=SHOP&q=cart'],
+            $page->filter('.project-rail__item')->each(static fn (Crawler $item): string => (string) $item->attr('href')),
+        );
+        self::assertSame('true', $page->filter('.project-rail__item[data-rail-project="SHOP"]')->attr('aria-current'));
+        self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+    }
+
+    /**
+     * "Show done" changes only the rail's counts: done tickets wait on no one, so the cards stay, and their links keep it.
+     */
+    #[Test]
+    public function showDoneCountsDoneTicketsOnTheRailAndKeepsTheCards(): void
+    {
+        $this->addShopCounts(6, 3);
+        foreach ([1, 2, 3, 4, 5, 6] as $waitDays) {
+            $this->addWaitingTicket('Omar', 'build', $waitDays, 'Omar waits '.$waitDays);
+        }
+        $this->logIn($this->client, $this->people['Lena']);
+        $openOnly = $this->client->request('GET', self::TURN);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['All projects 6 open tickets', 'SHOP Shop 6 open tickets'], self::textsOf($openOnly, '.project-rail__item'));
+
+        $withDone = $this->client->request('GET', self::TURN.'?done=1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['All projects 9 tickets', 'SHOP Shop 9 tickets'], self::textsOf($withDone, '.project-rail__item'));
+        self::assertSame('true', $withDone->filter('[data-done-chip]')->attr('aria-current'));
+        self::assertSame(self::TURN, $withDone->filter('[data-done-chip]')->attr('href'));
+        self::assertSame(self::textsOf($openOnly, '.turn__sentence'), self::textsOf($withDone, '.turn__sentence'));
+        self::assertSame(['6 tickets wait on Omar · the oldest for 6 days'], self::textsOf($withDone, '.turn__sentence'));
+        self::assertSame('6 tickets · grouped by who acts next', $withDone->filter('.tickets__total')->text());
+        $omarsCardId = 'turn-'.$this->people['Omar']->id()->toString();
+        self::assertSame(self::TURN.'?done=1&open='.$this->people['Omar']->id()->toString().'#'.$omarsCardId, $withDone->filter('.turn__more')->attr('href'));
+        self::assertSame(self::TURN.'?project=SHOP&done=1', $withDone->filter('.project-rail__item[data-rail-project="SHOP"]')->attr('href'));
+    }
+
+    #[Test]
+    public function showNMoreIsATextButton(): void
+    {
+        foreach ([1, 2, 3, 4, 5, 6] as $waitDays) {
+            $this->addWaitingTicket('Omar', 'build', $waitDays, 'Omar waits '.$waitDays);
+        }
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN);
+
+        self::assertResponseStatusCodeSame(200);
+        $more = $page->filter('a.turn__more');
+        self::assertSame('Show 1 more', $more->text());
+        self::assertSame(['btn', 'btn-sm', 'btn-text', 'turn__more'], self::sortedClassesOf((string) $more->attr('class')));
+    }
+
+    /**
+     * After a filter change the page loads the new URL into the cards' frame and the rail's: each gets its own frame
+     * alone, and runs only its own queries.
+     */
+    #[Test]
+    public function eachFrameRequestGetsOnlyItsFrameAndRunsOnlyItsQueries(): void
+    {
+        $this->addWaitingTicket('Omar', 'build', 4, 'Cart total shows the wrong sum');
+        $this->addWaitingTicket('Omar', 'build', 9, 'Checkout button is hidden');
+        $this->logIn($this->client, $this->people['Lena']);
+        $uri = self::TURN.'?q=cart';
+        $this->queriesOf($uri);
+        $pageQueries = $this->queriesOf($uri);
+
+        $cardsQueries = $this->queriesOf($uri, ['HTTP_TURBO_FRAME' => self::CARDS_FRAME]);
+
+        $cardsFrame = $this->client->getCrawler();
+        self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+        self::assertCount(1, $cardsFrame->filter('turbo-frame#ticket-list-frame[target="_top"]'));
+        self::assertCount(0, $cardsFrame->filter('.ticket-filters, nav.project-rail, header, title'));
+        self::assertSame(['Cart total shows the wrong sum'], self::textsOf($cardsFrame, '.turn__title'));
+        self::assertSame('1 ticket · grouped by who acts next', $cardsFrame->filter('[data-total-line]')->attr('data-total-line'));
+
+        $railQueries = $this->queriesOf($uri, ['HTTP_TURBO_FRAME' => self::RAIL_FRAME]);
+
+        $railFrame = $this->client->getCrawler();
+        self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+        self::assertCount(1, $railFrame->filter('turbo-frame#project-rail-frame[target="_top"] nav.project-rail'));
+        self::assertCount(0, $railFrame->filter('turbo-frame#ticket-list-frame, .ticket-filters, header, title, .turn__card'));
+        $railRead = '/FROM org_team WHERE organization_id = \? AND id = ANY|FROM tkt_project WHERE organization_id = \? AND team_id = ANY|FROM ins_project_counts/';
+        $cardsRead = '/FROM ins_ticket_turn|FROM idn_user WHERE id = ANY/';
+        self::assertSame([2, 2, 0], [self::countMatching($cardsRead, $pageQueries), self::countMatching($cardsRead, $cardsQueries), self::countMatching($cardsRead, $railQueries)]);
+        // The menu's team names match the rail's first read, so the page reads it twice.
+        self::assertSame([4, 0, 3], [self::countMatching($railRead, $pageQueries), self::countMatching($railRead, $cardsQueries), self::countMatching($railRead, $railQueries)]);
+    }
+
+    /**
+     * The toolbar's live requests send this view's URL, without a person.
+     */
+    #[Test]
+    public function theToolbarsLiveRequestsSendThisViewsUrl(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+        $toolbar = $this->createLiveComponent('TicketFilters', ['team' => $this->shop->toString(), 'project' => 'SHOP', 'person' => $this->people['Omar']->id()->toString(), 'isWhoseTurnView' => true], $this->client);
+
+        $toolbar->call('toggleDone');
+
+        self::assertSame(200, $toolbar->response()->getStatusCode());
+        $this->assertComponentDispatchBrowserEvent($toolbar, TicketFilters::LIST_CHANGED_EVENT)
+            ->withPayload(['url' => self::TURN.'?project=SHOP&done=1', 'addsHistoryEntry' => true]);
+
+        $toolbar->set('q', '  gift note ');
+
+        $this->assertComponentDispatchBrowserEvent($toolbar, TicketFilters::LIST_CHANGED_EVENT)
+            ->withPayload(['url' => self::TURN.'?project=SHOP&done=1&q=gift%20note', 'addsHistoryEntry' => false]);
+        self::assertCount(0, $toolbar->render()->crawler()->filter('.ticket-filters__people'));
     }
 
     private function queryCountOf(string $uri): int
     {
+        return \count($this->queriesOf($uri));
+    }
+
+    /**
+     * @param array<string, string> $server
+     *
+     * @return list<string> the SQL of every query the request ran
+     */
+    private function queriesOf(string $uri, array $server = []): array
+    {
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
         $debugData->reset();
-        $this->client->request('GET', $uri);
+        $this->client->request('GET', $uri, server: $server);
         self::assertResponseStatusCodeSame(200);
 
-        $queryCount = 0;
+        $queries = [];
         foreach ($debugData->getData() as $queriesOfOneConnection) {
-            $queryCount += \count($queriesOfOneConnection);
+            foreach ($queriesOfOneConnection as $query) {
+                $queries[] = \is_string($query['sql'] ?? null) ? $query['sql'] : '';
+            }
         }
 
-        return $queryCount;
+        return $queries;
+    }
+
+    /**
+     * @param list<string> $queries
+     */
+    private static function countMatching(string $pattern, array $queries): int
+    {
+        return \count(array_filter($queries, static fn (string $sql): bool => 1 === preg_match($pattern, $sql)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function sortedClassesOf(string $classAttribute): array
+    {
+        $classes = preg_split('/\s+/', trim($classAttribute)) ?: [];
+        sort($classes);
+
+        return $classes;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function textsOf(Crawler $page, string $selector): array
+    {
+        return $page->filter($selector)->each(static fn (Crawler $node): string => $node->text());
+    }
+
+    private function cartProject(): string
+    {
+        return $this->cartProject ??= $this->addProject($this->shop, 'CART', 'Checkout');
+    }
+
+    /**
+     * The rail's read model: SHOP's open and done tickets for everyone.
+     */
+    private function addShopCounts(int $openCount, int $doneCount): void
+    {
+        $values = [$this->acmeFoods->toString(), $this->shopProject, $this->shop->toString(), $openCount, $doneCount];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO ins_project_counts (organization_id, project_id, team_id, visibility, open_count, done_count) VALUES (?, ?, ?, 'all', ?, ?)",
+            $values,
+        ));
+    }
+
+    /**
+     * $count SHOP tickets titled $title in one statement, each waiting on Omar a minute longer than the one before.
+     */
+    private function addManyTicketsWaitingOnOmar(int $count, string $title): void
+    {
+        $firstNumber = $this->nextNumber;
+        $this->nextNumber += $count;
+        $organizationId = $this->acmeFoods->toString();
+        $ticketValues = [$organizationId, $this->shopProject, $this->shop->toString(), $title, $this->doingStep, $this->people['Lena']->id()->toString(), $firstNumber, $firstNumber + $count - 1];
+        $turnValues = [$this->people['Omar']->id()->toString(), self::NOW, $organizationId, $firstNumber, $firstNumber + $count - 1];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($ticketValues, $turnValues): int {
+            $migrator->executeStatement(
+                "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority, priority_rank,
+                     step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+                 SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8003-' || lpad(to_hex(number), 12, '0') AS uuid), CAST(? AS uuid), CAST(? AS uuid), number, 'SHOP-' || number, CAST(? AS text), '',
+                     'bug', 'normal', 3, CAST(? AS uuid), CAST(? AS uuid), 'all', '{}', '{}',
+                     TIMESTAMPTZ '2026-08-01 09:00:00+00', TIMESTAMPTZ '2026-08-01 09:00:00+00'
+                 FROM generate_series(CAST(? AS int), CAST(? AS int)) AS number",
+                $ticketValues,
+            );
+            $migrator->executeStatement(
+                "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
+                 SELECT ticket.organization_id, ticket.id, ticket.team_id, ticket.project_id, 'doing', CAST(? AS uuid), NULL, 'build', 100,
+                     CAST(? AS timestamptz) - ticket.number * INTERVAL '1 minute', 'all', ticket.reporter_id
+                 FROM tkt_ticket AS ticket WHERE ticket.organization_id = CAST(? AS uuid) AND ticket.number BETWEEN ? AND ?",
+                $turnValues,
+            );
+
+            return 0;
+        });
     }
 
     private function addDoingStep(): string
@@ -670,9 +1010,10 @@ final class WhoseTurnTest extends WebTestCase
     }
 
     /**
-     * As addWaitingTicket, waiting on the user id $turnUserId, which may be of nobody, or on $turnLabel for null.
+     * As addWaitingTicket, waiting on the user id $turnUserId, which may be of nobody, or on $turnLabel for null, in
+     * $projectKey, SHOP or CART.
      */
-    private function addTicketWaitingOn(?string $turnUserId, string $kind, int $waitDays, string $title, string $visibility = 'all', string $turnLabel = 'Customer'): void
+    private function addTicketWaitingOn(?string $turnUserId, string $kind, int $waitDays, string $title, string $visibility = 'all', string $turnLabel = 'Customer', string $projectKey = 'SHOP'): void
     {
         $number = $this->nextNumber++;
         $ticketId = Uuid::v7()->toRfc4122();
@@ -680,14 +1021,14 @@ final class WhoseTurnTest extends WebTestCase
         $shopTeam = $this->shop->toString();
         $lena = $this->people['Lena']->id()->toString();
         $waitingSince = new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d days -1 hour', $waitDays))->format('Y-m-d H:i:sP');
-        $projectId = $this->shopProject;
+        $projectId = 'CART' === $projectKey ? $this->cartProject() : $this->shopProject;
         $stepId = $this->doingStep;
-        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $ticketId, $projectId, $shopTeam, $number, $title, $stepId, $lena, $visibility, $turnUserId, $turnLabel, $kind, $waitingSince): int {
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $ticketId, $projectId, $projectKey, $shopTeam, $number, $title, $stepId, $lena, $visibility, $turnUserId, $turnLabel, $kind, $waitingSince): int {
             $migrator->executeStatement(
                 "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority,
                      priority_rank, step_id, reporter_id, visibility, assignee_id, components, check_reasons, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, '', 'bug', 'major', 2, ?, ?, ?, NULL, '{}', '{}', TIMESTAMPTZ '2026-08-01 09:00:00+00', TIMESTAMPTZ '2026-08-01 09:00:00+00')",
-                [$organizationId, $ticketId, $projectId, $shopTeam, $number, 'SHOP-'.$number, $title, $stepId, $lena, $visibility],
+                [$organizationId, $ticketId, $projectId, $shopTeam, $number, $projectKey.'-'.$number, $title, $stepId, $lena, $visibility],
             );
             $migrator->executeStatement(
                 "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
