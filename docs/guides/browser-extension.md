@@ -9,7 +9,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Connect it](#connect-it) — make a token and paste it
 - [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket
 - [Sign out](#sign-out) — the token stops working everywhere
-- [Permissions and why](#permissions-and-why) — the two Chrome permissions it asks for
+- [Permissions and why](#permissions-and-why) — the three Chrome permissions it asks for
 - [Manual check](#manual-check) — the steps to run by hand, and the record of the last run
 
 ## What it does
@@ -52,9 +52,10 @@ In the options, press **Sign out**. The extension asks pinround to revoke the to
 | Permission | Why |
 |---|---|
 | `activeTab` | To take a picture of the tab you are on, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
+| `scripting` | To run the extension's own pin overlay and scenario player in the tab you are on, only after you click the extension's icon. It never runs a script from the network. |
 | `storage` | To keep the pinround address and your token in this browser profile, and the captures of a report you are still collecting until you make the draft. |
 
-It asks for no host permission and injects no script into pages. `extension/tests/pairing.test.mjs` checks that the manifest asks for exactly these.
+It asks for no host permission and has no content scripts. It injects only its own files, and only into the tab you chose by clicking its icon. `extension/tests/pairing.test.mjs` checks that the manifest asks for exactly these.
 
 ## Manual check
 Run by hand on the dev stack after a change to the extension:

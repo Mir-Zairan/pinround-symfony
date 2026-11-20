@@ -2,6 +2,7 @@
 // the person's own draft round on a ticket (one capture at a time). Nothing becomes a ticket here: the person sends a
 // report draft in pinround (ADR-0039).
 import { ApiError, PinroundApi } from '../shared/api.js';
+import { browser } from '../shared/browser.js';
 import { loadSettings } from '../shared/settings.js';
 import { MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH, addToDraftRound, captureTexts, pngOf, upload } from '../capture/capture.js';
 import { NEW_REPORT, fillReportInputs, showCaptures } from './report-captures.js';
@@ -17,13 +18,13 @@ function showStatus(message, isError = false) {
 }
 
 async function loadCaptures() {
-    const stored = (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY];
+    const stored = (await browser.storage.session.get(SESSION_KEY))[SESSION_KEY];
 
     return stored ?? { project: '', reportTitle: '', items: [], idempotencyKey: crypto.randomUUID() };
 }
 
 async function saveCaptures(captures) {
-    await chrome.storage.session.set({ [SESSION_KEY]: captures });
+    await browser.storage.session.set({ [SESSION_KEY]: captures });
 }
 
 function showSavedCaptures(captures) {
@@ -47,7 +48,7 @@ async function fillTargets(api) {
 
 async function capture(api) {
     const texts = captureTexts(element('shot-title').value, element('shot-summary').value);
-    const file = pngOf(await chrome.tabs.captureVisibleTab({ format: 'png' }));
+    const file = pngOf(await browser.tabs.captureVisibleTab({ format: 'png' }));
     const targetValue = element('target').value;
     if (NEW_REPORT !== targetValue) {
         showStatus('Uploading…');
@@ -80,10 +81,10 @@ async function makeDraft(api, origin) {
         throw new Error('Write what is wrong in one line, at most 200 characters.');
     }
     const answer = await api.call('POST', '/api/v1/reports', { project: captures.project, title, screenshots: captures.items }, captures.idempotencyKey);
-    await chrome.storage.session.remove(SESSION_KEY);
+    await browser.storage.session.remove(SESSION_KEY);
     showSavedCaptures(await loadCaptures());
     if ('string' === typeof answer.url && new URL(answer.url).origin === origin) {
-        await chrome.tabs.create({ url: answer.url });
+        await browser.tabs.create({ url: answer.url });
     }
     showStatus('Report draft made. Check it in pinround and press Send.');
 }
@@ -103,7 +104,7 @@ async function start() {
     const settings = await loadSettings();
     if (null === settings) {
         element('not-paired').hidden = false;
-        element('open-options').addEventListener('click', () => chrome.runtime.openOptionsPage());
+        element('open-options').addEventListener('click', () => browser.runtime.openOptionsPage());
 
         return;
     }
@@ -124,7 +125,7 @@ async function start() {
     });
     element('make-draft').addEventListener('click', () => run(element('make-draft'), () => makeDraft(api, settings.origin)));
     element('clear-captures').addEventListener('click', async () => {
-        await chrome.storage.session.remove(SESSION_KEY);
+        await browser.storage.session.remove(SESSION_KEY);
         showSavedCaptures(await loadCaptures());
         showStatus('Started over. The screenshots already uploaded are not in any report.');
     });

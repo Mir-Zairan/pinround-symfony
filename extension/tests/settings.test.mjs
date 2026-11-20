@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SettingsError, checkedToken, clearSettings, loadSettings, pinroundOriginOf, saveSettings } from '../src/shared/settings.js';
+import { fakeBrowser } from './fake-browser.mjs';
 
 test('an https address or a local http address becomes its origin', () => {
     assert.equal(pinroundOriginOf(' https://pinround.acme-foods.example/ '), 'https://pinround.acme-foods.example');
@@ -22,12 +23,7 @@ test('a token must look like a pinround token', () => {
 });
 
 test('settings are kept, read back and cleared in the given storage only', async () => {
-    const stored = {};
-    const storage = {
-        get: async (key) => ({ [key]: stored[key] }),
-        set: async (values) => Object.assign(stored, values),
-        remove: async (key) => delete stored[key],
-    };
+    const storage = fakeBrowser().storage.local;
 
     assert.equal(await loadSettings(storage), null);
     await saveSettings('https://pinround.acme-foods.example/', 'pr_abcdefghijklmnopqrstuvwxyz012345', storage);
