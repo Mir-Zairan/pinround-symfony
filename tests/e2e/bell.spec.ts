@@ -3,6 +3,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { bellButton, bellPopover, expectOmarUnderBellCaps, openBellPopover } from './bell';
+import { expectTicketPageOf } from './ticket';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 const TOAST_REGION = '#toast-region';
@@ -45,12 +46,13 @@ async function pingOmarOnNewTicket(browser: Browser, message: string): Promise<s
   const shopValue = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
   expect(shopValue, 'the seeded SHOP project is missing: run make seed').not.toBeNull();
   await page.getByLabel('Project').selectOption(shopValue ?? '');
-  await page.getByLabel('Title', { exact: true }).fill(`Check the bell ${randomUUID().slice(0, 8)}`);
+  const title = `Check the bell ${randomUUID().slice(0, 8)}`;
+  await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Give it to').selectOption({ label: 'Omar' });
   await page.getByRole('button', { name: 'Make ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
   const key = new URL(page.url()).pathname.replace('/t/', '');
-  await expect(page.locator(TOAST_REGION)).toHaveText(`Ticket ${key} made.`);
+  await expectTicketPageOf(page, title);
 
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Ping Omar' }).click();

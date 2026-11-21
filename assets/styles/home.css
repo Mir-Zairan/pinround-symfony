@@ -172,7 +172,7 @@
   min-width: 2ch;
   font-family: var(--font-mono, monospace);
   font-size: 20px;
-  color: var(--outline);
+  color: var(--on-surface-var);
 }
 
 .home__rank--first {

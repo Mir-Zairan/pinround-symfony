@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
-import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
+import { composerBody, expectTicketPageOf, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // The Mercure hub's path, as in live-updates.spec.ts.
 const HUB_PATH = '/.well-known/mercure';
@@ -42,13 +42,13 @@ async function makeTicket(page: Page): Promise<string> {
   const shopValue = await page.locator('select[name="project_id"] option', { hasText: /^SHOP · / }).getAttribute('value');
   expect(shopValue, 'the seeded SHOP project is missing: run make seed').not.toBeNull();
   await page.getByLabel('Project').selectOption(shopValue ?? '');
-  await page.getByLabel('Title', { exact: true }).fill(`Talk about the basket ${randomUUID().slice(0, 8)}`);
+  const title = `Talk about the basket ${randomUUID().slice(0, 8)}`;
+  await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Give it to').selectOption({ label: 'Omar' });
   await page.getByRole('button', { name: 'Make ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
-  const key = new URL(page.url()).pathname.replace('/t/', '');
-  await expect(page.locator(TOAST_REGION)).toHaveText(`Ticket ${key} made.`);
-  return key;
+  await expectTicketPageOf(page, title);
+  return new URL(page.url()).pathname.replace('/t/', '');
 }
 
 function commentButton(page: Page) {

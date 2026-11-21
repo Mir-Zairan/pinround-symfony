@@ -21,9 +21,17 @@ export async function makeTicketGivenTo(browser: Browser, title: string, assigne
   await page.getByRole('button', { name: 'Make ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
   const key = new URL(page.url()).pathname.replace('/t/', '');
-  await expect(page.locator(TOAST_REGION)).toHaveText(`Ticket ${key} made.`);
+  await expectTicketPageOf(page, title);
   await context.close();
   return key;
+}
+
+/**
+ * The page a Make ticket redirects to shows the new ticket. Not its "Ticket … made." toast: every Lena spec shares one
+ * session, and a page another worker opens in it at that moment takes the flash. NewTicketTest checks the toast.
+ */
+export async function expectTicketPageOf(page: Page, title: string): Promise<void> {
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
 }
 
 /** As someone who may give the ticket, on its page: gives it to the person with that first name through the picker. */
