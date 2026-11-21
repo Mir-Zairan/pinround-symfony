@@ -189,7 +189,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - **Acceptance:**
   - [ ] A shared draft with 3 screenshots shows screenshot 1 of 3; next and the arrow key show 2; the thumbnail strip jumps (Playwright).
   - [ ] Full screen opens from the round page and from Round 0, and Escape closes it.
-  - [ ] The page reads the round in a fixed number of queries, whatever the screenshot count (query-count test).
+  - [x] The page reads the round in a fixed number of queries, whatever the screenshot count (query-count test). (`tests/Functional/Review/RoundPageScreenshotsTest::aSharedDraftsPageReadsTheSameNumberOfQueriesWhateverTheNumberOfScreenshotsAndPins`: the same count for 2 and 6 screenshots)
 - **Prototype check:** `Review` and `Focus`.
 - **Size:** L
 
@@ -236,8 +236,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   2. New prompt `fix_my_round_notes` (versioned file under `src/AgentApi/Infrastructure/Prompt/`): read `get_round_notes`; open each pinned screenshot with its note; fix; after each fix save the retake as a file with its context and the try it answers; when the person asks, upload each as a try (`retake_of`) and mark each pin fixed or still wrong.
   3. Document both in the guides with example prompts.
 - **Acceptance:**
-  - [ ] `instructions` (or the tool descriptions) contain the capture rule (contract test).
-  - [ ] The prompt is listed by `prompts/list` and renders with a ticket key (MCP test).
+  - [x] `instructions` (or the tool descriptions) contain the capture rule (contract test). (`tests/Functional/AgentApi/Prompt/FixMyRoundNotesPromptTest::initializeCarriesTheCaptureRuleAndOffersPrompts`)
+  - [x] The prompt is listed by `prompts/list` and renders with a ticket key (MCP test). (`FixMyRoundNotesPromptTest::promptsListShowsFixMyRoundNotesWithItsRequiredKeyArgument` and `::promptsGetWithAKeyOfAVisibleTicketRendersTheFileWithTheKeyAndWritesOneOkRowWithoutIt`)
 - **Depends on:** T6.
 - **Size:** M
 
@@ -382,3 +382,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (P14.T15): the My reports query is proved in `DbalMyReportsRowsTest` (RLS, reporter filter, ties, 300-report keyset walk). Two P07.T6 criteria are ticked there (team-only report listed for its reporter; first 50 and "Show more"); the progress-dots and two-buttons criteria stay open until the cards are built.
 - 2026-11-21: MCP create_report/add_screenshot/add_notebook_screenshot require a picture's title and summary through ToolCallGate::callOverMcp; /api/v1 keeps them optional.
 - 2026-11-21 (P14.T15 cards): cards, dots, intro and badge built; question text with asker and pin progress are 15f; Answer links to the ticket until P07.T7.
+- 2026-11-21 (P14.T12): server instructions carry the capture rule; fix_my_round_notes renders for a visible ticket key, refused as invalid params otherwise. Both criteria are ticked on `tests/Functional/AgentApi/Prompt/FixMyRoundNotesPromptTest.php`.
+- 2026-11-21 (11d): add_report_screenshot now implements ScreenshotContextRequiredOverMcp, so all four MCP picture tools require a title and summary; when a team has no lead, both report pages show plain "The team".
+- 2026-11-21 (8a/8d): one round page for every kind with a screenshot strip and Back/Next + arrow keys; ?screenshot=N (1-based) for rounds without areas, a malformed or unknown one is 404; review rounds keep ?area=N and an unknown area still shows the first. The query-count criterion is ticked on `RoundPageScreenshotsTest::aSharedDraftsPageReadsTheSameNumberOfQueriesWhateverTheNumberOfScreenshotsAndPins`. **The "1 of 3, next and arrow key, strip jumps" criterion stays open:** it asks for Playwright, and `RoundPageScreenshotsTest::aSharedDraftWithThreeScreenshotsOpensAtTheFirstAndTheQueryShowsTheSecond` proves only "1 of 3", the Next and strip links and `?screenshot=2`, not the arrow key in a browser. `tests/e2e/round-page.spec.ts` is written; it still has to run in main against the dev stack (after a dev cache clear and an app and worker restart).
+- 2026-11-21 (15f): cards quote the open question to the viewer through Ticketing's port OpenQuestionQueries (Conversation's DbalOpenQuestionQueries) and show "k of n pins OK" through PinProgressQueries (Review's DbalPinProgressQueries); one query each per page; MyReportsTest::myReportsRunsTheSameQueriesForTwoReportsAndForSixty covers both. The avatar beside a quoted question is the asker's (prototype), where P07.T6 step 3 says whose turn.
