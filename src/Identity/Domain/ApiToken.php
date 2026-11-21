@@ -27,13 +27,6 @@ final class ApiToken implements TenantOwned
      */
     public const int EXPIRY_WARNING_WINDOW_DAYS = 8;
     private const int RANDOM_BYTES = 32;
-    // Any Unicode space, the no-break and ideographic ones included, which trim() leaves in place.
-    private const string SPACE_AT_EDGES = '/\A[\p{Z}\s]+|[\p{Z}\s]+\z/u';
-    // A character that shows: a name of only spaces and zero-width or byte order marks reads as blank in a list.
-    private const string VISIBLE_CHARACTER = '/[^\p{Z}\s\p{Cf}]/u';
-    // C0/C1 controls, the Unicode line and paragraph separators, which would break a line in a log or a header, and
-    // format characters (zero-width, bidirectional overrides), which would make a name look like another one.
-    private const string LINE_BREAKING_CONTROL_OR_FORMAT = '/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u';
 
     private readonly string $organizationId;
     private readonly string $userId;
@@ -75,14 +68,14 @@ final class ApiToken implements TenantOwned
      */
     public static function issue(string $id, OrganizationId $organizationId, UserId $userId, string $name, array $scopes, ApiTokenHashing $hashing, \DateTimeImmutable $issuedAt, int $lifetimeDays = self::DEFAULT_LIFETIME_DAYS): IssuedApiToken
     {
-        $trimmedName = mb_check_encoding($name, 'UTF-8') ? preg_replace(self::SPACE_AT_EDGES, '', $name) : null;
+        $trimmedName = OneLineText::trimmed($name);
         if (null === $trimmedName) {
             throw new InvalidApiToken('A token name is one line of plain text.');
         }
-        if (1 !== preg_match(self::VISIBLE_CHARACTER, $trimmedName)) {
+        if (OneLineText::isBlank($trimmedName)) {
             throw new InvalidApiToken('Give the token a name.');
         }
-        if (1 === preg_match(self::LINE_BREAKING_CONTROL_OR_FORMAT, $trimmedName)) {
+        if (OneLineText::hasControlLineBreakOrFormat($trimmedName)) {
             throw new InvalidApiToken('A token name is one line of plain text.');
         }
         if (mb_strlen($trimmedName) > self::NAME_MAX_LENGTH) {

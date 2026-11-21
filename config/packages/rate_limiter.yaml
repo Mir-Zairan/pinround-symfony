@@ -10,6 +10,8 @@
 # session cannot guess the password.
 # Two-step login codes get two_step_code_per_user through SymfonyTwoStepCodeLimiter: every code typed for a user counts,
 # right or wrong, at login and wherever else a code is asked, so the 6 digits cannot be guessed.
+# OAuth client registrations (POST /oauth/register) get oauth_client_registration_per_ip through
+# SymfonyOAuthClientRegistrationLimiter (RegisterOAuthClient), before the request body is decoded or checked.
 # Upload begins (POST /media/intents and MCP create_upload) get media_upload_begin_per_user through
 # SymfonyUploadBeginLimit (Media's UploadBeginLimit): a begin the limit accepts counts at once, before Uploads checks it,
 # so a begin Uploads then refuses counts too and one member cannot script begins against the storage. A begin past the
@@ -30,6 +32,7 @@ parameters:
     identity.password_reset_per_ip_minutes: 60
     identity.password_change_per_user_minutes: 15
     identity.two_step_code_per_user_minutes: 15
+    identity.oauth_client_registration_per_ip_minutes: 60
     # The window in minutes, also the longest wait a refused begin is told (SymfonyUploadBeginLimit).
     media.upload_begin_per_user_minutes: 1
     # The same for a refused status poll (UploadStatusController).
@@ -77,6 +80,15 @@ framework:
             policy: fixed_window
             limit: 5
             interval: '%identity.two_step_code_per_user_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # POST /oauth/register (ADR-0050), keyed by the client IP: every request counts, registered or refused, so a
+        # script cannot fill idn_oauth_client. 30 an hour, not fewer: every Claude connector registers from Anthropic's
+        # servers, so the people of one install who connect Claude share the same few addresses.
+        oauth_client_registration_per_ip:
+            policy: fixed_window
+            limit: 30
+            interval: '%identity.oauth_client_registration_per_ip_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
         # POST /media/intents, keyed by the user id: three times the 20 uploads a person may have waiting, so pasting a

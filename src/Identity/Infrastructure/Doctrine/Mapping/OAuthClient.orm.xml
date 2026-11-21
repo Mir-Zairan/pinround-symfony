@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Identity\Domain\OAuthClient" table="idn_oauth_client">
+        <id name="clientId" type="text" column="client_id"/>
+
+        <field name="clientName" type="text" column="client_name" nullable="true"/>
+        <field name="redirectUris" type="text_array" column="redirect_uris"/>
+        <field name="grantTypes" type="text_array" column="grant_types"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+    </entity>
+</doctrine-mapping>

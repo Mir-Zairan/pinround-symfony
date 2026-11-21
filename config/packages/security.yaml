@@ -77,6 +77,10 @@ security:
         # The invite accept page (FR-ID-02), public by design: the emailed token is the proof, and InvitationVoter decides
         # whether the visitor, logged in or not, may accept it.
         - { route: ^organization_invitation(_token)?$, roles: PUBLIC_ACCESS }
+        # OAuth client registration and discovery (ADR-0050), public by design: a client registers and reads them before
+        # anyone logs in. Registration stores a public client only, acts for nobody and is rate-limited per IP
+        # (oauth_client_registration_per_ip); the two documents hold no user data.
+        - { route: ^identity_oauth_(register|authorization_server_metadata|protected_resource_metadata)$, roles: PUBLIC_ACCESS }
         - { route: ^web_component_gallery$, roles: PUBLIC_ACCESS }
         - { route: ^test_, roles: PUBLIC_ACCESS }
         - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
