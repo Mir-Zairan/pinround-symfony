@@ -14,15 +14,18 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * OAuthAuthorizationCodes on idn_oauth_authorization_code (Version20261121220000), a tenant table: each write switches
- * the tenant to the code's organization for its own transaction, as TenantSwitchingReads does in Organization, and
- * names the organization_id as well as row-level security does.
+ * OAuthAuthorizationCodes on idn_oauth_authorization_code (Version20261121220000, Version20261122000000), a tenant
+ * table: add() switches the tenant to the code's organization for its own transaction, as TenantSwitchingReads does in
+ * Organization, consume() writes in the caller's; each names the organization_id as well as row-level security does.
  */
 final readonly class DoctrineOAuthAuthorizationCodes implements OAuthAuthorizationCodes
 {
     // PostgreSQL checks the WHERE clause again after waiting on another call's row lock, so only one call marks it.
     private const string CONSUME = 'UPDATE idn_oauth_authorization_code SET used_at = ?'
         .' WHERE organization_id = ? AND code_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING id::text';
+
+    private const string USED_ID_BY_HASH = 'SELECT id::text FROM idn_oauth_authorization_code'
+        .' WHERE organization_id = ? AND code_hash = ? AND used_at IS NOT NULL';
 
     private const string RESOLVE = 'SELECT organization_id FROM resolve_oauth_authorization_code(?)';
 
@@ -46,25 +49,36 @@ final readonly class DoctrineOAuthAuthorizationCodes implements OAuthAuthorizati
         });
     }
 
-    public function consume(OrganizationId $organizationId, #[\SensitiveParameter] string $codeHash, \DateTimeImmutable $at): ?OAuthAuthorizationCode
+    public function consume(#[\SensitiveParameter] string $codeHash, \DateTimeImmutable $at): ?OAuthAuthorizationCode
     {
-        return $this->writeAs($organizationId, function () use ($organizationId, $codeHash, $at): ?OAuthAuthorizationCode {
-            $usedAt = $at->format(self::TIMESTAMP_FORMAT);
-            $markedIds = $this->entityManager->getConnection()->fetchFirstColumn(
-                self::CONSUME,
-                [$usedAt, $organizationId->toString(), $codeHash, $usedAt],
-                [2 => ParameterType::BINARY],
-            );
-            // code_hash is unique, so more than one row cannot be marked; anything but one is a refusal.
-            if (1 !== \count($markedIds) || !\is_string($markedIds[0])) {
-                return null;
-            }
+        $organizationId = $this->tenantContext->require()->toString();
+        $connection = $this->entityManager->getConnection();
+        // Outside one, the row lock would end with the UPDATE, before the tokens of the trade are added.
+        if (!$connection->isTransactionActive()) {
+            throw new \LogicException('A code is traded only in an open transaction; none is open.');
+        }
+        $usedAt = $at->format(self::TIMESTAMP_FORMAT);
+        $markedIds = $connection->fetchFirstColumn(self::CONSUME, [$usedAt, $organizationId, $codeHash, $usedAt], [2 => ParameterType::BINARY]);
+        // code_hash is unique, so more than one row cannot be marked; anything but one is a refusal.
+        if (1 !== \count($markedIds) || !\is_string($markedIds[0])) {
+            return null;
+        }
 
-            return $this->entityManager->find(OAuthAuthorizationCode::class, ['organizationId' => $organizationId->toString(), 'id' => $markedIds[0]]);
-        });
+        return $this->entityManager->find(OAuthAuthorizationCode::class, ['organizationId' => $organizationId, 'id' => $markedIds[0]]);
     }
 
-    public function organizationOfLiveCode(#[\SensitiveParameter] string $codeHash): ?OrganizationId
+    public function idOfUsedCode(#[\SensitiveParameter] string $codeHash): ?string
+    {
+        $id = $this->entityManager->getConnection()->fetchOne(
+            self::USED_ID_BY_HASH,
+            [$this->tenantContext->require()->toString(), $codeHash],
+            [1 => ParameterType::BINARY],
+        );
+
+        return \is_string($id) ? $id : null;
+    }
+
+    public function organizationOfCode(#[\SensitiveParameter] string $codeHash): ?OrganizationId
     {
         $organizationId = $this->entityManager->getConnection()->fetchOne(self::RESOLVE, [$codeHash], [ParameterType::BINARY]);
         if (false === $organizationId) {

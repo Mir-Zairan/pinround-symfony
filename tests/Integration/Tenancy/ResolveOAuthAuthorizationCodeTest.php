@@ -23,8 +23,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * resolve_oauth_authorization_code on real idn_oauth_authorization_code rows, called as pinround_app before any tenant
  * is known, as the token endpoint will (data-model.md › Lookups before the tenant is known). The database clock decides
- * expiry, so the live codes are issued far ahead and the expired one far back. Omar is a member of Acme Foods and Mia of
- * Beta Bakery, so only the use, the expiry or the missing membership refuses the other codes.
+ * expiry, so the live codes are issued far ahead and the expired ones far back. Omar is a member of Acme Foods and Mia of
+ * Beta Bakery, so only the expiry of an unused code or the missing membership refuses the other codes.
  */
 final class ResolveOAuthAuthorizationCodeTest extends KernelTestCase
 {
@@ -35,6 +35,7 @@ final class ResolveOAuthAuthorizationCodeTest extends KernelTestCase
     private const string LIVE_AT_ACME = 'live at Acme Foods';
     private const string LIVE_AT_BETA = 'live at Beta Bakery';
     private const string USED = 'used';
+    private const string USED_AND_EXPIRED = 'used and expired';
     private const string EXPIRED = 'expired';
     private const string OF_A_NON_MEMBER = 'of a person who is not a member';
     private const string LIVE_ISSUED_AT = '2099-01-01 10:00:00 UTC';
@@ -52,8 +53,10 @@ final class ResolveOAuthAuthorizationCodeTest extends KernelTestCase
         $this->transactions()->committedAs(self::BETA_BAKERY, fn (): int|string => $this->addMembership(self::BETA_BAKERY, self::MIA));
         $this->add(self::LIVE_AT_ACME, self::ACME_FOODS, self::OMAR, self::LIVE_ISSUED_AT);
         $this->add(self::USED, self::ACME_FOODS, self::OMAR, self::LIVE_ISSUED_AT);
-        self::assertNotNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), $this->hashes[self::USED], new \DateTimeImmutable('2099-01-01 10:00:05 UTC')));
+        self::assertNotNull($this->transactions()->committedAs(self::ACME_FOODS, fn (): ?OAuthAuthorizationCode => $this->codes()->consume($this->hashes[self::USED], new \DateTimeImmutable('2099-01-01 10:00:05 UTC'))));
         $this->add(self::EXPIRED, self::ACME_FOODS, self::OMAR, '2020-01-01 10:00:00 UTC');
+        $this->add(self::USED_AND_EXPIRED, self::ACME_FOODS, self::OMAR, '2020-01-01 10:00:00 UTC');
+        self::assertNotNull($this->transactions()->committedAs(self::ACME_FOODS, fn (): ?OAuthAuthorizationCode => $this->codes()->consume($this->hashes[self::USED_AND_EXPIRED], new \DateTimeImmutable('2020-01-01 10:00:05 UTC'))));
         $this->add(self::LIVE_AT_BETA, self::BETA_BAKERY, self::MIA, self::LIVE_ISSUED_AT);
         $this->add(self::OF_A_NON_MEMBER, self::BETA_BAKERY, self::OMAR, self::LIVE_ISSUED_AT);
     }
@@ -80,9 +83,10 @@ final class ResolveOAuthAuthorizationCodeTest extends KernelTestCase
     }
 
     #[Test]
-    public function aUsedCodeGetsNoRow(): void
+    public function aUsedCodeIsFoundExpiredOrNotSoAReplayCanBeToldFromAnUnknownCode(): void
     {
-        self::assertSame([], $this->resolve($this->hashes[self::USED]));
+        self::assertSame([['organization_id' => self::ACME_FOODS]], $this->resolve($this->hashes[self::USED]));
+        self::assertSame([['organization_id' => self::ACME_FOODS]], $this->resolve($this->hashes[self::USED_AND_EXPIRED]));
     }
 
     #[Test]

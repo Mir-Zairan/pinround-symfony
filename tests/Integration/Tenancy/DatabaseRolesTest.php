@@ -1003,11 +1003,11 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * resolve_oauth_authorization_code runs as its owner pinround_resolver with a fixed search_path; besides that owner
-     * only the app may call it, and it returns the organization of a code that is neither used nor expired and whose
-     * person is still a member of that organization.
+     * only the app may call it, and it returns the organization of a code that is used, or unused and not expired, and
+     * whose person is still a member of that organization (Version20261122000000).
      */
     #[Test]
-    public function theOAuthAuthorizationCodeResolverReturnsOnlyTheOrganizationOfALiveCode(): void
+    public function theOAuthAuthorizationCodeResolverReturnsOnlyTheOrganizationOfAUsedOrLiveCode(): void
     {
         $connection = $this->connection();
 
@@ -1019,7 +1019,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'arguments' => 'p_code_hash bytea',
                 'result' => 'TABLE(organization_id uuid)',
                 'body' => 'SELECT c.organization_id FROM public.idn_oauth_authorization_code c'
-                    ."\n".'WHERE c.code_hash = p_code_hash AND c.used_at IS NULL AND c.expires_at > now()'
+                    ."\n".'WHERE c.code_hash = p_code_hash AND (c.used_at IS NOT NULL OR c.expires_at > now())'
                     ."\n".'AND EXISTS (SELECT 1 FROM public.org_membership m WHERE m.organization_id = c.organization_id AND m.user_id = c.user_id)',
             ],
             $connection->fetchAssociative(

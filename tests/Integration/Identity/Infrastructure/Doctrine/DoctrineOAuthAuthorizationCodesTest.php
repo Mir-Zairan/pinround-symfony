@@ -12,6 +12,7 @@ use App\Identity\Domain\OAuthGrantType;
 use App\Identity\Infrastructure\Doctrine\DoctrineOAuthAuthorizationCodes;
 use App\Identity\Infrastructure\Security\HmacApiTokenHashing;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -26,9 +27,9 @@ use Symfony\Component\Process\Process;
 
 /**
  * DoctrineOAuthAuthorizationCodes on the real idn_oauth_authorization_code table as pinround_app. The codes are
- * committed, as add() and consume() run their own transactions, and removed through the migrator. Every time is fixed:
- * consume() compares with the time it is given; only organizationOfLiveCode() reads the database clock, so its live
- * code is dated ahead of it.
+ * committed, as add() runs its own transaction and consume() is called in a committed one, and removed through the
+ * migrator. Every time is fixed: consume() compares with the time it is given; only organizationOfCode() reads the
+ * database clock, so its live code is dated ahead of it.
  */
 final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
 {
@@ -88,11 +89,10 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         $code = $this->issue(self::ACME_FOODS);
 
         $this->codes()->add($code);
-        self::assertNull($this->tenantContext()->get());
 
-        self::assertNotNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+5 seconds')));
         self::assertNull($this->tenantContext()->get());
         self::assertFalse($this->connection()->isTransactionActive());
+        self::assertSame(1, $this->countAs(self::ACME_FOODS));
     }
 
     #[Test]
@@ -100,9 +100,8 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
     {
         $code = $this->issue(self::ACME_FOODS);
         $this->codes()->add($code);
-        $this->tenantContext()->set(new OrganizationId(self::BETA_BAKERY));
 
-        $consumed = $this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+59 seconds'));
+        $consumed = $this->consumeAs(self::ACME_FOODS, $code->codeHash(), $this->at('+59 seconds'));
 
         self::assertNotNull($consumed);
         self::assertSame($code->id(), $consumed->id());
@@ -113,12 +112,10 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         self::assertTrue($consumed->userId()->equals(new UserId(self::OMAR)));
         self::assertTrue($consumed->organizationId()->equals(new OrganizationId(self::ACME_FOODS)));
         self::assertSame('2027-03-15 10:00:59', $consumed->usedAt()?->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'));
-        self::assertSame(self::BETA_BAKERY, $this->tenantContext()->get()?->toString());
 
-        self::assertNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+59 seconds')));
-        self::assertNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+30 seconds')));
+        self::assertNull($this->consumeAs(self::ACME_FOODS, $code->codeHash(), $this->at('+59 seconds')));
+        self::assertNull($this->consumeAs(self::ACME_FOODS, $code->codeHash(), $this->at('+30 seconds')));
 
-        $this->tenantContext()->reset();
         self::assertSame('2027-03-15 10:00:59', $this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
     }
 
@@ -164,8 +161,8 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         $code = $this->issue(self::ACME_FOODS);
         $this->codes()->add($code);
 
-        self::assertNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+60 seconds')));
-        self::assertNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+1 day')));
+        self::assertNull($this->consumeAs(self::ACME_FOODS, $code->codeHash(), $this->at('+60 seconds')));
+        self::assertNull($this->consumeAs(self::ACME_FOODS, $code->codeHash(), $this->at('+1 day')));
 
         self::assertNull($this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
     }
@@ -176,8 +173,8 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         $code = $this->issue(self::ACME_FOODS);
         $this->codes()->add($code);
 
-        self::assertNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), hash('sha256', 'no code has this hash', true), $this->at('+5 seconds')));
-        self::assertNull($this->codes()->consume(new OrganizationId(self::ACME_FOODS), '', $this->at('+5 seconds')));
+        self::assertNull($this->consumeAs(self::ACME_FOODS, hash('sha256', 'no code has this hash', true), $this->at('+5 seconds')));
+        self::assertNull($this->consumeAs(self::ACME_FOODS, '', $this->at('+5 seconds')));
 
         self::assertNull($this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
     }
@@ -188,7 +185,7 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         $code = $this->issue(self::ACME_FOODS);
         $this->codes()->add($code);
 
-        self::assertNull($this->codes()->consume(new OrganizationId(self::BETA_BAKERY), $code->codeHash(), $this->at('+5 seconds')));
+        self::assertNull($this->consumeAs(self::BETA_BAKERY, $code->codeHash(), $this->at('+5 seconds')));
 
         self::assertSame(0, $this->countAs(self::BETA_BAKERY));
         self::assertSame(1, $this->countAs(self::ACME_FOODS));
@@ -220,23 +217,68 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
     }
 
     #[Test]
-    public function aConsumeInsideAnOpenTransactionIsRefusedAndChangesNothing(): void
+    public function aConsumeOutsideATransactionIsRefusedAndChangesNothing(): void
     {
         $code = $this->issue(self::ACME_FOODS);
         $this->codes()->add($code);
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
-        $this->connection()->beginTransaction();
         try {
-            $this->codes()->consume(new OrganizationId(self::ACME_FOODS), $code->codeHash(), $this->at('+5 seconds'));
-            self::fail('The consume ran inside an open transaction.');
-        } catch (TenantSwitchRefused) {
-            self::assertSame(self::ACME_FOODS, $this->tenantContext()->get()?->toString());
+            $this->codes()->consume($code->codeHash(), $this->at('+5 seconds'));
+            self::fail('The consume ran outside a transaction.');
+        } catch (\LogicException $refusal) {
+            self::assertSame('A code is traded only in an open transaction; none is open.', $refusal->getMessage());
         } finally {
-            $this->connection()->rollBack();
             $this->tenantContext()->reset();
         }
 
         self::assertNull($this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
+    }
+
+    #[Test]
+    public function aConsumeWithoutATenantIsRefusedAndChangesNothing(): void
+    {
+        $code = $this->issue(self::ACME_FOODS);
+        $this->codes()->add($code);
+        $this->connection()->beginTransaction();
+        try {
+            $this->codes()->consume($code->codeHash(), $this->at('+5 seconds'));
+            self::fail('The consume ran without a tenant.');
+        } catch (TenantNotSet) {
+            self::assertNull($this->tenantContext()->get());
+        } finally {
+            $this->connection()->rollBack();
+        }
+
+        self::assertNull($this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
+    }
+
+    /**
+     * A rolled-back consume leaves the code unused, so the tokens of a trade and its use commit or vanish together.
+     */
+    #[Test]
+    public function aConsumeIsUndoneWithItsTransaction(): void
+    {
+        $code = $this->issue(self::ACME_FOODS);
+        $this->codes()->add($code);
+
+        self::assertNotNull($this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?OAuthAuthorizationCode => $this->codes()->consume($code->codeHash(), $this->at('+5 seconds'))));
+
+        self::assertNull($this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
+    }
+
+    #[Test]
+    public function onlyAUsedCodeOfTheTenantGivesItsId(): void
+    {
+        $used = $this->issue(self::ACME_FOODS);
+        $unused = $this->issue(self::ACME_FOODS);
+        $this->codes()->add($used);
+        $this->codes()->add($unused);
+        self::assertNotNull($this->consumeAs(self::ACME_FOODS, $used->codeHash(), $this->at('+5 seconds')));
+
+        self::assertSame($used->id(), $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->codes()->idOfUsedCode($used->codeHash())));
+        self::assertNull($this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->codes()->idOfUsedCode($unused->codeHash())));
+        self::assertNull($this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->codes()->idOfUsedCode(hash('sha256', 'no code has this hash', true))));
+        self::assertNull($this->transactions()->committedAs(self::BETA_BAKERY, fn (): ?string => $this->codes()->idOfUsedCode($used->codeHash())));
     }
 
     #[Test]
@@ -270,7 +312,7 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
     }
 
     #[Test]
-    public function theResolverGivesTheOrganizationOfALiveCodeOnly(): void
+    public function theResolverGivesTheOrganizationOfALiveOrUsedCodeOnly(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
             "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2027-01-01 09:00:00+00')",
@@ -279,12 +321,16 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         // Ahead of the database clock, which the resolver reads.
         $live = $this->issue(self::ACME_FOODS, '2099-01-01 10:00:00 UTC');
         $expired = $this->issue(self::ACME_FOODS, '2020-01-01 10:00:00 UTC');
+        $usedAndExpired = $this->issue(self::ACME_FOODS, '2020-01-01 10:00:00 UTC');
         $this->codes()->add($live);
         $this->codes()->add($expired);
+        $this->codes()->add($usedAndExpired);
+        self::assertNotNull($this->consumeAs(self::ACME_FOODS, $usedAndExpired->codeHash(), new \DateTimeImmutable('2020-01-01 10:00:05 UTC')));
 
-        self::assertSame(self::ACME_FOODS, $this->codes()->organizationOfLiveCode($live->codeHash())?->toString());
-        self::assertNull($this->codes()->organizationOfLiveCode($expired->codeHash()));
-        self::assertNull($this->codes()->organizationOfLiveCode(hash('sha256', 'no code has this hash', true)));
+        self::assertSame(self::ACME_FOODS, $this->codes()->organizationOfCode($live->codeHash())?->toString());
+        self::assertSame(self::ACME_FOODS, $this->codes()->organizationOfCode($usedAndExpired->codeHash())?->toString());
+        self::assertNull($this->codes()->organizationOfCode($expired->codeHash()));
+        self::assertNull($this->codes()->organizationOfCode(hash('sha256', 'no code has this hash', true)));
     }
 
     /**
@@ -368,6 +414,11 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
         } while (microtime(true) < $deadline);
 
         self::fail('The two consumes did not both wait on the held row within 30 seconds.');
+    }
+
+    private function consumeAs(string $organizationId, string $codeHash, \DateTimeImmutable $at): ?OAuthAuthorizationCode
+    {
+        return $this->transactions()->committedAs($organizationId, fn (): ?OAuthAuthorizationCode => $this->codes()->consume($codeHash, $at));
     }
 
     private function at(string $afterIssue): \DateTimeImmutable

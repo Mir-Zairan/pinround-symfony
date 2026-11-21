@@ -10,8 +10,8 @@ use App\SharedKernel\Domain\OrganizationId;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * Codes as idn_oauth_authorization_code keeps them: (organization_id, id) the primary key, code_hash unique across all
- * organizations, and consume() marking an unused, unexpired code of the given organization only.
+ * Codes as idn_oauth_authorization_code keeps them: (organization_id, id) the primary key and code_hash unique across
+ * all organizations. Only the authorize step uses it, which never trades or resolves a code.
  */
 final class InMemoryOAuthAuthorizationCodes implements OAuthAuthorizationCodes
 {
@@ -36,12 +36,17 @@ final class InMemoryOAuthAuthorizationCodes implements OAuthAuthorizationCodes
         $this->rows[] = $code;
     }
 
-    public function consume(OrganizationId $organizationId, #[\SensitiveParameter] string $codeHash, \DateTimeImmutable $at): ?OAuthAuthorizationCode
+    public function consume(#[\SensitiveParameter] string $codeHash, \DateTimeImmutable $at): ?OAuthAuthorizationCode
     {
         throw new \LogicException('The authorize step never trades a code.');
     }
 
-    public function organizationOfLiveCode(#[\SensitiveParameter] string $codeHash): ?OrganizationId
+    public function idOfUsedCode(#[\SensitiveParameter] string $codeHash): ?string
+    {
+        throw new \LogicException('The authorize step never trades a code.');
+    }
+
+    public function organizationOfCode(#[\SensitiveParameter] string $codeHash): ?OrganizationId
     {
         throw new \LogicException('The authorize step never resolves a code.');
     }
