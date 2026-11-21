@@ -116,6 +116,24 @@ final class ReportControllerTest extends WebTestCase
         $this->removeUsersAndOrganizations();
     }
 
+    /**
+     * Lena, Shop's lead, left the team and nobody leads it now: the team chip names nobody rather than an empty
+     * "( decides)".
+     */
+    #[Test]
+    public function aTeamWithNoLeadIsOfferedAsThePlainTeam(): void
+    {
+        $parameters = [$this->shop->toString(), $this->people['Lena']->id()->toString()];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM org_team_member WHERE team_id = ? AND user_id = ?', $parameters));
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::REPORT);
+
+        self::assertResponseStatusCodeSame(200);
+        $shopGiveTo = $page->filter('[data-report-form-target="giveTo"][data-team="'.$this->shop->toString().'"]');
+        self::assertSame(['The team', 'Omar (you)'], $shopGiveTo->filter('label')->each(static fn (Crawler $chip): string => trim($chip->text())));
+    }
+
     #[Test]
     public function theFormShowsTheReportersTeamItsPeopleWithoutTestersAndItsProjects(): void
     {
