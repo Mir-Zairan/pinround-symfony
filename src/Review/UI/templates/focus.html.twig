@@ -1,9 +1,9 @@
 {% extends '@Web/base.html.twig' %}
 
-{#- The full-screen review of one area (RoundController::focus, full-screen-review.md). The server shows the bar of the
-    "?pin=" pin and hides the others; Previous, Next and After/Before are links and the verdicts plain forms, so the walk
-    works without JavaScript. pin-walker switches bars in place, moves the selected ring, and adds the arrow keys and
-    Escape. -#}
+{#- The full-screen review of one round (RoundController::focus, full-screen-review.md): a screen area, or a screenshot
+    of a round without areas. The server shows the bar of the "?pin=" pin and hides the others; Previous, Next, the
+    screenshots' Back and Next and After/Before are links and the verdicts plain forms, so the walk works without
+    JavaScript. pin-walker switches bars in place, moves the selected ring, and adds the arrow keys and Escape. -#}
 
 {% block title %}Full screen · Round {{ roundNumber }} · {{ ticketKey }} · pinround{% endblock %}
 
@@ -17,30 +17,38 @@
     {% set roundController = 'App\\Review\\UI\\Controller\\RoundController' %}
     {% set verdictController = 'App\\Review\\UI\\Controller\\VerdictController' %}
     {% set focusRoute = constant(roundController ~ '::FOCUS_ROUTE') %}
-    {% set exitHref = path(constant(roundController ~ '::ROUND_ROUTE'), {key: ticketKey, number: roundNumber}|merge(page.areaPosition is null ? {} : {(areaParameter): page.areaPosition})) %}
+    {% set focusPath = {key: ticketKey, number: roundNumber} %}
+    {% set shownQuery = focusPath|merge(page.shownParameters) %}
     <article class="focus-review" data-controller="pin-walker" data-pin-walker-parameter-value="{{ pinParameter }}" data-action="keydown@document->pin-walker#walk click->pin-walker#selectPin">
         <header class="focus-review__header">
-            <twig:Button variant="outline" size="sm" href="{{ exitHref }}" class="focus-review__exit" data-pin-walker-target="exit">
+            {#- A full load, as Escape's: the page left opens with the fragment already in its address, which fragment-focus reads to give the Full screen link its focus back. -#}
+            <twig:Button variant="outline" size="sm" href="{{ exitHref }}" data-turbo="false" class="focus-review__exit" data-pin-walker-target="exit">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
                 Exit full screen
             </twig:Button>
             <h1 class="focus-review__line">{{ page.line }}</h1>
             {% if page.hasBefore %}
-                {% set sideQuery = {key: ticketKey, number: roundNumber, (areaParameter): page.areaPosition} %}
                 <twig:SegmentedControl label="Picture" class="focus-review__sides" :links="[
-                    {label: 'After', href: path(focusRoute, sideQuery|merge({(sideParameter): 'after'})), isCurrent: page.side == 'after'},
-                    {label: 'Before', href: path(focusRoute, sideQuery|merge({(sideParameter): 'before'})), isCurrent: page.side == 'before'},
+                    {label: 'After', href: path(focusRoute, shownQuery|merge({(sideParameter): 'after'})|merge(returnParameters)), isCurrent: page.side == 'after'},
+                    {label: 'Before', href: path(focusRoute, shownQuery|merge({(sideParameter): 'before'})|merge(returnParameters)), isCurrent: page.side == 'before'},
                 ]" />
+            {% endif %}
+            {% if page.pager is not null %}
+                {% set pager = page.pager %}
+                <nav class="focus-review__pager" aria-label="Move between screenshots">
+                    <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, focusPath|merge(pager.backParameters ?? {})|merge(returnParameters)) }}" :disabled="pager.backParameters is null" class="focus-review__back" rel="prev"><span aria-hidden="true">&lt;</span> Back</twig:Button>
+                    <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, focusPath|merge(pager.nextParameters ?? {})|merge(returnParameters)) }}" :disabled="pager.nextParameters is null" class="focus-review__next" rel="next">Next <span aria-hidden="true">&gt;</span></twig:Button>
+                </nav>
             {% endif %}
         </header>
 
         {% if page.picture is null %}
-            <twig:EmptyState message="This round has no screen areas." />
+            <twig:EmptyState message="{{ page.emptyMessage }}" />
         {% else %}
             <twig:Screenshot :view="page.picture" :selectedNumber="page.current.number ?? null" class="focus-review__picture" />
 
             {% if page.current is null %}
-                <p class="focus-review__none">There are no earlier pins to check here.</p>
+                <p class="focus-review__none">{{ page.areaPosition is null ? 'This screenshot has no pins.' : 'There are no earlier pins to check here.' }}</p>
             {% else %}
                 {% set csrfField = constant(verdictController ~ '::CSRF_FIELD') %}
                 {% set verdictField = constant(verdictController ~ '::VERDICT_FIELD') %}
@@ -51,7 +59,7 @@
                 <div class="focus-bar" aria-live="polite">
                     {% for stop in page.stops %}
                         {% set isCurrent = stop.position == page.current.position %}
-                        {% set stopQuery = {key: ticketKey, number: roundNumber, (areaParameter): page.areaPosition, (sideParameter): page.side} %}
+                        {% set stopQuery = shownQuery|merge(page.areaPosition is null ? {} : {(sideParameter): page.side})|merge(returnParameters) %}
                         <section class="focus-bar__stop" id="focus-pin-{{ stop.position }}" aria-labelledby="focus-pin-{{ stop.position }}-label" data-pin-walker-target="stop" data-pin-number="{{ stop.number }}" data-pin-position="{{ stop.position }}"{% if not isCurrent %} hidden{% endif %}>
                             <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.previousPosition})) }}" aria-label="Previous pin" data-pin-walker-control="previous" data-action="pin-walker#previous">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>

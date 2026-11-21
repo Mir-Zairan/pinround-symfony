@@ -97,6 +97,40 @@ final class ScreenshotPagerTest extends TestCase
         ScreenshotPager::over($thumbs);
     }
 
+    #[Test]
+    public function overScreenshotsPagesByTheScreenshotQueryAndStopsAtBothEnds(): void
+    {
+        $first = ScreenshotPager::overScreenshots(1, 3);
+        $middle = ScreenshotPager::overScreenshots(2, 3);
+        $last = ScreenshotPager::overScreenshots(3, 3);
+        $alone = ScreenshotPager::overScreenshots(1, 1);
+
+        self::assertSame([null, ['screenshot' => 2], '1 of 3'], [$first->backParameters, $first->nextParameters, $first->positionLabel()]);
+        self::assertSame([['screenshot' => 1], ['screenshot' => 3], '2 of 3'], [$middle->backParameters, $middle->nextParameters, $middle->positionLabel()]);
+        self::assertSame([['screenshot' => 2], null, '3 of 3'], [$last->backParameters, $last->nextParameters, $last->positionLabel()]);
+        self::assertSame([null, null, '1 of 1'], [$alone->backParameters, $alone->nextParameters, $alone->positionLabel()]);
+    }
+
+    /**
+     * @return iterable<string, array{int, int}>
+     */
+    public static function screenshotsNotInTheRound(): iterable
+    {
+        yield 'zero' => [0, 3];
+        yield 'one past the last' => [4, 3];
+        yield 'a round with none' => [1, 0];
+    }
+
+    #[Test]
+    #[DataProvider('screenshotsNotInTheRound')]
+    public function overScreenshotsRefusesAShownNumberTheRoundHasNot(int $shownNumber, int $count): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('The shown screenshot is one of the round\'s.');
+
+        ScreenshotPager::overScreenshots($shownNumber, $count);
+    }
+
     /**
      * @return non-empty-list<ScreenshotThumb>
      */

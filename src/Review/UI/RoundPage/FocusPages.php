@@ -8,38 +8,101 @@ use App\Media\Api\SignedUrls;
 use App\Review\Api\AreaView;
 use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundPinView;
+use App\Review\Api\RoundScreenshotView;
+use App\Review\UI\Controller\RoundController;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCards;
+use App\Review\UI\VisibleTicket;
 use App\Ticketing\Api\TicketPageView;
 
 /**
- * Builds the full-screen review of one screen area for one viewer: signs the one picture shown and walks the pins of
- * the earlier round, the same pins the round page's side panel lists, in the same order.
+ * Builds the full-screen review of one round for one viewer: signs the one picture shown and walks its pins. On a screen
+ * area those are the earlier round's pins, the same the round page's side panel lists, in the same order; on a
+ * screenshot of any other round, the screenshot's own pins that the round page draws, numbered as the round page
+ * numbers its screenshots (RoundPages::screenshotsOf).
+ *
+ * Its reads do not grow with the screenshots or pins: one signing call, and, for a round without areas other than a
+ * review round, RoundPages' read of the one round whose screenshots it shows.
  */
 final readonly class FocusPages
 {
+    private const string REVIEW = 'review';
+
     public function __construct(
         private SignedUrls $signedUrls,
+        private RoundPages $roundPages,
     ) {
     }
 
     /**
      * Runs inside the request transaction whose tenant is the viewer's organization.
      *
-     * @param int    $selectedPosition the area to show; the first one when the round has no area at that position
-     * @param string $side             FocusPage::SIDE_BEFORE shows the earlier picture when the area has one; anything
-     *                                 else the round's own
-     * @param int    $pinPosition      from 1, the stop to show first; the first one when the walk has none there
-     * @param bool   $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
+     * @param int      $selectedPosition the area to show; the first one when the round has no area at that position
+     * @param int|null $screenshotNumber from 1, the screenshot a round without areas shows; the first one when this is
+     *                                   null. A round with areas and a review round do not read it
+     * @param string   $side             FocusPage::SIDE_BEFORE shows the earlier picture when the area has one; anything
+     *                                   else the round's own
+     * @param int      $pinPosition      from 1, the stop to show first; the first one when the walk has none there
+     * @param bool     $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
+     *
+     * @return FocusPage|null null when $screenshotNumber names no screenshot of a round without areas, which the caller
+     *                        answers with 404, as the round page does
      */
-    public function pageOf(TicketPageView $ticket, ReviewRoundView $round, int $selectedPosition, string $side, int $pinPosition, bool $isVerdictGranted, \DateTimeImmutable $now): FocusPage
+    public function pageOf(VisibleTicket $visible, ReviewRoundView $round, int $selectedPosition, ?int $screenshotNumber, string $side, int $pinPosition, bool $isVerdictGranted, \DateTimeImmutable $now): ?FocusPage
     {
+        $ticket = $visible->ticket;
         $roundLine = \sprintf('%s · Round %d', $ticket->key, $round->number);
         $area = RoundPages::areaAt($round, $selectedPosition);
-        if (null === $area) {
-            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false);
+        if (null !== $area) {
+            return $this->areaPageOf($ticket, $round, $area, $roundLine, $side, $pinPosition, $isVerdictGranted, $now);
+        }
+        if (self::REVIEW === $round->kind) {
+            // ReviewRoundQueries reads a review round's pictures through its areas only.
+            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false, [], null, RoundPages::NO_AREAS);
         }
 
+        $screenshots = ($this->roundPages->screenshotsOf($visible, $round) ?? [null, []])[1];
+        $shownIndex = null === $screenshotNumber ? 0 : $screenshotNumber - 1;
+        if (null !== $screenshotNumber && !isset($screenshots[$shownIndex])) {
+            return null;
+        }
+        $screenshot = $screenshots[$shownIndex] ?? null;
+        if (null === $screenshot) {
+            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false, [], null, RoundPages::NO_SCREENSHOTS);
+        }
+
+        $number = $shownIndex + 1;
+        $count = \count($screenshots);
+        $pins = array_values(array_filter($screenshot->pins, static fn (RoundPinView $pin): bool => RoundCards::isShownPin($pin)));
+        $stops = self::stopsOf($ticket, $pins);
+        $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$screenshot->mediaId], RoundCards::VARIANT, $now)[$screenshot->mediaId] ?? null;
+        $picture = RoundCards::viewOfPicture(
+            'focus-picture',
+            self::altTextOf($round, $screenshot, $number),
+            null,
+            null,
+            $image,
+            array_map(static fn (RoundPinView $pin): PinView => RoundCards::pinViewOf($pin), $pins),
+        );
+
+        return new FocusPage(
+            $ticket->key,
+            \sprintf('%s · Screenshot %d of %d', $roundLine, $number, $count),
+            null,
+            FocusPage::SIDE_AFTER,
+            false,
+            $picture,
+            $stops,
+            $stops[$pinPosition - 1] ?? $stops[0] ?? null,
+            false,
+            [RoundController::SCREENSHOT_PARAMETER => $number],
+            ScreenshotPager::overScreenshots($number, $count),
+            RoundPages::NO_SCREENSHOTS,
+        );
+    }
+
+    private function areaPageOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $area, string $roundLine, string $side, int $pinPosition, bool $isVerdictGranted, \DateTimeImmutable $now): FocusPage
+    {
         $shown = FocusPage::SIDE_BEFORE === $side ? ($area->before ?? $area->after) : $area->after;
         $isBefore = $shown !== $area->after;
         $pins = $area->before->pins ?? [];
@@ -66,7 +129,20 @@ final readonly class FocusPages
             $stops,
             $stops[$pinPosition - 1] ?? $stops[0] ?? null,
             RoundPages::mayGiveVerdictsOn($ticket, $round, $isVerdictGranted),
+            [RoundController::AREA_PARAMETER => $area->position],
+            null,
+            RoundPages::NO_AREAS,
         );
+    }
+
+    /**
+     * The screenshot's title, or "Screenshot 2 of round 1", as the round page's picture is named.
+     *
+     * @param int $number from 1, its place among the round's screenshots
+     */
+    private static function altTextOf(ReviewRoundView $round, RoundScreenshotView $screenshot, int $number): string
+    {
+        return $screenshot->title ?? \sprintf('Screenshot %d of round %d', $number, $round->number);
     }
 
     /**

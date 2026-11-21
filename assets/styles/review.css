@@ -535,7 +535,8 @@ textarea.screenshot-report__input {
   font-size: 14px;
 }
 
-.round-card__open {
+.round-card__open,
+.round-card__full-screen {
   margin-inline-start: auto;
 }
 
@@ -1139,6 +1140,11 @@ textarea.screenshot-report__input {
   font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.focus-review__pager {
+  display: flex;
+  gap: var(--space-8);
 }
 
 /* A size container, so the image below can be capped at the height of the picture's row (100cqh). A long note's bubble

@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Review\UI\RoundPage;
 
 /**
- * One pin of the full-screen review's walk: an earlier round's pin to check, with the bar that shows it.
+ * One pin of the full-screen review's walk, with the bar that shows it: on a screen area an earlier round's pin to check,
+ * on a screenshot of a round without areas one of its own pins.
  */
 final readonly class FocusPinStop
 {

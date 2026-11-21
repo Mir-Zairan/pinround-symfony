@@ -33,4 +33,21 @@ final readonly class RoundPage
         public string $emptyMessage,
     ) {
     }
+
+    /**
+     * The query that names the shown screenshot, "?area=N" or "?screenshot=N", which the round page and the full-screen
+     * review both read; empty when the round has nothing to show.
+     *
+     * @return array<string, int>
+     */
+    public function shownParameters(): array
+    {
+        foreach ($this->thumbs as $thumb) {
+            if ($thumb->isShown) {
+                return $thumb->parameters;
+            }
+        }
+
+        return [];
+    }
 }

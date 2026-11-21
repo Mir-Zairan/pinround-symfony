@@ -120,7 +120,8 @@ final class RoundPageScreenshotsTest extends WebTestCase
         self::assertSame('true', $back->attr('aria-disabled'), 'There is no screenshot before the first.');
         self::assertNull($back->attr('href'));
         self::assertSame('/t/SHOP-1/rounds/1?screenshot=2', $page->filter('.screenshot-pager__next')->attr('href'));
-        self::assertCount(0, $page->filter('.round-compare-control, .round-compare__side--before, .round-panel, a.round-page__full-screen'), 'A draft has no earlier picture and takes no verdict here.');
+        self::assertCount(0, $page->filter('.round-compare-control, .round-compare__side--before, .round-panel'), 'A draft has no earlier picture and takes no verdict here.');
+        self::assertSame('/t/SHOP-1/rounds/1/focus?screenshot=1', $page->filter('a.round-page__full-screen')->attr('href'));
 
         $page = $this->client->request('GET', self::DRAFT_PAGE.'?'.RoundController::SCREENSHOT_PARAMETER.'=2');
 
