@@ -11,6 +11,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Notebooks](#notebooks) — make one, pin a page and capture it there
 - [Ask Claude Code about a notebook](#ask-claude-code-about-a-notebook) — the `explain_my_notebook` prompt and its token
 - [Play scenarios](#play-scenarios) — Play, Step, Stop, Next and Back, and what stops a run
+- [The dock](#the-dock) — Pin, Capture, Shrink and Save draft on the page, a scenario's step card, and opening it again after a reload
 - [Allowed hosts for scenarios](#allowed-hosts-for-scenarios) — where scenarios may play, and the question before a run
 - [Safety](#safety) — what the player never does, and who decides
 - [Sign out](#sign-out) — the token stops working everywhere
@@ -93,6 +94,25 @@ A scenario is a short list of steps: open a page, click, type, choose, wait, che
 - The popup closes. A run lives in the popup, and Chrome closes the popup when you click the page. Do not click the page while a scenario plays. A capture under way then stores nothing.
 
 A capture step adds a screenshot of the page to the notebook, titled with the scenario's title.
+
+## The dock
+The dock is a small bar on the page itself. It stays open while you click the page, so you can pin, capture and walk through a scenario without the popup.
+1. Click the extension's icon and press **Open the dock on this page**. The popup says "The dock is on the page. Pin, capture and save your draft from there." Drag the dock by its grip, or move it with the arrow keys.
+2. In **Put it in**, choose where captures go, as in the popup. The popup and the dock always show the same choice.
+3. Use the buttons. P, C and H work as keys too, but not while you type in a field or hold Ctrl, Alt or Cmd:
+   - **Pin** (P) turns pinning on: click the page to drop a pin and type your note.
+   - **Capture** (C) takes the page with its pins into the place you chose, for example "Added to your draft round on SHOP-12. Only you see it."
+   - **Shrink** (H) folds the dock into a small round button. Press it to open the dock again.
+   - **Save draft** works for a new report once its draft holds a picture and no capture is still on its way. It opens the report draft in pinround, where you check it and press **Send**.
+   - **×** beside a pin (**Remove pin 2** for a screen reader) drops that pin. **Clear 3 pins** drops them all and keeps the dock open.
+4. To play a scenario, choose a notebook in **Put it in** and press **Play**. The dock opens the scenario's start page if the tab is elsewhere, and shows a step card: "Step 1 of 4", **Do** (what to do) and **Expected** (what you should see). The dock does not click for you: you do the step, then answer it.
+   - **Looks right** goes to the next step.
+   - **Found a problem** goes to the next step and turns pinning on: "Pin the problem, then capture. The capture is tagged with step 2." The capture is titled with the step, for example "Step 2: Look at the total".
+   - **Skip** goes to the next step and counts the step as skipped.
+   - **Stop** ends the run.
+   At the end the card counts your answers, for example "Scenario done: 3 looked right, 1 with a problem, 0 skipped."
+
+**After a reload, or a start page on another site.** A reload removes the dock from the page, and Chrome lets the extension reach only the site where you clicked its icon. The run is kept: click the extension's icon and press **Open the dock on this page** again, and the step card is where you left it.
 
 ## Allowed hosts for scenarios
 A notebook's scenarios click and type on a page, so they play only on hosts you list. Nothing is allowed at first.
