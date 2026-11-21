@@ -125,7 +125,7 @@ final class InMemoryRounds implements Rounds
     {
         $draft = $this->storedOpenUnsharedDraftOf($ticketId, $ownerId);
 
-        return null === $draft ? null : new DraftFacts($draft->id(), $draft->decision(), \count($draft->screenshots()));
+        return null === $draft ? null : new DraftFacts($draft->id(), $draft->decision(), \count($draft->latestTries()));
     }
 
     public function nextFreeNumberOf(TicketId $ticketId): int

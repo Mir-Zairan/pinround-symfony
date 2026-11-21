@@ -64,7 +64,8 @@ final readonly class ListDraftScreenshots implements AgentTool
                 'additionalProperties' => false,
             ],
             description: 'Lists the screenshots of your own private draft round on a ticket, one per screenshot with its'
-                .' tries: screenshot_id (the id add_screenshot takes as retake_of), number (the "Screenshot n" the'
+                .' tries: screenshot_id (the id add_screenshot takes as retake_of; set_verdict puts a verdict sent with'
+                .' it on the latest try), number (the "Screenshot n" the'
                 .' draft round shows), title of the latest try (or null) and try_count. The list is empty when you have'
                 .' no draft round on the ticket; another person\'s draft is never listed. '.UntrustedText::NOTICE
                 .' Titles are such text.',
