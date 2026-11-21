@@ -34,6 +34,7 @@ final class OAuthRedirectUriTest extends TestCase
         yield 'the extension\'s address with a path' => ['https://'.self::EXTENSION_ID.'.chromiumapp.org/oauth', self::EXTENSION_ID.'.chromiumapp.org'];
         yield 'a host in capitals reads in lowercase' => ['https://Claude.Example/cb', 'claude.example'];
         yield 'a dot that starts a segment name' => ['https://claude.example/.well-known/cb', 'claude.example'];
+        yield 'a tilde in the path and the query' => ['https://claude.example/~omar/cb?next=~x', 'claude.example'];
     }
 
     #[Test]

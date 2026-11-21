@@ -19,9 +19,10 @@ final readonly class OAuthRedirectUri
     private const string SHAPE = '~\A(?<scheme>https?)://'
         .'(?<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)'
         .'(?::(?<port>[0-9]{1,5}))?'
-        // RFC 3986 path and query characters without "*", which would read as a wildcard, and without "#".
-        .'(?<path>/[A-Za-z0-9._~!$&\'()+,;=:@/%-]*)?'
-        .'(?:\?[A-Za-z0-9._~!$&\'()+,;=:@/?%-]*)?\z~';
+        // RFC 3986 path and query characters without "*", which would read as a wildcard, and without "#". The "~" is
+        // escaped because it is also the delimiter; unescaped, the pattern fails to compile and refuses every URI.
+        .'(?<path>/[A-Za-z0-9._\~!$&\'()+,;=:@/%-]*)?'
+        .'(?:\?[A-Za-z0-9._\~!$&\'()+,;=:@/?%-]*)?\z~';
     private const string BAD_PERCENT_ENCODING = '/%(?![0-9A-Fa-f]{2})/';
     private const string DOT_SEGMENT = '~/\.{1,2}(?:/|\z)~';
     private const string CHROMIUM_APP_DOMAIN = 'chromiumapp.org';
