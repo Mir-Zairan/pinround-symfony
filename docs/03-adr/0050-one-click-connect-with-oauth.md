@@ -156,8 +156,8 @@ The product owner answered on 2026-11-21:
 - **Token storage.** Hashes only, as for personal access tokens.
 
 Note, 2026-11-21: the product owner decided that a leaver's personal access tokens are refused too, not only the OAuth
-tokens of "One organization per grant". `resolve_api_token` finds a token only while its person still has a membership
-row in the token's organization, so every token a person holds stops at their next request once they leave; the token
+tokens of "One organization per grant". `resolve_api_token` finds a token only while it is neither revoked nor expired and
+its person still has a membership row in the token's organization (`Version20261121193200`), so every token a person holds stops at their next request once they leave; the token
 rows stay until the retention job purges them.
 
 ## More information

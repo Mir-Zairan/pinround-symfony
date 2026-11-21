@@ -51,6 +51,8 @@ Chosen option: **2**, because HMAC is the standard way to key a hash with a secr
 - Bad: changing the pepper makes every issued token stop working; there is no rotation with two keys yet.
 - Neutral: the lookup stays one indexed equality on `token_hash`, before any tenant is known (`resolve_api_token`).
 
+Note, 2026-11-21: since `Version20261121193200`, `resolve_api_token` returns a token only while it is neither revoked nor expired and its person still has an `org_membership` row in the token's organization ([ADR-0050](0050-one-click-connect-with-oauth.md)). The hash lookup is unchanged; a leaver's token gives no row, like an unknown one.
+
 ## Confirmation
 
 - `tests/Unit/Identity/Infrastructure/Security/HmacApiTokenHashingTest.php`: the hash equals `hash_hmac('sha256', …, true)`, and a short or empty pepper is refused.
