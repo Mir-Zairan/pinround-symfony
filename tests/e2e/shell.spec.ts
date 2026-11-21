@@ -87,6 +87,35 @@ test.describe('narrow viewport', () => {
   });
 });
 
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 1280, height: 800 },
+  { width: 390, height: 844 },
+  { width: 360, height: 800 },
+]) {
+  test.describe(`${viewport.width}x${viewport.height}`, () => {
+    test.use({ viewport });
+
+    test(`the logo lines up with the page content at ${viewport.width}px`, async ({ page }) => {
+      await openShell(page);
+      const { logoLeft, contentLeft } = await page.evaluate(() => {
+        const content = document.querySelector('.page')!;
+        return {
+          logoLeft: document.querySelector('.site-header .logo')!.getBoundingClientRect().left,
+          contentLeft: content.getBoundingClientRect().left + parseFloat(getComputedStyle(content).paddingLeft),
+        };
+      });
+
+      expect(logoLeft).toBeCloseTo(contentLeft, 0);
+    });
+
+    test(`shell has no serious or critical accessibility violations at ${viewport.width}px`, async ({ page }) => {
+      await openShell(page);
+      expect(await seriousViolations(page)).toEqual([]);
+    });
+  });
+}
+
 test('page requests only the app origin and loads the fonts locally', async ({ page, baseURL }) => {
   const origin = new URL(baseURL!).origin;
   const foreignRequests: string[] = [];
