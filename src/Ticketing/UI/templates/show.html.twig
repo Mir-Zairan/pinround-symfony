@@ -16,7 +16,7 @@
 
 {% block live_updates %}
     {#- Notification's component, by name, as Ticketing's UI may not use Notification (deptrac.yaml). A refresh signal
-        fetches again what carries data-live-refresh: the thread's frame and the parts a move's Turbo Stream replaces. -#}
+        fetches again what carries data-live-refresh: the thread's and the rounds' frames and the parts a move's Turbo Stream replaces. -#}
     {{ component('LiveUpdates', {ticketId: ticket.id.toString}) }}
 {% endblock %}
 
@@ -78,8 +78,7 @@
 
             {{ include('@Ticketing/_next_step.html.twig') }}
 
-            {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. -#}
-            {{ component('RoundsSection', {key: ticket.key, class: 'ticket__rounds'}) }}
+            {{ include('@Ticketing/_rounds.html.twig') }}
 
             <aside class="ticket__aside">
                 {{ include('@Ticketing/_people.html.twig') }}

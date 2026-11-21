@@ -21,7 +21,8 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * What the ticket page shows of the ticket's step: the header's state (the step's pill, Now and Next, the group line)
  * and the "Your next step" box, the People section and What happened. TicketShowController renders them in the page,
  * TicketMoveController's Turbo Stream answer renders them again after a move, both through _ticket_state.html.twig,
- * _next_step.html.twig, _people.html.twig and _activity.html.twig.
+ * _next_step.html.twig, _people.html.twig and _activity.html.twig. The stream replaces the Rounds section too
+ * (_rounds.html.twig), whose lazy frame then loads the rounds again, so it needs nothing from here but ROUNDS_ID.
  *
  * One query for the latest moves and checklist or verdict changes (TicketHistoryEntries), one for the saved turn with the waiting turns
  * (SavedTicketPageTurns::pageTurnOf), one more for the names of movers the ticket does not hold, and the organization's
@@ -32,6 +33,8 @@ final readonly class TicketPageParts
     /** The ids of the parts' elements, which the Turbo Stream answer of a move replaces. */
     public const string STATE_ID = 'ticket-state';
     public const string NEXT_STEP_ID = 'ticket-next-step';
+    /** The Rounds section around Review's frame, which _rounds.html.twig renders from the ticket's key alone. */
+    public const string ROUNDS_ID = 'ticket-rounds-section';
     public const string PEOPLE_ID = 'ticket-people';
     public const string ACTIVITY_ID = 'ticket-activity';
 

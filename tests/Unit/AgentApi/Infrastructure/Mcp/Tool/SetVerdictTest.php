@@ -274,6 +274,22 @@ final class SetVerdictTest extends TestCase
     }
 
     /**
+     * Review puts a verdict sent with a retaken screenshot's first try on its latest try (ADR-0048); the answer names
+     * the try Review says took it, not the id sent.
+     */
+    #[Test]
+    public function theAnswerNamesTheTryReviewPutTheVerdictOn(): void
+    {
+        $latestTry = '019a5f00-0000-7000-8000-00000000e659';
+        $this->roundCommands->latestTryIds = [self::OMARS_SHOT => $latestTry];
+
+        $result = $this->callFor(['key' => 'SHOP-1', 'screenshot_id' => self::OMARS_SHOT, 'verdict' => 'looks_right']);
+
+        self::assertSame([[self::OMARS_DRAFT, self::OMAR, self::OMARS_SHOT, RoundCommands::VERDICT_LOOKS_RIGHT, null]], $this->roundCommands->verdictsSet);
+        self::assertSame($latestTry, $result['structured']['screenshot_id'] ?? null);
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function summaries(): iterable

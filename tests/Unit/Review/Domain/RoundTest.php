@@ -197,6 +197,41 @@ final class RoundTest extends TestCase
         );
     }
 
+    /**
+     * draftWithTries: chain A is 0, 2, 3 (3 retakes 2, but points at 0), B is 1 alone, C is 4, 5.
+     *
+     * @return iterable<string, array{int, int}> the position of the named try and of its chain's latest try
+     */
+    public static function triesAndTheLatestTryOfTheirChain(): iterable
+    {
+        yield 'the first try of a chain of three' => [0, 3];
+        yield 'a middle try' => [2, 3];
+        yield 'the latest try itself' => [3, 3];
+        yield 'a screenshot with no retake' => [1, 1];
+        yield 'the first try of another chain' => [4, 5];
+    }
+
+    #[Test]
+    #[DataProvider('triesAndTheLatestTryOfTheirChain')]
+    public function anyTryNamesTheLatestTryOfItsChainAndNothingChanges(int $namedPosition, int $latestPosition): void
+    {
+        $draft = self::draftWithTries();
+        $before = self::snapshot($draft);
+
+        self::assertSame(self::screenshotId($latestPosition)->toString(), $draft->latestTryIdOfChainWith(self::screenshotId($namedPosition))->toString());
+        self::assertSame($before, self::snapshot($draft));
+    }
+
+    #[Test]
+    public function aScreenshotTheRoundDoesNotHaveNamesNoLatestTry(): void
+    {
+        $draft = self::draftWithTries();
+
+        $this->expectExceptionObject(new \DomainException('This draft round has no such screenshot.'));
+
+        $draft->latestTryIdOfChainWith(new ScreenshotId(self::UNKNOWN_SCREENSHOT));
+    }
+
     #[Test]
     public function aShareOfADraftWithNoRetakeKeepsEveryScreenshot(): void
     {

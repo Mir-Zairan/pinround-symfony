@@ -291,13 +291,9 @@ final class SetVerdictTest extends WebTestCase
     #[Test]
     public function anEarlierTryOfASharedDraftIsNotFoundForAnyoneAndNothingIsWritten(): void
     {
-        $latestTry = $this->addScreenshot($this->omarsSharedDraft, $this->addMedia('ready', 'Omar'), 1, null, null);
         $sharedDraft = $this->omarsSharedDraft;
         $firstTry = $this->omarsSharedShot;
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'UPDATE rvw_screenshot SET retake_of = ? WHERE round_id = ? AND id = ?',
-            [$firstTry, $sharedDraft, $latestTry],
-        ));
+        $latestTry = $this->addRetake($sharedDraft, $firstTry, 1, null, null);
         [$miasTokenId, $miasToken] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
         [$omarsTokenId, $omarsToken] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored(2);
@@ -317,6 +313,47 @@ final class SetVerdictTest extends WebTestCase
             $this->toolRow('Omar', $omarsTokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'not_found'),
             $this->toolRow('Omar', $omarsTokenId, 'screenshot', $latestTry, 'read_only'),
         ], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * list_draft_screenshots gives a retaken screenshot by its first try's id (ADR-0048), so set_verdict sent with it
+     * puts the verdict and summary on the latest try, which is what the draft round and the shared round show, and
+     * answers with that try's id. The first try, the before picture, keeps what it had. Mia may see the ticket but not
+     * Omar's draft: the same first try's id is not found for her, and nothing is written.
+     */
+    #[Test]
+    public function aVerdictSentWithTheFirstTrysIdLandsOnTheLatestTryOfItsChain(): void
+    {
+        $latestTry = $this->addRetake($this->omarsDraft, $this->omarsShot, 1, 'Try 2', null);
+        [$miasTokenId, $miasToken] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
+        [$omarsTokenId, $omarsToken] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored(draftTries: 2);
+        self::assertSame([$this->omarsShot, $latestTry], array_column($before['screenshots'][$this->omarsDraft], 'id'));
+
+        $this->callSetVerdict($miasToken, ['key' => 'SHOP-1', 'screenshot_id' => $this->omarsShot, 'verdict' => SetVerdict::LOOKS_RIGHT, 'summary' => self::NEW_SUMMARY]);
+        $this->assertRefused(ToolRefusal::NOT_FOUND);
+        self::assertSame($before, $this->stored(draftTries: 2));
+
+        $this->callSetVerdict($omarsToken, ['key' => 'SHOP-1', 'screenshot_id' => strtoupper($this->omarsShot), 'verdict' => SetVerdict::NOT_RIGHT_YET, 'summary' => self::NEW_SUMMARY]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        self::assertSame(
+            ['screenshot_id' => $latestTry, 'verdict' => 'not_right_yet', 'verdict_label' => 'Not right yet', 'summary_saved' => true],
+            $this->responseValueAt('result', 'structuredContent'),
+        );
+        self::assertSame(
+            [
+                ['id' => $this->omarsShot, 'position' => 0, 'verdict' => null, 'title' => self::TITLE, 'summary' => self::OLD_SUMMARY],
+                ['id' => $latestTry, 'position' => 1, 'verdict' => 'not_right', 'title' => 'Try 2', 'summary' => self::NEW_SUMMARY],
+            ],
+            $this->stored(draftTries: 2)['screenshots'][$this->omarsDraft],
+        );
+        // The audit row names the screenshot the call named, as the gate checked that one.
+        self::assertEqualsCanonicalizing(
+            [$this->toolRow('Mia', $miasTokenId, 'screenshot', $this->omarsShot, 'not_found'), $this->toolRow('Omar', $omarsTokenId, 'screenshot', $this->omarsShot, 'ok')],
+            $this->toolRowsOf($this->acmeFoods),
+        );
     }
 
     #[Test]
@@ -490,6 +527,22 @@ final class SetVerdictTest extends WebTestCase
         return $screenshotId;
     }
 
+    /**
+     * A later try of $firstTryId's picture in the same Acme Foods round, with a ready picture of Omar's.
+     *
+     * @return string the try's id
+     */
+    private function addRetake(string $roundId, string $firstTryId, int $position, ?string $title, ?string $summary): string
+    {
+        $retake = $this->addScreenshot($roundId, $this->addMedia('ready', 'Omar'), $position, $title, $summary);
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE rvw_screenshot SET retake_of = ? WHERE round_id = ? AND id = ?',
+            [$firstTryId, $roundId, $retake],
+        ));
+
+        return $retake;
+    }
+
     private function verdictOf(OrganizationId $organizationId, string $screenshotId): mixed
     {
         $verdict = null;
@@ -562,16 +615,17 @@ final class SetVerdictTest extends WebTestCase
     /**
      * Every round of SHOP-1 with its screenshots, and the checklist item, as stored.
      *
-     * @param int $sharedDraftTries the screenshots Omar's shared draft holds; the other drafts hold one each
+     * @param int $sharedDraftTries the screenshots Omar's shared draft holds
+     * @param int $draftTries       the screenshots Omar's unshared draft holds; Mia's draft holds one
      *
      * @return array{rounds: list<array<string, mixed>>, screenshots: array<string, list<array<string, mixed>>>, check_item: array<string, mixed>}
      */
-    private function stored(int $sharedDraftTries = 1): array
+    private function stored(int $sharedDraftTries = 1, int $draftTries = 1): array
     {
         $rounds = $this->roundRowsOf($this->ticketId);
         self::assertCount(5, $rounds);
         $screenshots = [];
-        foreach ([$this->omarsDraft => 1, $this->omarsSharedDraft => $sharedDraftTries, $this->miasDraft => 1] as $roundId => $screenshotCount) {
+        foreach ([$this->omarsDraft => $draftTries, $this->omarsSharedDraft => $sharedDraftTries, $this->miasDraft => 1] as $roundId => $screenshotCount) {
             $screenshots[$roundId] = $this->screenshotRowsOf($roundId);
             self::assertCount($screenshotCount, $screenshots[$roundId]);
         }

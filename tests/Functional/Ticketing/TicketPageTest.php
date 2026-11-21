@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Conversation\UI\Component\Thread;
 use App\Identity\Domain\User;
+use App\Review\UI\Component\RoundsSection;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Assist\Laptop\StoresAiSettings;
@@ -338,7 +339,7 @@ final class TicketPageTest extends WebTestCase
 
     /**
      * The page follows its own ticket's topic and no other ticket's, and marks what a refresh signal fetches again: the
-     * header's state, the thread's frame, the next step box, People and What happened.
+     * header's state, the thread's frame, the next step box, the rounds' frame, People and What happened.
      */
     #[Test]
     public function aMemberFollowsTheLiveUpdatesOfThisTicketOnly(): void
@@ -359,7 +360,7 @@ final class TicketPageTest extends WebTestCase
         self::assertSame(1, substr_count($subscribeUrl, rawurlencode('/t/')));
         self::assertStringNotContainsString($this->ticketIdOf($otherKey), (string) $this->client->getResponse()->getContent());
         self::assertSame(
-            [TicketPageParts::STATE_ID, Thread::FRAME_ID, TicketPageParts::NEXT_STEP_ID, TicketPageParts::PEOPLE_ID, TicketPageParts::ACTIVITY_ID],
+            [TicketPageParts::STATE_ID, Thread::FRAME_ID, TicketPageParts::NEXT_STEP_ID, RoundsSection::FRAME_ID, TicketPageParts::PEOPLE_ID, TicketPageParts::ACTIVITY_ID],
             $page->filter('[data-live-refresh]')->each(static fn (Crawler $part): ?string => $part->attr('id')),
         );
     }

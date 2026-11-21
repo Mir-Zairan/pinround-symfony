@@ -9,6 +9,7 @@ use App\Review\Api\RoundCommands;
 use App\Review\Application\LockedRoundClosing;
 use App\Review\Application\RoundShareDraftQuestion;
 use App\Review\Domain\Rounds;
+use App\Review\UI\Component\RoundsSection;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -28,6 +29,7 @@ use App\Ticketing\Api\UndecidedDraft;
 use App\Ticketing\Infrastructure\Scheduler\AddTicketEventPartitions;
 use App\Ticketing\UI\MoveToasts;
 use App\Ticketing\UI\TicketMoveController;
+use App\Ticketing\UI\TicketPageParts;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -65,6 +67,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
     private const string TICKET_PAGE = '/t/SHOP-1';
     /** The version SHOP-1 is seeded at (SeedsTicketRounds). */
     private const int VERSION = 3;
+    private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
 
     private KernelBrowser $client;
 
@@ -174,6 +177,36 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
         // Round 2 was shared at a hand-off, so Omar's next move in his turn closes it (ADR-0048).
         $this->assertASecondMoveAsksNothing([...$after['rounds'], $this->omarsDraft => [...$after['rounds'][$this->omarsDraft], 'state' => 'closed', 'version' => 4]]);
+    }
+
+    /**
+     * FR-RND-11: the page shows the shared round with no reload. The move's stream replaces the Rounds section, whose
+     * fresh lazy frame loads the rounds again: the draft card with its "Share with the team now" is gone, Round 2 is there.
+     */
+    #[Test]
+    public function aTurboShareReplacesTheRoundsSectionSoItsFrameShowsTheSharedRoundAndNoDraft(): void
+    {
+        $this->addOmarsScreenshots(1);
+        $this->logIn($this->client, $this->people['Omar']);
+        $before = $this->roundsFrame();
+        self::assertSame(['Draft round · only you can see this'], $before->filter('article.round-card--private h3')->each(static fn (Crawler $heading): string => $heading->text()));
+        self::assertCount(1, $before->filter('.round-card__share'));
+
+        $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']), [], self::TURBO_FORM_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $content = (string) $this->client->getResponse()->getContent();
+        $roundsTarget = '<turbo-stream action="replace" target="'.TicketPageParts::ROUNDS_ID.'"><template>';
+        self::assertSame(1, substr_count($content, $roundsTarget), 'The move\'s stream replaces the Rounds section once.');
+        $roundsStream = new Crawler(strstr(substr($content, (int) strpos($content, $roundsTarget)), '</template>', true) ?: '');
+        self::assertSame(self::TICKET_PAGE.'/rounds', $roundsStream->filter('section#'.TicketPageParts::ROUNDS_ID.' > turbo-frame#'.RoundsSection::FRAME_ID.'[loading="lazy"][data-live-refresh]')->attr('src'));
+
+        $after = $this->roundsFrame();
+        $headlines = $after->filter('article.round-card h3')->each(static fn (Crawler $heading): string => $heading->text());
+        self::assertCount(1, array_filter($headlines, static fn (string $headline): bool => str_starts_with($headline, 'Round 2 · ')), implode(' | ', $headlines));
+        self::assertNotContains('Draft round · only you can see this', $headlines);
+        self::assertCount(0, $after->filter('.round-card__share'));
+        self::assertStringNotContainsString('Share with the team now', $this->client->getResponse()->getContent() ?: '');
     }
 
     /**
@@ -997,6 +1030,18 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
             TicketMoveController::VERSION_FIELD => (string) self::VERSION,
             ...$overrides,
         ];
+    }
+
+    /**
+     * The Rounds section's frame as its lazy load asks for it.
+     */
+    private function roundsFrame(): Crawler
+    {
+        $frame = $this->client->request('GET', self::TICKET_PAGE.'/rounds', [], [], ['HTTP_TURBO_FRAME' => RoundsSection::FRAME_ID]);
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $frame->filter('turbo-frame#'.RoundsSection::FRAME_ID));
+
+        return $frame;
     }
 
     private function toastAfterTheRedirect(): string

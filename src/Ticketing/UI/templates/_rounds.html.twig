@@ -1,0 +1,4 @@
+{#- The Rounds section: the page renders it, and a move's Turbo Stream answer replaces it, so a draft the move shared
+    shows as its round with no reload (FR-RND-11). Review's component, embedded by name: Ticketing's UI may not use
+    Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. -#}
+{{ component('RoundsSection', {key: ticket.key, id: constant('App\\Ticketing\\UI\\TicketPageParts::ROUNDS_ID'), class: 'ticket__rounds'}) }}
