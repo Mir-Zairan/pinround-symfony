@@ -130,6 +130,7 @@ final class DraftRoundEditorTriesTest extends WebTestCase
         self::assertNull($this->refusalShown());
         self::assertSame([$this->firstTry, $this->otherShot], $this->sectionIdsShown());
         $first = $this->sectionOf($this->firstTry);
+        self::assertSame('screenshot-'.$this->firstTry.'-editor', $first->attr('id'), 'A new id per try shown, so the live morph replaces the section and drops the latest try\'s pin placer.');
         self::assertSame('Try 1 of 2', $first->filter('[data-try-label]')->text());
         self::assertSame(['true', 'false'], $first->filter('[data-try-switch] button')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
         self::assertSame(
@@ -154,6 +155,7 @@ final class DraftRoundEditorTriesTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame([$this->latestTry, $this->otherShot], $this->sectionIdsShown());
+        self::assertSame('screenshot-'.$this->latestTry.'-editor', $this->sectionOf($this->latestTry)->attr('id'));
         self::assertSame([], $this->shownTryIdsOfResponse(), 'The latest try clears the chain\'s entry.');
     }
 

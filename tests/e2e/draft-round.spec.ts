@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
+import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
 import { recordCspViolations, spotInLayer } from './pin-spots';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
@@ -23,6 +24,7 @@ const COPIED_SHOWN_FOR_MS = 2000;
 // The fake clock runs requestAnimationFrame callbacks at most this long after they are asked for.
 const ANIMATION_FRAME_MS = 16;
 const FROZEN_AT = new Date('2026-03-14T10:00:00Z');
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
   const key = await makeTicketForOmar(browser, 'Draft round check on the checkout banner');
@@ -322,7 +324,17 @@ test.describe('Draft round', () => {
 
     await expect(page.getByRole('heading', { name: SHARED_HEADLINE, level: 3 })).toBeVisible();
     expect(events).toEqual(['setPins', 'share']);
-    await expect(page.getByRole('list', { name: 'Pins' }).getByText('Shared with the pin')).toBeVisible();
+    // A shared round is a one-line row on the ticket page, and its round page shows a shared draft's pictures only from
+    // P14.T8 on, so the shared round's stored pin proves the note went out with the share.
+    expect(roundId).toMatch(UUID);
+    expect(
+      runAsDatabaseOwner(
+        `SELECT round.shared_at IS NOT NULL, pin.note FROM rvw_round AS round
+         JOIN rvw_screenshot AS screenshot ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id
+         JOIN rvw_pin AS pin ON pin.organization_id = screenshot.organization_id AND pin.screenshot_id = screenshot.id
+         WHERE round.id = '${roundId}'`,
+      ),
+    ).toEqual(['t|Shared with the pin']);
     await context.close();
   });
 

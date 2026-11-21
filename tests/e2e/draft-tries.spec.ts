@@ -11,6 +11,7 @@ import { makeTicketForOmar, openAs } from './ticket';
 //
 // No app path adds a retake from the page yet, so try 2 is seeded as the database owner: a copy of the seeded picture
 // that points at try 1, and a pin on try 1. The ticket is this test's own, so no other draft spec shares its draft.
+// Ids are uuidv7(): the domain refuses any other UUID version when it loads the round.
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -31,9 +32,9 @@ function seedRetakeWithPinOnTheFirstTry(roundId: string): void {
   expect(roundId).toMatch(UUID);
   runAsDatabaseOwner(
     `INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, retake_of, created_at)
-     SELECT organization_id, gen_random_uuid(), round_id, media_id, position + 1, id, now() FROM rvw_screenshot WHERE round_id = '${roundId}' AND position = 0;
+     SELECT organization_id, uuidv7(), round_id, media_id, position + 1, id, now() FROM rvw_screenshot WHERE round_id = '${roundId}' AND position = 0;
      INSERT INTO rvw_pin (organization_id, id, screenshot_id, number, x_pct, y_pct, note, source, author_id, created_at)
-     SELECT screenshot.organization_id, gen_random_uuid(), screenshot.id, 1, 20, 30, '${FIRST_TRY_NOTE}', 'human', round.owner_id, now()
+     SELECT screenshot.organization_id, uuidv7(), screenshot.id, 1, 20, 30, '${FIRST_TRY_NOTE}', 'human', round.owner_id, now()
      FROM rvw_screenshot AS screenshot JOIN rvw_round AS round ON round.organization_id = screenshot.organization_id AND round.id = screenshot.round_id
      WHERE screenshot.round_id = '${roundId}' AND screenshot.position = 0`,
   );

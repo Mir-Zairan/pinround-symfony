@@ -31,9 +31,11 @@
             {% endif %}
 
             {% for chain in card.screenshots %}
-                {#- item is the try shown: the latest unless the owner switched to an earlier one. -#}
+                {#- item is the try shown: the latest unless the owner switched to an earlier one. The section's id names the try
+                    shown, so a switch replaces the section whole: the live morph never removes the data-live-ignore pin placer
+                    of a section it keeps. -#}
                 {% set item = this.shownTryOf(chain) %}
-                <section class="round-card__screenshot draft-shot" id="{{ chain.view.domId }}-editor" data-screenshot-id="{{ item.screenshotId }}" aria-label="{{ item.label }}">
+                <section class="round-card__screenshot draft-shot" id="{{ item.view.domId }}-editor" data-screenshot-id="{{ item.screenshotId }}" aria-label="{{ item.label }}">
                     <p class="round-card__screenshot-label">
                         <span>{{ item.label }}</span>
                         {% if item.tryLabel is not null %}<span data-try-label>{{ item.tryLabel }}</span>{% endif %}
