@@ -16,8 +16,9 @@ final readonly class NowNextContext
      * @param array<string, string> $firstNames         display names by user id string; only the first word is used.
      *                                                  Include the ticket's people and the team's lead, developers and
      *                                                  testers: a reviewer or tester the team picks is named from here
-     * @param TeamFacts             $team               for the reviewer and tester the team would pick when the ticket
-     *                                                  has none yet
+     * @param TeamFacts|null        $team               for the reviewer and tester the team would pick when the ticket
+     *                                                  has none yet; null in a context made for Now only
+     *                                                  ({@see self::forNowOnly}), which Next refuses
      * @param bool                  $isReviewBeforeTest the team's rule review_before_test
      * @param UserId|null           $viewerId           the person looking; their own items read "you". My reports
      *                                                  passes it for its Now line; the ticket page passes none and names
@@ -27,11 +28,30 @@ final readonly class NowNextContext
     public function __construct(
         public string $stepName,
         public array $firstNames,
-        public TeamFacts $team,
+        public ?TeamFacts $team,
         public bool $isReviewBeforeTest,
         public ?UserId $viewerId = null,
         public ?UserId $askerId = null,
     ) {
+    }
+
+    /**
+     * A context for the Now sentence alone, which reads the step, the names, the viewer and the asker but not the
+     * team, so a caller that shows only Now (My reports, list_my_tickets) need not read the team. Next refuses it.
+     *
+     * @param array<string, string> $firstNames as the constructor takes them
+     */
+    public static function forNowOnly(string $stepName, array $firstNames, ?UserId $viewerId = null, ?UserId $askerId = null): self
+    {
+        return new self($stepName, $firstNames, null, false, $viewerId, $askerId);
+    }
+
+    /**
+     * @throws \LogicException for a context made for Now only, so Next never names a made-up lead
+     */
+    public function teamForNext(): TeamFacts
+    {
+        return $this->team ?? throw new \LogicException('The Next sentence needs the team; this context was made for Now only.');
     }
 
     /**

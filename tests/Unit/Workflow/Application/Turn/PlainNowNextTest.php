@@ -139,6 +139,38 @@ final class PlainNowNextTest extends TestCase
     }
 
     #[Test]
+    public function nowNeedsNoTeamAndNamesTheTurnPersonAndTheViewer(): void
+    {
+        $omar = F::user(F::OMAR);
+        $ticket = F::ticket('progress', 'doing', ['assigneeId' => $omar]);
+        $names = [F::LENA => 'Lena Hart', F::OMAR => 'Omar'];
+
+        self::assertSame('Omar builds it', self::nowNext()->now($ticket, new Turn($omar, null, NeedsYouKind::Build), NowNextContext::forNowOnly('In progress', $names, F::user(F::LENA))));
+        self::assertSame('You build it', self::nowNext()->now($ticket, new Turn($omar, null, NeedsYouKind::Build), NowNextContext::forNowOnly('In progress', $names, $omar)));
+    }
+
+    #[Test]
+    public function nextRefusesAContextForNowOnlyRatherThanNameAMadeUpReviewer(): void
+    {
+        $omar = F::user(F::OMAR);
+        $context = NowNextContext::forNowOnly('In progress', [F::LENA => 'Lena Hart', F::OMAR => 'Omar'], F::user(F::LENA));
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('The Next sentence needs the team');
+
+        self::nowNext()->next(F::ticket('progress', 'doing', ['assigneeId' => $omar]), new Turn($omar, null, NeedsYouKind::Build), $context);
+    }
+
+    #[Test]
+    public function nextForAnOpenQuestionNeedsNoTeam(): void
+    {
+        $mia = F::user(F::MIA);
+        $context = NowNextContext::forNowOnly('In progress', [F::MIA => 'Mia'], askerId: F::user(F::LENA));
+
+        self::assertSame('it goes back to In progress', self::nowNext()->next(F::ticket('progress', 'doing', ['askedUserId' => $mia]), new Turn($mia, null, NeedsYouKind::Answer), $context));
+    }
+
+    #[Test]
     public function anUnknownCoreCodeIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);

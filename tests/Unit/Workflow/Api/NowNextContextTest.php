@@ -44,4 +44,27 @@ final class NowNextContextTest extends TestCase
         self::assertNull($context->firstNameOf(F::user(F::MIA)));
         self::assertNull($context->firstNameOf(F::user(F::LENA)));
     }
+
+    #[Test]
+    public function aContextForNowOnlyHasNoTeamAndRefusesToGiveOneForNext(): void
+    {
+        $context = NowNextContext::forNowOnly('In progress', [F::OMAR => 'Omar'], F::user(F::OMAR), F::user(F::LENA));
+
+        self::assertNull($context->team);
+        self::assertSame('In progress', $context->stepName);
+        self::assertSame(F::OMAR, $context->viewerId?->toString());
+        self::assertSame(F::LENA, $context->askerId?->toString());
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('The Next sentence needs the team; this context was made for Now only.');
+
+        $context->teamForNext();
+    }
+
+    #[Test]
+    public function aContextWithATeamGivesThatTeamForNext(): void
+    {
+        $context = F::context();
+
+        self::assertSame($context->team, $context->teamForNext());
+    }
 }

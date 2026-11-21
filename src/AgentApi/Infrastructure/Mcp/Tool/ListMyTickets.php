@@ -15,14 +15,12 @@ use App\Identity\Api\UserView;
 use App\Insight\Api\MyTicket;
 use App\Insight\Api\MyTicketQueries;
 use App\Insight\Api\TicketViewer;
-use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NowNext;
 use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
-use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\Turn;
 use Mcp\Schema\Content\TextContent;
@@ -150,7 +148,7 @@ final readonly class ListMyTickets implements OwnIdentityTool
                     'key' => $ticket->key,
                     'title' => UntrustedText::wrap($ticket->title),
                     'step' => $step->name,
-                    'now' => $this->nowLineOf($ticket, $step, $coreCodes, $displayNames, $userId),
+                    'now' => $this->nowLineOf($ticket, $step, $coreCodes, $displayNames),
                     'is_your_turn' => null !== $ticket->turnUserId && $ticket->turnUserId->equals($userId),
                     'is_assignee' => null !== $ticket->assigneeId && $ticket->assigneeId->equals($userId),
                     'updated_at' => $ticket->updatedAt->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM),
@@ -173,7 +171,7 @@ final readonly class ListMyTickets implements OwnIdentityTool
      * @param array<string, array<string, string|null>> $coreCodes    by team id, then step id
      * @param array<string, string>                     $displayNames by user id
      */
-    private function nowLineOf(MyTicket $ticket, ListedStepView $step, array $coreCodes, array $displayNames, UserId $callerId): ?string
+    private function nowLineOf(MyTicket $ticket, ListedStepView $step, array $coreCodes, array $displayNames): ?string
     {
         if (null === $ticket->teamId) {
             return null;
@@ -182,9 +180,7 @@ final readonly class ListMyTickets implements OwnIdentityTool
         return $this->nowNext->now(
             new TicketState($ticket->stepId, $coreCodes[$ticket->teamId->toString()][$ticket->stepId] ?? null, $step->groupCode, $ticket->teamId),
             new Turn($ticket->turnUserId, $ticket->turnLabel, NeedsYouKind::from($ticket->turnKind)),
-            // Only the Next sentence, which this tool does not show, reads the team facts and the review rule; Now
-            // reads the step, the names and the asker, so the team's real lead is not read for it.
-            new NowNextContext($step->name, $displayNames, new TeamFacts($callerId, ''), false, askerId: $ticket->askerId),
+            NowNextContext::forNowOnly($step->name, $displayNames, askerId: $ticket->askerId),
         );
     }
 

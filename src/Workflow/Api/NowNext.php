@@ -20,6 +20,8 @@ interface NowNext
      *                     next sentence depends on the step it moves on to
      *
      * @throws \InvalidArgumentException when the ticket's core code is not one of the core steps
+     * @throws \LogicException           when the sentence needs the team and the context was made for Now only
+     *                                   ({@see NowNextContext::forNowOnly})
      */
     public function next(TicketState $ticket, Turn $turn, NowNextContext $context): ?string;
 }

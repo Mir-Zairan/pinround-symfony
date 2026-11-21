@@ -20,7 +20,6 @@ use App\Workflow\Api\NeedsYouKind;
 use App\Workflow\Api\NowNext;
 use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
-use App\Workflow\Api\TeamFacts;
 use App\Workflow\Api\TicketState;
 use App\Workflow\Api\Turn;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -157,7 +156,7 @@ final readonly class ReportCards
         return $this->nowNext->now(
             new TicketState($report->stepId, $step->coreCode, $step->groupCode, null),
             new Turn($report->turnUserId, null, NeedsYouKind::from($report->turnKind)),
-            new NowNextContext($step->name, $namesByUserId, new TeamFacts($viewerId, ''), false, $viewerId),
+            NowNextContext::forNowOnly($step->name, $namesByUserId, $viewerId),
         );
     }
 }
