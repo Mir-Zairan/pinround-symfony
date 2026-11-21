@@ -8,6 +8,7 @@ use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
 use App\AgentApi\Infrastructure\Mcp\ToolCallsLimited;
 use App\Identity\Api\CurrentApiToken;
+use App\SharedKernel\Infrastructure\Http\ExtensionOrigins;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -46,8 +47,7 @@ final readonly class RestRequestGuard
         private CurrentApiToken $currentApiToken,
         #[Autowire(env: 'DEFAULT_URI')]
         private string $publicBaseUrl,
-        #[Autowire(env: 'default::EXTENSION_ORIGINS')]
-        private ?string $extensionOrigins,
+        private ExtensionOrigins $extensionOrigins,
     ) {
     }
 
@@ -71,7 +71,7 @@ final readonly class RestRequestGuard
             return;
         }
         $origins = $request->headers->all('Origin');
-        if (\count($origins) > 1 || (1 === \count($origins) && !$this->isAllowedOrigin((string) $origins[0]))) {
+        if (\count($origins) > 1 || (1 === \count($origins) && !$this->extensionOrigins->allows((string) $origins[0]))) {
             $event->setResponse(self::refusal(self::FOREIGN_ORIGIN, Response::HTTP_FORBIDDEN));
 
             return;
@@ -120,24 +120,12 @@ final readonly class RestRequestGuard
         }
         $response = $event->getResponse();
         $response->setVary('Origin', false);
-        $origins = $event->getRequest()->headers->all('Origin');
-        if (1 !== \count($origins) || !$this->isAllowedOrigin((string) $origins[0])) {
+        $origin = $this->extensionOrigins->allowedOriginOf($event->getRequest());
+        if (null === $origin) {
             return;
         }
-        $response->headers->set('Access-Control-Allow-Origin', (string) $origins[0]);
+        $response->headers->set('Access-Control-Allow-Origin', $origin);
         $response->headers->set('Access-Control-Expose-Headers', self::EXPOSED_HEADERS);
-    }
-
-    private function isAllowedOrigin(string $origin): bool
-    {
-        foreach (explode(',', $this->extensionOrigins ?? '') as $allowed) {
-            $allowed = trim($allowed);
-            if ('' !== $allowed && $allowed === $origin) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static function isMainApiRequest(RequestEvent $event): bool
