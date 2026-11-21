@@ -74,8 +74,8 @@ Every tool works as you, with your permissions in the app, and only inside the t
 | `set_verdict` | `rounds:write` | Sets "Looks right" (`looks_right`) or "Not right yet" (`not_right_yet`) on a screenshot of your own draft round, with an optional new summary of at most 600 characters. Or, when you are the ticket's assignee, marks a checklist item fixed: `{key, check_item_id, state: "fixed"}`. |
 | `create_upload` | `rounds:write` | Begins the upload of one screenshot into your own draft round on a ticket. When you have no draft there and you are the assignee, or it is your turn (for example the tester in Testing), it starts one. Answers where to send the file. |
 | `create_report_upload` | `reports:write` | Begins the upload of one screenshot for a new report in a project (`project`, such as `SHOP`). Answers where to send the file, as `create_upload` does. |
-| `create_report` | `reports:write` | Makes a private report draft from a title, a detail and up to 10 uploaded screenshots with titles, summaries and pins. It never makes a ticket: open the `url` it answers, check the draft and press **Send**. A token gets `reports:write` only when you tick it. |
-| `add_screenshot` | `rounds:write` | Adds the uploaded picture to your draft round, with an optional title (at most 120 characters), summary (at most 600) and pins (at most 100, each note at most 1,000). With `retake_of`, it is the next try of a screenshot already in that draft (at most 5 tries). |
+| `create_report` | `reports:write` | Makes a private report draft from a title, a detail and up to 10 uploaded screenshots, each with its title and summary, which a call must give, and optional pins. It never makes a ticket: open the `url` it answers, check the draft and press **Send**. A token gets `reports:write` only when you tick it. |
+| `add_screenshot` | `rounds:write` | Adds the uploaded picture to your draft round, with its title (at most 120 characters) and summary (at most 600), which a call must give, and optional pins (at most 100, each note at most 1,000). With `retake_of`, it is the next try of a screenshot already in that draft (at most 5 tries). |
 | `list_draft_screenshots` | `read` | For one ticket key: the screenshots of your own open draft round on it, in the order and with the numbers the draft round shows ("Screenshot n"). Each has its `screenshot_id` (the id `add_screenshot` takes as `retake_of`), `number`, the latest try's `title` (or none) and `try_count` (1 to 5). The list is empty when you have no open draft round there; another person's draft and a shared round are never listed. |
 
 Claude Code reads each tool's own description, so you do not need to name tools in your prompts.
@@ -93,7 +93,7 @@ Pictures never travel inside a tool call. A call body over 1 MB is refused. Clau
    curl -T shot.png -H "Content-Type: image/png" "<put_url>"
    ```
    The URL is signed for that type and that exact size. A file of another type or size is refused by the storage.
-3. **`add_screenshot`** with `{key, upload_id, title?, summary?, pins?, retake_of?}`. The answer has a `status`:
+3. **`add_screenshot`** with `{key, upload_id, title, summary, pins?, retake_of?}`. The title says what the picture is of and the summary what it shows, in plain words; a call without either, or with one that is blank, is refused and adds nothing (the REST calls of the browser extension keep both optional). The answer has a `status`:
    - `processing`: pinround is still checking the picture. Nothing is added yet. Call `add_screenshot` again with the same `upload_id` in a few seconds.
    - `added`: the screenshot is in your draft round, with its `screenshot_id`.
    - `added_before`: this `upload_id` was added already. Nothing new is added, and the title, summary, pins and `retake_of` of this call are not used.
@@ -117,7 +117,7 @@ A notebook is your private set of pinned screenshots of your own app; only you s
 | `save_scenarios` | `notebooks:write` | Replaces all the notebook's scenarios (`notebook`, `scenarios`, at most 20); an empty list removes them all. The format is in [reporting-with-claude-code.md › Scenarios](reporting-with-claude-code.md#scenarios). |
 | `create_notebook` | `notebooks:write` | Makes a new, empty notebook (`title`, at most 120 characters) and answers its `notebook_id`. |
 | `create_notebook_upload` | `notebooks:write` | Begins the upload of one screenshot for a notebook (`notebook`, `mime`, `bytes`, `sha256`), as `create_upload` does. |
-| `add_notebook_screenshot` | `notebooks:write` | Adds the uploaded picture at the end of the notebook (`notebook`, `upload_id`, optional title, summary and pins); a notebook holds at most 10. |
+| `add_notebook_screenshot` | `notebooks:write` | Adds the uploaded picture at the end of the notebook (`notebook`, `upload_id`, its title and summary, which a call must give, and optional pins); a notebook holds at most 10. |
 
 A new token has `read` ticked but not `notebooks:write`: tick it to let Claude Code save scenarios or add to a notebook.
 
@@ -132,7 +132,7 @@ A refused call saves nothing. The answers you may see:
 | "This screenshot already has 5 tries. Remove one before you add another." | `add_screenshot` with `retake_of` on a screenshot that has 5 tries. Remove a try in the app first. |
 | "This is read-only now, so it cannot be changed." | The draft round was shared, or the checklist item is fixed or confirmed already. |
 | "This token does not have the "…" scope." | Make a token with that scope ticked. |
-| "The arguments do not match the input schema of this tool: …" | Claude Code sent wrong or too long input. |
+| "The arguments do not match the input schema of this tool: …" | Claude Code sent wrong or too long input. "/summary is missing or blank" (or "/screenshots/1/title" for `create_report`) names a picture's title or summary that Claude Code left out or left blank. |
 | 401 | The token is missing, wrong, revoked or expired. |
 | 429 | Too many calls: 60 a minute or 600 an hour per token, or 600 a minute for the whole organization. Wait as long as `Retry-After` says. |
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\AgentApi\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReport;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReportUpload;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
@@ -45,6 +46,9 @@ final class CreateReportTest extends WebTestCase
     private const string NOW = '2026-11-10 09:00:20 UTC';
     private const string PROTOCOL_VERSION = '2025-06-18';
     private const string SHA256 = '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08';
+    private const array PICTURE_CONTEXT = ['title' => 'Cart', 'summary' => 'The total shows twice the sum.'];
+    /** JSON-RPC's "Invalid params". */
+    private const int INVALID_PARAMS = -32602;
 
     private KernelBrowser $client;
 
@@ -133,7 +137,7 @@ final class CreateReportTest extends WebTestCase
             'detail' => "1. Add two items\n2. Open the cart",
             'screenshots' => [
                 ['upload_id' => $first, 'title' => 'Case B', 'summary' => 'The total shows twice the sum.', 'pins' => [['x_pct' => 10.5, 'y_pct' => 20, 'note' => 'Total']]],
-                ['upload_id' => $second],
+                ['upload_id' => $second, 'title' => 'Cart', 'summary' => 'The cart lists each item once.'],
             ],
         ]);
 
@@ -154,7 +158,7 @@ final class CreateReportTest extends WebTestCase
         self::assertEquals(
             [
                 ['media_id' => $first, 'title' => 'Case B', 'summary' => 'The total shows twice the sum.', 'pins' => [['x_pct' => 10.5, 'y_pct' => 20.0, 'note' => 'Total']]],
-                ['media_id' => $second, 'title' => null, 'summary' => null, 'pins' => []],
+                ['media_id' => $second, 'title' => 'Cart', 'summary' => 'The cart lists each item once.', 'pins' => []],
             ],
             json_decode($drafts[0][5], true, flags: \JSON_THROW_ON_ERROR),
         );
@@ -175,7 +179,7 @@ final class CreateReportTest extends WebTestCase
 
         $this->callTool($token, CreateReportUpload::NAME, ['project' => 'SHOP', 'mime' => 'image/png', 'bytes' => 245_760, 'sha256' => self::SHA256]);
         $this->assertRefused(\sprintf(ToolRefusal::MISSING_SCOPE, 'reports:write'));
-        $this->callTool($token, CreateReport::NAME, ['project' => 'SHOP', 'title' => 'Total is doubled', 'screenshots' => [['upload_id' => $upload]]]);
+        $this->callTool($token, CreateReport::NAME, ['project' => 'SHOP', 'title' => 'Total is doubled', 'screenshots' => [['upload_id' => $upload, ...self::PICTURE_CONTEXT]]]);
         $this->assertRefused(\sprintf(ToolRefusal::MISSING_SCOPE, 'reports:write'));
 
         self::assertSame([], $this->rowsOf('SELECT id FROM rvw_report_draft'));
@@ -209,7 +213,7 @@ final class CreateReportTest extends WebTestCase
         $omars = $this->addIntent('Omar', 'new_report', 'SHOP');
 
         foreach ([$otherProjects, $aRounds, $omars, 'not-an-id'] as $upload) {
-            $this->callTool($token, CreateReport::NAME, ['project' => 'SHOP', 'title' => 'Total is doubled', 'screenshots' => [['upload_id' => $upload]]]);
+            $this->callTool($token, CreateReport::NAME, ['project' => 'SHOP', 'title' => 'Total is doubled', 'screenshots' => [['upload_id' => $upload, ...self::PICTURE_CONTEXT]]]);
             $this->assertRefused(ToolRefusal::NOT_FOUND);
         }
 
@@ -223,11 +227,83 @@ final class CreateReportTest extends WebTestCase
         [, $token] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
         $upload = $this->addIntent('Mia', 'new_report', 'SHOP');
 
-        $this->callTool($token, CreateReport::NAME, ['project' => 'SHOP', 'title' => " \n ", 'screenshots' => [['upload_id' => $upload]]]);
+        $this->callTool($token, CreateReport::NAME, ['project' => 'SHOP', 'title' => " \n ", 'screenshots' => [['upload_id' => $upload, ...self::PICTURE_CONTEXT]]]);
 
         $this->assertRefused(ReportDraftRefused::TITLE_BLANK);
         self::assertSame([], $this->rowsOf('SELECT id FROM rvw_report_draft'));
         self::assertSame([[$upload, null]], $this->rowsOf('SELECT id, used_at FROM med_upload_intent'), 'The savepoint takes the finished upload back.');
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string}> the second picture's context and the pointer refused
+     */
+    public static function picturesWithoutContext(): iterable
+    {
+        yield 'no title' => [['summary' => self::PICTURE_CONTEXT['summary']], '/screenshots/1/title'];
+        yield 'no summary' => [['title' => self::PICTURE_CONTEXT['title']], '/screenshots/1/summary'];
+        yield 'neither, which names the title first' => [[], '/screenshots/1/title'];
+        yield 'an empty title' => [['title' => '', 'summary' => self::PICTURE_CONTEXT['summary']], '/screenshots/1/title'];
+        yield 'a title of only CR LF, a tab and spaces' => [['title' => " \r\n\t ", 'summary' => self::PICTURE_CONTEXT['summary']], '/screenshots/1/title'];
+        yield 'a summary of only a BOM and a zero-width space' => [['title' => self::PICTURE_CONTEXT['title'], 'summary' => "\u{FEFF}\u{200B}"], '/screenshots/1/summary'];
+    }
+
+    /**
+     * Over MCP each picture needs its title and summary (P14.T11): the first picture is complete and the second is
+     * not, so the gate refuses the call naming the second, after the scope check and before any upload is finished.
+     *
+     * @param array<string, string> $context
+     */
+    #[Test]
+    #[DataProvider('picturesWithoutContext')]
+    public function aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndNoDraftIsMadeOrUploadUsed(array $context, string $pointer): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $first = $this->addIntent('Mia', 'new_report', 'SHOP');
+        $second = $this->addIntent('Mia', 'new_report', 'SHOP');
+
+        $this->callTool($token, CreateReport::NAME, [
+            'project' => 'SHOP',
+            'title' => 'Total is doubled on the cart',
+            'screenshots' => [['upload_id' => $first, ...self::PICTURE_CONTEXT], ['upload_id' => $second, ...$context]],
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['code' => self::INVALID_PARAMS, 'message' => \sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, $pointer))],
+            $this->responseValueAt('error'),
+        );
+        self::assertSame([], $this->rowsOf('SELECT id FROM rvw_report_draft'));
+        self::assertEqualsCanonicalizing([[$first, null], [$second, null]], $this->rowsOf('SELECT id, used_at FROM med_upload_intent'));
+        self::assertSame([], $this->rowsOf('SELECT id FROM med_object'));
+        self::assertSame([['token', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, CreateReport::NAME, 'invalid_input']], $this->toolRows());
+    }
+
+    /**
+     * Review trims the line breaks around a text and keeps the ones inside it and every multibyte character.
+     */
+    #[Test]
+    public function aPicturesTitleAndSummaryWithLineBreaksAndMultibyteTextAreStoredTrimmedAndOtherwiseAsSent(): void
+    {
+        [$tokenId, $token] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $upload = $this->addIntent('Mia', 'new_report', 'SHOP');
+
+        $this->callTool($token, CreateReport::NAME, [
+            'project' => 'SHOP',
+            'title' => 'Total is doubled on the cart',
+            'screenshots' => [['upload_id' => $upload, 'title' => "Prix affiché 価格\r\n", 'summary' => "Le total est faux.\r\nDer Preis ist 0 €"]],
+        ]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFalse($this->responseValueAt('result', 'isError'));
+        $drafts = $this->rowsOf('SELECT screenshots::text FROM rvw_report_draft');
+        self::assertCount(1, $drafts);
+        self::assertIsString($drafts[0][0]);
+        self::assertEquals(
+            [['media_id' => $upload, 'title' => 'Prix affiché 価格', 'summary' => "Le total est faux.\r\nDer Preis ist 0 €", 'pins' => []]],
+            json_decode($drafts[0][0], true, flags: \JSON_THROW_ON_ERROR),
+        );
+        self::assertSame([['token', $tokenId, 'project', $this->shopProject, CreateReport::NAME, 'ok']], $this->toolRows());
+        $this->assertNoAuditRowHolds(['Prix affiché', 'Der Preis']);
     }
 
     private function addIntent(string $person, string $targetKind, string $targetId): string

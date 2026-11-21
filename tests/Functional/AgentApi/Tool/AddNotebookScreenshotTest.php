@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\AgentApi\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddNotebookScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -15,6 +16,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -47,6 +49,8 @@ final class AddNotebookScreenshotTest extends WebTestCase
     private const string FIRST_PICTURE = '0197a3c0-0000-7000-8000-0000000e0001';
     private const array PICTURE_CONTEXT = ['title' => 'The cart', 'summary' => 'The total goes below 0.'];
     private const string NOTEBOOK_FULL = 'A notebook holds at most 10 screenshots.';
+    /** JSON-RPC's "Invalid params". */
+    private const int INVALID_PARAMS = -32602;
 
     private KernelBrowser $client;
 
@@ -287,6 +291,65 @@ final class AddNotebookScreenshotTest extends WebTestCase
         self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
         self::assertSame([[$uploadId, 'notebook', self::LENAS_NOTEBOOK, null]], $this->uploadIntentsOf($this->acmeFoods));
         self::assertSame([[$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, AddNotebookScreenshot::NAME, 'missing_scope']], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string}> the picture's context and the pointer refused
+     */
+    public static function picturesWithoutContext(): iterable
+    {
+        yield 'no title' => [['summary' => self::PICTURE_CONTEXT['summary']], '/title'];
+        yield 'no summary' => [['title' => self::PICTURE_CONTEXT['title']], '/summary'];
+        yield 'neither, which names the title first' => [[], '/title'];
+        yield 'an empty summary' => [['title' => self::PICTURE_CONTEXT['title'], 'summary' => ''], '/summary'];
+        yield 'a title of only CR LF, a tab and spaces' => [['title' => " \r\n\t ", 'summary' => self::PICTURE_CONTEXT['summary']], '/title'];
+        yield 'a summary of only a BOM and a no-break space' => [['title' => self::PICTURE_CONTEXT['title'], 'summary' => "\u{FEFF}\u{00A0}"], '/summary'];
+    }
+
+    /**
+     * Over MCP the picture needs its title and summary (P14.T11): the gate refuses the call after the scope check,
+     * before the upload is completed or the notebook looked up.
+     *
+     * @param array<string, string> $context
+     */
+    #[Test]
+    #[DataProvider('picturesWithoutContext')]
+    public function aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndTheNotebookAndUploadStayAsTheyWere(array $context, string $pointer): void
+    {
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, null);
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+        $rowsBefore = $this->notebookRowsOf($this->acmeFoods);
+        self::assertNotSame([], $rowsBefore);
+
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, ...$context]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['code' => self::INVALID_PARAMS, 'message' => \sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, $pointer))],
+            $this->responseValueAt('error'),
+        );
+        self::assertSame($rowsBefore, $this->notebookRowsOf($this->acmeFoods));
+        self::assertSame([[$uploadId, 'notebook', self::LENAS_NOTEBOOK, null]], $this->uploadIntentsOf($this->acmeFoods));
+        self::assertSame([[$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, AddNotebookScreenshot::NAME, 'invalid_input']], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * Review trims the line breaks around a text and keeps the ones inside it and every multibyte character.
+     */
+    #[Test]
+    public function aTitleAndSummaryWithLineBreaksAndMultibyteTextAreStoredTrimmedAndOtherwiseAsSent(): void
+    {
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'notebook', self::LENAS_NOTEBOOK, 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::NotebooksWrite]);
+
+        $this->callTool($token, AddNotebookScreenshot::NAME, ['notebook' => self::LENAS_NOTEBOOK, 'upload_id' => $uploadId, 'title' => "Prix affiché 価格\r\n", 'summary' => "Le total est faux.\r\nDer Preis ist 0 €"]);
+
+        self::assertSame(AddNotebookScreenshot::ADDED, $this->answer()['status'] ?? null);
+        self::assertEquals([
+            self::storedPicture(self::FIRST_PICTURE),
+            ['media_id' => $uploadId, 'title' => 'Prix affiché 価格', 'summary' => "Le total est faux.\r\nDer Preis ist 0 €", 'pins' => []],
+        ], $this->screenshotsAndVersionOf(self::LENAS_NOTEBOOK)[0]);
+        self::assertSame([[$tokenId, AddNotebookScreenshot::AUDIT_TARGET_TYPE, self::LENAS_NOTEBOOK, AddNotebookScreenshot::NAME, 'ok']], $this->toolRowsOf($this->acmeFoods));
     }
 
     /**
