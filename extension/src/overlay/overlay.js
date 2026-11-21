@@ -453,10 +453,12 @@
 
     /**
      * Asks the extension's service worker (src/background/) to act for the dock, and shows its answer there. One
-     * request at a time: a key pressed while one runs is ignored, as the disabled buttons are.
+     * request at a time: a press while one runs asks nothing and says to wait, as the dock's busy buttons do.
      */
     async function askExtension(action, value) {
         if (isAsking) {
+            dock.say(dockRules.TEXTS.busy);
+
             return undefined;
         }
         isAsking = true;
@@ -555,13 +557,15 @@
             const answered = runRules.answeredRun(stored, result);
             await runRules.saveRun(chrome.storage.local, answered);
             showRun(answered);
+            // The card's summary is no live region, so the status line says it as the last answer lands.
+            const summary = runRules.isDone(answered) ? runRules.TEXTS.done(runRules.countsOf(answered)) : '';
             if ('problem' === result) {
-                dock.say(runRules.TEXTS.problemTagged(answered.pendingTag.stepNumber));
+                dock.say([runRules.TEXTS.problemTagged(answered.pendingTag.stepNumber), summary].filter((text) => '' !== text).join(' '));
                 startPinning();
 
                 return;
             }
-            dock.say('');
+            dock.say(summary);
             if (hadFocus) {
                 stepCard.focusFirstButton();
             }
@@ -650,10 +654,11 @@
         });
         // A run started before a click, a navigation or a reload shows its step again.
         afterRunChanges(async () => showRun(await runRules.loadRun(chrome.storage.local))).catch(() => dock.say(runRules.TEXTS.notKept, true));
-        // Keys typed outside the overlay; the shadow root's own keydown listener below takes the ones inside it.
+        // Keys typed outside the overlay, only while the dock's Letter keys switch is on (WCAG 2.1.4); the shadow root's
+        // own keydown listener below takes the ones inside it, always.
         document.addEventListener('keydown', onlyTrusted((event) => {
             const action = dockRules.actionOfKey(event);
-            if (null !== action && host.isConnected && host !== event.target) {
+            if (null !== action && host.isConnected && host !== event.target && dock.areLetterKeysOn()) {
                 runDockAction(action);
             }
         }));

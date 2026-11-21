@@ -3,14 +3,20 @@
 // is not reachable from its host (shadowRoot is null), and document and element queries never look into a shadow
 // root; an event's path crosses a shadow root only when it is composed, and listeners outside a root see its host as
 // the target and as composedPath()[0]; capture-phase listeners run first, from the window down; stopPropagation ends
-// the path after the current node; activeElement is the focused element seen from that document or root. Not
+// the path after the current node; activeElement is the focused element seen from that document or root; a disabled
+// form control takes no focus, loses it once disabled, and hears no click. Not
 // modelled: layout (getBoundingClientRect answers what a test sets as `box`), CSS, default actions of events, and the
 // page's own open shadow roots. The test reaches into a closed root only through closedRootOf, as the e2e inspector
 // does through the DevTools protocol.
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { STORAGE_CHANGES } from './fake-browser.mjs';
 
 const EXTENSION_ROOT = new URL('../', import.meta.url);
+const FORM_CONTROL_TAGS = new Set(['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
+const isDisabledControl = (element) => true === element?.disabled && FORM_CONTROL_TAGS.has(element.tagName);
+// Chrome's focus fixup: a focused control that becomes disabled is no longer focused, and focus is on no element.
+const focusedOf = (page) => (isDisabledControl(page.focused) ? null : page.focused);
 
 class FakeNode {
     #listeners = [];
@@ -211,7 +217,7 @@ class FakeElement extends FakeNode {
     }
 
     focus() {
-        if (this.isConnected) {
+        if (this.isConnected && !isDisabledControl(this)) {
             this.page.focused = this;
         }
     }
@@ -254,7 +260,9 @@ class FakeShadowRoot extends FakeNode {
     }
 
     get activeElement() {
-        return this.contains(this.page.focused) ? this.page.focused : null;
+        const focused = focusedOf(this.page);
+
+        return this.contains(focused) ? focused : null;
     }
 }
 
@@ -273,7 +281,7 @@ class FakeDocument extends FakeNode {
 
     /** The focused element, or the host of the closed root it is in, as the page sees it. */
     get activeElement() {
-        let seen = this.page.focused;
+        let seen = focusedOf(this.page);
         while (null !== seen && !this.contains(seen)) {
             let at = seen;
             while (null !== at.parentNode) {
@@ -315,7 +323,7 @@ export function fakePage({ siteHost = 'shop.acme-foods.example', href = `https:/
         setTimeout,
         clearTimeout,
         chrome: {
-            storage: { local: storage },
+            storage: { local: { ...storage, onChanged: storage[STORAGE_CHANGES] } },
             runtime: {
                 sendMessage: async (message) => {
                     sentMessages.push(structuredClone(message));
@@ -421,7 +429,8 @@ export function fakePage({ siteHost = 'shop.acme-foods.example', href = `https:/
         dispatch,
         /** A person's key press where focus is: the page's own element, or inside a root. */
         keydown: (target, key, init = {}) => dispatch(target, 'keydown', { key, ...init }),
-        click: (target, init = {}) => dispatch(target, 'click', init),
+        /** A disabled form control hears no click, as in Chrome; the answer is then null. */
+        click: (target, init = {}) => (isDisabledControl(target) ? null : dispatch(target, 'click', init)),
         /** Typing at a field's end as Chrome sends it: beforeinput, then (not cancelled) the value and input; no maxLength. */
         typeInto(field, text) {
             field.selectionStart = field.value.length;

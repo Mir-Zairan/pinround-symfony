@@ -145,7 +145,7 @@ test('a tester pins, removes a pin, captures twice and saves one report draft fr
   await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Report draft opened in pinround. Check it there and press Send.']);
   const [draft, ...otherDrafts] = stub.myReportDrafts();
   expect(otherDrafts).toEqual([]);
-  expect(draftTab.url()).toBe(`${PINROUND_TEST_ORIGIN}/report-drafts/${draft.id}`);
+  await expect(draftTab).toHaveURL(`${PINROUND_TEST_ORIGIN}/report-drafts/${draft.id}`);
   expect(draft.screenshots.map((screenshot) => screenshot.pins.map((pin) => pin.note))).toEqual([['Logo is cut off'], []]);
   const [keptPin] = draft.screenshots[0].pins;
   expect([keptPin.x_pct, keptPin.y_pct]).toEqual([expect.closeTo(50, 0), expect.closeTo(50, 0)]);
@@ -154,9 +154,35 @@ test('a tester pins, removes a pin, captures twice and saves one report draft fr
   expect(extensionPagesOf(context)).toEqual([]);
 });
 
+test('with Letter keys off, P on the page does nothing while P in the dock still pins, and turned on again P on the page pins', async ({ context, testPage }) => {
+  await answerPinroundApi(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await openDockAndClosePopup(context, testPage, popup);
+  const overlaysShown = async () => (await inspector.accessibleNodes()).filter((node) => node.role === OVERLAY.role && node.name === OVERLAY.name).length;
+
+  await clickOverlayButton(inspector, testPage, 'Letter keys');
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Letter keys' });
+  await testPage.keyboard.press('p');
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
+  await testPage.keyboard.press('Escape');
+  await expect.poll(overlaysShown).toBe(0);
+
+  await testPage.mouse.click(40, 300);
+  await testPage.keyboard.press('p');
+  expect(await overlaysShown()).toBe(0);
+
+  await clickOverlayButton(inspector, testPage, 'Letter keys');
+  await testPage.mouse.click(40, 300);
+  await testPage.keyboard.press('p');
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
+});
+
 test('a scenario started with Play keeps its step card after a click on the page, and goes on from the dock', async ({ context, testPage }) => {
   const { stub, popup } = await popupWithBasketNotebook(context, testPage);
   const inspector = await openDockAndClosePopup(context, testPage, popup);
+  const notebookReads = () => stub.requests.filter((request) => request.method === 'GET' && request.path === `/api/v1/notebooks/${NOTEBOOK_ID}`).length;
+  // Choosing the notebook in the popup already read it once; Play reads it once more.
+  const readsBeforePlay = notebookReads();
 
   await clickOverlayButton(inspector, testPage, 'Play');
   await expect.poll(() => stepCardTextOf(inspector)).toContain('Step 1 of 2');
@@ -177,7 +203,7 @@ test('a scenario started with Play keeps its step card after a click on the page
   await testPage.mouse.click(40, 300);
   await clickOverlayButton(inspector, testPage, 'Looks right');
   await expect.poll(() => stepCardTextOf(inspector)).toContain('Scenario done: 2 looked right, 0 with a problem, 0 skipped.');
-  expect(stub.requests.filter((request) => request.method === 'GET' && request.path === `/api/v1/notebooks/${NOTEBOOK_ID}`).length).toBe(1);
+  expect(notebookReads()).toBe(readsBeforePlay + 1);
   expect(extensionPagesOf(context)).toEqual([]);
 });
 

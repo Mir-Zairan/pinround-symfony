@@ -414,12 +414,13 @@ test('the run lives in the popup: Chrome closes the toolbar popup on a click on 
 
   await expect.poll(() => uploadOutcome).toBe('answered');
 
-  // No document of the extension is left to run the player in: the next popup is the only one, with no service worker
-  // or offscreen document beside it.
+  // No document of the extension is left to run the player in: the next popup is the only one, with no offscreen
+  // document beside it. The dock's service worker (src/background/) may be awake; it runs no player, which the second
+  // run below proves.
   const nextPopup = await openPopupFor(context, testPage);
   const contextsLeft = await nextPopup.evaluate(async () => {
     const { chrome } = globalThis as unknown as { chrome: { runtime: { getContexts(filter: { contextTypes: string[] }): Promise<Array<{ contextType: string; documentUrl: string }>> } } };
-    return (await chrome.runtime.getContexts({ contextTypes: ['BACKGROUND', 'POPUP', 'TAB', 'OFFSCREEN_DOCUMENT'] })).map((found) => [found.contextType, found.documentUrl]);
+    return (await chrome.runtime.getContexts({ contextTypes: ['POPUP', 'TAB', 'OFFSCREEN_DOCUMENT'] })).map((found) => [found.contextType, found.documentUrl]);
   });
   expect(contextsLeft).toEqual([['TAB', nextPopup.url()]]);
 

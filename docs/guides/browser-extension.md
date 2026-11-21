@@ -99,7 +99,7 @@ A capture step adds a screenshot of the page to the notebook, titled with the sc
 The dock is a small bar on the page itself. It stays open while you click the page, so you can pin, capture and walk through a scenario without the popup.
 1. Click the extension's icon and press **Open the dock on this page**. The popup says "The dock is on the page. Pin, capture and save your draft from there." Drag the dock by its grip, or move it with the arrow keys.
 2. In **Put it in**, choose where captures go, as in the popup. The popup and the dock always show the same choice.
-3. Use the buttons. P, C and H work as keys too, but not while you type in a field or hold Ctrl, Alt or Cmd:
+3. Use the buttons. P, C and H work as keys too, but not while you type in a field or hold Ctrl, Alt or Cmd. Turn **Letter keys** off in the dock and they work only while focus is in the dock; the extension keeps that choice for every site. While the dock waits for the extension, a press on Capture, Save draft, Play or **Put it in** does nothing but say "Still working on the last request. Try again when it is done." The buttons:
    - **Pin** (P) turns pinning on: click the page to drop a pin and type your note.
    - **Capture** (C) takes the page with its pins into the place you chose, for example "Added to your draft round on SHOP-12. Only you see it."
    - **Shrink** (H) folds the dock into a small round button. Press it to open the dock again.

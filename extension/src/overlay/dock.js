@@ -5,6 +5,8 @@
 globalThis.pinroundDock ??= (() => {
     /** The local storage key's prefix; the site's host follows, so each site keeps its own side and height. */
     const PLACE_KEY_PREFIX = 'pinroundDockPlace:';
+    /** The local storage key of the Letter keys switch, one for every site; only a stored false turns the keys off. */
+    const LETTER_KEYS_KEY = 'pinroundDockLetterKeys';
     const SIDES = ['left', 'right'];
     const DEFAULT_PLACE = Object.freeze({ side: 'right', topPct: 50 });
     /** The gap between the dock and the viewport's edges, in CSS pixels. */
@@ -28,6 +30,9 @@ globalThis.pinroundDock ??= (() => {
         play: 'Play',
         saveDraft: 'Save draft',
         shrink: 'Shrink',
+        letterKeys: 'Letter keys',
+        letterKeysHint: 'While on, P, C and H work anywhere on the page. Off, they work only in the dock.',
+        busy: 'Still working on the last request. Try again when it is done.',
         open: 'Open the dock',
         notAnswered: 'The extension did not answer. Open its popup and try again.',
     });
@@ -58,8 +63,10 @@ globalThis.pinroundDock ??= (() => {
         .dock__action { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #2f6fd6; border-radius: 6px; background: #ffffff; color: #1f4fa0; cursor: pointer; }
         .dock__action[hidden] { display: none; }
         .dock__action[aria-pressed="true"] { background: #2f6fd6; color: #ffffff; }
-        .dock__action:disabled { border-color: #c3c7cc; color: #6b7280; cursor: default; }
+        .dock__action[aria-disabled="true"] { border-color: #c3c7cc; color: #6b7280; cursor: default; }
+        .dock select[aria-disabled="true"] { border-color: #c3c7cc; color: #6b7280; }
         .dock kbd { font: 12px/1 system-ui, sans-serif; padding: 2px 4px; border: 1px solid currentColor; border-radius: 4px; opacity: 0.8; }
+        .dock__action[aria-pressed="true"] kbd { opacity: 1; }
         .dock__count { min-width: 20px; padding: 0 6px; border-radius: 10px; background: #161d1b; color: #ffffff; font-size: 12px; line-height: 20px; text-align: center; }
         .dock__count[hidden] { display: none; }
         .dock__status { margin: 0; font-size: 12px; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
@@ -114,6 +121,11 @@ globalThis.pinroundDock ??= (() => {
         await storage.set({ [placeKeyOf(siteHost)]: checkedPlace(place) });
     }
 
+    /** @returns {Promise<boolean>} whether P, C and H work anywhere on the page; on unless turned off */
+    async function loadLetterKeys(storage) {
+        return false !== (await storage.get(LETTER_KEYS_KEY))[LETTER_KEYS_KEY];
+    }
+
     /** True for a field the person types in: the page's own keys there are never the dock's. */
     function isTypingTarget(element) {
         if (null === element || 'object' !== typeof element) {
@@ -160,10 +172,10 @@ globalThis.pinroundDock ??= (() => {
      * Builds the dock into `shadow` and places it where this site last had it.
      *
      * @param {ShadowRoot} shadow the overlay's closed root
-     * @param {{storage: {get: Function, set: Function}, siteHost: string, viewport: {width: () => number, height: () => number},
-     *   onAction: (action: string, value?: string) => void}} options storage is the extension's local storage; onAction hears
-     *   pin, clear-pins, capture, play, save-draft and choose (with the picked value); shrink stays in here. Play's step
-     *   card goes in the answer's stepSlot.
+     * @param {{storage: {get: Function, set: Function, onChanged: object}, siteHost: string, viewport: {width: () => number,
+     *   height: () => number}, onAction: (action: string, value?: string) => void}} options storage is the extension's local
+     *   storage; onAction hears pin, clear-pins, capture, play, save-draft and choose (with the picked value); shrink and
+     *   Letter keys stay in here. Play's step card goes in the answer's stepSlot.
      */
     function mountDock(shadow, { storage, siteHost, viewport, onAction }) {
         const make = (tag, className, properties = {}) => Object.assign(document.createElement(tag), { className, ...properties });
@@ -212,10 +224,12 @@ globalThis.pinroundDock ??= (() => {
         const count = make('span', 'dock__count', { hidden: true });
         saveButton.append(count);
         const shrinkButton = actionButton(TEXTS.shrink, 'H');
+        const letterKeysButton = actionButton(TEXTS.letterKeys);
+        letterKeysButton.title = TEXTS.letterKeysHint;
         const status = make('p', 'dock__status');
         status.setAttribute('role', 'status');
         const stepSlot = make('div', 'dock__step-slot');
-        dock.append(head, pickerLabel, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton, stepSlot, status);
+        dock.append(head, pickerLabel, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton, letterKeysButton, stepSlot, status);
 
         const handle = make('button', 'dock-handle dock--right', { type: 'button', hidden: true });
         handle.setAttribute('aria-label', TEXTS.open);
@@ -225,6 +239,10 @@ globalThis.pinroundDock ??= (() => {
         let place = { ...DEFAULT_PLACE };
         let isBusy = false;
         let canSave = false;
+        /** The picker's value as the extension last answered it, put back when the picker is changed while busy. */
+        let chosenTarget = '';
+        // Off until the stored switch is read, so a person who turned the keys off never has a key act meanwhile.
+        let areLetterKeysOn = false;
         /** @type {null|{dx: number, dy: number, width: number, height: number}} */
         let drag = null;
 
@@ -243,16 +261,38 @@ globalThis.pinroundDock ??= (() => {
             savePlace(storage, siteHost, place).catch(() => undefined);
         }
 
+        // aria-disabled, not disabled: a disabled control loses focus, so the keyboard user would be thrown out of the
+        // dock each time a request starts. A press on one is ignored by whenEnabled instead.
         function enableControls() {
             for (const control of [picker, captureButton]) {
-                control.disabled = isBusy;
+                control.setAttribute('aria-disabled', String(isBusy));
             }
-            saveButton.disabled = isBusy || !canSave;
+            saveButton.setAttribute('aria-disabled', String(isBusy || !canSave));
         }
 
         function say(message, isError = false) {
             status.textContent = message;
             status.classList.toggle('dock__status--error', isError);
+        }
+
+        /** The handler for a person's press on the control, which does nothing while it is aria-disabled. */
+        const whenEnabled = (control, handler) => onlyTrusted((event) => {
+            if ('true' !== control.getAttribute('aria-disabled')) {
+                handler(event);
+            } else if (isBusy) {
+                say(TEXTS.busy);
+            }
+        });
+
+        function showLetterKeys(areOn) {
+            areLetterKeysOn = areOn;
+            letterKeysButton.setAttribute('aria-pressed', String(areOn));
+        }
+
+        function toggleLetterKeys() {
+            showLetterKeys(!areLetterKeysOn);
+            // A switch that cannot be kept (the extension was updated under the page) still holds until the page goes.
+            storage.set({ [LETTER_KEYS_KEY]: areLetterKeysOn }).catch(() => undefined);
         }
 
         function showState(state) {
@@ -263,6 +303,7 @@ globalThis.pinroundDock ??= (() => {
             picker.replaceChildren(...options);
             const chosen = options.find((option) => option.value === state.chosen) ?? options[0];
             chosen.selected = true;
+            chosenTarget = chosen.value;
             count.hidden = null === state.count;
             count.textContent = null === state.count ? '' : String(state.count);
             saveButton.setAttribute('aria-label', null === state.count ? TEXTS.saveDraft : `${TEXTS.saveDraft}, ${state.count} in it`);
@@ -280,13 +321,21 @@ globalThis.pinroundDock ??= (() => {
             }
         }
 
-        picker.addEventListener('change', onlyTrusted(() => onAction('choose', picker.value)));
+        picker.addEventListener('change', onlyTrusted(() => {
+            if ('true' === picker.getAttribute('aria-disabled')) {
+                picker.value = chosenTarget;
+                say(TEXTS.busy);
+            } else {
+                onAction('choose', picker.value);
+            }
+        }));
         pinButton.addEventListener('click', onlyTrusted(() => onAction('pin')));
         clearPinsButton.addEventListener('click', onlyTrusted(() => onAction('clear-pins')));
-        captureButton.addEventListener('click', onlyTrusted(() => onAction('capture')));
+        captureButton.addEventListener('click', whenEnabled(captureButton, () => onAction('capture')));
         playButton.addEventListener('click', onlyTrusted(() => onAction('play')));
-        saveButton.addEventListener('click', onlyTrusted(() => onAction('save-draft')));
+        saveButton.addEventListener('click', whenEnabled(saveButton, () => onAction('save-draft')));
         shrinkButton.addEventListener('click', onlyTrusted(toggleShrunk));
+        letterKeysButton.addEventListener('click', onlyTrusted(toggleLetterKeys));
         handle.addEventListener('click', onlyTrusted(toggleShrunk));
 
         grip.addEventListener('pointerdown', onlyTrusted((event) => {
@@ -342,15 +391,27 @@ globalThis.pinroundDock ??= (() => {
 
         applyPlace(DEFAULT_PLACE);
         enableControls();
-        const ready = loadPlace(storage, siteHost).then(applyPlace, () => undefined);
+        showLetterKeys(false);
+        // Another tab's dock turning the keys on or off turns them here too.
+        storage.onChanged.addListener((changes) => {
+            if (Object.hasOwn(changes, LETTER_KEYS_KEY)) {
+                showLetterKeys(false !== changes[LETTER_KEYS_KEY].newValue);
+            }
+        });
+        const ready = Promise.all([
+            loadPlace(storage, siteHost).then(applyPlace, () => undefined),
+            loadLetterKeys(storage).then(showLetterKeys, () => showLetterKeys(true)),
+        ]).then(() => undefined);
 
         return {
-            /** Resolves once the site's stored place is applied, or the default kept when storage refused. */
+            /** Resolves once the site's stored place and the Letter keys switch are applied, or their defaults when storage refused. */
             ready,
             /** Where the scenario's step card goes (dock-run.js): after Shrink, before the status line. */
             stepSlot,
             /** The dock's focusable controls in Tab order, for the overlay's focus trap while pinning. */
-            focusables: () => (dock.hidden ? [handle] : [grip, picker, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton].filter((control) => !control.disabled && !control.hidden)),
+            focusables: () => (dock.hidden ? [handle] : [grip, picker, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton, letterKeysButton].filter((control) => !control.hidden)),
+            /** Whether P, C and H typed anywhere on the page are the dock's; inside the dock they always are. */
+            areLetterKeysOn: () => areLetterKeysOn,
             setPinning(isPinning) {
                 pinButton.setAttribute('aria-pressed', String(isPinning));
             },
@@ -359,9 +420,13 @@ globalThis.pinroundDock ??= (() => {
                 clearPinsButton.hidden = 0 === pinCount;
                 clearPinsButton.textContent = TEXTS.clearPins(pinCount);
             },
+            /** Marks the request controls busy; once not busy, a wait message still showing goes. */
             setBusy(busy) {
                 isBusy = busy;
                 enableControls();
+                if (!busy && TEXTS.busy === status.textContent) {
+                    say('');
+                }
             },
             /** Shows the extension's answer: its state, its message; anything unreadable is said as no answer. */
             showAnswer(answer) {
@@ -390,5 +455,5 @@ globalThis.pinroundDock ??= (() => {
         };
     }
 
-    return Object.freeze({ PLACE_KEY_PREFIX, DEFAULT_PLACE, EDGE_GAP_PX, GRIP_STEP_PCT, TEXTS, nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, isTypingTarget, actionOfKey, checkedState, mountDock });
+    return Object.freeze({ PLACE_KEY_PREFIX, LETTER_KEYS_KEY, DEFAULT_PLACE, EDGE_GAP_PX, GRIP_STEP_PCT, TEXTS, nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, mountDock });
 })();

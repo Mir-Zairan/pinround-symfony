@@ -5,7 +5,7 @@ import { OVERLAY_FILES } from '../src/capture/page-pins.js';
 import { fakeBrowser } from './fake-browser.mjs';
 import { fakePage } from './fake-page.mjs';
 
-const { DEFAULT_PLACE, EDGE_GAP_PX, TEXTS, actionOfKey, checkedPlace, isTypingTarget, loadPlace, nearerSide, placeKeyOf, savePlace, topPercentOf } = globalThis.pinroundDock;
+const { DEFAULT_PLACE, EDGE_GAP_PX, LETTER_KEYS_KEY, TEXTS, actionOfKey, checkedPlace, isTypingTarget, loadPlace, nearerSide, placeKeyOf, savePlace, topPercentOf } = globalThis.pinroundDock;
 
 const SHOP_HOST = 'shop.acme-foods.example';
 const MOBILE_HOST = 'm.acme-foods.example';
@@ -180,6 +180,145 @@ test('a dock key pressed in the page never reaches the page\'s listeners above t
     assert.deepEqual(heardByPage, ['BODY']);
 });
 
+/** What the page-wide P, C and H did: pinning on, the requests sent after the dock's first, the dock shrunk. */
+async function pageKeysPressed(page, inRoot) {
+    const requestsBefore = page.sentMessages.length;
+    for (const key of ['p', 'c', 'h']) {
+        page.keydown(page.document.body, key);
+    }
+    await settled();
+
+    return { isPinning: !inRoot('.surface').hidden, requests: requestsOf(page).slice(requestsBefore), isShrunk: inRoot('.dock').hidden };
+}
+
+const NOTHING_DONE = { isPinning: false, requests: [], isShrunk: false };
+
+test('Letter keys is on at first, and turned off it keeps P, C and H on the page from doing anything, and keeps that for every site', async () => {
+    const { storage } = fakeBrowser();
+    const { page, inRoot, buttonNamed } = await dockedPage({ storage: storage.local });
+    const letterKeys = buttonNamed(TEXTS.letterKeys);
+    assert.equal(letterKeys.getAttribute('aria-pressed'), 'true');
+
+    page.click(letterKeys, { isTrusted: false });
+    assert.equal(letterKeys.getAttribute('aria-pressed'), 'true', 'A click the page makes turns nothing off.');
+
+    page.click(letterKeys);
+    await settled();
+
+    assert.equal(letterKeys.getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(await storage.local.get(LETTER_KEYS_KEY), { [LETTER_KEYS_KEY]: false });
+    assert.deepEqual(await pageKeysPressed(page, inRoot), NOTHING_DONE);
+
+    const otherSite = await dockedPage({ siteHost: MOBILE_HOST, storage: storage.local });
+    assert.equal(otherSite.buttonNamed(TEXTS.letterKeys).getAttribute('aria-pressed'), 'false', 'The dock opens with the kept setting.');
+    assert.deepEqual(await pageKeysPressed(otherSite.page, otherSite.inRoot), NOTHING_DONE);
+});
+
+test('with Letter keys off, the same keys pressed inside the dock still act', async () => {
+    const { storage } = fakeBrowser();
+    await storage.local.set({ [LETTER_KEYS_KEY]: false });
+    const { page, inRoot, buttonNamed } = await dockedPage({ storage: storage.local });
+    const capture = buttonNamed(TEXTS.capture);
+
+    page.keydown(capture, 'p');
+    assert.equal(inRoot('.surface').hidden, false);
+    page.keydown(inRoot('.surface'), 'c');
+    await settled();
+    assert.deepEqual(requestsOf(page), ['state', 'capture']);
+    page.keydown(inRoot('.surface'), 'h');
+    assert.equal(inRoot('.dock').hidden, true);
+});
+
+test('Letter keys turned on again makes P, C and H on the page act, and a change made in another tab is followed here', async () => {
+    const { storage } = fakeBrowser();
+    await storage.local.set({ [LETTER_KEYS_KEY]: false });
+    const { page, inRoot, buttonNamed } = await dockedPage({ storage: storage.local });
+    const letterKeys = buttonNamed(TEXTS.letterKeys);
+
+    page.click(letterKeys);
+    await settled();
+    assert.deepEqual([letterKeys.getAttribute('aria-pressed'), await storage.local.get(LETTER_KEYS_KEY)], ['true', { [LETTER_KEYS_KEY]: true }]);
+    assert.deepEqual(await pageKeysPressed(page, inRoot), { isPinning: true, requests: ['capture'], isShrunk: true });
+    page.keydown(page.document.body, 'h');
+    page.keydown(page.document.body, 'p');
+
+    await storage.local.set({ [LETTER_KEYS_KEY]: false });
+    await settled();
+
+    assert.equal(letterKeys.getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(await pageKeysPressed(page, inRoot), NOTHING_DONE);
+});
+
+test('a storage that cannot read the setting leaves Letter keys on, as at first', async () => {
+    const { storage } = fakeBrowser();
+    const refusing = { ...storage.local, get: async () => { throw new Error('Extension context invalidated.'); } };
+    const { page, inRoot, buttonNamed } = await dockedPage({ storage: refusing });
+
+    assert.equal(buttonNamed(TEXTS.letterKeys).getAttribute('aria-pressed'), 'true');
+    assert.equal((await pageKeysPressed(page, inRoot)).isPinning, true);
+});
+
+test('while a request runs, Capture, Save draft and the picker keep focus and stay in the Tab order, and a press on them asks nothing and says why', async () => {
+    let release;
+    const answers = [{ state: { ...STATE, chosen: 'new-report', count: 2, canSave: true } }];
+    const { page, root, inRoot, buttonNamed } = await dockedPage({
+        answer: async () => answers.shift() ?? new Promise((resolve) => {
+            release = () => resolve({ state: { ...STATE, chosen: 'new-report', count: 3, canSave: true } });
+        }),
+    });
+    const capture = buttonNamed(TEXTS.capture);
+    const save = buttonNamed(TEXTS.saveDraft);
+    const picker = inRoot('select');
+
+    capture.focus();
+    page.click(capture);
+    await settled();
+    assert.deepEqual(requestsOf(page), ['state', 'capture']);
+    assert.deepEqual([capture, save, picker].map((control) => [control.disabled, control.getAttribute('aria-disabled')]), [[false, 'true'], [false, 'true'], [false, 'true']]);
+    assert.equal(root.activeElement, capture, 'Focus stays on the pressed button.');
+
+    page.click(capture);
+    assert.equal(inRoot('.dock__status').textContent, TEXTS.busy);
+    inRoot('.dock__status').textContent = '';
+    page.click(save);
+    assert.equal(inRoot('.dock__status').textContent, TEXTS.busy);
+    picker.value = 'ticket:SHOP-12';
+    page.dispatch(picker, 'change', { bubbles: false, composed: false });
+    await settled();
+
+    assert.deepEqual(requestsOf(page), ['state', 'capture']);
+    assert.equal(picker.value, 'new-report', 'The picker shows the target still in use.');
+    assert.equal(inRoot('.dock__status').textContent, TEXTS.busy);
+    page.keydown(page.document.body, 'p');
+    capture.focus();
+    assert.equal(page.keydown(capture, 'Tab', { shiftKey: true }).defaultPrevented, false, 'Capture is a stop in the focus trap: Shift+Tab goes back from it.');
+
+    release();
+    await settled();
+    await settled();
+    assert.deepEqual([capture, save, picker].map((control) => control.getAttribute('aria-disabled')), ['false', 'false', 'false']);
+    assert.equal(inRoot('.dock__status').textContent, '', 'The wait message goes once the request ends.');
+});
+
+test('a request\'s own message stays once it ends, even after a press while it ran', async () => {
+    let release;
+    const { page, inRoot, buttonNamed } = await dockedPage({
+        answer: async ({ pinroundDock }) => ('state' === pinroundDock ? { state: STATE } : new Promise((resolve) => {
+            release = () => resolve({ message: 'Screenshot 1 added to your draft round on SHOP-12. Only you see it.', state: STATE });
+        })),
+    });
+
+    page.click(buttonNamed(TEXTS.capture));
+    page.keydown(page.document.body, 'c');
+    await settled();
+    assert.equal(inRoot('.dock__status').textContent, TEXTS.busy, 'The key says why it did nothing, as the button does.');
+    release();
+    await settled();
+    await settled();
+
+    assert.equal(inRoot('.dock__status').textContent, 'Screenshot 1 added to your draft round on SHOP-12. Only you see it.');
+});
+
 test('dragging the grip snaps the dock to the nearer side and keeps the side and height for this host only', async () => {
     const { storage } = fakeBrowser();
     await savePlace(storage.local, MOBILE_HOST, { side: 'right', topPct: 80 });
@@ -268,7 +407,7 @@ test('the dock shows the target picker and the draft\'s count from the extension
     ]);
     assert.equal(picker.value, 'ticket:SHOP-12');
     assert.deepEqual([inRoot('.dock__count').hidden, inRoot('.dock__count').textContent], [false, '3']);
-    assert.equal(buttonNamed(TEXTS.saveDraft).disabled, true, 'A draft round has nothing to save from here.');
+    assert.equal(buttonNamed(TEXTS.saveDraft).getAttribute('aria-disabled'), 'true', 'A draft round has nothing to save from here.');
     assert.equal(inRoot('.dock__status').textContent, markup);
     assert.equal(inRoot('.dock__status').children.length, 0, 'The message made no element.');
     assert.equal(inRoot('.dock__status').classList.contains('dock__status--error'), true);
@@ -292,19 +431,22 @@ test('Save draft is pressed only for a draft it can save, and a second press whi
         }),
     });
     const save = buttonNamed(TEXTS.saveDraft);
-    assert.equal(save.disabled, false);
+    assert.equal(save.getAttribute('aria-disabled'), 'false');
     assert.equal(save.getAttribute('aria-label'), 'Save draft, 2 in it');
 
     page.click(save);
     page.keydown(page.document.body, 'c');
     await settled();
     assert.deepEqual(requestsOf(page), ['state', 'save-draft']);
-    assert.equal(save.disabled, true);
+    assert.equal(save.getAttribute('aria-disabled'), 'true');
 
     release();
     await settled();
     await settled();
-    assert.deepEqual([save.disabled, buttonNamed(TEXTS.capture).disabled], [true, false]);
+    assert.deepEqual([save.getAttribute('aria-disabled'), buttonNamed(TEXTS.capture).getAttribute('aria-disabled')], ['true', 'false']);
+    page.click(save);
+    await settled();
+    assert.deepEqual(requestsOf(page), ['state', 'save-draft'], 'A Save draft with nothing to save asks nothing.');
 });
 
 test('picking a target asks the extension to remember it', async () => {

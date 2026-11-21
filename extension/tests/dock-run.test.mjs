@@ -132,10 +132,11 @@ test('Play with a run already open never replaces it: it shows the open run and 
 
 test('Looks right and Skip record the step\'s result and move the card on; the last answer shows the summary', async () => {
     const { storage } = fakeBrowser();
-    const { play, press, card, inRoot } = await playingPage({ storage: storage.local });
+    const { play, press, card, inRoot, status } = await playingPage({ storage: storage.local });
     await play();
 
     await press('.dock-step__passed');
+    assert.equal(status(), '');
     assert.deepEqual((({ stepIndex, results }) => ({ stepIndex, results }))(await storedRunOf(storage.local)), { stepIndex: 1, results: ['passed', null, null] });
     assert.deepEqual(card(), { hidden: false, where: 'Step 2 of 3', say: 'Look at the total', expected: TOTAL_EXPECTED, isExpectedShown: true });
 
@@ -146,8 +147,59 @@ test('Looks right and Skip record the step\'s result and move the card on; the l
     await press('.dock-step__passed');
     assert.deepEqual((({ stepIndex, results }) => ({ stepIndex, results }))(await storedRunOf(storage.local)), { stepIndex: 3, results: ['passed', 'skipped', 'passed'] });
     assert.equal(inRoot('.dock-step__summary').textContent, 'Scenario done: 2 looked right, 0 with a problem, 1 skipped.');
+    assert.equal(status(), 'Scenario done: 2 looked right, 0 with a problem, 1 skipped.', 'The dock\'s status line says the summary, so a screen reader hears it.');
     assert.deepEqual(['.dock-step__passed', '.dock-step__problem', '.dock-step__skip', '.dock-step__next'].map((selector) => inRoot(selector).hidden), [true, true, true, false]);
     assert.equal(inRoot('.dock-step__stop').textContent, TEXTS.close);
+});
+
+test('Found a problem on the last step says both what to do next and the summary', async () => {
+    const { storage } = fakeBrowser();
+    const { play, press, status, inRoot } = await playingPage({ storage: storage.local });
+    await play();
+    await press('.dock-step__skip');
+    await press('.dock-step__skip');
+
+    await press('.dock-step__problem');
+
+    assert.equal(status(), `${TEXTS.problemTagged(3)} Scenario done: 0 looked right, 1 with a problem, 2 skipped.`);
+    assert.equal(inRoot('.surface').hidden, false);
+});
+
+test('Play or Next scenario pressed while a capture runs asks nothing, keeps no run and says to wait', async () => {
+    const { storage } = fakeBrowser();
+    const second = { ...SCENARIO, scenarioIndex: 1, title: 'Empty basket', steps: [{ say: 'Remove jam', expected: '' }] };
+    let releaseCapture;
+    const { play, press, capture, status, requests, card } = await playingPage({
+        storage: storage.local,
+        answers: {
+            capture: () => new Promise((resolve) => { releaseCapture = () => resolve(SAVED_CAPTURE); }),
+            scenario: (index) => ({ scenario: structuredClone(0 === index ? SCENARIO : second) }),
+        },
+    });
+
+    await capture();
+    await play();
+
+    assert.deepEqual(requests(), ['state', 'capture']);
+    assert.equal(status(), dockTexts.busy);
+    assert.deepEqual([await storage.local.get(null), card().hidden], [{}, true]);
+    releaseCapture();
+    await settled();
+    assert.equal(status(), SAVED_CAPTURE.message);
+
+    await play();
+    for (let step = 0; step < SCENARIO.steps.length; step += 1) {
+        await press('.dock-step__skip');
+    }
+    const finished = await storedRunOf(storage.local);
+    await capture();
+    await press('.dock-step__next');
+
+    assert.deepEqual(requests(), ['state', 'capture', 'scenario', 'capture']);
+    assert.equal(status(), dockTexts.busy);
+    assert.deepEqual(await storedRunOf(storage.local), finished, 'The finished run is still the one kept.');
+    releaseCapture();
+    await settled();
 });
 
 test('focus stays on the card as it moves on: the next step\'s first button, then the summary\'s, then Pin once it closes', async () => {

@@ -101,11 +101,44 @@ const STORED = { binaryRefusal: BINARY_IN_STORAGE, cycle: null };
 const SCRIPT_ARGUMENT = { binaryRefusal: BINARY_ARGUMENT, cycle: LEFT_OUT };
 const SCRIPT_RESULT = { cycle: null };
 
+/**
+ * A storage area's onChanged, which only the overlay in the page uses, so the adapter (src/shared/browser.js) and this
+ * fake's area leave it out and fakePage hands it to the page's chrome.storage.local. A symbol, so a spread copy keeps it.
+ */
+export const STORAGE_CHANGES = Symbol('storage area onChanged');
+
+/**
+ * Only documented: onChanged hears every change, the area's own included, after the call that made it, with only the
+ * keys whose stored value changed, each as {oldValue, newValue} and either one left out when there is none.
+ */
 function fakeStorageArea() {
     const kept = new Map();
+    const changeListeners = new Set();
     const noMatchingSignature = (signature) => new TypeError(`Error in invocation of storage.${signature}: No matching signature.`);
+    const keptAs = (key) => (kept.has(key) ? JSON.stringify(kept.get(key)) : undefined);
+    const announce = (changes) => {
+        if (0 !== Object.keys(changes).length) {
+            setTimeout(() => changeListeners.forEach((listener) => listener(structuredClone(changes))), 0);
+        }
+    };
+    const changeOf = (key, before) => {
+        const change = {};
+        if (undefined !== before) {
+            change.oldValue = JSON.parse(before);
+        }
+        if (kept.has(key)) {
+            change.newValue = structuredClone(kept.get(key));
+        }
+
+        return change;
+    };
 
     return {
+        [STORAGE_CHANGES]: {
+            addListener: (listener) => changeListeners.add(listener),
+            removeListener: (listener) => changeListeners.delete(listener),
+            hasListener: (listener) => changeListeners.has(listener),
+        },
         get(keys) {
             if (!['undefined', 'string', 'object'].includes(typeof keys)) {
                 throw noMatchingSignature('get(optional [string|array|object] keys, optional function callback)');
@@ -133,9 +166,15 @@ function fakeStorageArea() {
             }
 
             return answerLater(() => {
+                const changes = {};
                 for (const [key, value] of Object.entries(copyAcrossChrome(items, STORED))) {
+                    const before = keptAs(key);
                     kept.set(key, value);
+                    if (before !== keptAs(key)) {
+                        changes[key] = changeOf(key, before);
+                    }
                 }
+                announce(changes);
             });
         },
         remove(keys) {
@@ -144,9 +183,14 @@ function fakeStorageArea() {
             }
 
             return answerLater(() => {
+                const changes = {};
                 for (const key of [keys].flat()) {
-                    kept.delete(key);
+                    const before = keptAs(key);
+                    if (kept.delete(key)) {
+                        changes[key] = changeOf(key, before);
+                    }
                 }
+                announce(changes);
             });
         },
     };

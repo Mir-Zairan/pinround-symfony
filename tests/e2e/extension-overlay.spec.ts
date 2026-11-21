@@ -480,9 +480,9 @@ test('the short hint shows until the first pin and again once the last is gone, 
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
   const hint = await overlayElementWithClass(inspector, 'hint');
   const overlayDescription = async () => (await inspector.node(OVERLAY.role, OVERLAY.name)).description;
-  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
   expect(await inspector.boxesOf(hint.backendNodeId)).not.toBeNull();
   expect(await overlayDescription()).toBe(OVERLAY_KEYS);
 
@@ -503,6 +503,7 @@ test('the page\'s own script can neither reach the overlay nor drop, change or r
   await chooseNewReport(popup);
   const inspector = await PageInspector.of(context, testPage);
   await popup.getByRole('button', { name: 'Pin this page' }).click();
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
   await testPage.mouse.click(320, 180);
   await testPage.keyboard.type('Price is wrong');
   await testPage.keyboard.press('Enter');
