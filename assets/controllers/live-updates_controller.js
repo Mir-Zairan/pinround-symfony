@@ -166,7 +166,7 @@ function refocus(focusedControl, part) {
 // cookie first, as the page sets none, then opens the hub's stream. A refresh signal carries no content, so on one the
 // page fetches again, with the viewer's own session, what carries data-live-refresh, or else the whole page through
 // Turbo. Signals that come while the tab is hidden are remembered and fetched once when it is shown again; a part held
-// because it is in use is fetched once the hold ends.
+// because it is in use is fetched once the hold ends, and a frame put in use while it was fetched renders then.
 export default class extends Controller {
   static targets = ['paused', 'reload'];
   static values = { subscribeUrl: String, tokenUrl: String, ticketIds: Array };
@@ -185,6 +185,8 @@ export default class extends Controller {
   #heldPartIds = new Set();
   // A page with no parts that a signal would have visited again while it was in use.
   #isVisitHeld = false;
+  // Frames put in use while their reload was fetched, each with the function that renders its answer once it is free.
+  #pausedFrameRenders = new Map();
   #onSignal = () => this.#refetchWhenVisible();
   #onStreamMessage = (event) => renderStreamMessage(event.data);
   #onVisibilityChange = () => this.#refetchMissedSignal();
@@ -208,6 +210,7 @@ export default class extends Controller {
     // The page around the element is new, so what was held belonged to the page before.
     this.#heldPartIds.clear();
     this.#isVisitHeld = false;
+    this.#pausedFrameRenders.clear();
     this.#stopTimer = setTimeout(() => this.#stop(), 0);
   }
 
@@ -356,13 +359,23 @@ export default class extends Controller {
 
   // After the event that may end a hold, focus has moved on and a closed dialog or disclosure reads as closed.
   #refreshReleasedPartsSoon() {
-    if ((this.#heldPartIds.size > 0 || this.#isVisitHeld) && this.#releaseTimer === null) {
+    if ((this.#heldPartIds.size > 0 || this.#isVisitHeld || this.#pausedFrameRenders.size > 0) && this.#releaseTimer === null) {
       this.#releaseTimer = setTimeout(() => this.#refreshReleasedParts(), 0);
     }
   }
 
   #refreshReleasedParts() {
     this.#releaseTimer = null;
+    this.#pausedFrameRenders.forEach((render, frame) => {
+      if (!frame.isConnected) {
+        this.#pausedFrameRenders.delete(frame);
+      } else if (!isPartInUse(frame)) {
+        this.#pausedFrameRenders.delete(frame);
+        render();
+        // That answer was fetched before the hold, so it lacks what the person did meanwhile (a picture added).
+        this.#heldPartIds.add(frame.id);
+      }
+    });
     if (this.#isVisitHeld) {
       this.#visitPageUnlessInUse();
       return;
@@ -412,14 +425,27 @@ export default class extends Controller {
     });
   }
 
-  // The focused control is noted as the frame renders, not as it is asked for, as focus may move while it loads.
+  // The focused control is noted as the frame renders, not as it is asked for, as focus may move while it loads. A
+  // frame put in use while it loaded (an upload started, a field typed in) keeps its answer unrendered until a hold
+  // ending event finds it free; only the answer to this reload is held, not a later load the person starts in the frame.
   // Turbo's reload settles once its answer is rendered or its fetch fails. A frame answer of 404 loads this page for
   // real, as #swapPageParts does, not the frame's own URL that app.js's turbo:frame-missing loads: whichever of the two
   // lands last would decide the page the tab ends on.
   async #reloadFrame(frame) {
     let focusedControl = null;
-    const noteFocusedControl = () => {
-      focusedControl = focusedControlOf(frame);
+    const renderWhenFree = (event) => {
+      frame.removeEventListener('turbo:before-frame-render', renderWhenFree);
+      // Fetched already: a load the person starts in the frame while this answer is held is not a refresh.
+      frame.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
+      if (!isPartInUse(frame)) {
+        focusedControl = focusedControlOf(frame);
+        return;
+      }
+      event.preventDefault();
+      this.#pausedFrameRenders.set(frame, () => {
+        focusedControl = focusedControlOf(frame);
+        event.detail.resume();
+      });
     };
     const loadPageOnNotFound = (event) => {
       const { response } = event.detail;
@@ -429,13 +455,13 @@ export default class extends Controller {
         window.location.assign(pageUrlWithoutHash());
       }
     };
-    frame.addEventListener('turbo:before-frame-render', noteFocusedControl);
+    frame.addEventListener('turbo:before-frame-render', renderWhenFree);
     frame.addEventListener('turbo:before-fetch-request', markLiveRefresh);
     frame.addEventListener('turbo:frame-missing', loadPageOnNotFound);
     try {
       await frame.reload();
     } finally {
-      frame.removeEventListener('turbo:before-frame-render', noteFocusedControl);
+      frame.removeEventListener('turbo:before-frame-render', renderWhenFree);
       frame.removeEventListener('turbo:before-fetch-request', markLiveRefresh);
       frame.removeEventListener('turbo:frame-missing', loadPageOnNotFound);
     }

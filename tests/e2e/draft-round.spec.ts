@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { errors, expect, test, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test';
+import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request } from '@playwright/test';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
@@ -12,8 +12,8 @@ import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST
 // through the page and the direct URLs.
 //
 // A picture upload needs the processing worker and a bucket, so the cases with a picture seed it already ready through the
-// dev-only console command (draft-picture.ts) and run on any stack. The case of an upload held across a live refresh
-// answers the upload in the browser (media-mocks.ts), so the server refuses the picture it is asked to add.
+// dev-only console command (draft-picture.ts) and run on any stack. The cases of an upload held across a live refresh
+// answer the upload in the browser (media-mocks.ts), so the server refuses the picture it is asked to add.
 
 test.use({ viewport: { width: 1280, height: 900 } });
 // Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one test at a time.
@@ -32,6 +32,14 @@ const HUB_PATH = '/.well-known/mercure';
 // last (the ticket's creation counts) is sent one window later.
 const SHOWS_WITHIN_MS = 3000;
 const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
+// RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU.
+const ADD_REFUSAL = 'Add a screenshot you uploaded yourself.';
+
+/** What the case of a reload fetched during an upload keeps on the page's window between its steps. */
+interface HeldRoundsRender {
+  heldEditor: Element | null;
+  roundsRenderAsked: Promise<void>;
+}
 
 /** Whether request is a fetch of the ticket page, which only a live-updates signal sends. */
 function isPageFetch(request: Request, key: string): boolean {
@@ -63,15 +71,85 @@ async function nextTaskOf(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 }
 
+/** Resolves once the page has painted a frame and run a task after it, so a render Turbo put off to that frame is done. */
+async function nextFrameOf(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0))));
+}
+
+function isRoundsLoad(request: Request, key: string): boolean {
+  return 'GET' === request.method() && new URL(request.url()).pathname === `/t/${key}/rounds`;
+}
+
 /** Every load of the Rounds section's frame from now on. */
 function recordRoundsLoads(page: Page, key: string): Request[] {
   const loads: Request[] = [];
   page.on('request', (request) => {
-    if ('GET' === request.method() && new URL(request.url()).pathname === `/t/${key}/rounds`) {
+    if (isRoundsLoad(request, key)) {
       loads.push(request);
     }
   });
   return loads;
+}
+
+/**
+ * Omar's page of a new ticket, its live stream open and a draft round started. The upload calls are answered in the
+ * browser, and every status poll waits until releaseStatus() is called, then says ready.
+ */
+async function startDraftWithHeldUpload(browser: Browser, title: string): Promise<{ context: BrowserContext; page: Page; key: string; card: Locator; releaseStatus: () => void; picture: Buffer }> {
+  const key = await makeTicketForOmar(browser, title);
+  const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
+  const creationSignalSettled = settleCreationSignal(page, key);
+  const streamOpened = page.waitForResponse((response) => new URL(response.url()).pathname === HUB_PATH);
+  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  expect((await streamOpened).status()).toBe(200);
+  await creationSignalSettled;
+  await page.getByRole('button', { name: 'Start a draft round' }).click();
+  const card = page.locator('article.round-card--private');
+  await expect(card.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+  await page.waitForLoadState('networkidle');
+
+  const picture = drawablePng(400, 240);
+  await routeCompletedUpload(page, 'intent-held-by-refresh', picture.length);
+  let releaseStatus = () => {};
+  const statusReleased = new Promise<void>((resolve) => {
+    releaseStatus = resolve;
+  });
+  // Without the hold the refresh drops the editor, which aborts this poll; the answer then has no request to go to.
+  await page.route('**/media/*/status', async (route) => {
+    await statusReleased;
+    await route.fulfill({ status: 200, json: { status: 'ready' } }).catch(() => {});
+  });
+  return { context, page, key, card, releaseStatus, picture };
+}
+
+/** Starts the upload and resolves once its first status poll is sent, so the picture waits to be added. */
+async function uploadUntilFirstPoll(page: Page, card: Locator, picture: Buffer): Promise<void> {
+  const firstPoll = page.waitForRequest((request) => /^\/media\/[^/]+\/status$/.test(new URL(request.url()).pathname));
+  await card.locator('input[type="file"]').setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: picture });
+  await firstPoll;
+  await expect(card.locator('[data-upload-busy]')).toHaveCount(1);
+}
+
+/** Lena comments on the ticket, which sends Omar's page a refresh signal. */
+async function commentAsLena(browser: Browser, key: string): Promise<BrowserContext> {
+  const lena = await openAs(browser, LENA_STORAGE_STATE);
+  await openThread(lena.page, key);
+  await composerBody(lena.page).fill('The banner still covers the coupon box on a narrow window.');
+  await threadFrame(lena.page).locator('form.thread__composer button[type="submit"]').click();
+  await expect(lena.page.locator(TOAST_REGION)).toHaveText('Comment added.');
+  return lena.context;
+}
+
+/** Resolves with the add's answer once releaseStatus() let the picture be ready. */
+async function addAfterRelease(page: Page, releaseStatus: () => void): Promise<void> {
+  const added = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/addScreenshot'));
+  releaseStatus();
+  const addAnswer = await added;
+  expect(addAnswer.request().postData() ?? '').toContain(MEDIA_ID);
+  expect(addAnswer.status()).toBe(200);
+  // The picture is only mocked in the browser, so the server refuses it; that answer proves the add reached it.
+  expect(await addAnswer.text()).toContain(ADD_REFUSAL);
+  return addAnswer;
 }
 
 async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
@@ -414,59 +492,77 @@ test.describe('Draft round', () => {
     await context.close();
   });
 
-  test('an upload Omar started holds a live refresh of the Rounds section until its picture is added', async ({ browser }) => {
+  test('an upload Omar started holds a live refresh of the Rounds section until its picture is added, and a refused add until he moves on', async ({ browser }) => {
     test.setTimeout(60_000);
-    const key = await makeTicketForOmar(browser, 'Draft upload outlasts a refresh of the rounds');
-    const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
-    const creationSignalSettled = settleCreationSignal(page, key);
-    const streamOpened = page.waitForResponse((response) => new URL(response.url()).pathname === HUB_PATH);
-    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    expect((await streamOpened).status()).toBe(200);
-    await creationSignalSettled;
-    await page.getByRole('button', { name: 'Start a draft round' }).click();
-    const card = page.locator('article.round-card--private');
-    await expect(card.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
-    await page.waitForLoadState('networkidle');
-
-    const picture = drawablePng(400, 240);
-    await routeCompletedUpload(page, 'intent-held-by-refresh', picture.length);
-    let releaseStatus = () => {};
-    const statusReleased = new Promise<void>((resolve) => {
-      releaseStatus = resolve;
-    });
-    // Without the hold the refresh drops the editor, which aborts this poll; the answer then has no request to go to.
-    await page.route('**/media/*/status', async (route) => {
-      await statusReleased;
-      await route.fulfill({ status: 200, json: { status: 'ready' } }).catch(() => {});
-    });
+    const title = 'Draft upload outlasts a refresh of the rounds';
+    const { context, page, key, card, releaseStatus, picture } = await startDraftWithHeldUpload(browser, title);
     const roundsLoads = recordRoundsLoads(page, key);
-    const firstPoll = page.waitForRequest((request) => /^\/media\/[^/]+\/status$/.test(new URL(request.url()).pathname));
-    await card.locator('input[type="file"]').setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: picture });
-    await firstPoll;
-    await expect(card.locator('[data-upload-busy]')).toHaveCount(1);
+    await uploadUntilFirstPoll(page, card, picture);
 
-    const lena = await openAs(browser, LENA_STORAGE_STATE);
-    await openThread(lena.page, key);
     const omarsRefresh = page.waitForRequest((request) => isPageFetch(request, key), { timeout: COALESCED_SHOWS_WITHIN_MS });
-    await composerBody(lena.page).fill('The banner still covers the coupon box on a narrow window.');
-    await threadFrame(lena.page).locator('form.thread__composer button[type="submit"]').click();
-    await expect(lena.page.locator(TOAST_REGION)).toHaveText('Comment added.');
+    const lenaContext = await commentAsLena(browser, key);
     const refreshAnswer = await (await omarsRefresh).response();
     await refreshAnswer?.finished();
     await nextTaskOf(page);
     expect(roundsLoads, 'the Rounds section is held while the upload waits for its picture').toEqual([]);
     await expect(card.getByText('No screenshots yet.')).toBeVisible();
 
-    const added = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/addScreenshot'));
-    releaseStatus();
-    const addAnswer = await added;
-    expect(addAnswer.request().postData() ?? '').toContain(MEDIA_ID);
-    expect(addAnswer.status()).toBe(200);
-    // The picture is only mocked in the browser, so the server refuses it; that answer proves the add reached it.
-    expect(await addAnswer.text()).toContain('Add a screenshot you uploaded yourself.');
+    await addAfterRelease(page, releaseStatus);
+    const refusal = card.getByRole('alert');
+    await expect(refusal).toHaveText(ADD_REFUSAL);
+    await expect(card.locator('[data-upload-busy]'), 'the refusal keeps the upload busy while it shows').toHaveCount(1);
+    await nextTaskOf(page);
+    expect(roundsLoads, 'the held refresh waits while the refusal shows').toEqual([]);
+    await card.getByRole('button', { name: 'Add screenshot' }).focus();
+    await nextTaskOf(page);
+    expect(roundsLoads, 'moving inside the editor keeps the refusal').toEqual([]);
+    await expect(refusal).toHaveText(ADD_REFUSAL);
+
+    await page.getByRole('heading', { name: title, level: 1 }).click();
+    await expect.poll(() => roundsLoads.length, { message: 'the held Rounds section loads again once Omar moved on' }).toBeGreaterThan(0);
+    await expect(card.getByRole('alert')).toHaveCount(0);
     await expect(card.locator('[data-upload-busy]')).toHaveCount(0);
-    await expect.poll(() => roundsLoads.length, { message: 'the held Rounds section loads again once the upload ended' }).toBeGreaterThan(0);
-    await lena.context.close();
+    await lenaContext.close();
+    await context.close();
+  });
+
+  test('a Rounds reload that was being fetched when Omar started an upload renders only once the upload ended', async ({ browser }) => {
+    test.setTimeout(60_000);
+    const title = 'Draft upload started during a reload of the rounds';
+    const { context, page, key, card, releaseStatus, picture } = await startDraftWithHeldUpload(browser, title);
+    let releaseRounds = () => {};
+    const roundsReleased = new Promise<void>((resolve) => {
+      releaseRounds = resolve;
+    });
+    await page.route((url) => url.pathname === `/t/${key}/rounds`, async (route) => {
+      await roundsReleased;
+      await route.fallback().catch(() => {});
+    });
+    const roundsReload = page.waitForRequest((request) => isRoundsLoad(request, key), { timeout: COALESCED_SHOWS_WITHIN_MS });
+    const lenaContext = await commentAsLena(browser, key);
+    await roundsReload;
+
+    await uploadUntilFirstPoll(page, card, picture);
+    await card.evaluate((element) => {
+      const held = window as unknown as HeldRoundsRender;
+      held.heldEditor = element.querySelector('.draft-round-editor__body');
+      held.roundsRenderAsked = new Promise<void>((resolve) => element.closest('turbo-frame')?.addEventListener('turbo:before-frame-render', () => resolve(), { once: true }));
+    });
+    releaseRounds();
+    await page.evaluate(() => (window as unknown as HeldRoundsRender).roundsRenderAsked);
+    await nextFrameOf(page);
+    expect(await page.evaluate(() => (window as unknown as HeldRoundsRender).heldEditor?.isConnected), 'the fetched Rounds section waits while the upload is busy').toBe(true);
+
+    await addAfterRelease(page, releaseStatus);
+    await expect(card.getByRole('alert')).toHaveText(ADD_REFUSAL);
+    await nextFrameOf(page);
+    expect(await page.evaluate(() => (window as unknown as HeldRoundsRender).heldEditor?.isConnected), 'the refusal keeps the fetched section waiting').toBe(true);
+
+    await page.getByRole('heading', { name: title, level: 1 }).click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as HeldRoundsRender).heldEditor?.isConnected), { message: 'the fetched Rounds section renders once Omar moved on' }).toBe(false);
+    await expect(card.getByRole('alert')).toHaveCount(0);
+    await expect(card.getByText('No screenshots yet.')).toBeVisible();
+    await lenaContext.close();
     await context.close();
   });
 });

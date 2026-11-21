@@ -14,14 +14,17 @@ import { readUploadStatus, REJECTED_MESSAGE, sleep, statusUrlFor, waitForProcess
 // and the form that listens says so when the server refuses a submit. A status poll that fails or is refused (offline,
 // 404, 429) shows nothing and counts as pending. Refusals and failures of the upload itself show the server's own
 // message in the `status` live region, remove data-media-state and fire presigned-upload:failed (no detail). The clear()
-// action drops the picture: it stops the upload or the polling, empties the field, data-media-state and the preview, and
-// fires nothing. resumeProcessing() polls a kept, still pending picture for another 15 s. The markup and the values
-// come from the UploadField component, or from ScreenshotReportField.
+// action drops the picture: it stops the upload or the polling, empties the field, data-media-state, the preview and
+// the status, and fires only presigned-upload:idle when it ends a busy upload. clearAfterFailure(message) drops it the
+// same way but shows message and keeps the field busy as below. resumeProcessing() polls a kept, still pending picture
+// for another 15 s. The markup and the values come from the UploadField component, or from ScreenshotReportField.
 //
 // From the start of an upload until it ends, the element carries data-upload-busy, which tells live-updates to hold
-// the part around it rather than swap it and lose the upload. It ends on failed, rejected, clear(), and on ready or
-// still-processing unless a listener calls preventDefault() on that event: it then takes the picture over and ends
-// the upload with clear() or resumeProcessing(). presigned-upload:idle (no detail) fires as it ends.
+// the part around it rather than swap it and lose the upload. It ends on clear(), and on ready or still-processing
+// unless a listener calls preventDefault() on that event: it then takes the picture over and ends the upload with
+// clear(), clearAfterFailure() or resumeProcessing(). After a refusal, a failure or a rejection the field stays busy
+// while its message shows, so a refresh does not wipe the message unread: until the next upload starts, clear() runs,
+// or the person presses or focuses anything outside the field. presigned-upload:idle (no detail) fires as it ends.
 export default class extends Controller {
   static targets = ['input', 'status', 'progress', 'preview', 'mediaId'];
   static values = {
@@ -44,6 +47,7 @@ export default class extends Controller {
   disconnect() {
     this.abortController?.abort();
     cancelAnimationFrame(this.sayFrame);
+    this.#stopHoldingForMessage();
     this.clearPreview();
   }
 
@@ -81,6 +85,7 @@ export default class extends Controller {
     const refusal = refusalFor(file);
     if (refusal) {
       this.say(refusal);
+      this.#holdForMessage();
       return;
     }
     this.isUploading = true;
@@ -88,6 +93,7 @@ export default class extends Controller {
     const { signal } = (this.abortController = new AbortController());
     this.mediaIdTarget.value = '';
     this.element.dataset.mediaState = 'uploading';
+    this.#stopHoldingForMessage();
     this.#markBusy();
     this.showPreview(file);
     this.showProgress(0);
@@ -115,7 +121,7 @@ export default class extends Controller {
       delete this.element.dataset.mediaState;
       this.clearPreview();
       this.say(failure instanceof UploadFailed ? failure.message : 'The upload failed. Try again.');
-      this.#markIdle();
+      this.#holdForMessage();
       this.dispatch('failed');
     } finally {
       // An aborted upload was replaced by a newer one, or the page is gone: the newer one owns these.
@@ -127,6 +133,21 @@ export default class extends Controller {
   }
 
   clear() {
+    this.#dropPicture();
+    this.say('');
+    this.#stopHoldingForMessage();
+    this.#markIdle();
+  }
+
+  // Drops the picture as clear() does, for a picture that could not be used: shows message (pass none when the page
+  // says why elsewhere) and keeps the field busy until the person moves on, as after a failed upload.
+  clearAfterFailure(message = '') {
+    this.#dropPicture();
+    this.say(message);
+    this.#holdForMessage();
+  }
+
+  #dropPicture() {
     this.abortController?.abort();
     this.abortController = null;
     this.isUploading = false;
@@ -134,8 +155,6 @@ export default class extends Controller {
     delete this.element.dataset.mediaState;
     this.progressTarget.hidden = true;
     this.clearPreview();
-    this.say('');
-    this.#markIdle();
   }
 
   // Polls the kept picture again for another 15 s, after presigned-upload:still-processing; fires the same events as the
@@ -167,7 +186,7 @@ export default class extends Controller {
       this.mediaIdTarget.value = '';
       this.clearPreview();
       this.say(REJECTED_MESSAGE);
-      this.#markIdle();
+      this.#holdForMessage();
       this.dispatch('rejected', { detail: { mediaId } });
     } else {
       this.#markIdleUnlessTakenOver(this.dispatch('still-processing', { detail: { mediaId } }));
@@ -191,6 +210,25 @@ export default class extends Controller {
       this.#markIdle();
     }
   }
+
+  // Pressing or focusing anything outside the field ends the hold, so it cannot outlast the person's next move.
+  #holdForMessage() {
+    this.#markBusy();
+    document.addEventListener('pointerdown', this.#onInteraction, true);
+    document.addEventListener('focusin', this.#onInteraction, true);
+  }
+
+  #stopHoldingForMessage() {
+    document.removeEventListener('pointerdown', this.#onInteraction, true);
+    document.removeEventListener('focusin', this.#onInteraction, true);
+  }
+
+  #onInteraction = (event) => {
+    if (!this.element.contains(event.target)) {
+      this.#stopHoldingForMessage();
+      this.#markIdle();
+    }
+  };
 
   // The text is cleared first and set on the next frame: a live region does not announce a message equal to the last.
   say(message) {

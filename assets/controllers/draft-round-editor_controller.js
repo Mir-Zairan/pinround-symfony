@@ -18,7 +18,7 @@ const STILL_PROCESSING_MESSAGE = 'This picture is taking too long to process. Ad
 // and is added once it is ready (it is polled for up to MAX_EXTRA_PROCESSING_WAITS more rounds, then the person is told
 // to add it again).
 export default class extends Controller {
-  static targets = ['file'];
+  static targets = ['file', 'refusal'];
   static outlets = ['presigned-upload'];
 
   connect() {
@@ -52,8 +52,9 @@ export default class extends Controller {
     this.extraWaits = 0;
   }
 
-  // The picture is ready: add it, then empty the upload (also when the server refused the add, which it shows itself).
-  // preventDefault keeps the upload busy, so a live refresh of the Rounds section waits until the picture is added.
+  // The picture is ready: add it, then empty the upload. preventDefault keeps the upload busy, so a live refresh of the
+  // Rounds section waits until the picture is added; a refused add, whose reason the component shows, keeps it busy
+  // until the person moves on, so the refresh does not wipe that reason.
   async addUploaded(event) {
     const upload = this.hasPresignedUploadOutlet ? this.presignedUploadOutlet : null;
     if (upload !== null) {
@@ -64,7 +65,11 @@ export default class extends Controller {
       const component = await this.component();
       await this.send(component, 'addScreenshot', { mediaId: event.detail.mediaId });
     } finally {
-      upload?.clear();
+      if (this.hasRefusalTarget) {
+        upload?.clearAfterFailure();
+      } else {
+        upload?.clear();
+      }
     }
   }
 
@@ -77,8 +82,7 @@ export default class extends Controller {
     event.preventDefault();
     if (this.extraWaits >= MAX_EXTRA_PROCESSING_WAITS) {
       this.extraWaits = 0;
-      this.presignedUploadOutlet.clear();
-      this.presignedUploadOutlet.say(STILL_PROCESSING_MESSAGE);
+      this.presignedUploadOutlet.clearAfterFailure(STILL_PROCESSING_MESSAGE);
       return;
     }
     this.extraWaits += 1;

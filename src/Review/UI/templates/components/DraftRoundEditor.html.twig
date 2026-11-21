@@ -24,7 +24,7 @@
             data-action="paste->presigned-upload#paste dragover->presigned-upload#dragOver drop->presigned-upload#drop presigned-upload:ready->draft-round-editor#addUploaded presigned-upload:still-processing->draft-round-editor#keepWaiting presigned-upload:started->draft-round-editor#resetWaiting pin-placer:change->draft-round-editor#schedulePinSave"
         >
             {% if this.refusal is not null %}
-                <p class="draft-round-editor__refusal" role="alert">{{ this.refusal }}</p>
+                <p class="draft-round-editor__refusal" role="alert" data-draft-round-editor-target="refusal">{{ this.refusal }}</p>
             {% endif %}
             {% if card.screenshots is empty %}
                 <p class="round-card__empty">{{ constant('App\\Review\\UI\\Component\\DraftRoundEditor::EMPTY_NOTE') }}</p>
