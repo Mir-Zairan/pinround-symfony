@@ -10,4 +10,6 @@
         </div>
     </div>
     <p class="ticket__note">Reported in pinround · Group: {{ ticket.groupLabel }}</p>
+    {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). Here, so a move's stream and a live refresh, which replace this part, load the bar again; the frame's own request decides who may see it. -#}
+    {{ component('RoundBar', {key: ticket.key}) }}
 </div>

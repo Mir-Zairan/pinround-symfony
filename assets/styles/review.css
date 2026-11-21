@@ -417,6 +417,34 @@ textarea.screenshot-report__input {
   color: var(--on-surface-var);
 }
 
+/* The ticket header's round bar (RoundBar, P14.T7). The frame makes no box of its own, so an empty one adds no gap
+   to the header's column. */
+.round-bar-frame {
+  display: contents;
+}
+
+.round-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--space-8) var(--space-12);
+  padding: var(--space-8) var(--space-8) var(--space-8) var(--space-16);
+  border-radius: var(--radius-card);
+  background: var(--ping-container);
+  color: var(--on-ping-container);
+}
+
+.round-bar__text {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.round-bar__open {
+  margin-inline-start: auto;
+}
+
 /* The ticket page's Rounds section (RoundsSection). */
 
 .round-card {

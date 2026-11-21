@@ -1,0 +1,9 @@
+{#- RoundsController's answer to RoundBar's frame: the bar while a shared round is open, else the frame with nothing in it. The link leaves the frame (_top) for the round's page. -#}
+<turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundBar::FRAME_ID') }}" class="round-bar-frame">
+{%- if bar is not null -%}
+    <div class="round-bar">
+        <p class="round-bar__text"><strong>{{ constant('App\\Review\\UI\\Component\\RoundBar::ROUND_OPEN')|format(bar.roundNumber) }}</strong>{% if bar.readyForLine is not null %} · {{ bar.readyForLine }}{% endif %}</p>
+        <twig:Button variant="outline" size="sm" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::ROUND_ROUTE'), {key: ticketKey, number: bar.roundNumber}) }}" class="round-bar__open" data-turbo-frame="_top">{{ constant('App\\Review\\UI\\Component\\RoundBar::OPEN_ROUND') }}</twig:Button>
+    </div>
+{%- endif -%}
+</turbo-frame>
