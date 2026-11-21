@@ -1,19 +1,20 @@
 // The popup: choose once where captures go (a new report, my draft round on a ticket, a notebook), pin the page, then
 // capture the visible tab with its pins into that target. Nothing becomes a ticket here: the person sends a report
 // draft in pinround (ADR-0039). A notebook target also shows its scenarios (scenario-panel.js), played from here: the
-// run lives as long as the popup.
+// run lives as long as the popup. A draft round target also offers a retake of its screenshots (retake-picker.js).
 import { PinroundApi } from '../shared/api.js';
 import { browser } from '../shared/browser.js';
 import { loadSettings } from '../shared/settings.js';
 import { captureTexts } from '../capture/capture.js';
 import { NEW_NOTEBOOK, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, notebookChoice, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
-import { captureToTarget, newReportSavedMessage } from '../capture/capture-to-target.js';
+import { NEW_SCREENSHOT, captureToTarget, newReportSavedMessage } from '../capture/capture-to-target.js';
 import { OLD_CAPTURES_DROPPED, clearNewReport, dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture } from '../capture/new-report.js';
 import { captureToNotebook, makeNotebook } from '../capture/notebook-capture.js';
 import { activePageContext } from '../capture/page-context.js';
 import { activeTabId, openPinOverlay } from '../capture/page-pins.js';
 import { StepRefusal } from '../player/step-runner.js';
 import { fillReportInputs, showTargetFields } from './report-captures.js';
+import { RetakePicker } from './retake-picker.js';
 import { ScenarioPanel } from './scenario-panel.js';
 import { NO_CHOICE, forgetGoneTarget } from './target-picker.js';
 import { focusFirstVisible } from './visible-focus.js';
@@ -28,6 +29,8 @@ const FALLBACK_FOCUS_IDS = ['capture', 'target'];
 
 /** @type {ScenarioPanel|null} */
 let scenarioPanel = null;
+/** @type {RetakePicker|null} */
+let retakePicker = null;
 
 function showStatus(message, isError = false) {
     const status = element('status');
@@ -67,12 +70,21 @@ function showScenariosOfPicker() {
     scenarioPanel.showFor(offeredTargets.get(element('target').value));
 }
 
+/** "Add it as" for the picker's choice; a list that could not load is said on the status line. */
+async function showRetakePickerOf(keptValue = NEW_SCREENSHOT) {
+    const loadProblem = await retakePicker.showFor(offeredTargets.get(element('target').value), keptValue);
+    if (null !== loadProblem) {
+        showStatus(loadProblem, true);
+    }
+}
+
 /** Takes a target pinround says is gone out of the picker, and the scenarios out of sight when the picker showed it. */
 async function forgetGoneTargetOfPicker(goneTarget) {
     const shownValue = element('target').value;
     await forgetGoneTarget(extensionSession, element('target'), offeredTargets, goneTarget);
     if (shownValue !== element('target').value) {
         showScenariosOfPicker();
+        await showRetakePickerOf();
     }
 }
 
@@ -116,9 +128,23 @@ async function capture(api) {
     const target = chosenTarget();
     const texts = captureTexts(element('shot-title').value, element('shot-summary').value);
     const tabId = await activeTabId(browser);
+    const retakeOf = retakePicker.retakeOfFor(target);
     showStatus('Uploading…');
     const typed = { project: element('project').value, reportTitle: element('report-title').value };
-    const message = await captureToTarget({ api, browser, storage: extensionSession, tabId, target, typed, texts });
+    let message;
+    try {
+        message = await captureToTarget({ api, browser, storage: extensionSession, tabId, target, typed, texts, retakeOf });
+    } catch (error) {
+        // A refused retake may name a screenshot removed in pinround since the list loaded; a gone target is run()'s.
+        if (null !== retakeOf && !(error instanceof TargetGoneError)) {
+            await showRetakePickerOf(retakeOf);
+        }
+        throw error;
+    }
+    // The draft now has another screenshot or try; the next capture is a new screenshot unless the person picks again.
+    if ('ticket' === target.kind) {
+        await showRetakePickerOf();
+    }
     showStatus(message);
     await fillShotTexts(true);
 }
@@ -140,6 +166,7 @@ async function newNotebook(api) {
     element('notebook-title').value = '';
     await showFields();
     showScenariosOfPicker();
+    await showRetakePickerOf();
     showStatus('Notebook made. Captures now go to it.');
 }
 
@@ -201,6 +228,7 @@ async function start() {
         return;
     }
     const api = new PinroundApi(settings.origin, settings.token);
+    retakePicker = new RetakePicker(element, api);
     element('capture-form').hidden = false;
     scenarioPanel = new ScenarioPanel(element, showStatus, {
         api,
@@ -219,6 +247,7 @@ async function start() {
     }
     await showFields();
     showScenariosOfPicker();
+    await showRetakePickerOf();
     const problems = [droppedMessage, ...loadProblems, hadOldCaptures ? OLD_CAPTURES_DROPPED : null].filter((problem) => null !== problem);
     if (problems.length > 0) {
         showStatus(problems.join(' '), true);
@@ -233,6 +262,7 @@ async function start() {
         }
         await showFields();
         showScenariosOfPicker();
+        await showRetakePickerOf();
     });
     for (const id of ['project', 'report-title']) {
         element(id).addEventListener('change', () => saveTypedReport(extensionSession, { project: element('project').value, reportTitle: element('report-title').value }));

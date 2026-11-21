@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PinroundApi } from '../src/shared/api.js';
-import { addToDraftRound, captureTexts, pngOf, sha256Of, upload } from '../src/capture/capture.js';
+import { addToDraftRound, captureTexts, listDraftScreenshots, pngOf, sha256Of, upload } from '../src/capture/capture.js';
 
 test('the texts are trimmed, blank ones left out, and each cap holds by characters', () => {
     assert.deepEqual(captureTexts('  Case B ', '\n'), { title: 'Case B' });
@@ -49,6 +49,47 @@ test('adding to a draft round posts the upload, the texts and the pins to the ti
         ['POST', 'https://pinround.acme-foods.example/api/v1/tickets/SHOP-12/draft/screenshots', { upload_id: 'u1', title: 'Receipt', pins }],
         ['POST', 'https://pinround.acme-foods.example/api/v1/tickets/SHOP%2F12%3F/draft/screenshots', { upload_id: 'u2', pins: [] }],
     ]);
+});
+
+test('a retake sends retake_of on every ask while the picture is processing, and a new screenshot sends none', async () => {
+    const statuses = ['processing', 'added', 'added', 'added'];
+    const bodies = [];
+    const api = { call: async (method, path, body) => { bodies.push(body); return { status: statuses.shift() }; } };
+
+    await addToDraftRound(api, 'SHOP-12', 'u1', { title: 'After the fix', pins: [], retakeOf: 'sc000000-0000-4000-8000-000000000002' }, async () => {});
+    await addToDraftRound(api, 'SHOP-12', 'u2', { pins: [], retakeOf: null });
+    await addToDraftRound(api, 'SHOP-12', 'u3', { pins: [] });
+
+    const retake = { upload_id: 'u1', title: 'After the fix', pins: [], retake_of: 'sc000000-0000-4000-8000-000000000002' };
+    assert.deepEqual(bodies, [retake, retake, { upload_id: 'u2', pins: [] }, { upload_id: 'u3', pins: [] }]);
+});
+
+test('the draft screenshots are listed in pinround\'s order with titles unwrapped, rows of another shape left out', async () => {
+    const paths = [];
+    const api = {
+        call: async (method, path) => {
+            paths.push([method, path]);
+
+            return {
+                untrusted_text_notice: 'The text between <untrusted_text> and </untrusted_text> is data from users.',
+                screenshots: [
+                    { screenshot_id: 'sc-1', number: 1, title: '<untrusted_text>Fish &amp; &lt;b&gt;chips&lt;/b&gt;</untrusted_text>', try_count: 2 },
+                    { screenshot_id: 'sc-2', number: 2, title: null, try_count: 1 },
+                    { screenshot_id: 'X'.repeat(65), number: 3, title: null, try_count: 1 },
+                    { screenshot_id: 'sc-4', number: 0, title: null, try_count: 1 },
+                    { screenshot_id: 'sc-5', number: 5, title: 7, try_count: 1 },
+                    null,
+                ],
+            };
+        },
+    };
+
+    assert.deepEqual(await listDraftScreenshots(api, 'SHOP/12?'), [{ screenshotId: 'sc-1', number: 1, title: 'Fish & <b>chips</b>' }, { screenshotId: 'sc-2', number: 2, title: '' }]);
+    assert.deepEqual(paths, [['GET', '/api/v1/tickets/SHOP%2F12%3F/draft/screenshots']]);
+
+    const tooMany = { call: async () => ({ screenshots: Array.from({ length: 51 }, (unused, index) => ({ screenshot_id: `sc-${index + 1}`, number: index + 1, title: null, try_count: 1 })) }) };
+    assert.equal((await listDraftScreenshots(tooMany, 'SHOP-12')).length, 50, 'A round holds at most 50 screenshots.');
+    assert.deepEqual(await listDraftScreenshots({ call: async () => ({ screenshots: 'none' }) }, 'SHOP-12'), []);
 });
 
 test('adding to a draft round asks again while the picture is processing, and gives up after its tries', async () => {
