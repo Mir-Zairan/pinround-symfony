@@ -2,7 +2,7 @@ import type { BrowserContext, Page, Response } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { logInAndTurnOnTwoStepLogin, MIA_EMAIL, turnOffTwoStepLogin, twoStepCodesFile } from './auth';
+import { logInAndTurnOnTwoStepLogin, LENA_EMAIL, turnOffTwoStepLogin, twoStepCodesFile } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { EXTENSION_ID, expect, openPopupFor, test, type ExtensionPageGlobals } from './extension';
 
@@ -11,10 +11,10 @@ import { EXTENSION_ID, expect, openPopupFor, test, type ExtensionPageGlobals } f
 // (EXTENSION_ORIGINS): the test copy keeps the default host permissions, which do not reach pinround. One part is
 // stood in for: chrome.identity.launchWebAuthFlow (stubSignInWindow), whose window Playwright cannot reach.
 //
-// As Mia: the consent page asks for the recent password and two-step proof of making a token, so beforeAll turns her
-// two-step login on (that login is the proof, for 10 minutes) and afterAll turns it off. login-code.spec.ts does the
-// same for her in the chromium project: run the two apart, as each expects her two-step login to be off when it starts.
-const MIA_CONNECT_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'mia-connect.json');
+// As Lena: the consent page asks for the recent password and two-step proof of making a token, so beforeAll turns her
+// two-step login on (that login is the proof, for 10 minutes) and afterAll turns it off. Mia, Raj, Ben and Sara each
+// have a chromium spec that turns theirs on and off at the same time as this one could; Lena's is turned on nowhere else.
+const LENA_CONNECT_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'lena-connect.json');
 const CONSENT_HEADING = 'Connect pinround browser extension to pinround?';
 const CONNECTED = 'Connected. You can capture pages now.';
 const SIGNED_OUT = 'Signed out. The token no longer works.';
@@ -34,17 +34,17 @@ const registeredClientIds: string[] = [];
 
 test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
-  await logInAndTurnOnTwoStepLogin(await context.newPage(), MIA_EMAIL, 'Mia');
-  await context.storageState({ path: MIA_CONNECT_STORAGE_STATE });
+  await logInAndTurnOnTwoStepLogin(await context.newPage(), LENA_EMAIL, 'Lena');
+  await context.storageState({ path: LENA_CONNECT_STORAGE_STATE });
   await context.close();
 });
 
 test.afterAll(async ({ browser }) => {
-  if (!existsSync(twoStepCodesFile(MIA_EMAIL)) || !existsSync(MIA_CONNECT_STORAGE_STATE)) {
+  if (!existsSync(twoStepCodesFile(LENA_EMAIL)) || !existsSync(LENA_CONNECT_STORAGE_STATE)) {
     return;
   }
-  const context = await browser.newContext({ storageState: MIA_CONNECT_STORAGE_STATE });
-  await turnOffTwoStepLogin(await context.newPage(), MIA_EMAIL);
+  const context = await browser.newContext({ storageState: LENA_CONNECT_STORAGE_STATE });
+  await turnOffTwoStepLogin(await context.newPage(), LENA_EMAIL);
   await context.close();
 });
 
@@ -56,9 +56,9 @@ test.afterEach(() => {
   }
 });
 
-/** Gives the extension's browser Mia's logged-in session from beforeAll, as if she had logged in to pinround there. */
-async function logInAsMia(context: BrowserContext): Promise<void> {
-  const { cookies } = JSON.parse(await readFile(MIA_CONNECT_STORAGE_STATE, 'utf8')) as { cookies: Parameters<BrowserContext['addCookies']>[0] };
+/** Gives the extension's browser Lena's logged-in session from beforeAll, as if she had logged in to pinround there. */
+async function logInAsLena(context: BrowserContext): Promise<void> {
+  const { cookies } = JSON.parse(await readFile(LENA_CONNECT_STORAGE_STATE, 'utf8')) as { cookies: Parameters<BrowserContext['addCookies']>[0] };
   await context.addCookies(cookies);
 }
 
@@ -104,7 +104,7 @@ function accessTokenRowsOf(clientId: string, tokenPrefix: string): string[] {
   return runAsDatabaseOwner(`
     SELECT r.client_id, t.last_used_at IS NOT NULL, t.revoked_at IS NULL, r.revoked_at IS NULL
     FROM idn_api_token t JOIN idn_oauth_refresh_token r ON r.access_token_id = t.id JOIN idn_user u ON u.id = t.user_id
-    WHERE u.email = '${MIA_EMAIL}' AND r.client_id = '${clientId}' AND t.prefix = '${tokenPrefix}'`);
+    WHERE u.email = '${LENA_EMAIL}' AND r.client_id = '${clientId}' AND t.prefix = '${tokenPrefix}'`);
 }
 
 test('Connect on the options page allows the extension on the consent page, its calls carry the issued token, and Sign out revokes it', async ({ context, testPage, baseURL, request }) => {
@@ -113,7 +113,7 @@ test('Connect on the options page allows the extension on the consent page, its 
   const redirectOrigin = `https://${EXTENSION_ID}.chromiumapp.org`;
   // Chrome's sign-in window stops at this address and never loads it; the tab standing in for it gets an empty page.
   await context.route(`${redirectOrigin}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '' }));
-  await logInAsMia(context);
+  await logInAsLena(context);
   const options = await context.newPage();
   await options.goto(`chrome-extension://${EXTENSION_ID}/options.html`);
   await stubSignInWindow(options);
