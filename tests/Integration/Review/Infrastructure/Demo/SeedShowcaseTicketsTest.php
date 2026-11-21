@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Review\Infrastructure\Demo;
 
+use App\Media\Application\Processing\MediaFiles;
 use App\Review\Infrastructure\Demo\SeedShowcaseTickets;
 use App\SharedKernel\Application\TenantContext;
 use App\Tests\Functional\SharedKernel\DemoSeedRows;
@@ -47,7 +48,11 @@ final class SeedShowcaseTicketsTest extends KernelTestCase
     protected function tearDown(): void
     {
         $this->removeDemoRows();
-        false === $this->passwordBefore ? putenv('DEMO_PASSWORD') : putenv('DEMO_PASSWORD='.$this->passwordBefore);
+        if (false === $this->passwordBefore) {
+            putenv('DEMO_PASSWORD');
+        } else {
+            putenv('DEMO_PASSWORD='.$this->passwordBefore);
+        }
         parent::tearDown();
     }
 
@@ -127,6 +132,72 @@ final class SeedShowcaseTicketsTest extends KernelTestCase
     }
 
     #[Test]
+    public function aRunThatFailsPartwayLeavesNoShowcaseTicketAndTheNextRunMakesAllThree(): void
+    {
+        $bucket = new class(new InMemoryMediaFiles()) implements MediaFiles {
+            /** the 1-based number of the write() that fails, or null for a bucket that works */
+            private ?int $failingWrite = null;
+
+            private int $writes = 0;
+
+            public function __construct(private readonly InMemoryMediaFiles $files)
+            {
+            }
+
+            public function sizeOf(string $key): ?int
+            {
+                return $this->files->sizeOf($key);
+            }
+
+            public function readUpTo(string $key, int $maxBytes): string
+            {
+                return $this->files->readUpTo($key, $maxBytes);
+            }
+
+            public function write(string $key, string $bytes, string $mime): void
+            {
+                if (++$this->writes === $this->failingWrite) {
+                    throw new \RuntimeException('The storage cannot be written.');
+                }
+                $this->files->write($key, $bytes, $mime);
+            }
+
+            public function delete(string $key): void
+            {
+                $this->files->delete($key);
+            }
+
+            public function failAtWrite(?int $number): void
+            {
+                $this->failingWrite = $number;
+                $this->writes = 0;
+            }
+        };
+        self::getContainer()->set('test.media_seed_files', $bucket);
+        // The first run fails at the search ticket's first picture, so only the steps before the showcase have
+        // committed: the counts to compare with.
+        $bucket->failAtWrite(1);
+        $this->runFailingSeed();
+        $before = [$this->rowCountOf('med_object'), $this->rowCountOf('tkt_ticket_event')];
+
+        // Each picture writes a view and a thumb: writes 1 to 4 are the search ticket's report and fix, so write 5 is
+        // the total ticket's report, after the search ticket is complete.
+        $bucket->failAtWrite(5);
+        $refusal = $this->runFailingSeed();
+
+        self::assertSame('The storage cannot be written.', $refusal->getMessage());
+        self::assertSame([], $this->ticketFacts());
+        self::assertSame($before, [$this->rowCountOf('med_object'), $this->rowCountOf('tkt_ticket_event')]);
+
+        $bucket->failAtWrite(null);
+        $rerun = $this->runSeed();
+
+        self::assertSame(Command::SUCCESS, $rerun->getStatusCode(), $rerun->getDisplay());
+        self::assertStringContainsString('Showcase tickets: created 3, kept 0.', $rerun->getDisplay());
+        self::assertEqualsCanonicalizing(self::titles(), array_keys($this->ticketFacts()));
+    }
+
+    #[Test]
     public function aShowcaseTicketWhoseTitleIsTakenIsKeptAndTheOthersAreMade(): void
     {
         $this->runSeed();
@@ -135,11 +206,15 @@ final class SeedShowcaseTicketsTest extends KernelTestCase
             [SeedShowcaseTickets::TOTAL_TITLE, SeedShowcaseTickets::ORDERS_TITLE],
         ));
         $searchTicketBefore = $this->ticketFacts()[SeedShowcaseTickets::SEARCH_TITLE] ?? null;
+        $searchRoundsBefore = $this->roundFacts()[SeedShowcaseTickets::SEARCH_TITLE] ?? null;
 
         $second = $this->runSeed();
 
         self::assertStringContainsString('Showcase tickets: created 2, kept 1.', $second->getDisplay());
         self::assertSame(['done', 'Omar', 'Mia', null], $searchTicketBefore);
+        self::assertNotNull($searchRoundsBefore);
+        self::assertSame($searchTicketBefore, $this->ticketFacts()[SeedShowcaseTickets::SEARCH_TITLE] ?? null);
+        self::assertSame($searchRoundsBefore, $this->roundFacts()[SeedShowcaseTickets::SEARCH_TITLE] ?? null);
         self::assertSame(
             [SeedShowcaseTickets::TOTAL_TITLE, SeedShowcaseTickets::ORDERS_TITLE, SeedShowcaseTickets::SEARCH_TITLE],
             $this->underAcmeFoods(fn (): array => $this->connection()->fetchFirstColumn('SELECT title FROM tkt_ticket WHERE title IN (?, ?, ?) ORDER BY title', self::titles())),
@@ -241,6 +316,21 @@ final class SeedShowcaseTicketsTest extends KernelTestCase
         $tester->execute([]);
 
         return $tester;
+    }
+
+    /**
+     * Runs the seed expecting the showcase step to throw, and resets the entity manager its failed transaction closed.
+     */
+    private function runFailingSeed(): \RuntimeException
+    {
+        try {
+            $this->runSeed();
+        } catch (\RuntimeException $failure) {
+            self::getContainer()->get('doctrine')->resetManager();
+
+            return $failure;
+        }
+        self::fail('The seed was expected to fail at a picture.');
     }
 
     /**

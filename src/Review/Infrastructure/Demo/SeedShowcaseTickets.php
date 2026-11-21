@@ -309,7 +309,11 @@ final readonly class SeedShowcaseTickets implements DemoSeedStep
         } finally {
             // Entities loaded under $organizationId must not outlive its tenant.
             $this->entityManager->clear();
-            null === $tenantBefore ? $this->tenantContext->clear() : $this->tenantContext->set($tenantBefore);
+            if (null === $tenantBefore) {
+                $this->tenantContext->clear();
+            } else {
+                $this->tenantContext->set($tenantBefore);
+            }
         }
     }
 }
