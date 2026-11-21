@@ -98,6 +98,8 @@ final class AdminPeopleListTest extends WebTestCase
             PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
             PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00',
             PeopleController::TOKENS_AFTER_ID => '0198f000-0000-7000-8000-0000000002ff',
+            PeopleController::CONNECTIONS_AFTER_CONNECTED_AT => '2099-01-01T00:00:00+00:00',
+            PeopleController::CONNECTIONS_AFTER_ID => '0198f000-0000-7000-8000-0000000003ff',
         ];
 
         $page = $this->client->request('GET', self::PEOPLE_PAGE, $otherListsPages);
@@ -112,6 +114,7 @@ final class AdminPeopleListTest extends WebTestCase
         self::assertSame(
             '/admin/people?after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
             .'&tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff'
+            .'&connections_after_connected_at=2099-01-01T00:00:00%2B00:00&connections_after_id=0198f000-0000-7000-8000-0000000003ff'
             .\sprintf('&people_after_name=omar%%20%02d&people_after_id=%s', PeopleController::PAGE_SIZE, $lastShownId),
             $showMore->attr('href'),
         );

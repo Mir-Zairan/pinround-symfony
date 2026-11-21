@@ -108,5 +108,33 @@
                 </ul>
             {% endif %}
         </twig:Card>
+
+        <twig:Card tag="section" class="security__section" aria-labelledby="connected-apps-title">
+            <h2 class="security__heading" id="connected-apps-title">Connected apps</h2>
+            <p class="login__hint">Apps you allowed to use pinround as you, such as Claude Code or the browser extension. End a connection to stop the app at once.</p>
+            {% if connectionError %}
+                <p class="login__error" role="alert">{{ connectionError }}</p>
+            {% endif %}
+            {% if connections is empty %}
+                <twig:EmptyState message="No apps are connected." />
+            {% else %}
+                <ul class="api-tokens">
+                    {% for connection in connections %}
+                        <li class="api-tokens__row" data-connection-id="{{ connection.familyId }}">
+                            <p><strong>{{ connection.clientName }}</strong></p>
+                            <p class="login__hint">{{ connection.scopes|map(scopeName => scopeChoices[scopeName])|join(' ') }}</p>
+                            <p class="login__hint">
+                                Connected {{ connection.connectedAt|date('j M Y', app.user.timeZone) }}
+                                · {{ connection.lastRenewedAt ? 'Last renewed ' ~ connection.lastRenewedAt|date('j M Y, H:i', app.user.timeZone) : 'Not renewed yet' }}
+                            </p>
+                            <form class="api-tokens__revoke" method="post" action="{{ path('identity_tokens_end_connection', {id: connection.familyId}) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token(endConnectionCsrfTokenId) }}">
+                                <twig:Button type="submit" variant="outline" aria-label="End connection of {{ connection.clientName }}">End connection</twig:Button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </twig:Card>
     </div>
 {% endblock %}

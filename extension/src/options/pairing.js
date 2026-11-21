@@ -9,7 +9,7 @@ import { checkedToken, clearSettings, loadSettings, pinroundOriginOf, saveConnec
 export const CONNECTED = 'Connected. You can capture pages now.';
 export const SIGNED_OUT = 'Signed out. The token no longer works.';
 export const SIGNED_OUT_LOCALLY = 'Signed out here, but pinround could not be reached. Revoke the token on the API tokens page.';
-export const CONNECTION_SIGNED_OUT_LOCALLY = 'Signed out here, but pinround could not be reached, so it may still accept the connection.';
+export const CONNECTION_SIGNED_OUT_LOCALLY = 'Signed out here, but pinround could not be reached. End the connection under Connected apps on the API tokens page.';
 
 /**
  * Checks the address and the token with one call to pinround, then keeps them. Nothing is kept when either is refused.

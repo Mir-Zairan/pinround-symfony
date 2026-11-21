@@ -203,23 +203,35 @@ final class AdminPeopleTokensTest extends WebTestCase
             PeopleController::AFTER_ID => '0198f000-0000-7000-8000-0000000001ff',
             PeopleController::TOKENS_AFTER_EXPIRES_AT => '2099-01-01T00:00:00+00:00',
             PeopleController::TOKENS_AFTER_ID => '0198f000-0000-7000-8000-0000000002ff',
+            PeopleController::CONNECTIONS_AFTER_CONNECTED_AT => '2099-01-01T00:00:00+00:00',
+            PeopleController::CONNECTIONS_AFTER_ID => '0198f000-0000-7000-8000-0000000003ff',
         ]);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['Omar Haddad', 'Sara Holm'], $this->peopleNamesOn($page));
         self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__pending .people__row'));
         self::assertCount(PeopleController::PAGE_SIZE, $page->filter('main .people__token-row'));
+        $connectionsPage = '&connections_after_connected_at=2099-01-01T00:00:00%2B00:00&connections_after_id=0198f000-0000-7000-8000-0000000003ff';
         self::assertSame(
             '/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString()
             .'&tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff'
+            .$connectionsPage
             .'&after_invited_at=2026-11-16T13:02:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-000000000102',
             $this->showMoreHrefOf($page, 'people__pending'),
         );
         self::assertSame(
             '/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString()
             .'&after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
+            .$connectionsPage
             .'&tokens_after_expires_at=2099-04-20T10:00:00%2B00:00&tokens_after_id='.$soonestFirst[19],
             $this->showMoreHrefOf($page, 'people__tokens'),
+        );
+        self::assertSame(
+            '/admin/people?people_after_name=lena%20berg&people_after_id='.$lena->id()->toString()
+            .'&after_invited_at=2026-11-16T13:59:00.000000%2B00:00&after_id=0198f000-0000-7000-8000-0000000001ff'
+            .'&tokens_after_expires_at=2099-01-01T00:00:00%2B00:00&tokens_after_id=0198f000-0000-7000-8000-0000000002ff',
+            $page->filter('main .people__connections a')->attr('href'),
+            'the empty later page of connected apps links to their first page with the other lists\' pages kept',
         );
     }
 

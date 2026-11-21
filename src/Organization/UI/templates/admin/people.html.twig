@@ -112,7 +112,7 @@
             {% else %}
                 <ul class="people__list">
                     {% for token in liveTokens %}
-                        {% set ownerName = tokenOwnerNames[token.ownerId.toString] ?? 'Unknown person' %}
+                        {% set ownerName = ownerNames[token.ownerId.toString] ?? 'Unknown person' %}
                         <li class="people__row people__token-row" data-token-id="{{ token.id }}">
                             <span class="people__token-owner">{{ ownerName }}</span>
                             <span class="people__sub">
@@ -133,6 +133,43 @@
                 {% if tokensNextPage %}
                     <div class="people__more">
                         <twig:Button href="{{ path('organization_admin_people', tokensNextPage) }}" variant="outline">Show more</twig:Button>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </section>
+
+        <section class="people__connections" aria-labelledby="people-connections-title">
+            <h2 class="admin-tab__heading" id="people-connections-title">Connected apps</h2>
+            <p>Apps that people allowed to use pinround as them, the newest first. End a connection to stop the app at once.</p>
+            {% if connections is empty and connectionsFirstPage is not null %}
+                <p class="people__sub">No more connected apps. <a href="{{ path('organization_admin_people', connectionsFirstPage) }}">Back to the first page</a></p>
+            {% elseif connections is empty %}
+                <twig:EmptyState message="No apps are connected."/>
+            {% else %}
+                <ul class="people__list">
+                    {% for connection in connections %}
+                        {% set ownerName = ownerNames[connection.userId.toString] ?? 'Unknown person' %}
+                        <li class="people__row people__connection-row" data-connection-id="{{ connection.familyId }}">
+                            <span class="people__token-owner">{{ ownerName }}</span>
+                            <span class="people__sub">
+                                {{ connection.clientName }}
+                                · Connected {{ connection.connectedAt|date('j M Y', app.user.timeZone) }}
+                                · {{ connection.lastRenewedAt ? 'Last renewed ' ~ connection.lastRenewedAt|date('j M Y, H:i', app.user.timeZone) : 'Not renewed yet' }}
+                            </span>
+                            {# The pages the lists are on, so ending comes back to them. #}
+                            <form class="people__revoke" method="post" action="{{ path('organization_admin_people_connection_end', {id: connection.familyId}) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token(endConnectionCsrfId) }}">
+                                {% for name, value in shownPagesQuery %}
+                                    <input type="hidden" name="{{ name }}" value="{{ value }}">
+                                {% endfor %}
+                                <twig:Button type="submit" variant="outline" aria-label="End {{ ownerName }}’s connection of {{ connection.clientName }}">End connection</twig:Button>
+                            </form>
+                        </li>
+                    {% endfor %}
+                </ul>
+                {% if connectionsNextPage %}
+                    <div class="people__more">
+                        <twig:Button href="{{ path('organization_admin_people', connectionsNextPage) }}" variant="outline">Show more</twig:Button>
                     </div>
                 {% endif %}
             {% endif %}
