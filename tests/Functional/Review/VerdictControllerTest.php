@@ -165,11 +165,18 @@ final class VerdictControllerTest extends WebTestCase
 
         self::assertSame('Verdict saved. Lena can see it.', $this->toastOfTheStream(200));
         $content = (string) $this->client->getResponse()->getContent();
-        self::assertStringContainsString('<turbo-stream action="replace" target="round-area-tabs">', $content);
-        $tabs = new Crawler($content);
+        $matched = preg_match_all('#<turbo-stream action="replace" target="(screenshot-thumb-state-\d+)"><template>(.*?)</template></turbo-stream>#s', $content, $stateTags, \PREG_SET_ORDER);
+        self::assertSame(2, $matched, 'Each area\'s state tag in the strip is shown again.');
         self::assertSame(
-            ['Per product 3 pins', 'Totals Needs fix'],
-            $tabs->filter('template')->first()->filter('a.area-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
+            [
+                ['screenshot-thumb-state-0', 'screenshot-thumb-state-0', '3 pins', 'tag screenshot-thumb__tag area-chip--pins'],
+                ['screenshot-thumb-state-1', 'screenshot-thumb-state-1', 'Needs fix', 'tag screenshot-thumb__tag area-chip--needs-fix'],
+            ],
+            array_map(static function (array $stateTag): array {
+                $tag = new Crawler($stateTag[2]);
+
+                return [$stateTag[1], (string) $tag->filter('span.tag')->attr('id'), trim($tag->filter('span.tag')->text()), (string) $tag->filter('span.tag')->attr('class')];
+            }, $stateTags),
         );
         $panel = $this->streamedPanel();
         self::assertSame('Needs fix', $panel->filter('.round-panel__verdict .tag')->text());

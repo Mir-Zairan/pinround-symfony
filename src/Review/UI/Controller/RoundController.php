@@ -24,10 +24,11 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * One shared round of a ticket as a page of its own (P05.T7, review-round.md): the header, a tab per screen area, the
- * earlier and this round's pictures with their pins, and the side panel, with the verdict forms VerdictController
- * answers for a person VerdictPermission SET grants. The viewer is only ever the logged-in person; "?area=N" picks the
- * tab by its position.
+ * One shared round of a ticket, of any kind, as a page of its own (P05.T7, P14.T8, review-round.md): the header, a strip
+ * of its screenshots, one shown with its pins and, for a review round's screen area, the earlier round's picture and the
+ * side panel with the verdict forms VerdictController answers for a person VerdictPermission SET grants. The viewer is
+ * only ever the logged-in person; "?area=N" picks a screen area by its position, and "?screenshot=N", from 1, the
+ * screenshot of a round without areas.
  *
  * Runs in the request transaction. An unknown or malformed key or number, another organization's ticket, a ticket the
  * viewer may not see and a round RoundPermission VIEW denies all answer the same 404, so no answer tells that a hidden
@@ -38,6 +39,8 @@ final class RoundController extends AbstractController
     public const string ROUND_ROUTE = 'review_round';
     public const string FOCUS_ROUTE = 'review_round_focus';
     public const string AREA_PARAMETER = 'area';
+    /** From 1, the screenshot a round without screen areas shows. */
+    public const string SCREENSHOT_PARAMETER = 'screenshot';
     /** The full-screen review's picture: FocusPage::SIDE_BEFORE or SIDE_AFTER. */
     public const string SIDE_PARAMETER = 'side';
     /** The full-screen review's pin shown first, from 1. */
@@ -63,15 +66,16 @@ final class RoundController extends AbstractController
 
         return $this->render('@Review/round.html.twig', [
             'page' => $this->roundPages->pageOf(
-                $ticket,
+                $visible,
                 $round,
-                self::numberParameterOf($request, self::AREA_PARAMETER) ?? 0,
+                self::numberParameterOf($request, self::AREA_PARAMETER),
+                self::numberParameterOf($request, self::SCREENSHOT_PARAMETER),
                 $this->isGranted(VerdictPermission::SET, $facts),
-                $visible->actor->userId(),
                 $this->clock->now(),
                 $this->currentTimeZone->zone(),
             ),
             'ticketRoute' => RoundsController::TICKET_ROUTE,
+            'roundRoute' => self::ROUND_ROUTE,
             'ticketKey' => $ticket->key,
             'verdictCsrfId' => VerdictController::csrfIdOf($ticket->key),
             'roundNumber' => $round->number,
