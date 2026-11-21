@@ -34,7 +34,7 @@ use App\Ticketing\Api\TicketPageView;
  *
  * Its reads do not grow with the screenshots or pins: two signing calls (the shown pictures, then every small picture,
  * one more per SignedUrls::MAX_MEDIA_IDS of them), and, for a round without areas other than a review round,
- * RoundsVisibleTo's read of the ticket's rounds.
+ * RoundsVisibleTo's read of the one round whose screenshots it shows.
  */
 final readonly class RoundPages
 {
@@ -64,6 +64,9 @@ final readonly class RoundPages
     private const string CHECKLIST = 'checklist';
     private const string REVIEW = 'review';
 
+    /** The report is always Round 0. */
+    private const int REPORT_NUMBER = 0;
+
     public function __construct(
         private SignedUrls $signedUrls,
         private RoundsVisibleTo $roundsVisibleTo,
@@ -75,12 +78,15 @@ final readonly class RoundPages
      *
      * @param int|null      $areaPosition     a round with areas shows the area at that position, the first one when it
      *                                        has none there or this is null
-     * @param int|null      $screenshotNumber from 1, the screenshot a round without areas shows; the first one when it
-     *                                        has none with that number or this is null
+     * @param int|null      $screenshotNumber from 1, the screenshot a round without areas shows; the first one when this
+     *                                        is null. A round with areas and a review round do not read it
      * @param bool          $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
      * @param \DateTimeZone $viewerTimeZone   the header's day and time are in it
+     *
+     * @return RoundPage|null null when $screenshotNumber names no screenshot of a round without areas, which the
+     *                        caller answers with 404
      */
-    public function pageOf(VisibleTicket $visible, ReviewRoundView $round, ?int $areaPosition, ?int $screenshotNumber, bool $isVerdictGranted, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): RoundPage
+    public function pageOf(VisibleTicket $visible, ReviewRoundView $round, ?int $areaPosition, ?int $screenshotNumber, bool $isVerdictGranted, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): ?RoundPage
     {
         $ticket = $visible->ticket;
         $title = \sprintf('Round %d', $round->number);
@@ -112,10 +118,13 @@ final readonly class RoundPages
             static fn (array $tries): RoundScreenshotView => $tries[\count($tries) - 1],
             RoundCards::shownChainsOf($picturesRound),
         );
+        $shownIndex = null === $screenshotNumber ? 0 : $screenshotNumber - 1;
+        if (null !== $screenshotNumber && !isset($screenshots[$shownIndex])) {
+            return null;
+        }
         if (null === $picturesRound || [] === $screenshots) {
             return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::SCREENSHOTS_STRIP_LABEL, [], null, null, null, self::NO_SCREENSHOTS);
         }
-        $shownIndex = null !== $screenshotNumber && isset($screenshots[$screenshotNumber - 1]) ? $screenshotNumber - 1 : 0;
         $thumbs = $this->screenshotThumbsOf($ticket, $screenshots, $shownIndex, $now);
 
         return new RoundPage(
@@ -133,20 +142,18 @@ final readonly class RoundPages
     }
 
     /**
-     * The round whose screenshots the page shows: the report's for a checklist round, the round itself otherwise. Null
-     * for a shared draft past the newest RoundQueries::MAX_NUMBERED_ROUNDS, which RoundsVisibleTo does not load.
+     * The round whose screenshots the page shows: the report (Round 0) for a checklist round, the round itself
+     * otherwise, read alone, so a shared draft older than the rounds the ticket page lists is found too. Null when the
+     * ticket has no report.
      */
     private function picturesRoundOf(VisibleTicket $visible, ReviewRoundView $round): ?RoundView
     {
-        $rounds = $this->roundsVisibleTo->forVisibleTo($visible->ticket->id, $visible->visibility)->rounds;
-        foreach ($rounds as $listed) {
-            $isPicturesRound = self::CHECKLIST === $round->kind ? self::REPORT === $listed->kind : $listed->id === $round->id;
-            if ($isPicturesRound) {
-                return $listed;
-            }
+        if (self::CHECKLIST !== $round->kind) {
+            return $this->roundsVisibleTo->sharedRoundOf($visible->ticket->id, $visible->visibility, $round->number);
         }
+        $report = $this->roundsVisibleTo->sharedRoundOf($visible->ticket->id, $visible->visibility, self::REPORT_NUMBER);
 
-        return null;
+        return self::REPORT === $report?->kind ? $report : null;
     }
 
     /**

@@ -1,0 +1,76 @@
+import { expect, test } from '@playwright/test';
+import { MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { runAsDatabaseOwner } from './database';
+import { seedDraftWithPicture } from './draft-picture';
+import { makeTicketForOmar, openAs } from './ticket';
+
+// The round page of a shared draft (P14.T8 step 1) in a real browser: one screenshot at a time, the right arrow showing
+// the next, and a click in the strip jumping to another. What the page shows for each round kind and query, and who is
+// answered 404, is proven in tests/Functional/Review/RoundPageScreenshotsTest.php.
+//
+// A picture upload needs the processing worker and a bucket, so the draft's first picture is seeded ready through the
+// dev-only console command (draft-picture.ts), and screenshots 2 and 3 are copies of it added as the database owner. The
+// ticket is this test's own, so no other draft spec shares its draft. Ids are uuidv7(): the domain refuses any other
+// UUID version when it loads the round.
+
+test.use({ viewport: { width: 1280, height: 900 } });
+
+const DRAFT_HEADLINE = 'Draft round · only you can see this';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Adds screenshots 2 and 3 to the draft, copies of its first picture, as the database owner.
+ */
+function seedTwoMoreScreenshots(roundId: string): void {
+  // Checked before it goes into the SQL: it comes from the page.
+  expect(roundId).toMatch(UUID);
+  runAsDatabaseOwner(
+    `INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, title, created_at)
+     SELECT organization_id, uuidv7(), round_id, media_id, position + added.step, 'Screenshot copy ' || added.step, now()
+     FROM rvw_screenshot CROSS JOIN (VALUES (1), (2)) AS added(step) WHERE round_id = '${roundId}' AND position = 0`,
+  );
+}
+
+test.describe('The round page of a shared draft', () => {
+  test('Mia opens Omar\'s shared draft at 1 of 3, the right arrow shows 2 of 3, and the strip jumps to 3', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const key = await makeTicketForOmar(browser, 'Round page check on the cart screenshots');
+    seedDraftWithPicture(key);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    await omar.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await expect(omar.page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    const shareAction = await omar.page.locator('form.round-card__form', { has: omar.page.locator('.round-card__share') }).getAttribute('action');
+    seedTwoMoreScreenshots(/\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1] ?? '');
+    await omar.page.reload({ waitUntil: 'networkidle' });
+    await expect(omar.page.locator('section.draft-shot')).toHaveCount(3);
+
+    await omar.page.locator('.round-card__share').click();
+
+    const shared = omar.page.locator('article.round-card--row').filter({ has: omar.page.getByRole('heading', { name: /^Round 1 · /, level: 3 }) });
+    await expect(shared.getByRole('link', { name: 'Open round' })).toBeVisible();
+    await omar.context.close();
+
+    const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+    // networkidle: the arrow keys need the screenshot-pager controller, which connects after the importmap modules load.
+    await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
+    const strip = page.getByRole('navigation', { name: 'Screenshots' });
+    const position = page.locator('.screenshot-pager__position');
+    await expect(position).toHaveText('1 of 3');
+    await expect(strip.getByRole('link')).toHaveCount(3);
+    await expect(strip.locator('a[aria-current="page"] .screenshot-thumb__label')).toHaveText('Screenshot 1');
+
+    await page.keyboard.press('ArrowRight');
+
+    await expect(position).toHaveText('2 of 3');
+    await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=2$`));
+    await expect(page.locator('.screenshot__title')).toHaveText('Screenshot copy 1');
+
+    await strip.getByRole('link', { name: /^Screenshot 3/ }).click();
+
+    await expect(position).toHaveText('3 of 3');
+    await expect(strip.locator('a[aria-current="page"] .screenshot-thumb__label')).toHaveText('Screenshot 3');
+    await expect(page.locator('.screenshot__title')).toHaveText('Screenshot copy 2');
+    await expect(page.locator('.screenshot-pager__next')).toHaveAttribute('aria-disabled', 'true');
+    await context.close();
+  });
+});

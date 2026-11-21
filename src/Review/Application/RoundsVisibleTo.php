@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\Application;
 
+use App\Review\Api\RoundView;
 use App\Review\Api\TicketRounds;
 use App\SharedKernel\Domain\TicketId;
 use App\Ticketing\Api\TicketVisibility;
@@ -23,4 +24,21 @@ interface RoundsVisibleTo
      * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query
      */
     public function forVisibleTo(TicketId $ticketId, TicketVisibility $viewer): TicketRounds;
+
+    /**
+     * The one shared round of the ticket with that number, as forVisibleTo lists it (the latest try of each screenshot,
+     * with its pins; none loaded for a checklist or review round), also when it is older than the newest
+     * RoundQueries::MAX_NUMBERED_ROUNDS. At most four queries whatever the number of rounds, screenshots and pins:
+     * Ticketing's visibility check of the ticket, the round, its screenshots and their pins.
+     *
+     * @param int $number 0 for the report, from 1 for the rounds after it
+     *
+     * @return RoundView|null null for a ticket the viewer may not see, a negative number (without a query), a number the
+     *                        ticket has no round of and a deleted round; an unshared draft has no number, so it is never
+     *                        this
+     *
+     * @throws \LogicException           when no transaction is open or no tenant is set, before any query
+     * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query
+     */
+    public function sharedRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView;
 }
