@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Tests\Integration\Ticketing\TicketRows;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -14,6 +16,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\Uid\Uuid;
 use Zenstruck\Foundry\Test\Factories;
 
 /**
@@ -29,6 +32,7 @@ final class HomePageTest extends WebTestCase
     }
 
     private const string LEAD_LINE = 'You lead the team, so reviews, decisions and unclear new tickets come to you.';
+    private const string NOW = '2026-11-05 12:00:00 UTC';
 
     private KernelBrowser $client;
 
@@ -50,6 +54,7 @@ final class HomePageTest extends WebTestCase
                 [$organizationId],
             ));
         }
+        $this->ticketRows()->removeAllOf(...$this->createdOrganizationIds);
         $this->removeUsersAndOrganizations();
     }
 
@@ -63,7 +68,7 @@ final class HomePageTest extends WebTestCase
         self::assertSame(['All', 'My work', 'My team', 'Admin'], $this->chipLabels($page));
         self::assertSame(['All'], $this->pressedChipLabels($page));
         self::assertSame(
-            ['Needs you now', 'Also waiting on you', 'Admin', 'Pings for you', 'Release', 'Your team'],
+            ['Needs you now', 'Also waiting on you', 'Admin', 'Release', 'Your team'],
             $page->filter('section.home__section h2')->each(static fn (Crawler $title): string => $title->text()),
         );
         self::assertCount(0, $page->filter('section.home__section[hidden]'));
@@ -94,10 +99,38 @@ final class HomePageTest extends WebTestCase
 
         self::assertSame(['All', 'My work', 'My team'], $this->chipLabels($page));
         self::assertSame(
-            ['Needs you now', 'Also waiting on you', 'Pings for you', 'Your team'],
+            ['Needs you now', 'Also waiting on you', 'Your team'],
             $page->filter('section.home__section h2')->each(static fn (Crawler $title): string => $title->text()),
         );
         self::assertCount(0, $page->filter('.home__subline'), 'the job of a member is not known to Home yet');
+    }
+
+    /**
+     * Omar's bell holds an open ping from Lena; Home has no Pings for you section until P07.T2 reads them, so it never
+     * says there are none.
+     */
+    #[Test]
+    public function aPersonWithAnOpenPingIsNeverToldThereAreNone(): void
+    {
+        $this->client->disableReboot();
+        self::getContainer()->set('clock', new MockClock(new \DateTimeImmutable(self::NOW)));
+        $this->addPingToOmarFromLena();
+
+        $page = $this->openHomeAs('Omar');
+
+        self::assertSame('1 open', $page->filter('#bell-badge .visually-hidden')->text(), 'the bell holds the ping');
+        self::assertStringNotContainsString('No open pings', $page->filter('main')->text());
+        self::assertSame(['Needs you now', 'Also waiting on you'], $page->filter('section[data-focus-group="my_work"] h2')->each(static fn (Crawler $title): string => $title->text()));
+    }
+
+    #[Test]
+    public function aPersonWithNoPingIsNotToldAboutPingsOnHomeEither(): void
+    {
+        $page = $this->openHomeAs('Omar');
+
+        self::assertCount(0, $page->filter('#bell-badge .bell__badge'), 'the bell holds no ping');
+        self::assertStringNotContainsString('pings', strtolower($page->filter('main')->text()));
+        self::assertSame(['Needs you now', 'Also waiting on you'], $page->filter('section[data-focus-group="my_work"] h2')->each(static fn (Crawler $title): string => $title->text()));
     }
 
     #[Test]
@@ -127,8 +160,8 @@ final class HomePageTest extends WebTestCase
 
         self::assertSame(['My team'], $this->pressedChipLabels($page));
         $myWork = $page->filter('section[data-focus-group="my_work"]');
-        self::assertCount(3, $myWork);
-        self::assertCount(3, $page->filter('section[data-focus-group="my_work"][hidden]'));
+        self::assertCount(2, $myWork);
+        self::assertCount(2, $page->filter('section[data-focus-group="my_work"][hidden]'));
         self::assertCount(1, $page->filter('section[data-focus-group="admin"][hidden]'));
         $myTeam = $page->filter('section[data-focus-group="my_team"]');
         self::assertCount(2, $myTeam);
@@ -437,6 +470,41 @@ final class HomePageTest extends WebTestCase
         $this->people = $people;
 
         return $this->acmeFoods;
+    }
+
+    /**
+     * A ping notification five minutes before NOW, open and due, on a ticket of Acme Foods that everyone may see.
+     */
+    private function addPingToOmarFromLena(): void
+    {
+        $organizationId = $this->acmeFoods()->toString();
+        $lena = $this->person('Lena');
+        $omar = $this->person('Omar');
+        $ticketId = Uuid::v7()->toRfc4122();
+        $this->ticketRows()->addOf($organizationId, $ticketId, Uuid::v7()->toRfc4122(), $lena->id()->toString());
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->insert('ntf_notification', [
+            'organization_id' => $organizationId,
+            'id' => Uuid::v7()->toRfc4122(),
+            'user_id' => $omar->id()->toString(),
+            'kind' => 'ping',
+            'actor_id' => $lena->id()->toString(),
+            'ticket_id' => $ticketId,
+            'data' => json_encode(['actorName' => $lena->name(), 'ticketKey' => 'SHOP-1'], \JSON_THROW_ON_ERROR),
+            'created_at' => '2026-11-05 11:55:00+00',
+        ]));
+    }
+
+    /**
+     * TicketRows switches the tenant, which the switch guard refuses while the entity manager holds the test's users or
+     * the last request left its tenant set; the users stay usable detached, as only their ids and names are read.
+     */
+    private function ticketRows(): TicketRows
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->reset();
+        self::getContainer()->get('doctrine.orm.default_entity_manager')->clear();
+
+        return new TicketRows($this->migrator(), $tenantContext);
     }
 
     private function onlyOrganization(): OrganizationId

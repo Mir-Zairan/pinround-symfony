@@ -83,7 +83,8 @@
                 {% if isAdmin %}
                     {% include '@Web/home/_section.html.twig' with {id: 'admin', title: 'Admin', group: 'admin', focus: focus.value, message: 'Nothing needs you as admin.', adminSettingsUrl: adminSettingsUrl} only %}
                 {% endif %}
-                {% include '@Web/home/_section.html.twig' with {id: 'pings', title: 'Pings for you', group: 'my_work', focus: focus.value, message: 'No open pings. Nice.'} only %}
+                {#- TODO(P07.T2): Pings for you, the top 3 groups of NotificationQueries::bell. Left out until then: an
+                    empty state that reads no pings said "No open pings. Nice." while the bell held some. -#}
                 {% if isLead %}
                     {% include '@Web/home/_section.html.twig' with {id: 'release', title: 'Release', group: 'my_team', focus: focus.value, message: 'Your team has no release yet.'} only %}
                 {% endif %}

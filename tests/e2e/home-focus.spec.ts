@@ -46,7 +46,7 @@ test('Omar gets the chips All, My work and My team with All pressed', async ({ p
 
   await expect(page.getByRole('group', { name: 'Show on Home' }).getByRole('button')).toHaveText(['All', 'My work', 'My team']);
   await expect(chip(page, 'All')).toHaveAttribute('aria-pressed', 'true');
-  for (const title of ['Needs you now', 'Also waiting on you', 'Pings for you', 'Your team']) {
+  for (const title of ['Needs you now', 'Also waiting on you', 'Your team']) {
     await expect(section(page, title)).toBeVisible();
   }
 });
@@ -60,7 +60,7 @@ test('a chip hides and shows the sections at once', async ({ page }) => {
   await expect(chip(page, 'All')).toHaveAttribute('aria-pressed', 'false');
   await expect(section(page, 'Your team')).toBeVisible();
   await expect(section(page, 'Needs you now')).toBeHidden();
-  await expect(section(page, 'Pings for you')).toBeHidden();
+  await expect(section(page, 'Also waiting on you')).toBeHidden();
 
   await pressChip(page, 'My work');
 
