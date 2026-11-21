@@ -216,18 +216,24 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         $this->changeAndSave($draft, $at, static fn (Round $round) => $round->setPinVerdict($ownerId, $id, $pinVerdict));
     }
 
-    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): string
     {
         $draft = $this->ownDraft($roundId, $ownerId);
         $screenshotVerdict = self::screenshotVerdictOf($verdict);
-        $id = self::screenshotIdOf($screenshotId);
+        $namedTryId = self::screenshotIdOf($screenshotId);
+        $latestTryId = $namedTryId;
 
-        $this->changeAndSave($draft, $at, static function (Round $round) use ($ownerId, $id, $screenshotVerdict, $summary): void {
-            $round->setVerdict($ownerId, $id, $screenshotVerdict);
+        $this->changeAndSave($draft, $at, static function (Round $round) use ($ownerId, $namedTryId, &$latestTryId, $screenshotVerdict, $summary): void {
+            // A shared or closed draft is refused as such before an unknown picture is, as setVerdict alone refuses.
+            $round->refuseUnlessEditableBy($ownerId);
+            $latestTryId = $round->latestTryIdOfChainWith($namedTryId);
+            $round->setVerdict($ownerId, $latestTryId, $screenshotVerdict);
             if (null !== $summary) {
-                $round->editScreenshotText($ownerId, $id, self::titleOf($round, $id), $summary);
+                $round->editScreenshotText($ownerId, $latestTryId, self::titleOf($round, $latestTryId), $summary);
             }
         });
+
+        return $latestTryId->toString();
     }
 
     public function shareDraft(string $roundId, UserId $ownerId, \DateTimeImmutable $sharedAt): int

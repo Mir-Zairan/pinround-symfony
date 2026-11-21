@@ -10,7 +10,7 @@ namespace App\Review\Domain;
 final readonly class DraftFacts
 {
     /**
-     * @param int $screenshotCount from 0
+     * @param int $screenshotCount from 0; a screenshot with its retakes counts once (FR-RND-19)
      */
     public function __construct(
         public RoundId $id,

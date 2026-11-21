@@ -301,6 +301,22 @@ final class Round
     }
 
     /**
+     * The latest try of the chain that $screenshotId is a try of (ADR-0048): $screenshotId itself when no later try
+     * retakes it.
+     *
+     * @throws \DomainException when the round has no such picture
+     */
+    public function latestTryIdOfChainWith(ScreenshotId $screenshotId): ScreenshotId
+    {
+        $latestTry = $this->screenshots[$this->indexOf($screenshotId)];
+        foreach ($this->triesOfChain($latestTry->firstTryId()) as $try) {
+            $latestTry = $try;
+        }
+
+        return $latestTry->id();
+    }
+
+    /**
      * Marks a pin on an earlier try of a screenshot as fixed by a later try or still wrong, or clears the mark with null
      * (ADR-0048). A pin on the latest try of its chain takes no mark: no later try can have fixed it yet. Fixed stores
      * the chain's latest try number as it is now, so a later retake leaves "Fixed on try N" as it was.

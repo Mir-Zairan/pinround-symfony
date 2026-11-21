@@ -713,6 +713,26 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         self::assertSame(array_diff_key($before, [self::DRAFT => true]), array_diff_key($this->snapshot(), [self::DRAFT => true]));
     }
 
+    /**
+     * ADR-0048: the first try is the before picture, so a verdict and summary sent with its id, as MCP's
+     * list_draft_screenshots gives it, land on the chain's latest try; the answer names that try.
+     */
+    #[Test]
+    public function aVerdictWithASummaryOnARetakenScreenshotLandsOnItsLatestTryAndNamesIt(): void
+    {
+        $lena = new UserId(self::LENA);
+        $secondTry = $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::FRESH_MEDIA, 'Cart, fixed'), self::at(), self::FIRST_SCREENSHOT);
+        $before = $this->storedRound(self::DRAFT)->screenshots();
+
+        $verdictTryId = $this->commands->setDraftVerdictWithSummary(self::DRAFT, $lena, strtoupper(self::FIRST_SCREENSHOT), RoundCommands::VERDICT_NOT_RIGHT_YET, 'The total is off.', self::at());
+
+        self::assertSame($secondTry->screenshotId, $verdictTryId);
+        $after = $this->storedRound(self::DRAFT)->screenshots();
+        self::assertSame([self::FIRST_SCREENSHOT, self::SECOND_SCREENSHOT, $secondTry->screenshotId], array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $after));
+        self::assertEquals(\array_slice($before, 0, 2), \array_slice($after, 0, 2), 'The first try and the other screenshot keep what they had.');
+        self::assertSame([ScreenshotVerdict::NotRight, 'Cart, fixed', 'The total is off.'], [$after[2]->verdict(), $after[2]->title(), $after[2]->summary()]);
+    }
+
     #[Test]
     public function settingTheStoredVerdictWithNoSummaryKeepsTheSummaryAndStillRaisesTheVersionByOne(): void
     {

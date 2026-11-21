@@ -40,7 +40,8 @@ use Psr\Clock\ClockInterface;
  * is not found, also for the owner of an unshared draft on it, which RoundPermission grants without reading the
  * ticket. Another person's unshared draft is denied by RoundPermission EDIT and so not found, as every denial of the
  * gate; a shared draft is read-only for everyone RoundPermission VIEW lets see it, its owner included (FR-RND-12),
- * and an earlier try of one is not found, as draftScreenshotOf finds none (ADR-0048).
+ * and an earlier try of one is not found, as draftScreenshotOf finds none (ADR-0048). On an unshared draft any try
+ * names its chain: Review puts the verdict and summary on the latest try, as list_draft_screenshots gives the first.
  * A checklist item the voter denies, such as one of a ticket the caller is not the assignee of or may not see, is not
  * found too.
  */
@@ -86,7 +87,7 @@ final readonly class SetVerdict implements AgentTool
                 'type' => 'object',
                 'properties' => [
                     'key' => $idOf('The ticket key, such as SHOP-12.'),
-                    'screenshot_id' => $idOf('A screenshot of your own draft round on the ticket, as get_round_notes lists it.'),
+                    'screenshot_id' => $idOf('A screenshot of your own draft round on the ticket, as list_draft_screenshots or get_round_notes lists it; any try of it names its latest try.'),
                     'verdict' => ['type' => 'string', 'enum' => array_keys(self::VERDICT_LABELS), 'description' => 'looks_right is "Looks right", not_right_yet is "Not right yet".'],
                     'summary' => ['type' => 'string', 'description' => \sprintf('What the picture shows, in plain words: at most %d characters after trimming. An empty one removes the summary; leave it out to keep the one there is.', RoundCommands::MAX_SUMMARY_LENGTH)],
                     'check_item_id' => $idOf('A checklist item of the ticket, as get_round_notes lists it.'),
@@ -110,7 +111,9 @@ final readonly class SetVerdict implements AgentTool
             ],
             description: 'Sets your verdict on a screenshot of your own draft round on a ticket: {key, screenshot_id,'
                 .' verdict, summary?}, where verdict is looks_right ("Looks right") or not_right_yet ("Not right yet")'
-                .' and summary, when given, replaces the screenshot\'s summary in the same save. Or marks a checklist'
+                .' and summary, when given, replaces the screenshot\'s summary in the same save. A retaken screenshot'
+                .' takes both on its latest try, whichever try screenshot_id names; the answer\'s screenshot_id is that'
+                .' try. Or marks a checklist'
                 .' item fixed when you are the ticket\'s assignee: {key, check_item_id, state: "fixed"}. Send one shape,'
                 .' never both. A shared draft is read-only. Nothing is saved when the call is refused.',
             annotations: new ToolAnnotations(readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false),
@@ -203,12 +206,12 @@ final readonly class SetVerdict implements AgentTool
         $summary = \array_key_exists('summary', $arguments) ? self::stringAt($arguments, 'summary') : null;
 
         try {
-            $this->roundCommands->setDraftVerdictWithSummary($round->roundId, $this->callerId(), $screenshotId, $roundVerdict, $summary, $this->clock->now());
+            $latestTryId = $this->roundCommands->setDraftVerdictWithSummary($round->roundId, $this->callerId(), $screenshotId, $roundVerdict, $summary, $this->clock->now());
         } catch (RoundRefused $refused) {
             throw self::toolRefusalOf($refused);
         }
 
-        $answer = ['screenshot_id' => $screenshotId, 'verdict' => $verdict, 'verdict_label' => self::VERDICT_LABELS[$verdict], 'summary_saved' => null !== $summary];
+        $answer = ['screenshot_id' => $latestTryId, 'verdict' => $verdict, 'verdict_label' => self::VERDICT_LABELS[$verdict], 'summary_saved' => null !== $summary];
 
         return self::answerOf($answer);
     }

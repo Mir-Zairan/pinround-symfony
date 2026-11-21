@@ -80,6 +80,9 @@ final class DbalRoundsDraftTest extends KernelTestCase
     private const string OTHER_TICKET_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6137';
     private const string OTHER_ORGANIZATION_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6138';
     private const string OTHER_ORGANIZATION_SHARED_SCREENSHOT = '0197a3c0-0000-7000-8000-0000000f6139';
+    private const string LENAS_FIRST_RETAKE = '0197a3c0-0000-7000-8000-0000000f613a';
+    private const string LENAS_SECOND_RETAKE = '0197a3c0-0000-7000-8000-0000000f613b';
+    private const string OMARS_RETAKE = '0197a3c0-0000-7000-8000-0000000f613c';
 
     private const string FIRST_PIN = '0197a3c0-0000-7000-8000-0000000f6141';
     private const string SECOND_PIN = '0197a3c0-0000-7000-8000-0000000f6142';
@@ -227,6 +230,31 @@ final class DbalRoundsDraftTest extends KernelTestCase
             $this->rounds()->save($draft, self::savedAt());
         });
         self::assertEquals(new DraftFacts(new RoundId(self::DRAFT), DraftDecision::KeptPrivate, 2), $this->draftFacts(self::ACME_FOODS, self::TICKET, self::LENA));
+    }
+
+    /**
+     * FR-RND-19: a retake is a later try of the same screenshot, so it adds none to the count the hand-off dialog shows.
+     */
+    #[Test]
+    public function theOpenDraftsScreenshotCountCountsEachScreenshotOnceWhateverItsRetakes(): void
+    {
+        $this->committed(self::ACME_FOODS, function (): void {
+            $lena = new UserId(self::LENA);
+            $draft = $this->storedDraft();
+            $draft->addScreenshot($lena, new ScreenshotId(self::LENAS_FIRST_RETAKE), self::THIRD_MEDIA, new ScreenshotId(self::FIRST_SCREENSHOT));
+            $draft->addScreenshot($lena, new ScreenshotId(self::LENAS_SECOND_RETAKE), self::THIRD_MEDIA, new ScreenshotId(self::LENAS_FIRST_RETAKE));
+            $this->rounds()->save($draft, self::savedAt());
+
+            $omar = new UserId(self::OMAR);
+            $omarsDraft = $this->rounds()->get(new RoundId(self::OMARS_DRAFT)) ?? throw new \LogicException('Omar\'s seeded draft is missing.');
+            $omarsDraft->addScreenshot($omar, new ScreenshotId(self::OMARS_RETAKE), self::SECOND_MEDIA, new ScreenshotId(self::OMARS_SCREENSHOT));
+            $this->rounds()->save($omarsDraft, self::savedAt());
+        });
+        self::assertCount(4, $this->rowsOfRound(self::DRAFT)['screenshots'], 'The first screenshot\'s two retakes were not stored, so nothing below is proven.');
+        self::assertCount(2, $this->rowsOfRound(self::OMARS_DRAFT)['screenshots']);
+
+        self::assertEquals(new DraftFacts(new RoundId(self::DRAFT), null, 2), $this->draftFacts(self::ACME_FOODS, self::TICKET, self::LENA));
+        self::assertEquals(new DraftFacts(new RoundId(self::OMARS_DRAFT), null, 1), $this->draftFacts(self::ACME_FOODS, self::TICKET, self::OMAR));
     }
 
     #[Test]

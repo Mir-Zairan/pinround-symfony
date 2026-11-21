@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
 use App\Notification\Infrastructure\Mercure\RefreshTicketPagesHandler;
+use App\Review\UI\Component\RoundsSection;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -913,7 +914,7 @@ final class TicketMoveTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(200);
         self::assertSame(
-            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, TicketPageParts::PEOPLE_ID => 0, TicketPageParts::ACTIVITY_ID => 0, self::TOAST_REGION_ID => 0],
+            [TicketPageParts::STATE_ID => 0, TicketPageParts::NEXT_STEP_ID => 1, TicketPageParts::ROUNDS_ID => 0, TicketPageParts::PEOPLE_ID => 0, TicketPageParts::ACTIVITY_ID => 0, self::TOAST_REGION_ID => 0],
             array_map(static fn (Crawler $stream): int => $stream->filter('[autofocus]')->count(), $streams),
         );
         $heading = $streams[TicketPageParts::NEXT_STEP_ID]->filter('[autofocus]');
@@ -1230,8 +1231,8 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
-     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state, its box, its People and
-     * What happened and updates the toast region, in that order.
+     * Asserts the answer is a Turbo Stream of the status that replaces the ticket's state, its box, its Rounds, its
+     * People and What happened and updates the toast region, in that order.
      *
      * @return array<string, Crawler> each stream's template content by its target
      */
@@ -1246,7 +1247,7 @@ final class TicketMoveTest extends WebTestCase
             \PREG_SET_ORDER,
         );
         self::assertSame(
-            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['replace', TicketPageParts::PEOPLE_ID], ['replace', TicketPageParts::ACTIVITY_ID], ['update', self::TOAST_REGION_ID]],
+            [['replace', TicketPageParts::STATE_ID], ['replace', TicketPageParts::NEXT_STEP_ID], ['replace', TicketPageParts::ROUNDS_ID], ['replace', TicketPageParts::PEOPLE_ID], ['replace', TicketPageParts::ACTIVITY_ID], ['update', self::TOAST_REGION_ID]],
             array_map(static fn (array $match): array => [$match[1], $match[2]], $matches),
         );
         $streams = [];
@@ -1255,6 +1256,7 @@ final class TicketMoveTest extends WebTestCase
         }
         self::assertCount(1, $streams[TicketPageParts::STATE_ID]->filter('#'.TicketPageParts::STATE_ID));
         self::assertCount(1, $streams[TicketPageParts::NEXT_STEP_ID]->filter('#'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
+        self::assertSame('/t/'.self::KEY.'/rounds', $streams[TicketPageParts::ROUNDS_ID]->filter('section#'.TicketPageParts::ROUNDS_ID.'.ticket__rounds > turbo-frame#'.RoundsSection::FRAME_ID.'[loading="lazy"][data-live-refresh]')->attr('src'));
         self::assertCount(1, $streams[TicketPageParts::PEOPLE_ID]->filter('#'.TicketPageParts::PEOPLE_ID));
         self::assertCount(1, $streams[TicketPageParts::ACTIVITY_ID]->filter('#'.TicketPageParts::ACTIVITY_ID));
 

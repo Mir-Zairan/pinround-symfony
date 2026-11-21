@@ -211,7 +211,7 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Tick
         throw new \LogicException('create_upload never marks a pin.');
     }
 
-    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): string
     {
         throw new \LogicException('create_upload never sets a verdict.');
     }

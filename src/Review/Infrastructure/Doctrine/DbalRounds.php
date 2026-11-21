@@ -143,10 +143,11 @@ final readonly class DbalRounds implements Rounds
     public function openUnsharedDraftFactsOf(TicketId $ticketId, UserId $ownerId): ?DraftFacts
     {
         $organizationId = $this->requireTransactionAndTenant()->toString();
-        // openUnsharedDraftOf's predicate; the count is served by rvw_screenshot_round_id_position_key.
+        // openUnsharedDraftOf's predicate. The count is of chains, one first try each, as a retake adds no screenshot
+        // (FR-RND-19), served by rvw_screenshot_retake_of_idx.
         $draftRow = $this->connection->fetchAssociative(
             'SELECT draft.id, draft.decision,'
-            .' (SELECT CAST(COUNT(*) AS integer) FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = draft.organization_id AND screenshot.round_id = draft.id) AS screenshot_count'
+            .' (SELECT CAST(COUNT(*) AS integer) FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = draft.organization_id AND screenshot.round_id = draft.id AND screenshot.retake_of IS NULL) AS screenshot_count'
             .' FROM rvw_round AS draft WHERE draft.organization_id = ? AND draft.ticket_id = ? AND draft.owner_id = ?'
             ." AND draft.kind = 'draft' AND draft.shared_at IS NULL AND draft.state = 'open'",
             [$organizationId, $ticketId->toString(), $ownerId->toString()],

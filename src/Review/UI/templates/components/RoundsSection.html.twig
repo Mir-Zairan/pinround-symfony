@@ -1,7 +1,7 @@
 {% set roundsPath = path(constant('App\\Review\\UI\\RoundsController::ROUNDS_ROUTE'), {key: key}) %}
 <section{{ attributes.defaults({class: 'ticket__section rounds', 'aria-labelledby': 'ticket-rounds-heading'}) }}>
     <h2 id="ticket-rounds-heading" class="ticket__section-title">Rounds</h2>
-    <turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}" src="{{ roundsPath }}" loading="lazy">
+    <turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}" src="{{ roundsPath }}" loading="lazy" data-live-refresh>
         <a href="{{ roundsPath }}" class="rounds__show">{{ constant('App\\Review\\UI\\Component\\RoundsSection::SHOW_ROUNDS') }}</a>
     </turbo-frame>
 </section>

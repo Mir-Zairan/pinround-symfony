@@ -14,15 +14,20 @@ use App\SharedKernel\Domain\UserId;
  * know with UNKNOWN_VERDICT as invalid content; $refusal, when set, is thrown by the next call instead and nothing is
  * recorded, as the real command saves nothing when it refuses. The content rules, such as the summary's cap, are
  * Review's: the functional test proves them through the real command. The commands set_verdict never uses throw.
+ * Like the real command it answers with the latest try of the named screenshot's chain, in lowercase: the one
+ * $latestTryIds names, else the screenshot itself.
  */
 final class RecordingRoundCommands implements RoundCommands
 {
     /** @var list<array{string, string, string, string, string|null}> round, owner, screenshot, verdict and summary of each call */
     public array $verdictsSet = [];
 
+    /** @var array<string, string> latest try id by the lowercase id of an earlier try of its chain */
+    public array $latestTryIds = [];
+
     public ?RoundRefused $refusal = null;
 
-    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): void
+    public function setDraftVerdictWithSummary(string $roundId, UserId $ownerId, string $screenshotId, string $verdict, ?string $summary, \DateTimeImmutable $at): string
     {
         if (null !== $this->refusal) {
             throw $this->refusal;
@@ -31,6 +36,8 @@ final class RecordingRoundCommands implements RoundCommands
             throw RoundRefused::invalidContent(RoundRefused::UNKNOWN_VERDICT);
         }
         $this->verdictsSet[] = [$roundId, $ownerId->toString(), $screenshotId, $verdict, $summary];
+
+        return strtolower($this->latestTryIds[strtolower($screenshotId)] ?? $screenshotId);
     }
 
     public function setDraftVerdict(string $roundId, UserId $ownerId, string $screenshotId, ?string $verdict, \DateTimeImmutable $at): void
