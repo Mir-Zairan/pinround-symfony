@@ -9,7 +9,7 @@ What `make demo` does, what it needs, and how to publish new ready-made images a
 3. Starts the app, applies the database roles and migrations (not the test database), starts the rest and loads the demo data.
 4. Prints the address and who to log in as. It never prints the password; `grep DEMO_PASSWORD .env.dev.local` shows it.
 
-Measured on 2026-11-22 in an empty Docker (Docker in Docker, home internet line): 225 seconds from `git clone` to the login page. The pull takes about 60 seconds, the first app start (Composer install) about 90, the demo data about 50. A full `make up` that builds the images took 630 seconds.
+Measured on 2026-11-22 in an empty Docker (Docker in Docker, home internet line): 248 seconds from `git clone` to the login page, with the three showcase tickets. The pull takes about 60 seconds, the first app start (Composer install) about 90, the demo data about 70. A full `make up` that builds the images took 630 seconds.
 
 ## When it builds instead
 The app image runs as uid 1000. Docker Desktop on macOS maps file owners on its mounts, so it always uses the ready images there. On Linux it uses them only when `id -u` is 1000; anyone else builds the images, which takes 7 to 8 minutes the first time. It also builds when the pull fails.
