@@ -158,17 +158,19 @@ test.describe('Reporting from Claude Code', () => {
     // The worker processes the pictures after the PUT; the page shows "Processing…" until each is ready.
     await expect(async () => {
       await omar.goto(draftPath, { waitUntil: 'networkidle' });
-      await expect(omar.locator('section.report-draft__picture img.screenshot__image')).toHaveCount(3, { timeout: 2_000 });
+      await expect(omar.locator('#draft-shots [role="tabpanel"] img.screenshot__image')).toHaveCount(3, { timeout: 2_000 });
     }).toPass({ timeout: PROCESSING_TIMEOUT_MS });
     await expect(omar.getByRole('heading', { name: `Report draft for ${PROJECT}`, level: 1 })).toBeVisible();
     await expect(omar.getByLabel('What is wrong, in one line')).toHaveValue(REPORT_TITLE);
-    const draftPictures = omar.locator('section.report-draft__picture');
-    await expect(draftPictures).toHaveCount(3);
+    const editor = omar.locator('#draft-shots');
+    await expect(editor.getByRole('tab')).toHaveCount(3);
     for (const [index, evidence] of evidenceLog.entries()) {
-      const section = draftPictures.nth(index);
-      await expect(section.getByRole('heading', { name: `Screenshot ${index + 1}`, level: 2 })).toBeVisible();
-      await expect(section.getByLabel('Title · optional')).toHaveValue(evidence.checkedCase.title);
-      await expect(section.getByLabel('Pin 1 note')).toHaveValue(evidence.pin.note);
+      // The editor shows one screenshot at a time; its thumbnail shows it, and its lazy picture loads only then.
+      await editor.getByRole('tab', { name: `Screenshot ${index + 1} of 3` }).click();
+      const section = editor.locator(`#draft-shots-panel-${index + 1}`);
+      await expect(section).toBeVisible();
+      await expect(section.getByLabel('Picture title · optional')).toHaveValue(evidence.checkedCase.title);
+      await expect(section.getByLabel('Note for pin 1', { exact: true })).toHaveValue(evidence.pin.note);
       const picture = section.locator('img.screenshot__image');
       await picture.scrollIntoViewIfNeeded();
       await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0), { message: 'the processed picture loads' }).toBe(true);
