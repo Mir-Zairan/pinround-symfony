@@ -8,8 +8,9 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * A person's own open unshared draft round of a ticket, found without reading its pictures or pins. It reads under
- * row-level security, so it needs an open transaction whose tenant is the person's organization.
+ * A person's own open unshared draft round of a ticket: found without reading its pictures or pins, or with its
+ * screenshots listed by chain of tries, never with pins. It reads under row-level security, so it needs an open
+ * transaction whose tenant is the person's organization.
  */
 interface OpenDraftQueries
 {
@@ -25,4 +26,15 @@ interface OpenDraftQueries
      * @throws \LogicException when no transaction is open or no tenant is set, before any query
      */
     public function openDraftOf(TicketId $ticketId, UserId $owner): ?RoundAccessFacts;
+
+    /**
+     * The same draft as openDraftOf with each of its screenshots, the latest try of every chain, numbered as the draft
+     * round card numbers them (ScreenshotChains), in one query whatever the number of tries. Pins are not read. The
+     * same rules as openDraftOf: only $owner's own open unshared draft, and no check of who asks or of the ticket.
+     *
+     * @return OpenDraftScreenshots|null null when openDraftOf is; a draft with no screenshot has no chains
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set, before any query
+     */
+    public function openDraftScreenshotsOf(TicketId $ticketId, UserId $owner): ?OpenDraftScreenshots;
 }

@@ -14,6 +14,7 @@ use App\AgentApi\Infrastructure\Mcp\Tool\CreateReport;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateReportUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListDraftScreenshots;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
 use App\AgentApi\Infrastructure\Mcp\ToolCallGate;
@@ -111,6 +112,16 @@ final readonly class RestToolController
     public function draftScreenshots(string $key, Request $request): Response
     {
         return $this->idempotent($request, fn (array $body): Response => $this->runOnPathId(AddScreenshot::NAME, $body, 'key', $key, Response::HTTP_OK));
+    }
+
+    /**
+     * The screenshots of the caller's own draft round on the ticket, one per chain of tries, numbered as the draft round
+     * shows them (list_draft_screenshots, read), each title wrapped as UntrustedText; an empty list without a draft.
+     */
+    #[Route('/api/v1/tickets/{key}/draft/screenshots', name: 'api_v1_my_draft_screenshots', methods: ['GET'])]
+    public function myDraftScreenshots(string $key): Response
+    {
+        return $this->runOnPathId(ListDraftScreenshots::NAME, [], 'key', $key, Response::HTTP_OK);
     }
 
     /**
