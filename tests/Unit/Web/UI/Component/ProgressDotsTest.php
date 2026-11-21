@@ -77,7 +77,7 @@ final class ProgressDotsTest extends TestCase
     public function aRowThatCannotShowAStageIsRefusedAtMount(array $labels, int $current, string $message): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage($message);
+        $this->expectExceptionMessageIsOrContains($message);
 
         self::dots($labels, $current);
     }

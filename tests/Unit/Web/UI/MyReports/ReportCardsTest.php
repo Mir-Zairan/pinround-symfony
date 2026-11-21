@@ -201,7 +201,7 @@ final class ReportCardsTest extends TestCase
         ];
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The step of the report SHOP-2 is not a step of the organization.');
+        $this->expectExceptionMessageIsOrContains('The step of the report SHOP-2 is not a step of the organization.');
 
         $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $reports, new \DateTimeImmutable(self::NOW));
     }
@@ -220,11 +220,11 @@ final class ReportCardsTest extends TestCase
      */
     private function memberNames(): MemberNameQueries
     {
-        return new class($this->recordNameLookup(...)) implements MemberNameQueries {
+        return new readonly class($this->recordNameLookup(...)) implements MemberNameQueries {
             /**
              * @param \Closure(list<string>): void $recordLookup
              */
-            public function __construct(private readonly \Closure $recordLookup)
+            public function __construct(private \Closure $recordLookup)
             {
             }
 
@@ -256,11 +256,11 @@ final class ReportCardsTest extends TestCase
      */
     private function steps(): StepQueries
     {
-        return new class($this->recordStepListing(...)) implements StepQueries {
+        return new readonly class($this->recordStepListing(...)) implements StepQueries {
             /**
              * @param \Closure(): void $recordListing
              */
-            public function __construct(private readonly \Closure $recordListing)
+            public function __construct(private \Closure $recordListing)
             {
             }
 
@@ -300,11 +300,11 @@ final class ReportCardsTest extends TestCase
      */
     private function openQuestions(): OpenQuestionQueries
     {
-        return new class($this->answerQuestionLookup(...)) implements OpenQuestionQueries {
+        return new readonly class($this->answerQuestionLookup(...)) implements OpenQuestionQueries {
             /**
              * @param \Closure(string, list<string>): array<string, OpenQuestion> $answerLookup
              */
-            public function __construct(private readonly \Closure $answerLookup)
+            public function __construct(private \Closure $answerLookup)
             {
             }
 
@@ -327,11 +327,11 @@ final class ReportCardsTest extends TestCase
      */
     private function pinProgress(): PinProgressQueries
     {
-        return new class($this->answerPinProgressLookup(...)) implements PinProgressQueries {
+        return new readonly class($this->answerPinProgressLookup(...)) implements PinProgressQueries {
             /**
              * @param \Closure(list<string>): array<string, PinProgress> $answerLookup
              */
-            public function __construct(private readonly \Closure $answerLookup)
+            public function __construct(private \Closure $answerLookup)
             {
             }
 

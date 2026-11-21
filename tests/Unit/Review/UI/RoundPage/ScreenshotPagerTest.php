@@ -92,7 +92,7 @@ final class ScreenshotPagerTest extends TestCase
         ];
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A screenshot strip shows exactly one screenshot.');
+        $this->expectExceptionMessageIsOrContains('A screenshot strip shows exactly one screenshot.');
 
         ScreenshotPager::over($thumbs);
     }
@@ -126,7 +126,7 @@ final class ScreenshotPagerTest extends TestCase
     public function overScreenshotsRefusesAShownNumberTheRoundHasNot(int $shownNumber, int $count): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('The shown screenshot is one of the round\'s.');
+        $this->expectExceptionMessageIsOrContains('The shown screenshot is one of the round\'s.');
 
         ScreenshotPager::overScreenshots($shownNumber, $count);
     }

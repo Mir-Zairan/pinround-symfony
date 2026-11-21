@@ -540,7 +540,7 @@ final class RoundsFrameTest extends WebTestCase
     {
         $ticketId = $this->addTicket('SHOP-1');
         $reviewRound = new RoundView(Uuid::v7()->toRfc4122(), 2, 'review', $this->people['Lena']->id(), new \DateTimeImmutable(self::SHARED_AT), 'open', []);
-        $roundsWithNoCount = new class($reviewRound) implements RoundsVisibleTo {
+        $roundsWithNoCount = new readonly class($reviewRound) implements RoundsVisibleTo {
             public function __construct(private RoundView $round)
             {
             }

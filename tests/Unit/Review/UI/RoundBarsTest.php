@@ -80,11 +80,11 @@ final class RoundBarsTest extends TestCase
     {
         // Round 2 is the ticket's open review round, while one is open; no other ticket has one.
         $openRoundsByTicket = $isRoundOpen ? [self::TICKET => new OpenSharedRound(2, 'review', new UserId(self::MIA), false)] : [];
-        $openSharedRoundQueries = new class($openRoundsByTicket) implements OpenSharedRoundQueries {
+        $openSharedRoundQueries = new readonly class($openRoundsByTicket) implements OpenSharedRoundQueries {
             /**
              * @param array<string, OpenSharedRound> $openRoundsByTicket
              */
-            public function __construct(private readonly array $openRoundsByTicket)
+            public function __construct(private array $openRoundsByTicket)
             {
             }
 

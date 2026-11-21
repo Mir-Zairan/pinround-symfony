@@ -347,7 +347,7 @@ final class RoundTest extends TestCase
         $draft->removeScreenshot(new UserId(self::OMAR), self::screenshotId(0));
 
         $this->expectException(DraftHasNoScreenshots::class);
-        $this->expectExceptionMessage('Add a screenshot before you share.');
+        $this->expectExceptionMessageIsOrContains('Add a screenshot before you share.');
 
         $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable('2026-03-05 11:15:00+00:00'));
     }

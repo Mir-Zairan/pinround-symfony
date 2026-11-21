@@ -72,7 +72,7 @@ final class ScreenshotContextArgumentsTest extends TestCase
     public function aSchemaWithoutASummaryCannotBeMadeToRequireIt(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('A picture schema without "summary" cannot require it.');
+        $this->expectExceptionMessageIsOrContains('A picture schema without "summary" cannot require it.');
 
         ScreenshotContextArguments::requiredIn(['type' => 'object', 'properties' => ['title' => ['type' => 'string']]]);
     }
@@ -123,10 +123,9 @@ final class ScreenshotContextArgumentsTest extends TestCase
 
     #[Test]
     #[DataProvider('picturesLeftToTheSchemaOrGiven')]
+    #[\PHPUnit\Framework\Attributes\DoesNotPerformAssertions]
     public function aGivenTitleAndSummaryOrAPictureOfAnotherShapeIsNotRefusedHere(mixed $picture): void
     {
         ScreenshotContextArguments::refuseMissingIn($picture, '');
-
-        $this->addToAssertionCount(1);
     }
 }

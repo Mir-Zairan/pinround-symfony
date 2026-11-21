@@ -46,7 +46,7 @@ final class ReportStageTest extends TestCase
     public function aCodeThatIsNoStepGroupIsRefused(string $code): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage(\sprintf('"%s" is not a step group.', $code));
+        $this->expectExceptionMessageIsOrContains(\sprintf('"%s" is not a step group.', $code));
 
         ReportStage::ofStepGroup($code);
     }

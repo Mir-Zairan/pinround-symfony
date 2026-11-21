@@ -73,7 +73,7 @@ final readonly class FocusPages
 
         $number = $shownIndex + 1;
         $count = \count($screenshots);
-        $pins = array_values(array_filter($screenshot->pins, static fn (RoundPinView $pin): bool => RoundCards::isShownPin($pin)));
+        $pins = array_values(array_filter($screenshot->pins, RoundCards::isShownPin(...)));
         $stops = self::stopsOf($ticket, $pins);
         $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$screenshot->mediaId], RoundCards::VARIANT, $now)[$screenshot->mediaId] ?? null;
         $picture = RoundCards::viewOfPicture(
@@ -82,7 +82,7 @@ final readonly class FocusPages
             null,
             null,
             $image,
-            array_map(static fn (RoundPinView $pin): PinView => RoundCards::pinViewOf($pin), $pins),
+            array_map(RoundCards::pinViewOf(...), $pins),
         );
 
         return new FocusPage(

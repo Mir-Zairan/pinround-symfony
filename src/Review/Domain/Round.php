@@ -638,13 +638,7 @@ final class Round
 
     private function isLatestTry(Screenshot $screenshot): bool
     {
-        foreach ($this->triesOfChain($screenshot->firstTryId()) as $try) {
-            if ($try->position() > $screenshot->position()) {
-                return false;
-            }
-        }
-
-        return true;
+        return array_all($this->triesOfChain($screenshot->firstTryId()), static fn (Screenshot $try): bool => $try->position() <= $screenshot->position());
     }
 
     /**

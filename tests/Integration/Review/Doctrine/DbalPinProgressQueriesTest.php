@@ -108,7 +108,7 @@ final class DbalPinProgressQueriesTest extends KernelTestCase
         $tooMany = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-%012d', $number)), range(1, PinProgressQueries::MAX_TICKET_IDS + 1));
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Pin progress is read for at most 100 tickets at a time.');
+        $this->expectExceptionMessageIsOrContains('Pin progress is read for at most 100 tickets at a time.');
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->pinProgressOf($tooMany));
     }
@@ -130,7 +130,7 @@ final class DbalPinProgressQueriesTest extends KernelTestCase
     public function pinProgressIsReadOnlyInATransaction(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('none is open');
+        $this->expectExceptionMessageIsOrContains('none is open');
 
         $this->queries()->pinProgressOf(self::ticketIds(self::CHECKLIST_TICKET));
     }

@@ -130,7 +130,7 @@ final class DbalOpenQuestionQueriesTest extends KernelTestCase
         $tooMany = array_map(static fn (int $number): TicketId => new TicketId(\sprintf('0197a3c0-0000-7000-8000-%012d', $number)), range(1, OpenQuestionQueries::MAX_TICKET_IDS + 1));
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Open questions are read for at most 100 tickets at a time.');
+        $this->expectExceptionMessageIsOrContains('Open questions are read for at most 100 tickets at a time.');
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => $this->queries()->openQuestionsTo(new UserId(self::MIA), $tooMany));
     }
@@ -152,7 +152,7 @@ final class DbalOpenQuestionQueriesTest extends KernelTestCase
     public function questionsAreReadOnlyInATransaction(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('none is open');
+        $this->expectExceptionMessageIsOrContains('none is open');
 
         $this->queries()->openQuestionsTo(new UserId(self::MIA), self::ticketIds(self::ASKED_TICKET));
     }

@@ -22,9 +22,6 @@ final readonly class ScreenshotEditorItem
     /** What the summary field shows. */
     public string $summary;
 
-    /** @var array<int, string> by the pin's position among the screenshot's pins, from 0 */
-    private array $typedPinNotes;
-
     /**
      * @param array<int, string> $typedPinNotes by the pin's position among the view's pins, from 0
      */
@@ -34,7 +31,7 @@ final readonly class ScreenshotEditorItem
         public bool $isRemoved = false,
         ?string $typedTitle = null,
         ?string $typedSummary = null,
-        array $typedPinNotes = [],
+        private array $typedPinNotes = [],
     ) {
         if ($isRemoved && null === $fieldNames->remove) {
             throw new \InvalidArgumentException('Only a screenshot with a remove field can show as removed.');
@@ -42,7 +39,6 @@ final readonly class ScreenshotEditorItem
         $this->picture = new ScreenshotView($view->domId, $view->imageUrl, $view->width, $view->height, $view->altText, pins: $view->pins, status: $view->status);
         $this->title = $typedTitle ?? $view->title ?? '';
         $this->summary = $typedSummary ?? $view->summary ?? '';
-        $this->typedPinNotes = $typedPinNotes;
     }
 
     /** The note the field of the pin at this position (0 for the lowest number) shows: the typed one, or the pin's. */
