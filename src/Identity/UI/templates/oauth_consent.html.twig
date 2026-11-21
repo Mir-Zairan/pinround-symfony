@@ -1,0 +1,72 @@
+{% extends '@Web/base.html.twig' %}
+
+{% block title %}{{ refusal ? 'This app cannot connect' : 'Connect an app' }} · pinround{% endblock %}
+
+{# The card, fields and errors of the login pages; profile.css gives the organization radios their choice group. #}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
+{% endblock %}
+
+{% block main %}
+    <div class="login">
+        {% if refusal %}
+            <twig:Card tag="section" class="login__card" aria-labelledby="oauth-refusal-title">
+                <h1 class="login__title" id="oauth-refusal-title">This app cannot connect</h1>
+                <p class="login__error" role="alert">{{ refusal }}</p>
+                <div>
+                    <twig:Button href="{{ path('web_home') }}" variant="text">Go to Home</twig:Button>
+                </div>
+            </twig:Card>
+        {% else %}
+            <twig:Card tag="section" class="login__card" aria-labelledby="oauth-consent-title">
+                <h1 class="login__title" id="oauth-consent-title">Connect {{ authorization.clientName ?? 'an app' }} to pinround?</h1>
+                <p class="login__hint">It sends you back to <strong>{{ authorization.redirectHost }}</strong>. Allow only if you started this from that app.</p>
+                {% if formError %}
+                    <p class="login__error" role="alert">{{ formError }}</p>
+                {% endif %}
+                <form class="login__form" method="post" action="{{ path('identity_oauth_authorize_decide') }}">
+                    <div>
+                        <p class="profile__legend">It may do this as you</p>
+                        <ul>
+                            {% for explanation in scopeExplanations %}
+                                <li>{{ explanation }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% if organizations is empty %}
+                        <twig:EmptyState message="You are not in any organization yet, so there is nothing to connect."/>
+                    {% else %}
+                        <fieldset class="profile__themes">
+                            <legend class="profile__legend">In this organization only</legend>
+                            {% for organization in organizations %}
+                                <label class="profile__theme">
+                                    <input type="radio" name="organization_id" value="{{ organization.id.toString }}" required
+                                        {%- if organization.id.toString == preselectedOrganizationId %} checked{% endif %}>
+                                    {{ organization.name }}
+                                </label>
+                            {% endfor %}
+                        </fieldset>
+                    {% endif %}
+                    <input type="hidden" name="response_type" value="code">
+                    <input type="hidden" name="client_id" value="{{ authorization.clientId }}">
+                    <input type="hidden" name="redirect_uri" value="{{ authorization.redirectUri }}">
+                    <input type="hidden" name="code_challenge" value="{{ authorization.codeChallenge }}">
+                    <input type="hidden" name="code_challenge_method" value="S256">
+                    {% if authorization.state is not null %}
+                        <input type="hidden" name="state" value="{{ authorization.state }}">
+                    {% endif %}
+                    <input type="hidden" name="scope" value="{{ authorization.scope }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfTokenId) }}">
+                    <div>
+                        {% if organizations is not empty %}
+                            <twig:Button type="submit" name="decision" value="allow">Allow</twig:Button>
+                        {% endif %}
+                        {# No organization needs picking to say no. #}
+                        <twig:Button type="submit" name="decision" value="deny" variant="outline" formnovalidate>Deny</twig:Button>
+                    </div>
+                </form>
+            </twig:Card>
+        {% endif %}
+    </div>
+{% endblock %}

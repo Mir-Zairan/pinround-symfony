@@ -99,6 +99,58 @@ final class OAuthRedirectUriTest extends TestCase
         new OAuthRedirectUri($uri);
     }
 
+    /**
+     * @return iterable<string, array{string, string}> the requested URI and the registered one
+     */
+    public static function matchingUris(): iterable
+    {
+        yield 'the same https URI' => ['https://claude.example/api/mcp/auth_callback', 'https://claude.example/api/mcp/auth_callback'];
+        yield 'the same https URI with its port and query' => ['https://claude.example:8443/cb?x=1', 'https://claude.example:8443/cb?x=1'];
+        yield 'the extension\'s address' => ['https://'.self::EXTENSION_ID.'.chromiumapp.org/', 'https://'.self::EXTENSION_ID.'.chromiumapp.org/'];
+        yield 'loopback 127.0.0.1 with another port' => ['http://127.0.0.1:53127/cb', 'http://127.0.0.1:8080/cb'];
+        yield 'loopback 127.0.0.1 with a port, registered without one' => ['http://127.0.0.1:53127/cb', 'http://127.0.0.1/cb'];
+        yield 'loopback 127.0.0.1 without a port, registered with one' => ['http://127.0.0.1/cb', 'http://127.0.0.1:53127/cb'];
+        yield 'loopback localhost with a port and a query' => ['http://localhost:4000/cb?x=1', 'http://localhost/cb?x=1'];
+        yield 'loopback [::1] with a port and no path' => ['http://[::1]:4000', 'http://[::1]'];
+    }
+
+    #[Test]
+    #[DataProvider('matchingUris')]
+    public function aRequestedUriMatchesItsRegisteredOne(string $requested, string $registered): void
+    {
+        self::assertTrue(new OAuthRedirectUri($requested)->matchesRegistered($registered));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}> the requested URI and the registered one
+     */
+    public static function differentUris(): iterable
+    {
+        yield 'another path' => ['https://claude.example/cb2', 'https://claude.example/cb'];
+        yield 'a trailing slash more' => ['https://claude.example/cb/', 'https://claude.example/cb'];
+        yield 'a path in another case' => ['https://claude.example/CB', 'https://claude.example/cb'];
+        yield 'a host in another case' => ['https://Claude.example/cb', 'https://claude.example/cb'];
+        yield 'one character changed' => ['https://claude.example/cc', 'https://claude.example/cb'];
+        yield 'a query more' => ['https://claude.example/cb?x=1', 'https://claude.example/cb'];
+        yield 'a prefix of the registered one' => ['https://claude.example/c', 'https://claude.example/cb'];
+        yield 'an https port' => ['https://claude.example:8443/cb', 'https://claude.example/cb'];
+        yield 'another https port' => ['https://claude.example:8443/cb', 'https://claude.example:9443/cb'];
+        yield 'https on a loopback host' => ['https://127.0.0.1:53127/cb', 'https://127.0.0.1/cb'];
+        yield 'another loopback host' => ['http://localhost:53127/cb', 'http://127.0.0.1:53127/cb'];
+        yield 'http where https is registered' => ['http://localhost/cb', 'https://localhost/cb'];
+        yield 'loopback with another path' => ['http://127.0.0.1:53127/cb2', 'http://127.0.0.1/cb'];
+        yield 'loopback with a percent-encoded path' => ['http://127.0.0.1:53127/%63b', 'http://127.0.0.1/cb'];
+        yield 'the extension of another id' => ['https://'.self::EXTENSION_ID.'.chromiumapp.org/', 'https://bbcdefghijklmnopabcdefghijklmnop.chromiumapp.org/'];
+        yield 'a registered one that breaks the rule' => ['https://claude.example/cb', 'https://claude.example/cb#'];
+    }
+
+    #[Test]
+    #[DataProvider('differentUris')]
+    public function aRequestedUriDoesNotMatchADifferentRegisteredOne(string $requested, string $registered): void
+    {
+        self::assertFalse(new OAuthRedirectUri($requested)->matchesRegistered($registered));
+    }
+
     #[Test]
     public function aUriOfTheMaximumLengthIsAcceptedAndOneMoreCharacterIsRefused(): void
     {

@@ -33,6 +33,8 @@ final readonly class OAuthRedirectUri
 
     private string $uri;
     private string $host;
+    /** The URI as matchesRegistered() compares it: exactly as given, without the port on an http loopback host. */
+    private string $comparedForm;
 
     /**
      * @throws InvalidOAuthRedirectUri when $uri breaks a rule of the class description or is over MAX_LENGTH bytes
@@ -72,6 +74,31 @@ final readonly class OAuthRedirectUri
 
         $this->uri = $uri;
         $this->host = $host;
+        if ('http' === $parts['scheme']) {
+            // Only a loopback host gets here: the http rule above refused every other one.
+            $authority = 'http://'.$parts['host'].('' === $port ? '' : ':'.$port);
+            $this->comparedForm = 'http://'.$parts['host'].substr($uri, \strlen($authority));
+        } else {
+            $this->comparedForm = $uri;
+        }
+    }
+
+    /**
+     * Whether an authorize request that carries this URI may send its answer to $registeredUri, one of the client's
+     * registered ones: only when both are the same string, compared byte for byte, except that on an http loopback host
+     * the port is left out on both sides, as a native client picks a free port at each run (RFC 8252, section 7.3).
+     * A different scheme, host, path, query, case or trailing slash never matches.
+     *
+     * @param string $registeredUri as OAuthClient::redirectUris() gives it; one that breaks the rule of this class
+     *                              matches nothing
+     */
+    public function matchesRegistered(string $registeredUri): bool
+    {
+        try {
+            return new self($registeredUri)->comparedForm === $this->comparedForm;
+        } catch (InvalidOAuthRedirectUri) {
+            return false;
+        }
     }
 
     public function toString(): string

@@ -49,6 +49,9 @@ parameters:
         - identity_oauth_register
         - identity_oauth_authorization_server_metadata
         - identity_oauth_protected_resource_metadata
+        # The consent page has the person pick the organization for the grant, so it must not ask for one first.
+        - identity_oauth_authorize
+        - identity_oauth_authorize_decide
         - health_live
         - health_ready
         - web_component_gallery
@@ -472,8 +475,8 @@ when@test:
         test.identity_issue_api_token:
             alias: App\Identity\Application\IssueApiToken
             public: true
-        # Nothing issues or trades an OAuth code before the consent page and the token endpoint;
-        # DoctrineOAuthAuthorizationCodesTest and NamedMemberOrganizationsTest get them as those will.
+        # DoctrineOAuthAuthorizationCodesTest and NamedMemberOrganizationsTest get them as AuthorizeOAuthClient does;
+        # nothing trades a code before the token endpoint.
         test.identity_oauth_authorization_codes:
             alias: App\Identity\Domain\OAuthAuthorizationCodes
             public: true
