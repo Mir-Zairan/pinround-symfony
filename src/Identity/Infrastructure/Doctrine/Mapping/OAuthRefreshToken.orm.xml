@@ -7,6 +7,12 @@
         <indexes>
             <index name="idn_oauth_refresh_token_family_id_idx" columns="organization_id,family_id"/>
             <index name="idn_oauth_refresh_token_access_token_id_idx" columns="organization_id,access_token_id"/>
+            <!-- OAuthConnections: the newest token of each family, the only one neither traded nor revoked. -->
+            <index name="idn_oauth_refresh_token_user_id_live_idx" columns="organization_id,user_id">
+                <options>
+                    <option name="where">((revoked_at IS NULL) AND (used_at IS NULL))</option>
+                </options>
+            </index>
         </indexes>
         <unique-constraints>
             <!-- For resolve_oauth_refresh_token, which runs before the tenant is known (data-model.md, the documented exception). -->

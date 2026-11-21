@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\Application;
 
+use App\Identity\Api\ApiTokenNotInOrganization;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokens;
@@ -15,12 +16,14 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantSwitchRefused;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 
 /**
  * Token revocation for OAuth clients (RFC 7009, ADR-0050), as the extension's "Sign out" uses it. A client revokes only
  * tokens issued to it: a refresh token revokes its whole family and the access token that may still work with it; an
  * access token stops alone. A personal access token, a token of another client and an unknown token are left alone,
- * and the client is told nothing about which it was (RFC 7009 section 2.2).
+ * and the client is told nothing about which it was (RFC 7009 section 2.2). EndOAuthConnection ends a family the same
+ * way, through endFamily().
  */
 final readonly class RevokeOAuthToken
 {
@@ -76,17 +79,47 @@ final readonly class RevokeOAuthToken
     }
 
     /**
+     * Ends $ownerId's connection: revokes every token of the family and the access token that may still work with it.
+     * ApiTokenRevoked names $ownerId as the user and $actorId as the actor: the owner when their client signs out or
+     * they end it on the connected apps page, an Admin who ends it for them. It does not check that $actorId may:
+     * EndOAuthConnection's voter has. Runs in the caller's transaction, which must be open under the family's
+     * organization as tenant.
+     *
+     * @return bool true when this call ended it; false when the family was revoked already, as by a second end at the
+     *              same time, which waits for the first under the family's lock
+     *
+     * @throws \LogicException when no tenant is set, or no transaction is open
+     */
+    public function endFamily(string $familyId, UserId $ownerId, UserId $actorId, \DateTimeImmutable $now): bool
+    {
+        $accessTokenIds = $this->refreshTokens->revokeFamily($familyId, $now);
+        foreach ($accessTokenIds as $accessTokenId) {
+            $this->revokeAccessTokenOfFamily($ownerId, $actorId, $accessTokenId, $now);
+        }
+
+        // A family not revoked yet always has one untraded token, its newest, so this call revoked one only if it ended it.
+        return [] !== $accessTokenIds;
+    }
+
+    private function revokeAccessTokenOfFamily(UserId $ownerId, UserId $actorId, string $accessTokenId, \DateTimeImmutable $now): void
+    {
+        try {
+            if ($ownerId->equals($actorId)) {
+                ($this->revokeApiToken)($ownerId, $accessTokenId, $now);
+            } else {
+                $this->revokeApiToken->asAdmin($actorId, $accessTokenId, $now);
+            }
+        } catch (ApiTokenNotFound|ApiTokenNotInOrganization) {
+            // The retention job purged it: nothing is left to stop.
+        }
+    }
+
+    /**
      * The client signs its person out, so ApiTokenRevoked names the owner as actor, as the tokens page does.
      */
     private function signOutFamilyOf(OAuthRefreshToken $refreshToken, \DateTimeImmutable $now): void
     {
-        foreach ($this->refreshTokens->revokeFamily($refreshToken->familyId(), $now) as $accessTokenId) {
-            try {
-                ($this->revokeApiToken)($refreshToken->userId(), $accessTokenId, $now);
-            } catch (ApiTokenNotFound) {
-                // The retention job purged it: nothing is left to stop.
-            }
-        }
+        $this->endFamily($refreshToken->familyId(), $refreshToken->userId(), $refreshToken->userId(), $now);
     }
 
     private function revokeRefreshToken(string $tokenHash, OAuthClient $client, \DateTimeImmutable $now): void

@@ -1115,6 +1115,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX idn_oauth_refresh_token_token_hash_key ON public.idn_oauth_refresh_token USING btree (token_hash)',
                 'CREATE INDEX idn_oauth_refresh_token_family_id_idx ON public.idn_oauth_refresh_token USING btree (organization_id, family_id)',
                 'CREATE INDEX idn_oauth_refresh_token_access_token_id_idx ON public.idn_oauth_refresh_token USING btree (organization_id, access_token_id)',
+                'CREATE INDEX idn_oauth_refresh_token_user_id_live_idx ON public.idn_oauth_refresh_token USING btree (organization_id, user_id) WHERE ((revoked_at IS NULL) AND (used_at IS NULL))',
             ],
             $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_oauth_refresh_token'"),
         );
