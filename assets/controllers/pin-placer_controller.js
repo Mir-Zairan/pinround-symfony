@@ -58,7 +58,9 @@ export default class extends Controller {
     }
     const removeButton = event.target.closest('[data-pin-remove]');
     const marker = event.target.closest('.pin');
-    if (removeButton) {
+    if (event.target.closest('.pin__bubble')) {
+      this.addUnderBubble(event.clientX, event.clientY);
+    } else if (removeButton) {
       this.board.remove(this.numberOf(removeButton.closest('[data-pin-number]')));
     } else if (marker) {
       this.board.select(this.numberOf(marker));
@@ -67,6 +69,19 @@ export default class extends Controller {
       this.board.add(spot.x, spot.y);
       this.board.noteFieldOf(this.board.selectedNumber)?.focus();
     }
+  }
+
+  // The bubble covers the picture where it opens, so a click on it drops a pin there as on the picture itself. Where it
+  // hangs past the picture's edge the click does nothing: no pin outside the picture, and nothing under the bubble.
+  addUnderBubble(clientX, clientY) {
+    const box = this.layerTarget.getBoundingClientRect();
+    const isOverPicture = clientX >= box.left && clientX <= box.right && clientY >= box.top && clientY <= box.bottom;
+    if (!isOverPicture) {
+      return;
+    }
+    const spot = this.spotOf(clientX, clientY);
+    this.board.add(spot.x, spot.y);
+    this.board.noteFieldOf(this.board.selectedNumber)?.focus();
   }
 
   // A click anywhere but this placer's picture, pins, pin list and Add pin clears the selection, so the selected pin's
@@ -140,7 +155,7 @@ export default class extends Controller {
 
   onPointerdown(event) {
     this.dragJustEnded = false;
-    const marker = event.target.closest('.pin');
+    const marker = event.target.closest('.pin__bubble') ? null : event.target.closest('.pin');
     this.drag = beginDrag(event, marker, marker ? this.numberOf(marker) : null);
     if (this.drag) {
       marker.setPointerCapture(event.pointerId);

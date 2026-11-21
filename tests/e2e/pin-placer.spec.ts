@@ -372,6 +372,30 @@ test('a click on the selected pin\'s note bubble drops a new pin on the spot und
   expect(Math.abs(Number(await field('pins[2][y]').inputValue()) - ((spot.y - picture.y) / picture.height) * 100)).toBeLessThanOrEqual(1);
 });
 
+test('a click on the part of the note bubble past the picture\'s edge adds no pin and reaches nothing under it', async ({ page }) => {
+  const { form, frame, note, marker } = await openEditableExample(page);
+  const firstPicture = (await frame.boundingBox())!;
+  // On the top edge the bubble, centred on its ring, hangs above the picture.
+  await frame.click({ position: { x: firstPicture.width * 0.2, y: 1 } });
+  await note(1).fill('Check this');
+  const bubble = form.locator('.pin[data-pin-number="1"] .pin__bubble');
+  await expect(bubble).toBeVisible();
+  await frame.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  const picture = (await frame.boundingBox())!;
+  const shown = (await bubble.boundingBox())!;
+  const spot = { x: shown.x + shown.width / 2, y: shown.y + 2 };
+  expect(spot.y, 'the spot is above the picture').toBeLessThan(picture.y);
+  expect(spot.y, 'and inside the window').toBeGreaterThan(0);
+  const hit = await page.evaluate(({ x, y }) => (document.elementFromPoint(x, y)?.closest('.pin__bubble') ?? null) !== null, spot);
+  expect(hit, 'the bubble is what the click hits').toBe(true);
+
+  await page.mouse.click(spot.x, spot.y);
+
+  await expect(marker(2)).toHaveCount(0);
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(bubble).toBeVisible();
+});
+
 test('a click outside the picture and its pins clears the selection; the pin list and Add pin keep one', async ({ page }) => {
   const { form, frame, addPin, note, marker, status } = await openEditableExample(page);
   const picture = (await frame.boundingBox())!;
