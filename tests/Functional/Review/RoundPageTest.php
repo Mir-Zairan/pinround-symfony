@@ -39,9 +39,11 @@ final class RoundPageTest extends WebTestCase
     private const string SHARED_EARLIER = '2026-11-05 09:00:00+00';
     private const string ROUND_PAGE = '/t/SHOP-1/rounds/2';
     /**
-     * The session's user and password change, the organizations, the tenant, the viewer's roles and teams, the settings, the
-     * ticket, the names, the visibility checks, the round, its areas, the pins, the round and verdict voters' ticket facts, the signing of the shown pictures and of the strip's small ones
-     * and the header's Local AI chip's AI settings (LocalAiChip).
+     * The session's user and password change, the organizations, the transaction and its tenant, the viewer's roles and
+     * teams, the settings, the ticket, the names, the visibility checks, the round, its areas, the pins, the round and
+     * verdict voters' ticket facts, the signing of the shown pictures and of the strip's small ones (one query each), the
+     * main menu's My reports count (MyReportsCounts) and the header's Local AI chip's AI settings (LocalAiChip). The
+     * strip's signing and the My reports count, which came in just before the strip, raised it from 23.
      */
     private const int PAGE_QUERIES = 25;
     private const string PRIVATE_TITLE = 'Lena private draft picture';

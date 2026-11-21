@@ -168,9 +168,11 @@ trait SeedsTicketRounds
     /**
      * A screen area of a review round; a verdict given is Mia's.
      *
+     * @param string|null $beforeId null for an area no earlier round pictured
+     *
      * @return string the area's id
      */
-    private function addArea(string $roundId, string $name, int $position, string $beforeId, string $afterId, ?string $verdict, ?string $note): string
+    private function addArea(string $roundId, string $name, int $position, ?string $beforeId, string $afterId, ?string $verdict, ?string $note): string
     {
         $areaId = Uuid::v7()->toRfc4122();
         $decidedBy = null === $verdict ? null : $this->people['Mia']->id()->toString();

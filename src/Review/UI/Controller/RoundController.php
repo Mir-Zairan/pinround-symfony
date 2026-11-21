@@ -32,7 +32,9 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * Runs in the request transaction. An unknown or malformed key or number, another organization's ticket, a ticket the
  * viewer may not see and a round RoundPermission VIEW denies all answer the same 404, so no answer tells that a hidden
- * ticket or someone's private draft exists. The number only matches digits, so a malformed one never reaches here.
+ * ticket or someone's private draft exists. The number only matches digits, so a malformed one never reaches here. A
+ * "?screenshot=N" that is malformed or names no screenshot of the round is a 404 too, while an unknown "?area=N" shows
+ * the first area.
  */
 final class RoundController extends AbstractController
 {
@@ -47,6 +49,7 @@ final class RoundController extends AbstractController
     public const string PIN_PARAMETER = 'pin';
 
     public const string NOT_FOUND = 'No round you may see has that number.';
+    public const string SCREENSHOT_NOT_FOUND = 'This round has no screenshot with that number.';
 
     public function __construct(
         private readonly VisibleTicketLookup $visibleTicketLookup,
@@ -63,17 +66,23 @@ final class RoundController extends AbstractController
     {
         [$visible, $round, $facts] = $this->visibleRoundOf($key, $number);
         $ticket = $visible->ticket;
+        $screenshotValue = $request->query->all()[self::SCREENSHOT_PARAMETER] ?? null;
+        $screenshotNumber = self::positionOf($screenshotValue);
+        if (null !== $screenshotValue && null === $screenshotNumber) {
+            throw new NotFoundHttpException(self::SCREENSHOT_NOT_FOUND);
+        }
+        $page = $this->roundPages->pageOf(
+            $visible,
+            $round,
+            self::numberParameterOf($request, self::AREA_PARAMETER),
+            $screenshotNumber,
+            $this->isGranted(VerdictPermission::SET, $facts),
+            $this->clock->now(),
+            $this->currentTimeZone->zone(),
+        ) ?? throw new NotFoundHttpException(self::SCREENSHOT_NOT_FOUND);
 
         return $this->render('@Review/round.html.twig', [
-            'page' => $this->roundPages->pageOf(
-                $visible,
-                $round,
-                self::numberParameterOf($request, self::AREA_PARAMETER),
-                self::numberParameterOf($request, self::SCREENSHOT_PARAMETER),
-                $this->isGranted(VerdictPermission::SET, $facts),
-                $this->clock->now(),
-                $this->currentTimeZone->zone(),
-            ),
+            'page' => $page,
             'ticketRoute' => RoundsController::TICKET_ROUTE,
             'roundRoute' => self::ROUND_ROUTE,
             'ticketKey' => $ticket->key,

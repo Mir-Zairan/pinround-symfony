@@ -89,6 +89,11 @@ final class RoundBarsTest extends TestCase
             {
                 return new TicketRounds($this->rounds);
             }
+
+            public function sharedRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView
+            {
+                return array_find($this->rounds, static fn (RoundView $round): bool => $round->number === $number);
+            }
         };
         $displayNames = [] === $lenasDisplayName ? [] : [self::LENA => $lenasDisplayName[0]];
 
