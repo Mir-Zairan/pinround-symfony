@@ -19,14 +19,12 @@
             <twig:Button variant="text" href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Back to {{ page.ticketKey }}</twig:Button>
             <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="round-page__ticket-link">{{ page.ticketTitle }}</a></p>
             <h1 class="round-page__title">{{ page.title }}<span class="round-page__detail"> · {{ page.detail }}</span></h1>
-            {% if shown is not null and (shown.before is not null or page.panel is not null) %}
+            {% if shown is not null %}
                 <div class="round-page__tools">
                     {% if shown.before is not null %}
                         <twig:SegmentedControl label="Compare" :options="{both: 'Side by side', before: 'Before', after: 'After'}" selected="both" class="round-compare-control" hidden data-compare-target="control" data-action="click->compare#choose" />
                     {% endif %}
-                    {% if page.panel is not null %}
-                        <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, roundPath|merge({(areaParameter): page.panel.areaPosition})) }}" class="round-page__full-screen">Full screen</twig:Button>
-                    {% endif %}
+                    <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, roundPath|merge(page.shownParameters)) }}" id="{{ fullScreenControlId }}" class="round-page__full-screen" data-controller="fragment-focus">Full screen</twig:Button>
                 </div>
             {% endif %}
         </header>

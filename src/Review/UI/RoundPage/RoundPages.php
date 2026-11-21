@@ -113,11 +113,7 @@ final readonly class RoundPages
             return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::AREAS_STRIP_LABEL, [], null, null, null, self::NO_AREAS);
         }
 
-        $picturesRound = $this->picturesRoundOf($visible, $round);
-        $screenshots = null === $picturesRound ? [] : array_map(
-            static fn (array $tries): RoundScreenshotView => $tries[\count($tries) - 1],
-            RoundCards::shownChainsOf($picturesRound),
-        );
+        [$picturesRound, $screenshots] = $this->screenshotsOf($visible, $round) ?? [null, []];
         $shownIndex = null === $screenshotNumber ? 0 : $screenshotNumber - 1;
         if (null !== $screenshotNumber && !isset($screenshots[$shownIndex])) {
             return null;
@@ -139,6 +135,27 @@ final readonly class RoundPages
             null,
             self::NO_SCREENSHOTS,
         );
+    }
+
+    /**
+     * The screenshots a round without areas shows, other than a review round's: the latest try of each chain, in the
+     * order the page numbers them from 1, and the round they belong to. One read of that round alone, through
+     * RoundsVisibleTo. Runs inside the request transaction whose tenant is the viewer's organization.
+     *
+     * @return array{RoundView, list<RoundScreenshotView>}|null null when there is no round to show the pictures of: a
+     *                                                          checklist round of a ticket without a report
+     */
+    public function screenshotsOf(VisibleTicket $visible, ReviewRoundView $round): ?array
+    {
+        $picturesRound = $this->picturesRoundOf($visible, $round);
+        if (null === $picturesRound) {
+            return null;
+        }
+
+        return [
+            $picturesRound,
+            array_map(static fn (array $tries): RoundScreenshotView => $tries[\count($tries) - 1], RoundCards::shownChainsOf($picturesRound)),
+        ];
     }
 
     /**

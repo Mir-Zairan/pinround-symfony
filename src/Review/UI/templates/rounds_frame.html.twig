@@ -19,6 +19,10 @@
                     {% if card.hasOpenRound and card.number is not null %}
                         <twig:Button variant="outline" size="sm" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::ROUND_ROUTE'), {key: ticketKey, number: card.number}) }}" class="round-card__open" data-turbo-frame="_top">Open round</twig:Button>
                     {% endif %}
+                    {% if card.hasFullScreen and card.number is not null %}
+                        {#- The full-screen review's way back names the frame, which only the report's card links from. -#}
+                        <twig:Button variant="outline" size="sm" href="{{ path(constant('App\\Review\\UI\\Controller\\RoundController::FOCUS_ROUTE'), {key: ticketKey, number: card.number, (constant('App\\Review\\UI\\Controller\\RoundController::RETURN_PARAMETER')): constant('App\\Review\\UI\\Controller\\RoundController::RETURN_TO_TICKET')}) }}" class="round-card__full-screen" data-turbo-frame="_top" data-controller="fragment-focus" data-fragment-focus-fragment-value="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}">Full screen</twig:Button>
+                    {% endif %}
                 </header>
                 {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
                 {% if card.emptyNote is not null %}<p class="round-card__empty">{{ card.emptyNote }}</p>{% endif %}

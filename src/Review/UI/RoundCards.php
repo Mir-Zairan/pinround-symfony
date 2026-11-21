@@ -180,7 +180,18 @@ final readonly class RoundCards
         $moreNote = 0 === $notShown ? null : (1 === $notShown ? '1 more screenshot is not shown.' : \sprintf('%d more screenshots are not shown.', $notShown));
 
         if (self::REPORT === $round->kind) {
-            return new RoundCard($round->id, $domId, \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'), null, false, $screenshots, false, $moreNote);
+            return new RoundCard(
+                $round->id,
+                $domId,
+                \sprintf('Round %d · Report · by %s · %s', $round->number ?? 0, $ownerName, 1 === $pinCount ? '1 pin' : $pinCount.' pins'),
+                null,
+                false,
+                $screenshots,
+                false,
+                $moreNote,
+                number: $round->number,
+                hasFullScreen: [] !== $chains,
+            );
         }
         $status = [] === $chains ? null : \sprintf('%d of %d look right', $looksRightCount, \count($chains));
         $emptyNote = [] === $round->screenshots ? self::EMPTY_DRAFT_NOTE : null;
@@ -250,12 +261,18 @@ final readonly class RoundCards
     {
         $pins = [];
         foreach ($screenshot->pins as $pin) {
-            if (self::DISMISSED !== $pin->aiState) {
+            if (self::isShownPin($pin)) {
                 $pins[] = self::pinViewOf($pin);
             }
         }
 
         return $pins;
+    }
+
+    /** Every pin but an AI suggestion that was dismissed. */
+    public static function isShownPin(RoundPinView $pin): bool
+    {
+        return self::DISMISSED !== $pin->aiState;
     }
 
     /**
@@ -314,7 +331,7 @@ final readonly class RoundCards
     {
         $rows = [];
         foreach ($earlierTry->pins as $pin) {
-            if (self::DISMISSED === $pin->aiState) {
+            if (!self::isShownPin($pin)) {
                 continue;
             }
             [$verdictLabel, $verdictClass, $isChecked] = match ($pin->verdict) {
@@ -401,7 +418,7 @@ final readonly class RoundCards
         return self::REPORT === $round->kind ? self::THUMB_VARIANT : self::VARIANT;
     }
 
-    private static function pinViewOf(RoundPinView $pin): PinView
+    public static function pinViewOf(RoundPinView $pin): PinView
     {
         return new PinView($pin->number, $pin->xPercent, $pin->yPercent, $pin->note, self::AI === $pin->source);
     }

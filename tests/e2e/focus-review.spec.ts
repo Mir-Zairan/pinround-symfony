@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { MIA_STORAGE_STATE } from './auth';
 import { drawablePng } from './media-mocks';
-import { EARLIER_PIN_NOTES, LONG_PIN_NOTE, REVIEW_AREAS, seedReviewRound } from './review-round-seed';
+import { EARLIER_PIN_NOTES, LONG_PIN_NOTE, REPORT_PIN_NOTES, REVIEW_AREAS, seedChecklistRound, seedReviewRound } from './review-round-seed';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // The full-screen review (P05.T10) as Mia, the tester of Shop, with the keyboard only, and its layout on small screens.
@@ -117,6 +117,7 @@ test('Mia walks the pins with the keyboard only: Full screen, the arrows, Enter 
   await pressUntilFocused(page, page.getByRole('link', { name: 'Exit full screen' }), 'Shift+Tab');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`${roundPath()}\\?area=0$`));
+  await expect(page.getByRole('link', { name: 'Full screen', exact: true }), 'focus is back on the link that opened it').toBeFocused();
   const pinRow = (note: string) => page.locator('aside#round-panel .round-panel__pin').filter({ hasText: note });
   await expect(pinRow(EARLIER_PIN_NOTES[1]).locator('.verdict-tag'), 'the choice made in full screen').toHaveText('Fixed');
   await expect(pinRow(LONG_PIN_NOTE).locator('.verdict-tag')).toHaveText('Not checked yet');
@@ -130,6 +131,60 @@ test('Mia walks the pins with the keyboard only: Full screen, the arrows, Enter 
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(new RegExp(`${roundPath()}\\?area=0$`));
   await expect(page.getByRole('heading', { level: 1, name: new RegExp(`^Round ${roundNumber}`) })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Full screen', exact: true })).toBeFocused();
+  await context.close();
+});
+
+// P14.T8 step 2: every round has a full screen, Round 0 also from its card on the ticket page. The seed gives a new
+// ticket Mia's Round 0 with one picture and REPORT_PIN_NOTES, the checklist round, then Omar's shared draft of two
+// pictures, the first with EARLIER_PIN_NOTES.
+test('Full screen opens from a shared draft, from Round 0 and from Round 0 on the ticket page; Escape goes back to each, focus on its link', async ({ browser }) => {
+  const reportKey = await makeTicketForOmar(browser, 'Full-screen check of the report and draft pictures');
+  const draftNumber = seedChecklistRound(reportKey) + 1;
+  const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+  await drawThePictures(context);
+  const fullScreenLink = page.getByRole('link', { name: 'Full screen', exact: true });
+
+  await page.goto(`/t/${reportKey}/rounds/${draftNumber}`, { waitUntil: 'networkidle' });
+  await pressUntilFocused(page, fullScreenLink, 'Tab');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/${draftNumber}/focus\\?screenshot=1$`));
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round ${draftNumber} · Screenshot 1 of 2`);
+  await expect(shownStop(page).locator('.focus-bar__note')).toHaveText(EARLIER_PIN_NOTES[0]);
+  await page.keyboard.press('ArrowRight');
+  await expect(shownStop(page).locator('.focus-bar__note')).toHaveText(EARLIER_PIN_NOTES[1]);
+  await page.getByRole('link', { name: 'Next', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/focus\\?screenshot=2$`));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round ${draftNumber} · Screenshot 2 of 2`);
+  await page.waitForLoadState('networkidle');
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/${draftNumber}\\?screenshot=2$`));
+  await expect(page.locator('.screenshot-pager__position')).toHaveText('2 of 2');
+  await expect(fullScreenLink).toBeFocused();
+
+  await page.goto(`/t/${reportKey}/rounds/0`, { waitUntil: 'networkidle' });
+  await pressUntilFocused(page, fullScreenLink, 'Tab');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/0/focus\\?screenshot=1$`));
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round 0 · Screenshot 1 of 1`);
+  await expect(shownStop(page).locator('.focus-bar__note')).toHaveText(REPORT_PIN_NOTES[0]);
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/0\\?screenshot=1$`));
+  await expect(fullScreenLink).toBeFocused();
+
+  await page.goto(`/t/${reportKey}`, { waitUntil: 'networkidle' });
+  const cardLink = page.locator('.round-card').getByRole('link', { name: 'Full screen', exact: true });
+  await expect(cardLink, 'only Round 0\'s card has one').toHaveCount(1);
+  await cardLink.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/0/focus\\?from=ticket$`));
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round 0 · Screenshot 1 of 1`);
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(new RegExp(`/t/${reportKey}$`));
+  await expect(cardLink, 'focus is back on Round 0\'s link once the Rounds frame has loaded').toBeFocused();
   await context.close();
 });
 

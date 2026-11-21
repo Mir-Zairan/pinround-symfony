@@ -110,7 +110,7 @@ final class FocusPageTest extends WebTestCase
         self::assertSame('dark', $page->filter('html')->attr('data-theme'), 'Always dark, whatever the theme saved.');
         self::assertCount(0, $page->filter('.site-header'));
         self::assertSame('SHOP-1 · Round 2 · Per product · section 1 of 2', $page->filter('h1.focus-review__line')->text());
-        self::assertSame('/t/SHOP-1/rounds/2?area=0', $page->filter('a.focus-review__exit')->attr('href'));
+        self::assertSame('/t/SHOP-1/rounds/2?area=0#round-full-screen', $page->filter('a.focus-review__exit')->attr('href'));
         self::assertSame('Exit full screen', $page->filter('a.focus-review__exit')->text());
         self::assertCount(1, $page->filter('a.focus-review__exit svg[aria-hidden="true"]'), 'The collapse icon is decoration only.');
         self::assertSame(
@@ -428,7 +428,7 @@ final class FocusPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('SHOP-1 · Round 1', $page->filter('h1.focus-review__line')->text());
         self::assertSame('This round has no screen areas.', $page->filter('.empty-state')->text());
-        self::assertSame('/t/SHOP-1/rounds/1', $page->filter('a.focus-review__exit')->attr('href'));
+        self::assertSame('/t/SHOP-1/rounds/1#round-full-screen', $page->filter('a.focus-review__exit')->attr('href'));
         self::assertCount(0, $page->filter('.focus-review__sides, .focus-bar'));
     }
 
@@ -445,7 +445,7 @@ final class FocusPageTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('SHOP-1 · Round 2 · Totals · section 2 of 2', $page->filter('h1.focus-review__line')->text());
-        self::assertSame('/t/SHOP-1/rounds/2?area=1', $page->filter('a.focus-review__exit')->attr('href'), 'Exit goes back to that area.');
+        self::assertSame('/t/SHOP-1/rounds/2?area=1#round-full-screen', $page->filter('a.focus-review__exit')->attr('href'), 'Exit goes back to that area.');
     }
 
     /**
