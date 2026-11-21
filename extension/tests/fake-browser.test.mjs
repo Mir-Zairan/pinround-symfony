@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, CANNOT_ACCESS_CHROME_URL, CANNOT_ACCESS_PAGE, FIRST_WINDOW_ID, NEEDS_ACTIVE_TAB, fakeBrowser } from './fake-browser.mjs';
+import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, CANNOT_ACCESS_CHROME_URL, CANNOT_ACCESS_PAGE, FAKE_EXTENSION_ID, FIRST_WINDOW_ID, NEEDS_ACTIVE_TAB, USER_DID_NOT_APPROVE, fakeBrowser } from './fake-browser.mjs';
 
 const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true, windowId: FIRST_WINDOW_ID };
 const OTHER_PAGE = { id: 8, url: 'https://news.acme-foods.example/', title: 'Acme Foods news', active: false, windowId: FIRST_WINDOW_ID };
@@ -386,4 +386,18 @@ test('tabs.update to another origin keeps activeTab on the old page while it loa
         name: 'TypeError',
         message: 'Error in invocation of tabs.update(optional integer tabId, object updateProperties, optional function callback): No matching signature.',
     });
+});
+
+test('identity answers the chromiumapp.org address its window reaches, and rejects a closed window or one that never got there', async () => {
+    const redirectUri = `https://${FAKE_EXTENSION_ID}.chromiumapp.org/`;
+    const reachedOf = { 'https://pinround.acme-foods.example/allow': `${redirectUri}?code=c1&state=s1`, 'https://pinround.acme-foods.example/elsewhere': 'https://pinround.acme-foods.example/done' };
+    const browser = fakeBrowser({ webAuthFlow: async (url) => reachedOf[url] ?? null });
+
+    assert.equal(browser.identity.getRedirectURL(), redirectUri);
+    assert.equal(browser.identity.getRedirectURL('done'), `${redirectUri}done`);
+    assert.equal(await browser.identity.launchWebAuthFlow({ url: 'https://pinround.acme-foods.example/allow', interactive: true }), `${redirectUri}?code=c1&state=s1`);
+    await assert.rejects(browser.identity.launchWebAuthFlow({ url: 'https://pinround.acme-foods.example/elsewhere', interactive: true }), { message: USER_DID_NOT_APPROVE });
+    await assert.rejects(browser.identity.launchWebAuthFlow({ url: 'https://pinround.acme-foods.example/closed' }), { message: USER_DID_NOT_APPROVE });
+    assert.throws(() => browser.identity.launchWebAuthFlow({ interactive: true }), { name: 'TypeError' });
+    assert.deepEqual(browser.webAuthFlows.map((flow) => flow.interactive), [true, true, false]);
 });

@@ -2,7 +2,7 @@
 // capture the visible tab with its pins into that target. Nothing becomes a ticket here: the person sends a report
 // draft in pinround (ADR-0039). A notebook target also shows its scenarios (scenario-panel.js), played from here: the
 // run lives as long as the popup. A draft round target also offers a retake of its screenshots (retake-picker.js).
-import { PinroundApi } from '../shared/api.js';
+import { pinroundApiOf } from '../shared/oauth-connection.js';
 import { browser } from '../shared/browser.js';
 import { loadSettings } from '../shared/settings.js';
 import { captureTexts } from '../capture/capture.js';
@@ -232,7 +232,7 @@ async function start() {
 
         return;
     }
-    const api = new PinroundApi(settings.origin, settings.token);
+    const api = pinroundApiOf(settings, browser.storage.local);
     retakePicker = new RetakePicker(element, api);
     element('capture-form').hidden = false;
     scenarioPanel = new ScenarioPanel(element, showStatus, {

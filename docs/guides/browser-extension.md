@@ -6,7 +6,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [What it does](#what-it-does) — where a capture can go, and what it never does
 - [Install it](#install-it) — load the folder, find its id
 - [Let pinround accept it](#let-pinround-accept-it) — the two origin settings an admin sets once
-- [Connect it](#connect-it) — make a token and paste it
+- [Connect it](#connect-it) — Connect on pinround's consent page, or paste a token instead
 - [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket, as a new screenshot or a retake
 - [Notebooks](#notebooks) — make one, pin a page and capture it there
 - [Ask Claude Code about a notebook](#ask-claude-code-about-a-notebook) — the `explain_my_notebook` prompt and its token
@@ -15,7 +15,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Allowed hosts for scenarios](#allowed-hosts-for-scenarios) — where scenarios may play, and the question before a run
 - [Safety](#safety) — what the player never does, and who decides
 - [Sign out](#sign-out) — the token stops working everywhere
-- [Permissions and why](#permissions-and-why) — the three Chrome permissions it asks for
+- [Permissions and why](#permissions-and-why) — the four Chrome permissions it asks for
 - [Manual check](#manual-check) — the capture and notebook checks to run by hand, and the record of the last runs
 
 ## What it does
@@ -39,10 +39,15 @@ A browser sends the extension's origin with every request. pinround and its stor
 - The storage's CORS origins: in the dev stack, `MINIO_CORS_ALLOW_ORIGIN` in `.env.local`, as a comma-separated list with the app origin first, for example `https://localhost,chrome-extension://abcdefghijklmnopabcdefghijklmnop`; then run `docker compose up -d --force-recreate minio-init`. In production, add the origin to the bucket's CORS rule for `PUT`. Without it the picture upload fails with "The screenshot could not be stored."
 
 ## Connect it
-1. In pinround, open **API tokens** under your avatar and make a token. Tick `rounds:write` to add screenshots to your draft rounds, `reports:write` to make report drafts, and `notebooks:write` ("Let Claude Code and the extension write to your notebooks.") to make notebooks and capture into them. `read` is needed too, for your ticket list, your notebooks and their scenarios.
-2. Right-click the extension's icon and choose **Options**.
-3. Type the pinround address you open in the browser, for example `https://pinround.acme-foods.example` (plain `http://` only for `localhost`).
-4. Paste the token and press **Save and check**. The extension makes one call to pinround and keeps the token only when pinround accepts it. It is kept in this browser profile only, never synced.
+Connect with pinround's own consent page, with no token to make or paste ([ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)):
+1. Click the extension's icon and press **Connect to pinround**, or right-click the icon and choose **Options**.
+2. Type the pinround address you open in the browser, for example `https://pinround.acme-foods.example` (plain `http://` only for `localhost`), and press **Connect to pinround**.
+3. pinround opens in a window of its own. Log in if you are not; the consent page needs your password and two-step login within the last 10 minutes, as making a token does, and sends you to **Confirm it's you** otherwise.
+4. The page shows "pinround browser extension" with the host of its address (`<extension id>.chromiumapp.org`) and what it may do: `read`, `rounds:write`, `reports:write` and `notebooks:write`. Pick your organization and press **Allow**. The window closes and the options say "Connected. You can capture pages now."
+
+What happens underneath: the extension reads `/.well-known/oauth-authorization-server`, refuses endpoints on any other address, registers itself once as a public client (kept for the next Connect), opens `/oauth/authorize` with a PKCE `S256` challenge and a random state, refuses an answer whose state differs, and trades the code at `/oauth/token`. The access token (1 hour) and the refresh token are kept in this browser profile only, never synced, never shown and never written to the console. When pinround refuses the access token, the extension refreshes it once and sends the call again; when the refresh is refused too, it forgets both and says "Your pinround connection ended. Connect again in the extension options." **Deny**, or closing the window, keeps nothing.
+
+**Use a personal access token instead.** Under that heading in the options, paste a token made under **API tokens** (with `read`, `rounds:write`, `reports:write` and `notebooks:write`) and press **Save and check**. The extension makes one call to pinround and keeps the token only when pinround accepts it.
 
 ## Capture a page
 1. Open the page with the problem and click the extension's icon.
@@ -134,14 +139,15 @@ A notebook's scenarios click and type on a page, so they play only on hosts you 
 - **A closed tab stops a run.** "The tab is closed. Open the scenario's page and play again." Nothing runs in another tab in its place.
 
 ## Sign out
-In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it, with your "Play anyway" answers. If pinround cannot be reached, the extension still forgets it and tells you to revoke it on the **API tokens** page.
+In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it, with your "Play anyway" answers. After **Connect** it revokes the refresh token and the access token at `/oauth/revoke`; if pinround cannot be reached, it still forgets them and says "Signed out here, but pinround could not be reached, so it may still accept the connection." After a pasted token, if pinround cannot be reached, it still forgets it and tells you to revoke it on the **API tokens** page.
 
 ## Permissions and why
 | Permission | Why |
 |---|---|
 | `activeTab` | To take a picture of the tab you are on, and read its title and address for the capture's title and summary, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
+| `identity` | To open pinround's consent page in a window of its own when you press **Connect to pinround**, and take the one-time code back from it. It reads no Google account and no other site's sign-in. |
 | `scripting` | To run the extension's own pin overlay and scenario player in the tab you are on, only after you click the extension's icon. It never runs a script from the network. |
-| `storage` | To keep the pinround address, your token, your allowed hosts and your "Play anyway" answers in this browser profile, and, until the browser closes, where your captures go and the report draft they are adding to. |
+| `storage` | To keep the pinround address, your tokens, your allowed hosts and your "Play anyway" answers in this browser profile, and, until the browser closes, where your captures go and the report draft they are adding to. |
 
 It asks for no host permission and has no content scripts. It injects only its own files, and only into the tab you chose by clicking its icon. `extension/tests/pairing.test.mjs` checks that the manifest asks for exactly these.
 

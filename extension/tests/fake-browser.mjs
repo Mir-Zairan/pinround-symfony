@@ -17,7 +17,9 @@
 // commits (its activeTab grant too, only documented); a missing tab rejects, an id that is no integer throws at
 // once; a func still running when its document navigates away answers null with that document's id. Not modelled:
 // Chrome's "Frame with ID 0 was removed." refusal of an injection into a page that is leaving, which comes and goes
-// with timing; a test that needs it wraps executeScript.
+// with timing; a test that needs it wraps executeScript. Only documented: identity.getRedirectURL answers
+// https://<extension id>.chromiumapp.org/ with the path after it; launchWebAuthFlow answers the first address its window
+// reaches on that host, and rejects when the person closes the window first, as a window that never reaches it ends.
 
 import { statSync } from 'node:fs';
 import path from 'node:path';
@@ -232,13 +234,20 @@ function refusalOfInjectedFile(file) {
 const isChromeUrl = (url) => url.startsWith('chrome://');
 const isWebUrl = (url) => ['http:', 'https:'].includes(new URL(url).protocol);
 
+export const FAKE_EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
+export const USER_DID_NOT_APPROVE = 'The user did not approve access.';
+const WEB_AUTH_FLOW_DETAILS = "Error in invocation of identity.launchWebAuthFlow(identity.WebAuthFlowDetails details, optional function callback): Error at parameter 'details': Missing required property 'url'.";
+
 /**
- * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean, status?: string, windowId?: number}>, hostOrigins?: string[]}} options
+ * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean, status?: string, windowId?: number}>, hostOrigins?: string[],
+ *   webAuthFlow?: (url: string, interactive: boolean) => Promise<string|null>}} options
  *   the open tabs, at most one of them active in each window (FIRST_WINDOW_ID unless windowId says otherwise), each
  *   loaded unless its status says 'loading', and the manifest's host permissions: origins such as
  *   'https://shop.acme-foods.example', or ALL_URLS for every web page. The person is in the first tab's window.
+ *   webAuthFlow is what the person does in identity.launchWebAuthFlow's window opened on `url`: the address that window
+ *   reached, or null when they closed it.
  */
-export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
+export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async () => null } = {}) {
     const openTabs = tabs.map((tab) => ({ active: false, status: 'complete', windowId: FIRST_WINDOW_ID, ...structuredClone(tab) }));
     let lastFocusedWindowId = openTabs[0]?.windowId ?? FIRST_WINDOW_ID;
     const hostOriginSet = new Set(hostOrigins);
@@ -246,6 +255,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
     const activeTabGrants = new Set();
     const pageDocuments = new Map();
     const injectedFiles = [];
+    const webAuthFlows = [];
     const messageListeners = [];
     let nextTabId = Math.max(0, ...openTabs.map((tab) => tab.id)) + 1;
     let documentsLoaded = 0;
@@ -430,6 +440,25 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             },
         },
 
+        identity: {
+            getRedirectURL: (redirectPath = '') => `https://${FAKE_EXTENSION_ID}.chromiumapp.org/${redirectPath}`,
+            launchWebAuthFlow(details) {
+                if ('string' !== typeof details?.url) {
+                    throw new TypeError(WEB_AUTH_FLOW_DETAILS);
+                }
+                webAuthFlows.push({ url: details.url, interactive: true === details.interactive });
+
+                return answerLater(async () => {
+                    const reached = await webAuthFlow(details.url, true === details.interactive);
+                    if (null === reached || new URL(reached).host !== `${FAKE_EXTENSION_ID}.chromiumapp.org`) {
+                        throw new Error(USER_DID_NOT_APPROVE);
+                    }
+
+                    return reached;
+                });
+            },
+        },
+
         /** What clicking the extension's icon on the tab does: the tab becomes the active one and activeTab reaches it. */
         clickIcon(tabId) {
             if (isChromeUrl(tabOf(tabId).url)) {
@@ -460,6 +489,8 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
         },
         tabUrl: (tabId) => tabOf(tabId)?.url,
         injectedFiles,
+        /** Each identity.launchWebAuthFlow call's url and interactive flag, in order. */
+        webAuthFlows,
         /** The listeners added with runtime.onMessage.addListener, in order; a test calls them as Chrome would. */
         messageListeners,
         get optionsPageOpenings() {

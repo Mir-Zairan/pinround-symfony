@@ -25,4 +25,8 @@ export const browser = {
         onMessage: { addListener: (listener) => chrome.runtime.onMessage.addListener(listener) },
     },
     scripting: { executeScript: (injection) => chrome.scripting.executeScript(injection) },
+    identity: {
+        getRedirectURL: (path) => chrome.identity.getRedirectURL(path),
+        launchWebAuthFlow: (details) => chrome.identity.launchWebAuthFlow(details),
+    },
 };

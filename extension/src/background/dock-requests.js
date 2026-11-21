@@ -1,7 +1,8 @@
 // What the dock on a page (src/overlay/dock.js) asks the extension for, answered in the service worker: the page's
 // isolated world may not capture a tab, call pinround with the token or read session storage. Each answer is what the
 // popup does for the same press, with the same storage, so the popup and the dock always show one target and one draft.
-import { ApiError, PinroundApi } from '../shared/api.js';
+import { ApiError } from '../shared/api.js';
+import { pinroundApiOf } from '../shared/oauth-connection.js';
 import { loadSettings } from '../shared/settings.js';
 import { captureTexts, listDraftScreenshots } from '../capture/capture.js';
 import { CHOOSE_TARGET_FIRST, NEW_REPORT, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
@@ -39,13 +40,13 @@ export function isDockRequest(message) {
  * @param {{pinroundDock: string, value?: unknown}} request
  * @param {{id?: number, url?: string, title?: string, width?: number, height?: number}} tab the tab whose dock asked,
  *   as Chrome names the sender
- * @param {{browser: object, navigator: object, apiOf?: (settings: {origin: string, token: string}) => PinroundApi,
+ * @param {{browser: object, navigator: object, apiOf?: (settings: {origin: string, token: string}) => import('../shared/api.js').PinroundApi,
  *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} deps the clock, in ms, times the wait for the
  *   start page to load; the system's by default
  * @returns {Promise<DockAnswer>} never rejects: a refusal is an answer with isError. A scenario request answers
  *   {scenario} (dock-scenario.js) instead of a state
  */
-export async function answerDockRequest(request, tab, { browser, navigator, apiOf = (settings) => new PinroundApi(settings.origin, settings.token), clock = SYSTEM_CLOCK }) {
+export async function answerDockRequest(request, tab, { browser, navigator, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local), clock = SYSTEM_CLOCK }) {
     if (!DOCK_ACTIONS.includes(request.pinroundDock) || !Number.isInteger(tab?.id) || !isReadableValue(request)) {
         return { message: DOCK_TEXTS.unknownRequest, isError: true };
     }

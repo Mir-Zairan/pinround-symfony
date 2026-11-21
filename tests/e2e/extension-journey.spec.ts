@@ -73,6 +73,7 @@ async function pairOnOptionsPage(context: BrowserContext, appOrigin: string, tok
   const options = await context.newPage();
   await options.goto(`chrome-extension://${EXTENSION_ID}/options.html`);
   await options.getByLabel('pinround address').fill(appOrigin);
+  await options.getByText('Use a personal access token instead').click();
   await options.getByLabel('Personal access token').fill(token.plainToken);
   await options.getByRole('button', { name: 'Save and check' }).click();
   await expect(options.locator('#status')).toHaveText('Connected. You can capture pages now.');

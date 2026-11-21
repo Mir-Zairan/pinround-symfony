@@ -25,17 +25,22 @@ export const NOT_REACHED = 'Could not reach pinround. Check the address and your
 export const OTHER_HOST = 'The extension only talks to the pinround address you set.';
 export const MISSING_SCOPE = 'missing_scope';
 export const NOT_FOUND = 'not_found';
+export const PAIR_AGAIN = 'pinround does not accept this token any more. Pair the extension again in its options.';
+export const CONNECT_AGAIN = 'Your pinround connection ended. Connect again in the extension options.';
 
 export class PinroundApi {
     /**
      * @param {string} origin the checked pinround origin (settings.js pinroundOriginOf)
-     * @param {string} token a personal access token
+     * @param {string} token a personal access token, or an access token a Connect issued
      * @param {typeof fetch} fetchFn
+     * @param {((refusedToken: string) => Promise<string|null>)|null} renewToken for an issued access token: answers the
+     *   token to retry with once after a 401, or null when the connection ended; null for a personal access token
      */
-    constructor(origin, token, fetchFn = (...args) => fetch(...args)) {
+    constructor(origin, token, fetchFn = (...args) => fetch(...args), renewToken = null) {
         this.origin = origin;
         this.token = token;
         this.fetchFn = fetchFn;
+        this.renewToken = renewToken;
         /** @type {Set<string>} the put_urls this origin answered, the only other URLs a PUT may go to */
         this.issuedPutUrls = new Set();
     }
@@ -52,24 +57,21 @@ export class PinroundApi {
         if (url.origin !== this.origin || !url.pathname.startsWith('/api/v1/')) {
             throw new ApiError(OTHER_HOST, 0);
         }
-        const headers = { Authorization: `Bearer ${this.token}`, Accept: 'application/json' };
-        if (undefined !== body) {
-            headers['Content-Type'] = 'application/json';
-        }
-        if (undefined !== idempotencyKey) {
-            headers['Idempotency-Key'] = idempotencyKey;
-        }
-        let response;
-        try {
-            response = await this.fetchFn(url.href, { method, headers, body: undefined === body ? undefined : JSON.stringify(body), credentials: 'omit', redirect: 'error' });
-        } catch {
-            throw new ApiError(NOT_REACHED, 0);
+        let response = await this.send(url, method, body, idempotencyKey);
+        // A 401 means pinround did nothing, so the same request, with the same idempotency key, is safe to send again.
+        if (401 === response.status && null !== this.renewToken) {
+            const renewedToken = await this.renewToken(this.token);
+            if (null === renewedToken) {
+                throw new ApiError(CONNECT_AGAIN, 401);
+            }
+            this.token = renewedToken;
+            response = await this.send(url, method, body, idempotencyKey);
         }
         const parsed = await response.json().catch(() => ({}));
         const answer = null !== parsed && 'object' === typeof parsed ? parsed : {};
         if (!response.ok) {
             throw new ApiError(
-                401 === response.status ? 'pinround does not accept this token any more. Pair the extension again in its options.' : ('string' === typeof answer.error ? answer.error : `pinround answered ${response.status}.`),
+                401 === response.status ? (null === this.renewToken ? PAIR_AGAIN : CONNECT_AGAIN) : ('string' === typeof answer.error ? answer.error : `pinround answered ${response.status}.`),
                 response.status,
                 'string' === typeof answer.outcome ? answer.outcome : null,
             );
@@ -79,6 +81,21 @@ export class PinroundApi {
         }
 
         return answer;
+    }
+
+    async send(url, method, body, idempotencyKey) {
+        const headers = { Authorization: `Bearer ${this.token}`, Accept: 'application/json' };
+        if (undefined !== body) {
+            headers['Content-Type'] = 'application/json';
+        }
+        if (undefined !== idempotencyKey) {
+            headers['Idempotency-Key'] = idempotencyKey;
+        }
+        try {
+            return await this.fetchFn(url.href, { method, headers, body: undefined === body ? undefined : JSON.stringify(body), credentials: 'omit', redirect: 'error' });
+        } catch {
+            throw new ApiError(NOT_REACHED, 0);
+        }
     }
 
     /**
