@@ -119,6 +119,87 @@ final class RecentAuthTest extends TestCase
         self::assertTrue($turnedOnInTheSameSecond->isRecentFor(new UserId(self::LENA_ID), self::now()));
     }
 
+    /**
+     * Lena has no two-step login and no code in this session, so only the switch can make the proof count.
+     */
+    #[Test]
+    public function theDemoSwitchOnInDevCountsATwoStepProofThatNeverHappened(): void
+    {
+        $justNow = self::now();
+        $passwordOnly = self::confirmationsOf(self::LENA_ID, $justNow, null);
+
+        $recentAuth = new RecentAuth($passwordOnly, new InMemoryTwoStepLogins(), true, 'dev');
+
+        self::assertTrue($recentAuth->isTwoStepLoginSkippedForDemo());
+        self::assertTrue($recentAuth->hasConfirmedTwoStepLoginWithin(new UserId(self::LENA_ID), 3600, $justNow));
+        self::assertTrue($recentAuth->hasConfirmedTwoStepLoginWithin(new UserId(self::OMAR_ID), RecentAuth::WINDOW_SECONDS, $justNow));
+        self::assertTrue($recentAuth->isRecentFor(new UserId(self::LENA_ID), $justNow));
+    }
+
+    /**
+     * The switch skips the code only: the password must still be at most ten minutes old.
+     */
+    #[Test]
+    public function theDemoSwitchStillNeedsARecentPassword(): void
+    {
+        $passwordOnly = self::confirmationsOf(self::LENA_ID, self::now()->modify('-601 seconds'), null);
+
+        $recentAuth = new RecentAuth($passwordOnly, new InMemoryTwoStepLogins(), true, 'dev');
+
+        self::assertFalse($recentAuth->isRecentFor(new UserId(self::LENA_ID), self::now()));
+        self::assertFalse($recentAuth->isRecentFor(new UserId(self::OMAR_ID), self::now()));
+        self::assertTrue($recentAuth->isRecentFor(new UserId(self::LENA_ID), self::now()->modify('-1 second')));
+    }
+
+    /**
+     * @return iterable<string, array{bool, string}> the switch, the kernel's environment
+     */
+    public static function switchesThatSkipNothing(): iterable
+    {
+        yield 'on in prod' => [true, 'prod'];
+        yield 'on in test' => [true, 'test'];
+        yield 'on in an environment named Dev' => [true, 'Dev'];
+        yield 'on with no environment' => [true, ''];
+        yield 'off in dev' => [false, 'dev'];
+    }
+
+    #[Test]
+    #[DataProvider('switchesThatSkipNothing')]
+    public function theDemoSwitchSkipsNothingUnlessItIsOnInDev(bool $isDemoSwitchOn, string $appEnvironment): void
+    {
+        $justNow = self::now();
+        $passwordOnly = self::confirmationsOf(self::LENA_ID, $justNow, null);
+
+        $recentAuth = new RecentAuth($passwordOnly, new InMemoryTwoStepLogins(), $isDemoSwitchOn, $appEnvironment);
+
+        self::assertFalse($recentAuth->isTwoStepLoginSkippedForDemo());
+        self::assertFalse($recentAuth->hasConfirmedTwoStepLoginWithin(new UserId(self::LENA_ID), 3600, $justNow));
+        self::assertFalse($recentAuth->isRecentFor(new UserId(self::LENA_ID), $justNow));
+    }
+
+    /**
+     * Off, the proof is judged exactly as without the switch: the same code counts and the same old code does not.
+     */
+    #[Test]
+    public function theDemoSwitchOffKeepsTheRealProof(): void
+    {
+        $codeAt = self::now()->modify('-5 minutes');
+        $recentAuth = new RecentAuth(self::confirmationsOf(self::LENA_ID, $codeAt, $codeAt), self::twoStepLoginsOfLena(self::TURNED_ON_AT), false, 'dev');
+
+        self::assertTrue($recentAuth->isRecentFor(new UserId(self::LENA_ID), self::now()));
+        self::assertFalse($recentAuth->isRecentFor(new UserId(self::LENA_ID), self::now()->modify('+5 minutes 1 second')));
+        self::assertFalse($recentAuth->hasConfirmedTwoStepLoginWithin(new UserId(self::OMAR_ID), 3600, self::now()));
+    }
+
+    #[Test]
+    public function withoutTheDemoArgumentsTheSwitchIsOff(): void
+    {
+        $recentAuth = new RecentAuth(self::confirmationsOf(self::LENA_ID, self::now(), null), new InMemoryTwoStepLogins());
+
+        self::assertFalse($recentAuth->isTwoStepLoginSkippedForDemo());
+        self::assertFalse($recentAuth->isRecentFor(new UserId(self::LENA_ID), self::now()));
+    }
+
     private static function now(): \DateTimeImmutable
     {
         return self::utcOf(self::NOW);

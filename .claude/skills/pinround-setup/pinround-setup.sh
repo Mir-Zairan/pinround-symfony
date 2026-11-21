@@ -13,6 +13,7 @@
 #   ai-key <provider>     ask for a huggingface or anthropic key (typed, never shown), test it, save it and restart
 #                         (run it in your own terminal: it reads the key from the keyboard)
 #   ai-status             say which cloud AI keys the app has and test them, and whether Ollama here is ready for pinround
+#   demo-mode <on|off>    turn the dev-only switch that skips two-step login on or off (PINROUND_DEMO_SKIP_2FA), restart
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -133,6 +134,12 @@ cmd_check() {
     local cors
     cors=$(compose_setting MINIO_CORS_ALLOW_ORIGIN '')
     [[ $cors == *chrome-extension://* ]] && ok 'storage allows the extension origin' || missing 'the extension origin in MINIO_CORS_ALLOW_ORIGIN' "$0 extension <id>"
+
+    if demo_mode_is_on; then
+        printf '  -        demo mode is on: two-step login is skipped (%s demo-mode off to turn it off)\n' "$0"
+    else
+        printf '  -        optional: demo mode is off, so admin pages and tokens need two-step login (%s demo-mode on)\n' "$0"
+    fi
 
     if [[ -n $(app_setting AI_HUGGINGFACE_TOKEN) || -n $(app_setting AI_ANTHROPIC_KEY) ]]; then
         ok 'a cloud AI key is set (test it with: ai-status)'
@@ -411,6 +418,33 @@ print(pick)' 2>/dev/null || true)
     fi
 }
 
+# Whether the switch is on as the dev app reads it: true, on, yes or a whole number other than 0, as Symfony's bool
+# env processor reads them (it also counts a decimal other than 0, which nobody writes here).
+demo_mode_is_on() {
+    local value
+    value=$(app_setting PINROUND_DEMO_SKIP_2FA)
+    [[ ${value,,} =~ ^(true|on|yes)$ ]] || [[ $value =~ ^[+-]?[0-9]+$ && $((10#${value#[+-]})) -ne 0 ]]
+}
+
+# ADR-0049: the app reads the switch only with APP_ENV=dev and refuses to start with it on anywhere else, so it goes
+# to .env.dev.local, which only dev reads.
+cmd_demo_mode() {
+    local choice=${1:-}
+    case $choice in
+        on) set_env_line .env.dev.local PINROUND_DEMO_SKIP_2FA 1 ;;
+        off) set_env_line .env.dev.local PINROUND_DEMO_SKIP_2FA 0 ;;
+        *) fail 'say on or off: demo-mode on skips two-step login on this laptop, demo-mode off asks for it again.' ;;
+    esac
+    echo "Demo mode $choice in .env.dev.local. Restarting the app and the workers."
+    compose restart app worker worker-heavy > /dev/null 2>&1 || fail 'the app did not restart; run: make logs'
+    wait_for_app
+    if demo_mode_is_on; then
+        ok 'demo mode is on: admin pages and tokens need no two-step login, and every page says so'
+    else
+        ok 'demo mode is off: admin pages and tokens need two-step login'
+    fi
+}
+
 case ${1:-} in
     check) cmd_check ;;
     stack) cmd_stack ;;
@@ -420,5 +454,6 @@ case ${1:-} in
     mcp-status) cmd_mcp_status "${2:-}" ;;
     ai-key) cmd_ai_key "${2:-}" ;;
     ai-status) cmd_ai_status ;;
+    demo-mode) cmd_demo_mode "${2:-}" ;;
     *) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print } /^set -euo/ { exit }' "$0"; exit 2 ;;
 esac

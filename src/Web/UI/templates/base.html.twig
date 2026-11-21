@@ -25,6 +25,10 @@
 <body>
     <a class="skip-link" href="#main">Skip to main content</a>
     <div class="app">
+        {#- Outside every block, so no page can leave it out (ADR-0049). -#}
+        {% if is_two_step_login_skipped_for_demo() %}
+            <p class="demo-mode-banner" role="note">Demo mode: two-step login is skipped.</p>
+        {% endif %}
         {% block site_header %}
         <header class="site-header">
             <div class="site-header__inner">

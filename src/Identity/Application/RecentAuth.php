@@ -13,13 +13,37 @@ use App\SharedKernel\Domain\UserId;
  * the code alone, within the admin window (LoginAssurance). A login with the password only records no two-step time,
  * so it never counts. A code proof counts only while two-step login is on and only from the second it was last turned
  * on, so turning it off or setting it up again in another browser ends the proofs of every session.
+ *
+ * The demo switch PINROUND_DEMO_SKIP_2FA is read here and nowhere else (ADR-0049): on in the dev environment only, it
+ * makes every two-step proof count, and nothing else; the recent password of isRecentFor is still needed. The kernel
+ * refuses to boot with it on outside dev, and this class checks the environment again, so neither check alone lets a
+ * real deployment skip two-step login.
  */
 final readonly class RecentAuth
 {
     public const int WINDOW_SECONDS = 600;
 
-    public function __construct(private SessionConfirmations $sessionConfirmations, private TwoStepLogins $twoStepLogins)
+    private const string DEMO_ENVIRONMENT = 'dev';
+
+    /**
+     * @param bool   $isDemoSwitchOn whether PINROUND_DEMO_SKIP_2FA is on; off unless config/services.yaml wires it
+     * @param string $appEnvironment the kernel's environment; the switch counts only in "dev"
+     */
+    public function __construct(
+        private SessionConfirmations $sessionConfirmations,
+        private TwoStepLogins $twoStepLogins,
+        private bool $isDemoSwitchOn = false,
+        private string $appEnvironment = '',
+    ) {
+    }
+
+    /**
+     * Whether the demo switch is on in the dev environment, so a two-step proof is never needed. The page banner
+     * reads it, so it shows exactly when the skip applies.
+     */
+    public function isTwoStepLoginSkippedForDemo(): bool
     {
+        return $this->isDemoSwitchOn && self::DEMO_ENVIRONMENT === $this->appEnvironment;
     }
 
     /**
@@ -36,6 +60,10 @@ final readonly class RecentAuth
      */
     public function hasConfirmedTwoStepLoginWithin(UserId $userId, int $seconds, \DateTimeImmutable $now): bool
     {
+        if ($this->isTwoStepLoginSkippedForDemo()) {
+            return true;
+        }
+
         // Null while two-step login is off: TwoStepLogin::isOn reads the same time.
         $turnedOnAt = $this->twoStepLogins->byUserId($userId)?->confirmedAt();
         $codeConfirmedAt = $this->sessionConfirmations->twoStepConfirmedAt($userId);

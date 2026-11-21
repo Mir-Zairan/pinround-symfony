@@ -52,6 +52,7 @@ Real secrets never enter the repo ([ADR-0027](../03-adr/0027-secrets-and-encrypt
 | `APP_SHARE_DIR` | `var/share` | app, all workers, migrate | no | Folder for data shared between app versions. |
 | `DEFAULT_URI` | `http://localhost` in `.env.dev` and `.env.test`; none, required in prod | app, all workers, migrate | no | The public base URL, used to build links in commands, workers and mail. |
 | `KERNEL_CLASS` | `App\Kernel` in `.env.test` | test only | no | The kernel class the Symfony test cases boot. |
+| `PINROUND_DEMO_SKIP_2FA` | empty (off) in `.env`; unset counts as off | app, all workers, migrate (the kernel's boot check); app (`RecentAuth`) | no | The demo switch of [ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md). Read as Symfony's `bool` env processor reads it (`1`, `true`, `on`, `yes` are on). On with `APP_ENV=dev`, every two-step proof counts, so a local demo opens admin pages and makes tokens without two-step login (a token still needs a password login from the last 10 minutes), and every page shows "Demo mode: two-step login is skipped." With any other `APP_ENV` the kernel refuses to boot while it is on. Set it only in `.env.dev.local` on a laptop (`pinround-setup.sh demo-mode on`); never in prod. |
 
 ## Database
 Dev and test use the app role for the web and workers, and the migrator role for migrations through the `migrator` Doctrine connection. The passwords in the URLs must match the ones `make db-roles` sets ([Docker and compose host settings](#docker-and-compose-host-settings)).
