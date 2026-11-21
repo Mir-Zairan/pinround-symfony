@@ -14,7 +14,8 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * OAuthRefreshTokens on idn_oauth_refresh_token (Version20261121230000), a tenant table: marked used and revoked in one
- * conditional SQL statement each, naming the tenant's organization_id as well as row-level security does.
+ * conditional SQL statement each, naming the tenant's organization_id as well as row-level security does. Each write
+ * first takes the family's advisory lock (FAMILY_LOCK_KEY_FORMAT) for the rest of the transaction.
  */
 final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
 {
@@ -24,6 +25,15 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
         .' AND expires_at > ? RETURNING id::text';
 
     private const string ID_BY_HASH = 'SELECT id::text FROM idn_oauth_refresh_token WHERE organization_id = ? AND token_hash = ?';
+
+    private const string FAMILY_BY_HASH = 'SELECT family_id::text FROM idn_oauth_refresh_token WHERE organization_id = ? AND token_hash = ?';
+
+    // An advisory lock, not a row lock: a row lock does not stop the insert of a family's next token, which a revoke's
+    // UPDATE that began before it would then miss.
+    private const string LOCK_FAMILY = 'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))';
+
+    /** Names the lock among every module's advisory locks, which share one key space; then organization and family. */
+    public const string FAMILY_LOCK_KEY_FORMAT = 'idn_oauth_refresh_token:family:%s:%s';
 
     private const string REVOKE_FAMILY = 'UPDATE idn_oauth_refresh_token SET revoked_at = ?'
         .' WHERE organization_id = ? AND family_id = ? AND revoked_at IS NULL RETURNING access_token_id::text, used_at IS NULL AS untraded';
@@ -47,6 +57,7 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
         if (!$this->tenantContext->require()->equals($token->organizationId())) {
             throw new \LogicException('A refresh token is saved under its own organization as tenant.');
         }
+        $this->lockFamily($token->organizationId()->toString(), $token->familyId());
         $this->entityManager->persist($token);
         $this->entityManager->flush();
     }
@@ -54,6 +65,12 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
     public function markUsed(#[\SensitiveParameter] string $tokenHash, string $clientId, \DateTimeImmutable $at): ?OAuthRefreshToken
     {
         $organizationId = $this->tenantContext->require()->toString();
+        $this->refuseOutsideTransaction();
+        $familyId = $this->entityManager->getConnection()->fetchOne(self::FAMILY_BY_HASH, [$organizationId, $tokenHash], [1 => ParameterType::BINARY]);
+        if (!\is_string($familyId)) {
+            return null;
+        }
+        $this->lockFamily($organizationId, $familyId);
         $usedAt = $at->format(self::TIMESTAMP_FORMAT);
         $markedIds = $this->entityManager->getConnection()->fetchFirstColumn(
             self::MARK_USED,
@@ -91,9 +108,12 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
 
     public function revokeFamily(string $familyId, \DateTimeImmutable $revokedAt): array
     {
+        $organizationId = $this->tenantContext->require()->toString();
+        // Taken before the UPDATE, whose snapshot then holds every token a rotation that held the lock has added.
+        $this->lockFamily($organizationId, $familyId);
         $revoked = $this->entityManager->getConnection()->fetchAllAssociative(self::REVOKE_FAMILY, [
             $revokedAt->format(self::TIMESTAMP_FORMAT),
-            $this->tenantContext->require()->toString(),
+            $organizationId,
             $familyId,
         ]);
         $accessTokenIds = [];
@@ -117,6 +137,30 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
         }
 
         return new OrganizationId($organizationId);
+    }
+
+    /**
+     * Held to the end of the transaction, so a family's rotation, its revocation and the exchange that starts it run
+     * one after another.
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    private function lockFamily(string $organizationId, string $familyId): void
+    {
+        $this->refuseOutsideTransaction();
+        $this->entityManager->getConnection()->executeStatement(self::LOCK_FAMILY, [\sprintf(self::FAMILY_LOCK_KEY_FORMAT, $organizationId, strtolower($familyId))]);
+    }
+
+    /**
+     * Outside a transaction the family lock would end with its own statement, and a token lookup would find nothing.
+     *
+     * @throws \LogicException when no transaction is open
+     */
+    private function refuseOutsideTransaction(): void
+    {
+        if (!$this->entityManager->getConnection()->isTransactionActive()) {
+            throw new \LogicException('A refresh token family is changed only in an open transaction; none is open.');
+        }
     }
 
     /**
