@@ -22,8 +22,9 @@
                 </header>
                 {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
                 {% if card.emptyNote is not null %}<p class="round-card__empty">{{ card.emptyNote }}</p>{% endif %}
+                {#- Only the report's pictures reach this loop (a shared draft is a row, the owner's draft has its editor), and the ticket page shows them as thumbnails (P14.T7). -#}
                 {% for item in card.screenshots %}
-                    <div class="round-card__screenshot">
+                    <div class="round-card__screenshot round-card__screenshot--thumbnail">
                         {% if item.label is not null %}
                             <p class="round-card__screenshot-label">
                                 <span>{{ item.label }}</span>

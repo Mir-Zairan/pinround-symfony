@@ -26,7 +26,8 @@
         <p class="thread__earlier">Showing the latest {{ constant('App\\Conversation\\Api\\ThreadView::MESSAGE_LIMIT') }} messages.</p>
     {% endif %}
     {% if messages is empty %}
-        <twig:EmptyState message="{{ constant('App\\Conversation\\UI\\Component\\Thread::EMPTY_THREAD') }}" />
+        {#- One muted line, not the dashed EmptyState box, so an empty thread keeps the ticket page short (P14.T7). -#}
+        <p class="thread__note thread__empty">{{ constant('App\\Conversation\\UI\\Component\\Thread::EMPTY_THREAD') }}</p>
     {% else %}
         <ol class="thread__messages">
             {% for message in messages %}
