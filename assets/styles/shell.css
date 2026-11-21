@@ -107,6 +107,20 @@
   background: var(--s-high);
 }
 
+/* My reports' count of questions waiting on the person (prototype "Global layout": a red count tag). */
+.nav__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--error);
+  color: var(--on-error);
+}
+
 /* Muted by weight, not by a lighter colour, so the text keeps its contrast. */
 .nav--not-built {
   font-weight: 400;

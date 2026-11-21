@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Web\UI\Navigation;
 
+use App\Insight\Api\MyReportsCounts;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\TeamQueries;
@@ -46,6 +47,7 @@ final readonly class MainMenu
         private TokenStorageInterface $tokenStorage,
         private CurrentActor $currentActor,
         private TeamQueries $teamQueries,
+        private MyReportsCounts $myReportsCounts,
         private UrlGeneratorInterface $urlGenerator,
         private RequestStack $requestStack,
     ) {
@@ -56,7 +58,8 @@ final readonly class MainMenu
      * chosen yet) the menu is Home alone.
      *
      * @return list<MenuItem> in this order, each when the roles allow it: Home, Tickets, My reports (once its page
-     *                        exists), Team (or the "Teams" group for two or more teams), Admin
+     *                        exists; its count tag is the questions that wait on the person in their reports, one
+     *                        query), Team (or the "Teams" group for two or more teams), Admin
      */
     #[AsTwigFunction('main_menu')]
     public function items(): array
@@ -74,7 +77,8 @@ final readonly class MainMenu
         }
         if ([] !== $teamIds) {
             if (null !== $this->urlOf(self::MY_REPORTS_ROUTE, [])) {
-                $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE);
+                $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE)
+                    ->withBadgeCount($this->myReportsCounts->questionsWaitingOn($actor->organizationId(), $actor->userId()));
             }
             $teamItem = $this->teamItem($actor, $teamIds);
             if (null !== $teamItem) {

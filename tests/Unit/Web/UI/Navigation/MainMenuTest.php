@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Web\UI\Navigation;
 
+use App\Insight\Api\MyReportsCounts;
+use App\Insight\Api\MyReportsTotals;
+use App\Insight\Api\TicketViewer;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\MemberJob;
 use App\Organization\Api\Roles;
@@ -349,12 +352,27 @@ final class MainMenuTest extends TestCase
         $tokenStorage->setToken(new UsernamePasswordToken(new InMemoryUser(self::LENA, null), 'main'));
         $actor = new ActorContext(new UserId(self::LENA), new OrganizationId(self::ACME_FOODS), $roles);
 
-        return new MainMenu($tokenStorage, new FixedCurrentActor([self::LENA => $actor]), $this->teamQueries, $this->urlGenerator(), $this->requestStack);
+        return new MainMenu($tokenStorage, new FixedCurrentActor([self::LENA => $actor]), $this->teamQueries, self::noQuestionsWaiting(), $this->urlGenerator(), $this->requestStack);
     }
 
     private function menuWithoutActor(): MainMenu
     {
-        return new MainMenu(new TokenStorage(), new FixedCurrentActor([]), $this->teamQueries, $this->urlGenerator(), $this->requestStack);
+        return new MainMenu(new TokenStorage(), new FixedCurrentActor([]), $this->teamQueries, self::noQuestionsWaiting(), $this->urlGenerator(), $this->requestStack);
+    }
+
+    private static function noQuestionsWaiting(): MyReportsCounts
+    {
+        return new class implements MyReportsCounts {
+            public function questionsWaitingOn(OrganizationId $organizationId, UserId $reporterId): int
+            {
+                return 0;
+            }
+
+            public function totalsOf(TicketViewer $viewer): MyReportsTotals
+            {
+                throw new \LogicException('The menu reads only the badge count.');
+            }
+        };
     }
 
     private function urlGenerator(): UrlGenerator
