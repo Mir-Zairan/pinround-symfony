@@ -160,6 +160,39 @@ paths:
         '422':
           $ref: '#/components/responses/Refused'
           description: '{error, outcome: invalid_input | refused}: input past a cap, a rejected or expired picture, or a sixth try of a screenshot (outcome refused, `error` names the 5-try cap). Nothing was saved.'
+    get:
+      summary: The screenshots of my own draft round on the ticket, one per screenshot with its tries (list_draft_screenshots, scope read).
+      description: >-
+        In the order and with the numbers the draft round shows ("Screenshot n"). Send a row's `screenshot_id` as
+        `retake_of` to add a retake of that screenshot. The list is empty when I have no open private draft round on
+        the ticket; another person's draft, a shared round and a closed one are never listed. Titles come wrapped as
+        untrusted text, as for `GET /api/v1/notebooks/{id}`. A ticket I may not see, another organization's and an
+        unknown key are 404.
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string }, example: SHOP-12 }
+      responses:
+        '200':
+          description: The draft's screenshots, or an empty list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [untrusted_text_notice, screenshots]
+                properties:
+                  untrusted_text_notice: { type: string }
+                  screenshots:
+                    type: array
+                    items:
+                      type: object
+                      required: [screenshot_id, number, title, try_count]
+                      properties:
+                        screenshot_id: { type: string, format: uuid, description: 'The first try of the screenshot, the id `retake_of` takes.' }
+                        number: { type: integer, minimum: 1, description: 'The "Screenshot n" the draft round shows.' }
+                        title: { type: [string, 'null'], description: 'The latest try''s title, wrapped as untrusted text, or null.' }
+                        try_count: { type: integer, minimum: 1, maximum: 5 }
+        '401': { $ref: '#/components/responses/NoToken' }
+        '403': { $ref: '#/components/responses/Refused' }
+        '404': { $ref: '#/components/responses/Refused' }
   /api/v1/notebooks:
     get:
       summary: My own private notebooks in the token's organization, the last used first (list_my_notebooks, scope read).

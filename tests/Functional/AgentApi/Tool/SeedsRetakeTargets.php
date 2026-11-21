@@ -20,13 +20,13 @@ trait SeedsRetakeTargets
      *
      * @return string the try's id
      */
-    private function addRetake(string $roundId, string $firstTryId, int $position, string $owner): string
+    private function addRetake(string $roundId, string $firstTryId, int $position, string $owner, ?string $title = null): string
     {
         $screenshotId = Uuid::v7()->toRfc4122();
-        $parameters = [$this->acmeFoods->toString(), $screenshotId, $roundId, $this->addMedia('ready', $owner), $position, $firstTryId];
+        $parameters = [$this->acmeFoods->toString(), $screenshotId, $roundId, $this->addMedia('ready', $owner), $position, $firstTryId, $title];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, retake_of, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, '2026-11-05 08:30:00+00')",
+            "INSERT INTO rvw_screenshot (organization_id, id, round_id, media_id, position, retake_of, title, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, '2026-11-05 08:30:00+00')",
             $parameters,
         ));
 
