@@ -57,6 +57,27 @@ test('the avatar menu lists Profile, Security, API tokens, Theme and Log out', a
   await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`at ${viewport.width}px each Theme segment shows its word on one line, never broken inside it`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openHome(page);
+    await avatar(page).click();
+    const segments = page.getByRole('banner').getByRole('group', { name: 'Theme' }).getByRole('button');
+    await expect(segments).toHaveText(['System', 'Light', 'Dark']);
+
+    const lineCounts = await segments.evaluateAll((buttons) => buttons.map((button) => {
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    }));
+    expect(lineCounts).toEqual([1, 1, 1]);
+    for (const segment of await segments.all()) {
+      expect(await segment.evaluate((button) => button.scrollWidth <= button.clientWidth), 'the word fits its segment').toBe(true);
+      await expect(segment).toBeInViewport({ ratio: 1 });
+    }
+  });
+}
+
 test('picking Dark applies it without a reload and a reload keeps it', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
   await openHome(page);

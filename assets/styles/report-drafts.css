@@ -22,6 +22,12 @@
     max-width: 560px;
 }
 
+/* The ScreenshotEditor shows the picture large with its fields beside it (P14.T10), which a 560 px column squeezed
+   to a third of the page; with pictures the draft takes the page's width. */
+.report-draft--with-pictures {
+    max-width: none;
+}
+
 /* Starts at the column's left edge, as the ticket page's back link does, instead of stretching across it with the
    button's text centred. */
 .report-draft__back {

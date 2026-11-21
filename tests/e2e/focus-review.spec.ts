@@ -240,6 +240,34 @@ for (const { name, viewport } of SMALL_SCREENS) {
   });
 }
 
+test('at 390px the pin bar keeps Previous and Next on one row, at its two ends, with the note and choices between', async ({ browser }) => {
+  const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+  await drawThePictures(context);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(focusPath(0), { waitUntil: 'networkidle' });
+  await page.evaluate(() => document.fonts.ready);
+
+  const stop = shownStop(page);
+  await expect(stop.getByRole('button', { name: 'Still wrong' }), 'the choices are in the bar').toBeVisible();
+  const stopBox = await stop.boundingBox();
+  const previousBox = await stop.getByRole('link', { name: 'Previous pin' }).boundingBox();
+  const nextBox = await stop.getByRole('link', { name: 'Next pin' }).boundingBox();
+  const textBox = await stop.locator('.focus-bar__text').boundingBox();
+  expect(stopBox).not.toBeNull();
+  expect(previousBox).not.toBeNull();
+  expect(nextBox).not.toBeNull();
+  expect(textBox).not.toBeNull();
+  if (stopBox === null || previousBox === null || nextBox === null || textBox === null) {
+    return;
+  }
+
+  expect(Math.abs(nextBox.y - previousBox.y), 'Next is on Previous\'s row, not wrapped under it').toBeLessThanOrEqual(1);
+  expect(previousBox.x + previousBox.width, 'Previous is left of the note').toBeLessThanOrEqual(textBox.x);
+  expect(nextBox.x, 'Next is right of the note').toBeGreaterThanOrEqual(textBox.x + textBox.width);
+  expect(stopBox.x + stopBox.width - (nextBox.x + nextBox.width), 'Next sits at the bar\'s right end').toBeLessThanOrEqual(17);
+  await context.close();
+});
+
 for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 800 }]) {
   test(`at ${viewport.width}px a picture still processing takes the column's full width`, async ({ browser }) => {
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);

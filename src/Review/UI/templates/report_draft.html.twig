@@ -14,7 +14,7 @@
 {% endblock %}
 
 {% block main %}
-    <div class="report-draft">
+    <div class="report-draft{% if screenshots is not empty %} report-draft--with-pictures{% endif %}">
         <twig:Button variant="text" href="{{ path('review_report_drafts') }}" class="report-draft__back"><span aria-hidden="true">&lt;</span> Report drafts</twig:Button>
         <h1 class="report-draft__title">Report draft for {{ draft.projectKey }}</h1>
         <p class="report-draft__hint">Only you see this draft. Nothing reaches the team until you press Send.</p>
