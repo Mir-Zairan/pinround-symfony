@@ -1,0 +1,202 @@
+/* My reports (src/Web/UI/templates/my_reports/show.html.twig, my-reports.md): the groups of report cards. */
+
+.my-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 880px;
+}
+
+.my-reports__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.my-reports__header h1 {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+}
+
+.my-reports__intro {
+  font-size: 16px;
+  color: var(--on-surface-var);
+}
+
+.my-reports__group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.my-reports__group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+/* The group's dot (my-reports.md, Groups); the heading's text names the group, so the colour is never the only cue. */
+.my-reports__group-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.my-reports__group-name::before {
+  content: "";
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--primary);
+}
+
+.my-reports__group--needs_you .my-reports__group-name::before {
+  background: var(--error);
+}
+
+.my-reports__group--stuck .my-reports__group-name::before {
+  background: var(--waiting);
+}
+
+.my-reports__count,
+.my-reports__hint {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--on-surface-var);
+}
+
+.my-reports__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.my-reports__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--outline-var);
+  background: var(--s-lowest);
+}
+
+.my-reports__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.my-reports__link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.my-reports__link:hover .my-reports__title {
+  text-decoration: underline;
+}
+
+.my-reports__key {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--on-surface-var);
+}
+
+.my-reports__title {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.my-reports__side {
+  font-size: 13px;
+  color: var(--on-surface-var);
+  white-space: nowrap;
+}
+
+.my-reports__side--stuck {
+  font-weight: 700;
+  color: var(--waiting);
+}
+
+.my-reports__bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.my-reports__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  font-size: 12px;
+}
+
+.my-reports__now {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.my-reports__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.my-reports__more > summary,
+.my-reports__done > summary {
+  width: fit-content;
+  padding: 6px 12px;
+  border-radius: var(--radius-button);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.my-reports__more > summary::-webkit-details-marker,
+.my-reports__done > summary::-webkit-details-marker {
+  display: none;
+}
+
+.my-reports__more > summary:hover,
+.my-reports__done > summary:hover {
+  background: var(--s-high);
+}
+
+.my-reports__more > summary + .my-reports__rows,
+.my-reports__done > summary + .my-reports__rows {
+  margin-top: 12px;
+}
+
+/* A summary holds both of its texts; only the one for its state shows, and display: none hides the other from
+   assistive tech too, so the summary's name is always the shown text. */
+details[open] > summary > .my-reports__when-closed,
+details:not([open]) > summary > .my-reports__when-open {
+  display: none;
+}
+
+.my-reports__pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

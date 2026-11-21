@@ -280,6 +280,82 @@ a.seg {
   color: var(--on-surface-var);
 }
 
+/* ProgressDots (my-reports.md, Card): 12 px dots joined by 2 px lines, each label hung under its dot so the lines meet
+   the dots; the first and last labels align to the row's edges so they stay inside it. */
+.progress-dots {
+  display: flex;
+  align-items: flex-start;
+  max-width: 520px;
+  padding-bottom: 22px;
+}
+
+.progress-dots__stage {
+  position: relative;
+  flex: none;
+}
+
+.progress-dots__dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--s-highest);
+}
+
+.progress-dots__stage--passed .progress-dots__dot,
+.progress-dots__stage--current .progress-dots__dot {
+  background: var(--primary);
+}
+
+.progress-dots__stage--current .progress-dots__dot {
+  box-shadow: 0 0 0 3px var(--primary-container);
+}
+
+.progress-dots__stage--current.progress-dots__stage--waiting .progress-dots__dot {
+  background: var(--waiting);
+}
+
+.progress-dots__label {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--on-surface);
+}
+
+.progress-dots__stage:first-child .progress-dots__label {
+  left: 0;
+  transform: none;
+}
+
+.progress-dots__stage:last-child .progress-dots__label {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.progress-dots__stage--current .progress-dots__label {
+  font-weight: 700;
+}
+
+.progress-dots__stage--later .progress-dots__label {
+  color: var(--on-surface-var);
+}
+
+.progress-dots__line {
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 2px;
+  margin-top: 5px;
+  background: var(--s-highest);
+}
+
+.progress-dots__line--passed {
+  background: var(--primary);
+}
+
 .toast {
   position: fixed;
   left: 50%;
