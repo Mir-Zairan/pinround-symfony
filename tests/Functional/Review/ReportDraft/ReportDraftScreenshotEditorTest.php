@@ -80,7 +80,7 @@ final class ReportDraftScreenshotEditorTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFTS.'/'.$draft);
 
         self::assertResponseStatusCodeSame(200);
-        $editor = $page->filter('form.login__form #draft-shots.screenshot-editor');
+        $editor = $page->filter('form.report-draft__form #draft-shots.screenshot-editor');
         self::assertCount(1, $editor);
         $panels = $editor->filter('[role="tabpanel"]');
         self::assertCount(4, $panels);

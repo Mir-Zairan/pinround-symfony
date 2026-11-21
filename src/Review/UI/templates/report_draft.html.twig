@@ -7,8 +7,6 @@
 {% block title %}{{ draft.title }} · Report draft · pinround{% endblock %}
 
 {% block stylesheets %}
-    <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
-    <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/screenshot-editor.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report.css') }}">
@@ -16,24 +14,24 @@
 {% endblock %}
 
 {% block main %}
-    <div class="security report-draft">
-        <twig:Button variant="text" href="{{ path('review_report_drafts') }}"><span aria-hidden="true">&lt;</span> Report drafts</twig:Button>
-        <h1 class="security__title">Report draft for {{ draft.projectKey }}</h1>
-        <p class="login__hint">Only you see this draft. Nothing reaches the team until you press Send.</p>
+    <div class="report-draft">
+        <twig:Button variant="text" href="{{ path('review_report_drafts') }}" class="report-draft__back"><span aria-hidden="true">&lt;</span> Report drafts</twig:Button>
+        <h1 class="report-draft__title">Report draft for {{ draft.projectKey }}</h1>
+        <p class="report-draft__hint">Only you see this draft. Nothing reaches the team until you press Send.</p>
         {% if error %}
-            <p class="login__error" role="alert" id="report-draft-error">{{ error }}</p>
+            <p class="report-draft__error" role="alert" id="report-draft-error">{{ error }}</p>
         {% endif %}
 
-        <form class="login__form" method="post" action="{{ path('review_report_draft_save', {id: draft.id}) }}" {% if error %}aria-describedby="report-draft-error"{% endif %}>
+        <form class="report-draft__form" method="post" action="{{ path('review_report_draft_save', {id: draft.id}) }}" {% if error %}aria-describedby="report-draft-error"{% endif %}>
             <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
             <input type="hidden" name="version" value="{{ draft.version }}">
-            <label class="login__field">
+            <label class="report-draft__field">
                 What is wrong, in one line
-                <input class="login__input" type="text" name="title" value="{{ title }}" maxlength="200" required>
+                <input class="report-draft__input" type="text" name="title" value="{{ title }}" maxlength="200" required>
             </label>
-            <label class="login__field">
+            <label class="report-draft__field">
                 More detail · optional
-                <textarea class="login__input report-draft__detail" name="detail" rows="5">{{ detail }}</textarea>
+                <textarea class="report-draft__input report-draft__detail" name="detail" rows="5">{{ detail }}</textarea>
             </label>
 
             {% if screenshots is not empty %}

@@ -276,6 +276,12 @@ textarea.pin-list__note {
   cursor: crosshair;
 }
 
+/* The selected pin's bubble stays open over the picture; a click on it must drop a pin on the spot under it, as on any
+   other part of the picture. The bubble holds only text. */
+.pin-placer .pin__bubble {
+  pointer-events: none;
+}
+
 /* Without this the browser starts dragging the picture itself when a marker is dragged, and cancels the pointer. */
 .pin-placer .screenshot__image {
   -webkit-user-drag: none;

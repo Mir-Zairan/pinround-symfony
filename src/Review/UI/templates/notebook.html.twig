@@ -15,7 +15,7 @@
 
 {% block main %}
     <div class="security report-draft">
-        <twig:Button variant="text" href="{{ path('review_notebooks') }}"><span aria-hidden="true">&lt;</span> My notebooks</twig:Button>
+        <twig:Button variant="text" href="{{ path('review_notebooks') }}" class="report-draft__back"><span aria-hidden="true">&lt;</span> My notebooks</twig:Button>
         <h1 class="security__title">{{ notebook.title }}</h1>
         <p class="login__hint">Only you see this notebook.</p>
         {% if error %}

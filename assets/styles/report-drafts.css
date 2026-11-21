@@ -13,6 +13,62 @@
     overflow-wrap: anywhere;
 }
 
+/* One draft's page (report_draft.html.twig) has its own classes, not the login and security pages' (P14.T10). The
+   notebook page shares .report-draft and the back link. */
+.report-draft {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 560px;
+}
+
+/* Starts at the column's left edge, as the ticket page's back link does, instead of stretching across it with the
+   button's text centred. */
+.report-draft__back {
+    align-self: flex-start;
+    margin-left: calc(-1 * var(--space-8));
+}
+
+.report-draft__title {
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.report-draft__hint {
+    color: var(--on-surface-var);
+}
+
+.report-draft__error {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--error-container);
+    color: var(--on-error-container);
+}
+
+.report-draft__form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.report-draft__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.report-draft__input {
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-input);
+    background: var(--s-lowest);
+    color: var(--on-surface);
+    font: inherit;
+    font-weight: 400;
+}
+
 /* No min-height: the textarea's rows sets its starting height (5 lines). */
 .report-draft__detail {
     resize: vertical;
