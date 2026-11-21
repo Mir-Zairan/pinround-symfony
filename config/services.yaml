@@ -45,6 +45,10 @@ parameters:
         - identity_two_step_confirm
         - identity_two_step_off
         - identity_confirm
+        # An OAuth client registers and reads discovery for nobody, so a logged-in browser's chosen organization is moot.
+        - identity_oauth_register
+        - identity_oauth_authorization_server_metadata
+        - identity_oauth_protected_resource_metadata
         - health_live
         - health_ready
         - web_component_gallery

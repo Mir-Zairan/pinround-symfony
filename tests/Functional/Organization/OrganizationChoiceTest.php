@@ -260,7 +260,7 @@ final class OrganizationChoiceTest extends WebTestCase
     }
 
     #[Test]
-    public function onlyThePickerLoginAccountInviteHealthAndGalleryRoutesWorkWithoutAnOrganizationAndEachExists(): void
+    public function onlyThePickerLoginAccountInviteOAuthClientHealthAndGalleryRoutesWorkWithoutAnOrganizationAndEachExists(): void
     {
         $routeNames = self::getContainer()->getParameter('organization.routes_without_organization');
         $routes = self::getContainer()->get('router')->getRouteCollection();
@@ -285,6 +285,9 @@ final class OrganizationChoiceTest extends WebTestCase
             'identity_two_step_confirm',
             'identity_two_step_off',
             'identity_confirm',
+            'identity_oauth_register',
+            'identity_oauth_authorization_server_metadata',
+            'identity_oauth_protected_resource_metadata',
             'health_live',
             'health_ready',
             'web_component_gallery',

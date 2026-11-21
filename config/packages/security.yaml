@@ -19,6 +19,12 @@ security:
         health:
             pattern: ^/health/
             security: false
+        # The two OAuth discovery documents (ADR-0050) are the same for everyone, so shared caches may keep them. Under
+        # main, the session listener turns their Cache-Control private, even for a visitor without a cookie.
+        # OAuthDiscoveryDocumentsTest pins the header.
+        oauth_discovery:
+            pattern: ^/\.well-known/oauth-(?:authorization-server|protected-resource)\z
+            security: false
         # Claude Code and the browser plugin (ADR-0021): a personal access token in "Authorization: Bearer pr_…" on every
         # request, nothing else. Stateless, so a session cookie is never read here and a logged-in browser cannot be
         # used through CSRF; TokenAuthenticator answers every request without a live token with the same 401. Not lazy,
