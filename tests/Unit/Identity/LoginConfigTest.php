@@ -53,8 +53,12 @@ final class LoginConfigTest extends TestCase
             ],
             self::at($security, 'security', 'access_control'),
         );
-        self::assertSame(['health', 'api_token', 'main'], array_keys((array) self::at($security, 'security', 'firewalls')));
+        self::assertSame(['health', 'oauth_discovery', 'api_token', 'main'], array_keys((array) self::at($security, 'security', 'firewalls')));
         self::assertSame(['pattern' => '^/health/', 'security' => false], self::at($security, 'security', 'firewalls', 'health'));
+        self::assertSame(
+            ['pattern' => '^/\.well-known/oauth-(?:authorization-server|protected-resource)\z', 'security' => false],
+            self::at($security, 'security', 'firewalls', 'oauth_discovery'),
+        );
     }
 
     /**
