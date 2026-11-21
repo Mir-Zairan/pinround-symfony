@@ -482,6 +482,60 @@ final class DbalRoundQueriesTest extends KernelTestCase
         self::assertSame([self::REPORT, self::ROUND_ONE, self::ROUND_TWO, self::OMAR_SHARED_DRAFT, self::OMAR_DRAFT], $roundIds);
     }
 
+    /**
+     * sharedRoundOf reads one round by its number for the round page: the viewer who may see it gets it, and each
+     * refusal is null with nothing of the round.
+     */
+    #[Test]
+    public function sharedRoundOfGivesTheNumberedRoundToAViewerWhoMaySeeIt(): void
+    {
+        self::assertSame(self::OMAR_SHARED_DRAFT, $this->sharedRoundFor(self::TICKET, 'Lena', 3)?->id);
+        self::assertSame(self::TEAM_ONLY_REPORT, $this->sharedRoundFor(self::TEAM_ONLY_TICKET, 'Lena', 0)?->id);
+        self::assertSame(self::BAKERY_REPORT, $this->sharedRoundFor(self::BAKERY_TICKET, 'Ben', 0)?->id);
+    }
+
+    /**
+     * @return iterable<string, array{string, string, int}> ticket, viewer, number
+     */
+    public static function sharedRoundsRefused(): iterable
+    {
+        yield 'a negative number' => [self::TICKET, 'Lena', -1];
+        yield 'a team-only ticket, to a member outside the team' => [self::TEAM_ONLY_TICKET, 'Noor', 0];
+        yield 'another organization\'s round on the ticket id, to Acme Foods\' lead' => [self::TICKET, 'Lena', 4];
+        yield 'Acme Foods\' ticket, to another organization\'s lead' => [self::TICKET, 'Ben', 4];
+        yield 'a number only an unshared draft could have' => [self::TICKET, 'Omar', 5];
+    }
+
+    #[Test]
+    #[DataProvider('sharedRoundsRefused')]
+    public function sharedRoundOfRefusesWithNull(string $ticketId, string $viewer, int $number): void
+    {
+        self::assertNull($this->sharedRoundFor($ticketId, $viewer, $number));
+    }
+
+    /**
+     * An unshared draft has no number, so no number reads it, not even for its owner.
+     */
+    #[Test]
+    public function sharedRoundOfNeverGivesAnUnsharedDraft(): void
+    {
+        $roundIds = [];
+        foreach ([0, 1, 2, 3] as $number) {
+            $roundIds[] = $this->sharedRoundFor(self::TICKET, 'Omar', $number)?->id;
+        }
+
+        self::assertSame([self::REPORT, self::ROUND_ONE, self::ROUND_TWO, self::OMAR_SHARED_DRAFT], $roundIds);
+    }
+
+    private function sharedRoundFor(string $ticketId, string $viewer, int $number): ?RoundView
+    {
+        [$userId, $organizationId] = self::VIEWERS[$viewer];
+        $teams = self::BEN === $userId || \in_array($userId, [self::SARA, self::NOOR], true) ? [] : [new TeamId(self::SHOP_TEAM)];
+        $visibility = TicketVisibility::for(new OrganizationId($organizationId), new UserId($userId), $teams, false, null);
+
+        return self::transactions()->rolledBackAs($organizationId, fn (): ?RoundView => $this->roundsVisibleTo()->sharedRoundOf(new TicketId($ticketId), $visibility, $number));
+    }
+
     #[Test]
     public function anUnknownTicketHasNoRoundsAndCostsNoRoundQuery(): void
     {
