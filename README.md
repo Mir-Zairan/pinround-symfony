@@ -123,6 +123,7 @@ Put the bugs back with `git restore demo-shop/src`.
 
 ## Good to know
 - **Sample data:** setup adds about 40 sample `SHOP` tickets in every step, so each page has something to show. Your own report gets the next number.
+- **Three tickets that show the loop:** setup also adds three `SHOP` bugs of the demo shop with real screenshots: "Search finds nothing for Bread with a capital B" (done), "Cart total disappears after a discount code" (waiting for Mia in Testing) and "Orders filter leaves out the last order" (back with Omar after Mia found a new order missing). Open their rounds to see Before and After with pins and verdicts.
 - **Home is mostly empty** until P07 is built. Your tickets are under **Tickets**.
 - **Start or stop later:** `make up` / `make down`. A port is taken? Set another in `.env.local`, for example `HTTPS_PORT=8443`.
 - **Guides:** [Claude Code](docs/guides/claude-code.md) · [Reporting with Claude Code](docs/guides/reporting-with-claude-code.md) · [Browser extension](docs/guides/browser-extension.md)
