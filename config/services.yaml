@@ -226,6 +226,10 @@ services:
     App\Ticketing\Api\ShareDraftQuestion: '@App\Review\Application\RoundShareDraftQuestion'
     # Ticketing's port that Review implements, so the ticket's history names a Review event's pin and area.
     App\Ticketing\Api\ReviewChangeLabels: '@App\Review\Infrastructure\Doctrine\DbalReviewChangeLabels'
+    # Ticketing's ports that Review and Conversation implement, so My reports shows pin progress and quotes the open
+    # question without depending on either.
+    App\Ticketing\Api\PinProgressQueries: '@App\Review\Infrastructure\Doctrine\DbalPinProgressQueries'
+    App\Ticketing\Api\OpenQuestionQueries: '@App\Conversation\Infrastructure\Doctrine\DbalOpenQuestionQueries'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
     App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'

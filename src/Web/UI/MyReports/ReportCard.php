@@ -14,10 +14,12 @@ final readonly class ReportCard
      * @param string      $sideText        "no change for N days", "changed recently" or "updated 5 Nov"
      * @param bool        $isStuck         whether the side text is a Stuck report's, shown in the waiting colour
      * @param bool        $isWaiting       whether the ticket waits at its stage: on hold, or on an open question
-     * @param string|null $turnPersonName  the full name of the person whose turn it is, for the avatar; null when it is
-     *                                     a label's turn, nobody's, the ticket is done, or the person left
+     * @param string|null $turnPersonName  the full name of the person whose turn it is, for the avatar, or of the asker
+     *                                     when the Now line quotes their question; null when it is a label's turn,
+     *                                     nobody's, the ticket is done, or the person left
      * @param string      $nowText         what happens now, for example "Omar builds it"
      * @param bool        $isAnswerOffered whether the card offers "Answer" (Needs you)
+     * @param string|null $pinProgressText for example "1 of 2 pins OK"; null when the ticket has no checklist
      */
     public function __construct(
         public string $key,
@@ -30,6 +32,7 @@ final readonly class ReportCard
         public ?string $turnPersonName,
         public string $nowText,
         public bool $isAnswerOffered,
+        public ?string $pinProgressText,
     ) {
     }
 }

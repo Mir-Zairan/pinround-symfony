@@ -10,6 +10,10 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\OpenQuestion;
+use App\Ticketing\Api\OpenQuestionQueries;
+use App\Ticketing\Api\PinProgress;
+use App\Ticketing\Api\PinProgressQueries;
 use App\Web\UI\Controller\HomeController;
 use App\Web\UI\MyReports\ReportCard;
 use App\Web\UI\MyReports\ReportCards;
@@ -45,6 +49,21 @@ final class ReportCardsTest extends TestCase
     private array $nameLookups = [];
 
     private int $stepListings = 0;
+
+    /** @var list<array{string, list<string>}> the asked person's id and the ticket ids of each openQuestionsTo call */
+    private array $questionLookups = [];
+
+    /** @var list<list<string>> the ticket ids of each pinProgressOf call */
+    private array $pinProgressLookups = [];
+
+    /** @var array<string, OpenQuestion> the open question of a ticket, by ticket id, and to whom it is in askedIds */
+    private array $openQuestions = [];
+
+    /** @var array<string, string> the asked person's id, by ticket id */
+    private array $askedIds = [];
+
+    /** @var array<string, PinProgress> by ticket id */
+    private array $pinProgress = [];
 
     #[Test]
     public function eachReportGetsTheCardOfItsGroupAndStep(): void
@@ -90,6 +109,70 @@ final class ReportCardsTest extends TestCase
 
         self::assertSame([[self::OMAR, self::LENA]], $this->nameLookups);
         self::assertSame(1, $this->stepListings);
+        self::assertSame([], $this->questionLookups, 'no report needs Mia, so no question is read');
+        self::assertSame([[self::ticketIdOf(1), self::ticketIdOf(2), self::ticketIdOf(3), self::ticketIdOf(4)]], $this->pinProgressLookups);
+    }
+
+    /**
+     * SHOP-1 and SHOP-2 wait on Mia's answer: Omar asked SHOP-1's question; Lena, who left, asked SHOP-2's. SHOP-3's
+     * question is to Omar, and SHOP-4 is done with a stale question to Mia, so neither is read.
+     */
+    #[Test]
+    public function aQuestionThatWaitsOnTheViewerIsQuotedWithItsAskersNameAndAvatar(): void
+    {
+        $this->openQuestions = [
+            self::ticketIdOf(1) => new OpenQuestion(new UserId(self::OMAR), "Which order?\nThe one from May?"),
+            self::ticketIdOf(2) => new OpenQuestion(new UserId(self::LENA), 'Which browser?'),
+            self::ticketIdOf(3) => new OpenQuestion(new UserId(self::MIA), 'Is it fixed?'),
+        ];
+        $this->askedIds = [self::ticketIdOf(1) => self::MIA, self::ticketIdOf(2) => self::MIA, self::ticketIdOf(3) => self::OMAR];
+        $reports = [
+            self::report(1, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'answer'], isQuestionToReporter: true),
+            self::report(2, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'answer'], isQuestionToReporter: true),
+            self::report(3, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'answer']),
+            self::report(4, self::DONE_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'answer'], isQuestionToReporter: true, closedAt: '2026-11-05 09:00:00'),
+        ];
+
+        $cards = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $reports, new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(
+            [
+                ['Omar Haddad', 'Omar asks: “Which order? The one from May?”'],
+                [null, 'Someone asks: “Which browser?”'],
+                ['Omar Haddad', 'Omar answers a question'],
+                [null, 'Done'],
+            ],
+            array_values(array_map(static fn (ReportCard $card): array => [$card->turnPersonName, $card->nowText], $cards)),
+        );
+        self::assertSame([[self::MIA, [self::ticketIdOf(1), self::ticketIdOf(2)]]], $this->questionLookups);
+        self::assertSame([[self::MIA, self::OMAR, self::LENA]], $this->nameLookups, 'the askers are named in the turn people\'s batch');
+    }
+
+    #[Test]
+    public function aQuestionWithNoVisibleTextKeepsThePlainLineAndTheTurnPersonsAvatar(): void
+    {
+        $this->openQuestions = [self::ticketIdOf(1) => new OpenQuestion(new UserId(self::OMAR), " \n\t ")];
+        $this->askedIds = [self::ticketIdOf(1) => self::MIA];
+        $report = self::report(1, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'answer'], isQuestionToReporter: true);
+
+        $card = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [$report], new \DateTimeImmutable(self::NOW))[self::ticketIdOf(1)];
+
+        self::assertSame(['Mia Lund', 'A question waits for your answer'], [$card->turnPersonName, $card->nowText]);
+    }
+
+    #[Test]
+    public function aReportWithAChecklistShowsItsPinProgressAndOneWithoutShowsNone(): void
+    {
+        $this->pinProgress = [self::ticketIdOf(1) => new PinProgress(1, 2), self::ticketIdOf(3) => new PinProgress(0, 1)];
+        $reports = [
+            self::report(1, self::CHECKING_STEP, '2026-11-05 09:00:00'),
+            self::report(2, self::DOING_STEP, '2026-11-05 09:00:00'),
+            self::report(3, self::DONE_STEP, '2026-11-05 09:00:00', closedAt: '2026-11-05 09:00:00'),
+        ];
+
+        $cards = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $reports, new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(['1 of 2 pins OK', null, '0 of 1 pin OK'], array_values(array_map(static fn (ReportCard $card): ?string => $card->pinProgressText, $cards)));
     }
 
     #[Test]
@@ -106,7 +189,7 @@ final class ReportCardsTest extends TestCase
     public function anEmptyPageReadsNothing(): void
     {
         self::assertSame([], $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [], new \DateTimeImmutable(self::NOW)));
-        self::assertSame([[], 0], [$this->nameLookups, $this->stepListings]);
+        self::assertSame([[], 0, [], []], [$this->nameLookups, $this->stepListings, $this->questionLookups, $this->pinProgressLookups]);
     }
 
     #[Test]
@@ -128,7 +211,7 @@ final class ReportCardsTest extends TestCase
         $routes = new RouteCollection();
         $routes->add(HomeController::TICKET_ROUTE, new Route('/t/{key}'));
 
-        return new ReportCards($this->memberNames(), $this->steps(), new UrlGenerator($routes, new RequestContext()));
+        return new ReportCards($this->memberNames(), $this->steps(), $this->openQuestions(), $this->pinProgress(), new UrlGenerator($routes, new RequestContext()));
     }
 
     /**
@@ -209,6 +292,93 @@ final class ReportCardsTest extends TestCase
                 throw new \LogicException('My reports reads the steps\' groups from the listed steps.');
             }
         };
+    }
+
+    /**
+     * Like the real one: it refuses more than MAX_TICKET_IDS ids, runs no query for none, and leaves out a question to
+     * someone else.
+     */
+    private function openQuestions(): OpenQuestionQueries
+    {
+        return new class($this->answerQuestionLookup(...)) implements OpenQuestionQueries {
+            /**
+             * @param \Closure(string, list<string>): array<string, OpenQuestion> $answerLookup
+             */
+            public function __construct(private readonly \Closure $answerLookup)
+            {
+            }
+
+            public function openQuestionsTo(UserId $askedId, array $ticketIds): array
+            {
+                if (\count($ticketIds) > self::MAX_TICKET_IDS) {
+                    throw new \InvalidArgumentException('Too many ticket ids.');
+                }
+                if ([] === $ticketIds) {
+                    return [];
+                }
+
+                return ($this->answerLookup)($askedId->toString(), array_map(static fn (TicketId $ticketId): string => $ticketId->toString(), $ticketIds));
+            }
+        };
+    }
+
+    /**
+     * Like the real one: it refuses more than MAX_TICKET_IDS ids and runs no query for none.
+     */
+    private function pinProgress(): PinProgressQueries
+    {
+        return new class($this->answerPinProgressLookup(...)) implements PinProgressQueries {
+            /**
+             * @param \Closure(list<string>): array<string, PinProgress> $answerLookup
+             */
+            public function __construct(private readonly \Closure $answerLookup)
+            {
+            }
+
+            public function pinProgressOf(array $ticketIds): array
+            {
+                if (\count($ticketIds) > self::MAX_TICKET_IDS) {
+                    throw new \InvalidArgumentException('Too many ticket ids.');
+                }
+                if ([] === $ticketIds) {
+                    return [];
+                }
+
+                return ($this->answerLookup)(array_map(static fn (TicketId $ticketId): string => $ticketId->toString(), $ticketIds));
+            }
+        };
+    }
+
+    /**
+     * Records the lookup and answers the open questions of the tickets that are to $askedId.
+     *
+     * @param list<string> $ticketIds
+     *
+     * @return array<string, OpenQuestion>
+     */
+    private function answerQuestionLookup(string $askedId, array $ticketIds): array
+    {
+        $this->questionLookups[] = [$askedId, $ticketIds];
+        $questions = [];
+        foreach ($ticketIds as $ticketId) {
+            if (isset($this->openQuestions[$ticketId]) && ($this->askedIds[$ticketId] ?? null) === $askedId) {
+                $questions[$ticketId] = $this->openQuestions[$ticketId];
+            }
+        }
+
+        return $questions;
+    }
+
+    /**
+     * @param list<string> $ticketIds
+     *
+     * @return array<string, PinProgress>
+     */
+    private function answerPinProgressLookup(array $ticketIds): array
+    {
+        $this->pinProgressLookups[] = $ticketIds;
+
+        return array_intersect_key($this->pinProgress, array_flip($ticketIds));
     }
 
     /**

@@ -25,6 +25,7 @@
                 <div class="my-reports__bottom">
                     {% if card.turnPersonName is not null %}<twig:Avatar name="{{ card.turnPersonName }}" class="my-reports__avatar" />{% endif %}
                     <p class="my-reports__now">{{ card.nowText }}</p>
+                    {% if card.pinProgressText is not null %}<span class="my-reports__pins">{{ card.pinProgressText }}</span>{% endif %}
                     {% if card.isAnswerOffered %}
                         <div class="my-reports__actions">
                             <twig:Button size="sm" href="{{ card.url }}" class="my-reports__answer">Answer<span class="visually-hidden"> on {{ card.key }}</span></twig:Button>
