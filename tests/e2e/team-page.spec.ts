@@ -134,6 +134,29 @@ test.describe('as the lead', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click();
   });
 
+  test('See tickets is a small text button like Remove beside it, and Remove is in the error colour', async ({ page }) => {
+    await openShopTeam(page);
+    const seeTickets = page.getByRole('link', { name: 'See tickets of SHOP' });
+    const remove = page.getByRole('button', { name: 'Remove SHOP from the team' });
+    const looksOf = (element: Element) => {
+      const style = getComputedStyle(element);
+      return { height: style.height, radius: style.borderRadius, fontSize: style.fontSize, decoration: style.textDecorationLine };
+    };
+    const colourOf = (element: Element) => getComputedStyle(element).color;
+    const errorColour = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--error)';
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    });
+
+    expect(await seeTickets.evaluate(looksOf)).toEqual(await remove.evaluate(looksOf));
+    expect(await remove.evaluate(colourOf)).toBe(errorColour);
+    expect(await seeTickets.evaluate(colourOf)).not.toBe(errorColour);
+  });
+
   test('Add step is disabled while the name is empty and the "in" legend shares a row with the first group chip', async ({ page }) => {
     await openShopTeam(page);
     const form = page.getByRole('form', { name: 'Add a team step' });

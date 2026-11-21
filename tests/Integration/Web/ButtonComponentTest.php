@@ -20,7 +20,7 @@ final class ButtonComponentTest extends KernelTestCase
      */
     public static function variants(): iterable
     {
-        foreach (['filled', 'tonal', 'outline', 'text'] as $variant) {
+        foreach (['filled', 'tonal', 'outline', 'text', 'danger'] as $variant) {
             yield $variant => [$variant];
         }
     }

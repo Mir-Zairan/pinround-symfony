@@ -97,13 +97,13 @@
                                         </div>
                                         <div class="team__project-actions">
                                             {% if ticketsUrls[project.id] is not null %}
-                                                <a class="team__project-link" href="{{ ticketsUrls[project.id] }}">See tickets<span class="visually-hidden"> of {{ project.key }}</span></a>
+                                                <twig:Button variant="text" size="sm" class="team__project-link" href="{{ ticketsUrls[project.id] }}">See tickets<span class="visually-hidden"> of {{ project.key }}</span></twig:Button>
                                             {% endif %}
                                             {% if canUnlink %}
                                                 <form class="team__remove" method="post" action="{{ path(projectForms.unlinkRoute, {slug: team.slug}) }}">
                                                     <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.unlinkCsrfId) }}">
                                                     <input type="hidden" name="{{ projectForms.projectIdField }}" value="{{ project.id }}">
-                                                    <twig:Button type="submit" variant="text" size="sm" aria-label="Remove {{ project.key }} from the team">Remove</twig:Button>
+                                                    <twig:Button type="submit" variant="danger" size="sm" aria-label="Remove {{ project.key }} from the team">Remove</twig:Button>
                                                 </form>
                                             {% endif %}
                                         </div>

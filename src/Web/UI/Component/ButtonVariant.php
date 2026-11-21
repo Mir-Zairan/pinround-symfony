@@ -10,4 +10,6 @@ enum ButtonVariant: string
     case Tonal = 'tonal';
     case Outline = 'outline';
     case Text = 'text';
+    /** A text button in the error colour, for an action that removes or deletes something. */
+    case Danger = 'danger';
 }

@@ -108,11 +108,6 @@
   color: var(--on-surface-var);
 }
 
-.team__project-link {
-  color: var(--primary);
-  font-weight: 700;
-}
-
 .team__section-head {
   display: flex;
   flex-wrap: wrap;

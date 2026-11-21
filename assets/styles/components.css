@@ -52,6 +52,17 @@
   background: var(--s-high);
 }
 
+.btn-danger {
+  background: transparent;
+  color: var(--error);
+  padding: 0 12px;
+}
+
+.btn-danger:hover:not(:disabled, [aria-disabled="true"], [aria-busy="true"]) {
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
 .btn:disabled,
 .btn[aria-disabled="true"],
 .btn[aria-busy="true"] {
