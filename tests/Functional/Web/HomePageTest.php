@@ -237,6 +237,11 @@ final class HomePageTest extends WebTestCase
         );
         self::assertCount(0, $page->filter('.home__chips, button.chip'));
         self::assertSame(['Mobile', 'Shop'], $page->filter('article.card > h2')->each(static fn (Crawler $name): string => $name->text()));
+        self::assertSame(
+            ['Mobile → /teams/mobile', 'Shop → /teams/shop'],
+            $page->filter('article.card > h2 > a')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')),
+            'each name opens its team page',
+        );
         self::assertCount(2, $page->filter('article.card .empty-state'));
         self::assertCount(1, $page->filter('.home__date'));
     }
@@ -264,7 +269,7 @@ final class HomePageTest extends WebTestCase
         $page = $this->openHomeAs('Noor');
 
         self::assertSame('Teams at a glance', $page->filter('h1')->text());
-        self::assertSame(['Home', 'Tickets', 'Admin'], $this->menuLabels($page));
+        self::assertSame(['Home', 'Tickets', 'Teams', 'Admin'], $this->menuLabels($page));
     }
 
     #[Test]
@@ -438,7 +443,8 @@ final class HomePageTest extends WebTestCase
      */
     private function menuLabels(Crawler $page): array
     {
-        return $page->filter('header nav[aria-label="Main"] > *')->each(static fn (Crawler $item): string => trim((string) $item->getNode(0)?->firstChild?->textContent));
+        // A group's label is the first text of its button, as in MainMenuTest.
+        return $page->filter('header nav[aria-label="Main"] > *')->each(static fn (Crawler $item): string => trim((string) ('div' === $item->nodeName() ? $item->filter('button') : $item)->getNode(0)?->firstChild?->textContent));
     }
 
     private function person(string $name): User

@@ -34,8 +34,8 @@ use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 
 /**
- * Acme Foods has the teams Shop and Mobile, with the slugs shop and mobile-app. Only the routes a test adds exist,
- * besides Home.
+ * Acme Foods has the teams Shop and Mobile, with the slugs shop and mobile-app, unless a test gives it others. Only the
+ * routes a test adds exist, besides Home.
  */
 final class MainMenuTest extends TestCase
 {
@@ -43,7 +43,8 @@ final class MainMenuTest extends TestCase
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-00000000000a';
     private const string SHOP = '0197a3c0-0000-7000-8000-0000000000d1';
     private const string MOBILE = '0197a3c0-0000-7000-8000-0000000000d2';
-    private const array SLUGS = [self::SHOP => 'shop', self::MOBILE => 'mobile-app'];
+    private const string SUPPORT = '0197a3c0-0000-7000-8000-0000000000d3';
+    private const array SLUGS = [self::SHOP => 'shop', self::MOBILE => 'mobile-app', self::SUPPORT => 'support'];
 
     private RouteCollection $routes;
 
@@ -56,9 +57,19 @@ final class MainMenuTest extends TestCase
         $this->routes = new RouteCollection();
         $this->routes->add(MainMenu::HOME_ROUTE, new Route('/'));
         $this->requestStack = new RequestStack();
-        $this->teamQueries = new class([self::SHOP => 'Shop', self::MOBILE => 'Mobile'], self::SLUGS) implements TeamQueries, \Countable {
+        $this->teamQueries = self::teamQueriesOf([self::SHOP => 'Shop', self::MOBILE => 'Mobile']);
+    }
+
+    /**
+     * Acme Foods' teams as TeamQueries gives them, ordered by name; it counts its queries.
+     *
+     * @param array<string, string> $teamNamesById
+     */
+    private static function teamQueriesOf(array $teamNamesById): TeamQueries&\Countable
+    {
+        return new class($teamNamesById, self::SLUGS) implements TeamQueries, \Countable {
             /** @var int<0, max> */
-            private int $summariesOfCalls = 0;
+            private int $queries = 0;
 
             /**
              * @param array<string, string> $teamNamesById
@@ -70,42 +81,59 @@ final class MainMenuTest extends TestCase
 
             public function teamsOf(OrganizationId $organizationId): array
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                throw new \LogicException('Only summariesOf and allSummariesOf are expected.');
             }
 
             public function allSummariesOf(OrganizationId $organizationId): array
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                ++$this->queries;
+
+                return $this->summariesByName(...array_map(static fn (string $teamId): TeamId => new TeamId($teamId), array_keys($this->teamNamesById)));
             }
 
             public function countOf(OrganizationId $organizationId): int
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                throw new \LogicException('Only summariesOf and allSummariesOf are expected.');
             }
 
             public function bySlug(OrganizationId $organizationId, string $slug): ?TeamSummary
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                throw new \LogicException('Only summariesOf and allSummariesOf are expected.');
             }
 
             public function jobOf(TeamId $teamId, UserId $userId): ?MemberJob
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                throw new \LogicException('Only summariesOf and allSummariesOf are expected.');
             }
 
             public function leadOf(TeamId $teamId): ?UserId
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                throw new \LogicException('Only summariesOf and allSummariesOf are expected.');
             }
 
             public function possibleAssigneesOf(array $teamIds): array
             {
-                throw new \LogicException('Only summariesOf is expected.');
+                throw new \LogicException('Only summariesOf and allSummariesOf are expected.');
             }
 
             public function summariesOf(OrganizationId $organizationId, array $teamIds): array
             {
-                ++$this->summariesOfCalls;
+                ++$this->queries;
+
+                return $this->summariesByName(...$teamIds);
+            }
+
+            /**
+             * The number of summariesOf and allSummariesOf calls so far.
+             */
+            public function count(): int
+            {
+                return $this->queries;
+            }
+
+            /** @return list<TeamSummary> */
+            private function summariesByName(TeamId ...$teamIds): array
+            {
                 $summaries = [];
                 foreach ($teamIds as $teamId) {
                     if (isset($this->teamNamesById[$teamId->toString()])) {
@@ -116,14 +144,6 @@ final class MainMenuTest extends TestCase
 
                 return $summaries;
             }
-
-            /**
-             * The number of summariesOf calls so far.
-             */
-            public function count(): int
-            {
-                return $this->summariesOfCalls;
-            }
         };
     }
 
@@ -132,10 +152,11 @@ final class MainMenuTest extends TestCase
     {
         $items = $this->menuFor(new Roles(false, true, [], [], []))->items();
 
-        self::assertSame(['Home', 'Tickets'], self::labelsOf($items));
+        self::assertSame(['Home', 'Tickets', 'Teams'], self::labelsOf($items));
         self::assertSame(MainMenu::TICKETS_ROUTE, $items[1]->routeName());
         self::assertNull($items[1]->url());
         self::assertFalse($items[1]->isPageBuilt());
+        self::assertSame([null, null], array_map(static fn (MenuItem $team): ?string => $team->url(), $items[2]->children()));
     }
 
     #[Test]
@@ -229,12 +250,78 @@ final class MainMenuTest extends TestCase
     }
 
     #[Test]
-    public function aManagerWithoutATeamGetsTicketsButNoReportButton(): void
+    public function aManagerWithoutATeamGetsTicketsAndEveryTeamButNoReportButton(): void
     {
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
         $menu = $this->menuFor(new Roles(false, true, [], [], []));
 
-        self::assertSame(['Home', 'Tickets'], self::labelsOf($menu->items()));
+        $items = $menu->items();
+
+        self::assertSame(['Home', 'Tickets', 'Teams'], self::labelsOf($items));
+        self::assertSame(['/teams/mobile-app', '/teams/shop'], array_map(static fn (MenuItem $team): ?string => $team->url(), $items[2]->children()));
         self::assertFalse($menu->canReportProblems());
+    }
+
+    /**
+     * TeamVoter lets a Manager open every team of the organization, not only the ones they hold a role in.
+     */
+    #[Test]
+    public function aManagerWhoViewsOneTeamGetsEveryTeamOfTheOrganizationInOneQuery(): void
+    {
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
+
+        $items = $this->menuFor(new Roles(false, true, [], [], [new TeamId(self::SHOP)], [self::SHOP => 'shop']))->items();
+
+        self::assertSame(['Home', 'Tickets', 'Teams'], self::labelsOf($items));
+        self::assertTrue($items[2]->isGroup());
+        self::assertSame(['Mobile', 'Shop'], self::labelsOf($items[2]->children()));
+        self::assertSame(['/teams/mobile-app', '/teams/shop'], array_map(static fn (MenuItem $team): ?string => $team->url(), $items[2]->children()));
+        self::assertCount(1, $this->teamQueries);
+    }
+
+    #[Test]
+    public function aLeadWhoIsNoManagerGetsOnlyTheTeamsTheyHoldARoleIn(): void
+    {
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
+        $this->teamQueries = self::teamQueriesOf([self::SHOP => 'Shop', self::MOBILE => 'Mobile', self::SUPPORT => 'Support']);
+
+        $items = $this->menuFor(new Roles(true, false, [new TeamId(self::SHOP)], [new TeamId(self::MOBILE)], []))->items();
+
+        self::assertSame(['Mobile', 'Shop'], self::labelsOf($items[2]->children()), 'Support is a team of the organization they hold no role in');
+    }
+
+    #[Test]
+    public function aManagerOfAnOrganizationWithOneTeamGetsTeam(): void
+    {
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
+        $this->teamQueries = self::teamQueriesOf([self::MOBILE => 'Mobile']);
+
+        $items = $this->menuFor(new Roles(false, true, [], [], []))->items();
+
+        self::assertSame(['Home', 'Tickets', 'Team'], self::labelsOf($items));
+        self::assertFalse($items[2]->isGroup());
+        self::assertSame('/teams/mobile-app', $items[2]->url());
+    }
+
+    #[Test]
+    public function aManagerOfAnOrganizationWithoutTeamsGetsNoTeamItem(): void
+    {
+        $this->routes->add(MainMenu::TEAM_ROUTE, new Route('/teams/{slug}'));
+        $this->teamQueries = self::teamQueriesOf([]);
+
+        $items = $this->menuFor(new Roles(false, true, [], [], []))->items();
+
+        self::assertSame(['Home', 'Tickets'], self::labelsOf($items));
+        self::assertCount(1, $this->teamQueries);
+    }
+
+    #[Test]
+    public function aPersonWithoutATeamOrTheManagerRoleRunsNoTeamQuery(): void
+    {
+        $items = $this->menuFor(new Roles(true, false, [], [], []))->items();
+
+        self::assertSame(['Home', 'Admin'], self::labelsOf($items));
+        self::assertCount(0, $this->teamQueries, 'an Admin who is not a Manager gets no team list here');
     }
 
     #[Test]

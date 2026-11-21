@@ -2,6 +2,6 @@
 <section{{ attributes.defaults({class: 'ticket__section rounds', 'aria-labelledby': 'ticket-rounds-heading'}) }}>
     <h2 id="ticket-rounds-heading" class="ticket__section-title">Rounds</h2>
     <turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}" src="{{ roundsPath }}" loading="lazy" data-live-refresh>
-        <a href="{{ roundsPath }}" class="rounds__show">{{ constant('App\\Review\\UI\\Component\\RoundsSection::SHOW_ROUNDS') }}</a>
+        <twig:Button variant="text" href="{{ roundsPath }}">{{ constant('App\\Review\\UI\\Component\\RoundsSection::SHOW_ROUNDS') }}</twig:Button>
     </turbo-frame>
 </section>

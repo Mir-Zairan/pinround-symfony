@@ -115,6 +115,24 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(0, $page->filter(self::ROUNDS.' .round-card'));
     }
 
+    /**
+     * Until the lazy frame loads, its link is the design system's text button, not the browser's own blue link.
+     */
+    #[Test]
+    public function untilTheFrameLoadsTheTicketPageShowsRoundsAsATextButton(): void
+    {
+        $this->addTicket('SHOP-1');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [[RoundsSection::SHOW_ROUNDS, self::ROUNDS_PAGE, 'btn btn-text']],
+            $page->filter(self::ROUNDS.' > a')->each(static fn (Crawler $link): array => [trim($link->text()), $link->attr('href'), $link->attr('class')]),
+        );
+    }
+
     #[Test]
     public function roundZeroShowsItsReporterItsPinCountAndEachScreenshotsTextBeforeItsPictureWithPinsAndNoWayToAddOne(): void
     {

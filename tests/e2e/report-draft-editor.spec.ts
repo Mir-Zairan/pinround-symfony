@@ -172,6 +172,21 @@ test.describe('the report draft page', () => {
     await expect(draft.panel(2).getByLabel('Picture title · optional')).toHaveValue('');
   });
 
+  test('at 1440px the editor uses the page\'s width: the picture is large and its fields are not squeezed', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const draft = await openReportDraft(page, seedMiasReportDraft(`Picture gets room ${randomUUID().slice(0, 8)}`, FOUR_SCREENSHOTS.slice(0, 1)));
+    const picture = draft.panel(1).locator('img.screenshot__image');
+    await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0), { message: 'the shown picture loads' }).toBe(true);
+
+    const pictureBox = (await picture.boundingBox())!;
+    const titleFieldBox = (await draft.panel(1).getByLabel('Picture title · optional').boundingBox())!;
+
+    // In the old 560 px column the picture was about 357 px wide and the title field about 180 px.
+    expect(pictureBox.width).toBeGreaterThan(640);
+    expect(titleFieldBox.width).toBeGreaterThan(300);
+    expect(titleFieldBox.x, 'the fields sit beside the picture').toBeGreaterThan(pictureBox.x + pictureBox.width);
+  });
+
   test('the Report drafts back link starts at the left edge of the page, not centred across it', async ({ page }) => {
     await openReportDraft(page, seedMiasReportDraft(`Back link sits left ${randomUUID().slice(0, 8)}`, FOUR_SCREENSHOTS.slice(0, 1)));
     const back = (await page.getByRole('link', { name: 'Report drafts', exact: true }).boundingBox())!;

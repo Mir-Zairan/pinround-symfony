@@ -51,9 +51,9 @@ final class MainMenuTest extends WebTestCase
         yield 'Lena, Admin and lead of Shop and Mobile' => ['Lena', ['Home', 'Tickets', 'My reports', 'Teams', 'Admin'], ['Mobile', 'Shop'], true];
         yield 'Omar, member of Shop and Mobile' => ['Omar', ['Home', 'Tickets', 'My reports', 'Teams'], ['Mobile', 'Shop'], true];
         yield 'Mia, member of Shop' => ['Mia', ['Home', 'Tickets', 'My reports', 'Team'], [], true];
-        yield 'Raj, Manager and viewer of Shop' => ['Raj', ['Home', 'Tickets', 'My reports', 'Team'], [], true];
+        yield 'Raj, Manager and viewer of Shop' => ['Raj', ['Home', 'Tickets', 'My reports', 'Teams'], ['Mobile', 'Shop'], true];
         yield 'Sara, Admin with no team' => ['Sara', ['Home', 'Admin'], [], false];
-        yield 'Noor, Manager with no team' => ['Noor', ['Home', 'Tickets'], [], false];
+        yield 'Noor, Manager with no team' => ['Noor', ['Home', 'Tickets', 'Teams'], ['Mobile', 'Shop'], false];
     }
 
     /**
@@ -129,6 +129,44 @@ final class MainMenuTest extends WebTestCase
         self::assertSame('/teams/shop', $page->filter('header nav[aria-label="Main"] > a.nav')->reduce(static fn (Crawler $link): bool => 'Team' === $link->text())->attr('href'));
     }
 
+    /**
+     * A Manager may open every team of the organization (TeamVoter), so the menu links each of them and opens; a team
+     * of another organization is never linked.
+     */
+    #[Test]
+    public function aManagerReachesEveryTeamOfTheOrganizationAndNoTeamOfAnother(): void
+    {
+        $raj = $this->createAcmeFoodsPeople()['Raj'];
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->createTeam($betaBakery, 'Payments', $this->createUserWithoutOrganization('Bea'));
+        $this->logIn($this->client, $raj);
+
+        $teamLinks = $this->teamLinksOnHome();
+
+        self::assertSame(['Mobile → /teams/mobile', 'Shop → /teams/shop'], array_keys($teamLinks));
+        foreach ($teamLinks as $href) {
+            $this->client->request('GET', $href);
+            self::assertResponseStatusCodeSame(200, $href);
+        }
+        $this->client->request('GET', '/teams/payments');
+        self::assertResponseStatusCodeSame(404);
+    }
+
+    /**
+     * Mia is a member of Shop only: no link reaches Mobile, which she may not open.
+     */
+    #[Test]
+    public function aMemberOfOneTeamIsLinkedOnlyToThatTeam(): void
+    {
+        $this->logIn($this->client, $this->createAcmeFoodsPeople()['Mia']);
+
+        self::assertSame(['Team → /teams/shop'], array_keys($this->teamLinksOnHome()));
+        $this->client->request('GET', '/teams/shop');
+        self::assertResponseStatusCodeSame(200);
+        $this->client->request('GET', '/teams/mobile');
+        self::assertResponseStatusCodeSame(403);
+    }
+
     #[Test]
     public function theMenuRoutesAreTheRealPages(): void
     {
@@ -186,6 +224,25 @@ final class MainMenuTest extends WebTestCase
         $labelHolder = 'div' === $item->nodeName() ? $item->filter('button') : $item;
 
         return trim((string) $labelHolder->getNode(0)?->firstChild?->textContent);
+    }
+
+    /**
+     * @return array<string, string> the href of each menu link to a team page, keyed "label → href", in menu order
+     */
+    private function teamLinksOnHome(): array
+    {
+        $page = $this->client->request('GET', '/');
+        self::assertResponseStatusCodeSame(200);
+
+        $teamLinks = [];
+        foreach ($page->filter('header nav[aria-label="Main"] a[href^="/teams/"]') as $link) {
+            self::assertInstanceOf(\DOMElement::class, $link);
+            $href = $link->getAttribute('href');
+            $teamLinks[trim($link->textContent).' → '.$href] = $href;
+        }
+        self::assertNotSame([], $teamLinks);
+
+        return $teamLinks;
     }
 
     /**

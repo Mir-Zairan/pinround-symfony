@@ -64,31 +64,34 @@
                             <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.previousPosition})) }}" aria-label="Previous pin" data-pin-walker-control="previous" data-action="pin-walker#previous">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
                             </a>
-                            <div class="focus-bar__text">
-                                <h2 class="focus-bar__label" id="focus-pin-{{ stop.position }}-label">{{ stop.label }}</h2>
-                                {#- tabindex: a long note scrolls inside the bar (review.css), and a keyboard scrolls only what it can focus. -#}
-                                <p class="focus-bar__note" tabindex="0">{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
-                            </div>
-                            {% if page.mayGiveVerdicts %}
-                                {% set focusFields %}
-                                    <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                    <input type="hidden" name="{{ focusSideField }}" value="{{ page.side }}">
-                                    <input type="hidden" name="{{ focusAreaField }}" value="{{ page.areaPosition }}">
-                                    <input type="hidden" name="{{ focusPinField }}" value="{{ stop.position }}">
-                                {% endset %}
-                                {% if stop.isChecked %}
-                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: stop.id}) }}" class="focus-bar__choices">
-                                        {{ focusFields }}
-                                        <twig:Button type="submit" variant="text" :autofocus="isCurrent" data-pin-walker-control="undo">Undo</twig:Button>
-                                    </form>
-                                {% else %}
-                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: stop.id}) }}" class="focus-bar__choices">
-                                        {{ focusFields }}
-                                        <twig:Button type="submit" variant="tonal" :autofocus="isCurrent" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" data-pin-walker-control="fixed">Fixed</twig:Button>
-                                        <twig:Button type="submit" variant="text" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" data-pin-walker-control="still-wrong">Still wrong</twig:Button>
-                                    </form>
+                            {#- The text and the choices wrap inside this body, so the arrows stay at the bar's two ends at any width. -#}
+                            <div class="focus-bar__body">
+                                <div class="focus-bar__text">
+                                    <h2 class="focus-bar__label" id="focus-pin-{{ stop.position }}-label">{{ stop.label }}</h2>
+                                    {#- tabindex: a long note scrolls inside the bar (review.css), and a keyboard scrolls only what it can focus. -#}
+                                    <p class="focus-bar__note" tabindex="0">{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
+                                </div>
+                                {% if page.mayGiveVerdicts %}
+                                    {% set focusFields %}
+                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                        <input type="hidden" name="{{ focusSideField }}" value="{{ page.side }}">
+                                        <input type="hidden" name="{{ focusAreaField }}" value="{{ page.areaPosition }}">
+                                        <input type="hidden" name="{{ focusPinField }}" value="{{ stop.position }}">
+                                    {% endset %}
+                                    {% if stop.isChecked %}
+                                        <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: stop.id}) }}" class="focus-bar__choices">
+                                            {{ focusFields }}
+                                            <twig:Button type="submit" variant="text" :autofocus="isCurrent" data-pin-walker-control="undo">Undo</twig:Button>
+                                        </form>
+                                    {% else %}
+                                        <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: stop.id}) }}" class="focus-bar__choices">
+                                            {{ focusFields }}
+                                            <twig:Button type="submit" variant="tonal" :autofocus="isCurrent" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" data-pin-walker-control="fixed">Fixed</twig:Button>
+                                            <twig:Button type="submit" variant="text" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" data-pin-walker-control="still-wrong">Still wrong</twig:Button>
+                                        </form>
+                                    {% endif %}
                                 {% endif %}
-                            {% endif %}
+                            </div>
                             <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.nextPosition})) }}" aria-label="Next pin" data-pin-walker-control="next" data-action="pin-walker#next">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
                             </a>

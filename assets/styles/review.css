@@ -1256,11 +1256,11 @@ textarea.screenshot-report__input {
   max-width: 720px;
 }
 
+/* The arrows never wrap: only the body between them does, so Previous and Next keep the bar's two ends on a phone. */
 .focus-bar__stop {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-8) var(--space-12);
+  gap: var(--space-12);
   padding: var(--space-12) var(--space-16);
   border-radius: 18px;
   background: var(--s-high);
@@ -1268,6 +1268,19 @@ textarea.screenshot-report__input {
 
 .focus-bar__stop[hidden] {
   display: none;
+}
+
+.focus-bar__step {
+  flex: none;
+}
+
+.focus-bar__body {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+  min-width: 0;
 }
 
 .focus-bar__text {
