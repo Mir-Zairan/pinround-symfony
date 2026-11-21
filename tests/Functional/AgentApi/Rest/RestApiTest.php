@@ -10,6 +10,7 @@ use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListDraftScreenshots;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
@@ -440,6 +441,64 @@ final class RestApiTest extends WebTestCase
     }
 
     /**
+     * Acme Foods' SHOP-2 has Omar's draft, with a retake of its second screenshot, and Mia's; Beta Bakery's SHOP-1, a key
+     * Acme Foods has no ticket with, has Omar's draft there. Each person reads only their own draft; the other
+     * organization's ticket and an unknown key are 404 with the tool's not_found row, and no token is 401 with none.
+     */
+    #[Test]
+    public function theDraftScreenshotsListTheCallersOwnDraftAndAnotherOrganizationsTicketIsNotFound(): void
+    {
+        $this->stepId = $this->addTodoStep();
+        $ticketId = $this->addTicket('SHOP-2', number: 2);
+        $omarsDraft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $cartShot = $this->addScreenshot($omarsDraft, $this->addMedia('ready', 'Omar'), 1, 'Cart total', null);
+        $couponShot = $this->addScreenshot($omarsDraft, $this->addMedia('ready', 'Omar'), 0, 'Coupon', null);
+        $cartRetake = $this->addRetake($omarsDraft, $cartShot, 2, 'Omar', 'Cart total <again>');
+        $miasShot = $this->addScreenshot($this->addRound($ticketId, null, 'draft', 'Mia', null), $this->addMedia('ready', 'Mia'), 0, 'Mia private title', null);
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($this->people['Omar'], $betaBakery);
+        $betaBakeryShot = $this->addOtherOrganizationsDraftScreenshot($betaBakery, 'Omar');
+        [$omarsTokenId, $omarsToken] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        [$miasTokenId, $miasToken] = $this->issueApiToken($this->people['Mia'], $this->acmeFoods);
+        $notFound = ['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'];
+
+        $this->client->request('GET', '/api/v1/tickets/SHOP-2/draft/screenshots');
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame(0, $this->rowCountOf('aud_event'));
+
+        $this->request($omarsToken, 'GET', '/api/v1/tickets/SHOP-2/draft/screenshots');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([
+            'untrusted_text_notice' => UntrustedText::NOTICE,
+            'screenshots' => [
+                ['screenshot_id' => $couponShot, 'number' => 1, 'title' => '<untrusted_text>Coupon</untrusted_text>', 'try_count' => 1],
+                ['screenshot_id' => $cartShot, 'number' => 2, 'title' => '<untrusted_text>Cart total &lt;again&gt;</untrusted_text>', 'try_count' => 2],
+            ],
+        ], $this->json());
+        foreach ([$cartRetake, $miasShot, 'Mia private', $betaBakeryShot, 'Bread shelf'] as $notListed) {
+            self::assertStringNotContainsString($notListed, (string) $this->client->getResponse()->getContent());
+        }
+
+        $this->request($miasToken, 'GET', '/api/v1/tickets/SHOP-2/draft/screenshots');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([['screenshot_id' => $miasShot, 'number' => 1, 'title' => '<untrusted_text>Mia private title</untrusted_text>', 'try_count' => 1]], $this->json()['screenshots'] ?? null);
+        foreach ([$couponShot, $cartShot, $cartRetake, 'Coupon', 'Cart total'] as $omarsText) {
+            self::assertStringNotContainsString($omarsText, (string) $this->client->getResponse()->getContent());
+        }
+
+        foreach (['SHOP-1', 'SHOP-404'] as $key) {
+            $this->request($omarsToken, 'GET', '/api/v1/tickets/'.$key.'/draft/screenshots');
+            self::assertResponseStatusCodeSame(404, $key);
+            self::assertSame($notFound, $this->json());
+        }
+
+        self::assertEqualsCanonicalizing([[$omarsTokenId, 'ok'], [$miasTokenId, 'ok'], [$omarsTokenId, 'not_found'], [$omarsTokenId, 'not_found']], $this->toolAuditRowsOf(ListDraftScreenshots::NAME));
+        self::assertSame([], $this->toolRowsOf($betaBakery));
+    }
+
+    /**
      * Lena makes a notebook twice with one Idempotency-Key, begins an upload for it and adds a picture, then sends the
      * add again without a key, as after a lost answer: one notebook, the picture in it once, and no ticket.
      */
@@ -842,6 +901,7 @@ final class RestApiTest extends WebTestCase
         yield 'notebook uploads' => ['POST', '/api/v1/notebooks/%s/uploads', CreateNotebookUpload::NAME, 'notebooks:write', 'file'];
         yield 'notebook screenshots' => ['POST', '/api/v1/notebooks/%s/screenshots', AddNotebookScreenshot::NAME, 'notebooks:write', 'upload'];
         yield 'draft round screenshots' => ['POST', '/api/v1/tickets/%s/draft/screenshots', AddScreenshot::NAME, 'rounds:write', 'upload'];
+        yield 'my draft screenshots' => ['GET', '/api/v1/tickets/%s/draft/screenshots', ListDraftScreenshots::NAME, 'read', 'none'];
     }
 
     /**
