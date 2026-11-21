@@ -9,6 +9,7 @@ use App\Identity\Application\RecentAuth;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\User;
 use App\Identity\UI\Controller\LoginController;
+use App\Identity\UI\Controller\OAuthConsentController;
 use App\Identity\UI\Controller\TokenController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Organization\LogsInAdmins;
@@ -196,34 +197,78 @@ final class OAuthConsentTest extends WebTestCase
         self::assertSame(0, $this->storedCodeCount());
     }
 
+    /**
+     * A self-registered client may put any https address it likes in its link, so a bad request must not send the
+     * person there on its own (RFC 9700, section 4.11.2): pinround's page names the host and the way back is a link.
+     */
     #[Test]
-    public function aRequestWithoutPkceS256OrWithAnotherResponseTypeGoesBackToTheAppWithTheErrorAndNoCode(): void
+    public function aRequestWithoutPkceS256OrWithAnotherResponseTypeShowsAnErrorPageWithALinkBackAndNoRedirectOrCode(): void
     {
         [$omar] = $this->omarAndHisOrganizations();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $cases = [
-            'a plain challenge' => [['code_challenge_method' => 'plain'], 'invalid_request'],
-            'no challenge method' => [['code_challenge_method' => null], 'invalid_request'],
-            'no challenge' => [['code_challenge' => null], 'invalid_request'],
-            'a challenge too short' => [['code_challenge' => 'short'], 'invalid_request'],
-            'response type token' => [['response_type' => 'token'], 'unsupported_response_type'],
-            'no response type' => [['response_type' => null], 'invalid_request'],
-            'an unknown scope' => [['scope' => 'read admin'], 'invalid_scope'],
+            'a plain challenge' => [['code_challenge_method' => 'plain'], 'invalid_request', 'PKCE is required: code_challenge_method is S256.'],
+            'no challenge method' => [['code_challenge_method' => null], 'invalid_request', 'PKCE is required: code_challenge_method is S256.'],
+            'no challenge' => [['code_challenge' => null], 'invalid_request', 'PKCE is required: code_challenge is 43 to 128 characters of A-Z, a-z, 0-9, ., _, ~ and -.'],
+            'a challenge too short' => [['code_challenge' => 'short'], 'invalid_request', 'PKCE is required: code_challenge is 43 to 128 characters of A-Z, a-z, 0-9, ., _, ~ and -.'],
+            'response type token' => [['response_type' => 'token'], 'unsupported_response_type', 'Only response_type code is supported.'],
+            'no response type' => [['response_type' => null], 'invalid_request', 'response_type is code.'],
+            'an unknown scope' => [['scope' => 'read admin'], 'invalid_scope', 'scope is one or more of: read rounds:write comments:write tickets:move reports:write notebooks:write.'],
         ];
 
-        foreach ($cases as $case => [$change, $error]) {
-            $this->client->request('GET', $this->authorizePath($change));
+        foreach ($cases as $case => [$change, $error, $description]) {
+            $page = $this->client->request('GET', $this->authorizePath($change));
 
-            self::assertResponseStatusCodeSame(302, $case);
-            $location = (string) $this->client->getResponse()->headers->get('Location');
-            self::assertStringStartsWith(self::CALLBACK.'?error=', $location, $case);
-            $answer = self::queryOf($location);
-            self::assertSame($error, $answer['error'] ?? null, $case);
-            self::assertSame(self::STATE, $answer['state'] ?? null, $case);
-            self::assertArrayNotHasKey('code', $answer, $case);
+            self::assertResponseStatusCodeSame(400, $case);
+            $this->assertNotStored();
+            self::assertFalse($this->client->getResponse()->headers->has('Location'), $case);
+            self::assertSame('This app cannot connect', $page->filter('main h1')->text(), $case);
+            self::assertSame([OAuthConsentController::CLIENT_REQUEST_REFUSED], $page->filter('main [role="alert"]')->each(static fn (Crawler $alert): string => $alert->text()), $case);
+            self::assertSame("For the app's developer: ".$description, $page->filter('main p.login__hint')->text(), $case);
+            self::assertCount(0, $page->filter('main form'), $case);
+            $goBack = $page->selectLink('Go back to claude.example');
+            self::assertCount(1, $goBack, $case);
+            self::assertSame('noreferrer', $goBack->attr('rel'), $case);
+            $goBackUrl = (string) $goBack->attr('href');
+            self::assertStringStartsWith(self::CALLBACK.'?error=', $goBackUrl, $case);
+            self::assertSame(['error' => $error, 'error_description' => $description, 'state' => self::STATE], self::queryOf($goBackUrl), $case);
         }
 
         self::assertSame(0, $this->storedCodeCount());
+    }
+
+    #[Test]
+    public function aStateThatBreaksItsRuleIsLeftOutOfTheLinkBack(): void
+    {
+        [$omar] = $this->omarAndHisOrganizations();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+
+        $page = $this->client->request('GET', $this->authorizePath(['state' => str_repeat('s', AuthorizeOAuthClient::MAX_STATE_LENGTH + 1)]));
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertFalse($this->client->getResponse()->headers->has('Location'));
+        self::assertSame(
+            ['error' => 'invalid_request', 'error_description' => 'state is 1 to 500 printable ASCII characters.'],
+            self::queryOf((string) $page->selectLink('Go back to claude.example')->attr('href')),
+        );
+        self::assertSame(0, $this->storedCodeCount());
+    }
+
+    /**
+     * The error page of an unknown client or an unregistered address offers no way to it, only Home.
+     */
+    #[Test]
+    public function anErrorPageWithoutARegisteredRedirectUriHasNoLinkBack(): void
+    {
+        [$omar] = $this->omarAndHisOrganizations();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+
+        $page = $this->client->request('GET', $this->authorizePath(['redirect_uri' => 'https://evil.example/cb', 'response_type' => 'token']));
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertSame(['Go to Home'], $page->filter('main a')->each(static fn (Crawler $link): string => $link->text()));
+        self::assertCount(0, $page->filter('main p.login__hint'));
+        self::assertStringNotContainsString('evil.example', (string) $this->client->getResponse()->getContent());
     }
 
     #[Test]

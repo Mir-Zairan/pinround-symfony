@@ -101,6 +101,37 @@ final class NamedMemberOrganizationsTest extends KernelTestCase
         }
     }
 
+    #[Test]
+    public function aPersonIsAMemberOnlyOfTheOrganizationsTheyAreInNow(): void
+    {
+        $omar = new UserId(self::OMAR);
+
+        self::assertTrue($this->memberOrganizations()->isMember($omar, new OrganizationId(self::ACME_FOODS)));
+        self::assertTrue($this->memberOrganizations()->isMember($omar, new OrganizationId(self::BETA_BAKERY)));
+        self::assertFalse($this->memberOrganizations()->isMember($omar, new OrganizationId(self::CEDAR_CAFE)), 'one he left');
+        self::assertFalse($this->memberOrganizations()->isMember($omar, new OrganizationId(self::DELTA_DAIRY)), 'Mia\'s');
+        self::assertTrue($this->memberOrganizations()->isMember(new UserId(self::MIA), new OrganizationId(self::DELTA_DAIRY)));
+        self::assertFalse($this->memberOrganizations()->isMember(new UserId(self::RAJ), new OrganizationId(self::ACME_FOODS)), 'in none');
+    }
+
+    /**
+     * Only one query runs, so no transaction is opened per organization and the tenant is never switched.
+     */
+    #[Test]
+    public function theMembershipCheckLeavesTheTenantAndOpensNoTransaction(): void
+    {
+        $this->tenantContext()->set(new OrganizationId(self::DELTA_DAIRY));
+        $this->connection()->beginTransaction();
+        try {
+            self::assertTrue($this->memberOrganizations()->isMember(new UserId(self::OMAR), new OrganizationId(self::ACME_FOODS)));
+            self::assertSame(1, $this->connection()->getTransactionNestingLevel());
+        } finally {
+            $this->connection()->rollBack();
+        }
+
+        self::assertSame(self::DELTA_DAIRY, $this->tenantContext()->get()?->toString());
+    }
+
     /**
      * @param list<MemberOrganization> $memberOrganizations
      *

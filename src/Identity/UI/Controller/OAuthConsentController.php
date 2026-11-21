@@ -28,7 +28,9 @@ use Symfony\Component\Routing\Attribute\Route;
  * actions need the recent password and two-step proof of making a personal access token (RequiresRecentAuth) and ask
  * OwnAccountVoter for AccountPermission::EDIT_OWN first (ADR-0013). Allow and Deny need the form's CSRF token; without
  * it the page comes back with 422 and no code. A client the server does not know, or a redirect URI it did not
- * register, gets an error page here and never a redirect. The routes run without the request transaction, as
+ * register, gets an error page here and never a redirect. Any other bad request also gets the error page on the GET,
+ * with a link back to the client; only a click on Allow or Deny sends the person to the client's address on its own.
+ * The routes run without the request transaction, as
  * MemberOrganizations and the code's save each open their own (OAuthAuthorizationCodes::add). No answer is stored.
  */
 final class OAuthConsentController extends AbstractController
@@ -36,6 +38,7 @@ final class OAuthConsentController extends AbstractController
     public const string ROUTE = 'identity_oauth_authorize';
     public const string DECIDE_ROUTE = 'identity_oauth_authorize_decide';
     public const string ALLOW = 'allow';
+    public const string CLIENT_REQUEST_REFUSED = 'The app sent a request pinround cannot accept, so nothing was connected.';
 
     private const string CSRF_ID = 'identity_oauth_consent';
 
@@ -55,7 +58,7 @@ final class OAuthConsentController extends AbstractController
         try {
             $authorization = $this->authorizeOAuthClient->check($request->query->all());
         } catch (OAuthAuthorizationRefused $refusal) {
-            return $this->refusalAnswer($refusal);
+            return $this->renderRefusal($refusal);
         }
 
         return $this->renderConsent($authorization);
@@ -79,7 +82,7 @@ final class OAuthConsentController extends AbstractController
                 ? $this->authorizeOAuthClient->allow($fields, $this->currentSession->userId(), $request->request->getString('organization_id'), $this->clock->now())
                 : $this->authorizeOAuthClient->deny($fields);
         } catch (OAuthAuthorizationRefused $refusal) {
-            return $this->refusalAnswer($refusal);
+            return $this->clickedRefusalAnswer($refusal);
         } catch (OAuthConsentOrganizationNotFound $notFound) {
             throw $this->createNotFoundException($notFound->getMessage(), $notFound);
         }
@@ -95,19 +98,37 @@ final class OAuthConsentController extends AbstractController
         try {
             $authorization = $this->authorizeOAuthClient->check($fields);
         } catch (OAuthAuthorizationRefused) {
-            return $this->renderRefusal(LoginController::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
+            return $this->renderRefusalPage(LoginController::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
         return $this->renderConsent($authorization, LoginController::FORM_EXPIRED);
     }
 
-    private function refusalAnswer(OAuthAuthorizationRefused $refusal): Response
+    /**
+     * For a refusal after the person clicked Allow or Deny on this page, which named the client's host: the error may go
+     * straight back to the client.
+     */
+    private function clickedRefusalAnswer(OAuthAuthorizationRefused $refusal): Response
     {
         if (null === $refusal->errorRedirectUrl) {
-            return $this->renderRefusal($refusal->getMessage(), Response::HTTP_BAD_REQUEST);
+            return $this->renderRefusal($refusal);
         }
 
         return self::notStored(new RedirectResponse($refusal->errorRedirectUrl));
+    }
+
+    /**
+     * Never redirects: a GET of a self-registered client's link must not send the person to its address on its own
+     * (RFC 9700, section 4.11.2). When the error may go back to the client, the page names its host and offers the way
+     * back as a link the person has to click.
+     */
+    private function renderRefusal(OAuthAuthorizationRefused $refusal): Response
+    {
+        if (null === $refusal->errorRedirectUrl || null === $refusal->redirectHost) {
+            return $this->renderRefusalPage($refusal->getMessage(), Response::HTTP_BAD_REQUEST);
+        }
+
+        return $this->renderRefusalPage(self::CLIENT_REQUEST_REFUSED, Response::HTTP_BAD_REQUEST, $refusal->getMessage(), $refusal->errorRedirectUrl, $refusal->redirectHost);
     }
 
     private function renderConsent(OAuthAuthorizationRequest $authorization, ?string $formError = null): Response
@@ -132,9 +153,18 @@ final class OAuthConsentController extends AbstractController
         ], new Response(status: null === $formError ? Response::HTTP_OK : Response::HTTP_UNPROCESSABLE_ENTITY)));
     }
 
-    private function renderRefusal(string $refusal, int $status): Response
+    /**
+     * @param string|null $developerNote the OAuth error description, for the client's developer
+     * @param string|null $goBackUrl     the client's redirect URI with the error and state, given only as a link
+     */
+    private function renderRefusalPage(string $refusal, int $status, ?string $developerNote = null, ?string $goBackUrl = null, ?string $goBackHost = null): Response
     {
-        return self::notStored($this->render('@Identity/oauth_consent.html.twig', ['refusal' => $refusal], new Response(status: $status)));
+        return self::notStored($this->render('@Identity/oauth_consent.html.twig', [
+            'refusal' => $refusal,
+            'developerNote' => $developerNote,
+            'goBackUrl' => $goBackUrl,
+            'goBackHost' => $goBackHost,
+        ], new Response(status: $status)));
     }
 
     /**

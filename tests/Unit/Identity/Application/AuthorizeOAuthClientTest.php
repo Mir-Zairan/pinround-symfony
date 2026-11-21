@@ -123,6 +123,7 @@ final class AuthorizeOAuthClientTest extends TestCase
         $refusal = $this->refusalOfAllow($this->parameters($change));
 
         self::assertNull($refusal->errorRedirectUrl);
+        self::assertNull($refusal->redirectHost);
         self::assertSame($message, $refusal->getMessage());
         self::assertSame([], $this->codes->all());
     }
@@ -172,6 +173,7 @@ final class AuthorizeOAuthClientTest extends TestCase
         $refusal = $this->refusalOfAllow($this->parameters($change));
 
         self::assertSame($description, $refusal->getMessage());
+        self::assertSame('claude.example', $refusal->redirectHost);
         self::assertNotNull($refusal->errorRedirectUrl);
         self::assertStringStartsWith(self::CALLBACK.'&', $refusal->errorRedirectUrl);
         $expected = ['from' => 'pinround', 'error' => $error, 'error_description' => $description];
@@ -282,6 +284,7 @@ final class AuthorizeOAuthClientTest extends TestCase
             self::fail('A deny went to an unregistered redirect URI.');
         } catch (OAuthAuthorizationRefused $refusal) {
             self::assertNull($refusal->errorRedirectUrl);
+            self::assertNull($refusal->redirectHost);
             self::assertSame(AuthorizeOAuthClient::UNREGISTERED_REDIRECT_URI, $refusal->getMessage());
         }
     }

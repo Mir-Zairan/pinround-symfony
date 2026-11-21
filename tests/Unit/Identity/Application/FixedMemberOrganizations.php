@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Identity\Application;
 
 use App\Identity\Api\MemberOrganization;
 use App\Identity\Api\MemberOrganizations;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -26,5 +27,16 @@ final class FixedMemberOrganizations implements MemberOrganizations
         usort($organizations, static fn (MemberOrganization $left, MemberOrganization $right): int => strcmp($left->id->toString(), $right->id->toString()));
 
         return $organizations;
+    }
+
+    public function isMember(UserId $userId, OrganizationId $organizationId): bool
+    {
+        foreach ($this->organizationsByUserId[$userId->toString()] ?? [] as $organization) {
+            if ($organization->id->equals($organizationId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

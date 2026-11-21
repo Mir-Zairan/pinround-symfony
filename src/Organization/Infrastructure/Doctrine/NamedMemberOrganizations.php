@@ -30,4 +30,15 @@ final readonly class NamedMemberOrganizations implements MemberOrganizations
 
         return $memberOrganizations;
     }
+
+    public function isMember(UserId $userId, OrganizationId $organizationId): bool
+    {
+        foreach ($this->membershipQueries->organizationsOf($userId) as $memberOrganizationId) {
+            if ($memberOrganizationId->equals($organizationId)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
