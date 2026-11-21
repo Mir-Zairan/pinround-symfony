@@ -9,6 +9,7 @@ How to let Claude Code check a problem in an app, keep the evidence, and file it
 - [While Claude Code checks](#while-claude-code-checks) — the evidence log, pictures, titles, summaries and pins
 - [At the end](#at-the-end) — `find_tickets`, the three choices, the uploads, and Send
 - [Resume a check](#resume-a-check) — go on with an evidence log after a stop
+- [Fix your round notes](#fix-your-round-notes) — the prompt `fix_my_round_notes` with a ticket key, and retakes as tries
 - [Use a local model client](#use-a-local-model-client) — any MCP client can follow the same prompt
 - [Scenarios](#scenarios) — the format Claude Code writes into a notebook, its caps, an example, and `save_scenarios`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see here
@@ -31,7 +32,7 @@ The prompt's text is in [report_while_investigating.v1.md](../../src/AgentApi/In
 
 | Scope | Ticked by default | Needed for |
 |---|---|---|
-| `read` | yes | `find_tickets` at the end. Reading the prompt itself works with any token. |
+| `read` | yes | `find_tickets` at the end. Reading `report_while_investigating` itself works with any token; `fix_my_round_notes` needs `read`. |
 | `reports:write` | **no** | "New report": `create_report_upload` and `create_report`. Tick "Let Claude Code prepare report drafts for you. You still check and send them." |
 | `rounds:write` | yes | "Add to <key>": `create_upload` and `add_screenshot` into your own draft round. |
 
@@ -68,6 +69,8 @@ The prompt asks Claude Code to:
 
 The log never holds a token or a password.
 
+**The capture rule without a prompt.** pinround's MCP server sends this rule to every client when it connects (its MCP server instructions), so Claude Code follows it even when you start no prompt: save each screenshot it takes for you in the local evidence log at that moment, with its title, summary and pins, and upload nothing to pinround until you ask.
+
 ## At the end
 Claude Code tells you what it found, case by case. Then:
 
@@ -100,6 +103,8 @@ flowchart TD
 
 **A draft round stays private** until you share it in pinround, as any draft round.
 
+**A picture for a report draft that exists already** goes up with `create_report_upload` for the draft's project, the PUT, then `add_report_screenshot` with the draft's id as `report`, the `upload_id`, the title, the summary and the pins. Over MCP it needs the title and the summary, as `create_report`, `add_screenshot` and `add_notebook_screenshot` do; a call without either, or with a blank one, is refused and adds nothing.
+
 ## Resume a check
 The log is written after every case, so a check can go on after Claude Code stops or a new session starts.
 
@@ -107,6 +112,22 @@ The log is written after every case, so a check can go on after Claude Code stop
 - Entries marked as filed are never filed again.
 - Nothing was uploaded before you chose a target, so no upload expired while the check was stopped.
 - To start clean, say "start a new log", or move the `pinround-evidence` folder away.
+
+## Fix your round notes
+When people marked a ticket's screenshots "Not right yet" or pinned what is wrong, the prompt `fix_my_round_notes` tells Claude Code how to fix it. It takes one argument, the ticket key. In Claude Code:
+
+```text
+/mcp__pinround__fix_my_round_notes SHOP-88
+```
+
+Then say what else matters, for example "Start with the checkout total." With it, Claude Code:
+
+1. Reads `get_round_notes` for SHOP-88 and tells you, pin by pin, what it is going to fix.
+2. Fixes one screenshot at a time and, right after each fix, takes the retake: the same screen, now fixed. It saves it in the evidence log at that moment, with the try it answers, a title, a summary, pins on what changed, and whether it thinks each pin is fixed.
+3. Uploads nothing until you ask. Then it calls `list_draft_screenshots`, and for each retake `create_upload`, the PUT and `add_screenshot` with `retake_of`, so the retake becomes the next try of its screenshot in your draft round.
+4. Tells you which pins it thinks are fixed. You mark each pin "Fixed on try N" or "Still wrong" in pinround yourself; no tool marks a pin, sends a round or moves the ticket.
+
+The prompt needs a token with `read`, and the uploads `rounds:write`. It renders only for a ticket you may see: a malformed key, such as `shop-88`, is "The arguments do not match this prompt: …", and an unknown key or a ticket you may not see is "Not found", alike. The prompt's text is in [fix_my_round_notes.v1.md](../../src/AgentApi/Infrastructure/Prompt/fix_my_round_notes.v1.md).
 
 ## Use a local model client
 The prompt and the tools work with any MCP client, not only Claude Code, for example a client that runs a model on your own computer:
@@ -183,6 +204,7 @@ A refused call saves nothing. Claude Code tells you the message in plain words. 
 | "Not found. It does not exist, or you may not see it." | A wrong project key or ticket key, or an upload begun for another target. |
 | "A picture was rejected: …" | The file is not a PNG, JPEG or WebP pinround can read, or it is too big. Capture it again. |
 | "An upload expired before the report was made. …" | Begin a new upload with `create_report_upload`. |
+| "The arguments do not match this prompt: …" | A prompt was started with a wrong argument, for example `fix_my_round_notes` without a ticket key or with a malformed one. |
 
 The other answers (401, 429 and more) are in [claude-code.md › When a call is refused](claude-code.md#when-a-call-is-refused).
 

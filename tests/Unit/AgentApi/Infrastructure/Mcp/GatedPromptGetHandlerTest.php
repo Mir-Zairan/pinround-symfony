@@ -6,6 +6,7 @@ namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp;
 
 use App\AgentApi\Infrastructure\Mcp\GatedPromptGetHandler;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
+use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
 use App\AgentApi\Infrastructure\Prompt\AgentPrompt;
 use App\AgentApi\Infrastructure\Prompt\ExplainMyNotebookPrompt;
 use App\AgentApi\Infrastructure\Prompt\ReportWhileInvestigatingPrompt;
@@ -19,12 +20,13 @@ use Mcp\Schema\JsonRpc\Response;
 use Mcp\Schema\Request\GetPromptRequest;
 use Mcp\Schema\Request\ListPromptsRequest;
 use Mcp\Server\Session\SessionInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 /**
- * GatedPromptGetHandler on doubles: each way a prompts/get ends, its audit row, that each name gets its own prompt, and
- * that a failure is logged by its class alone. tests/Functional/AgentApi/Prompt proves the same through POST /mcp.
+ * GatedPromptGetHandler on doubles: each way a prompts/get ends, its audit row, that each name gets its own prompt, the
+ * checks on the arguments of a prompt that takes them, and that a failure is logged by its class alone. tests/Functional/AgentApi/Prompt proves the same through POST /mcp.
  */
 final class GatedPromptGetHandlerTest extends TestCase
 {
@@ -127,6 +129,82 @@ final class GatedPromptGetHandlerTest extends TestCase
     }
 
     #[Test]
+    public function aPromptThatTakesArgumentsGetsThemAndItsTextIsAnsweredAfterOneOkRowWithoutThem(): void
+    {
+        $prompt = new ScriptedPrompt();
+
+        $answer = $this->handler([new ReportWhileInvestigatingPrompt(), $prompt])->handle(self::getOf(ScriptedPrompt::NAME, ['round' => '2', 'key' => 'SHOP-12']), self::createStub(SessionInterface::class));
+
+        self::assertInstanceOf(Response::class, $answer);
+        $sent = json_decode(json_encode($answer->result, \JSON_THROW_ON_ERROR), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertIsArray($sent);
+        self::assertSame([['role' => 'user', 'content' => ['type' => 'text', 'text' => 'Fix SHOP-12 in round 2.']]], $sent['messages'] ?? null);
+        self::assertSame([['round' => '2', 'key' => 'SHOP-12']], $prompt->renderedArguments);
+        $this->assertOneRow('ok', ScriptedPrompt::NAME);
+    }
+
+    #[Test]
+    public function anOptionalArgumentMayBeLeftOut(): void
+    {
+        $prompt = new ScriptedPrompt();
+
+        $answer = $this->handler([$prompt])->handle(self::getOf(ScriptedPrompt::NAME, ['key' => 'SHOP-12']), self::createStub(SessionInterface::class));
+
+        self::assertInstanceOf(Response::class, $answer);
+        self::assertSame([['key' => 'SHOP-12']], $prompt->renderedArguments);
+        $this->assertOneRow('ok', ScriptedPrompt::NAME);
+    }
+
+    /**
+     * @return iterable<string, array{array<mixed>|null, string}>
+     */
+    public static function refusedArguments(): iterable
+    {
+        $takesOnly = \sprintf(GatedPromptGetHandler::TAKES_ONLY, 'key", "round');
+
+        yield 'an unlisted name beside the key' => [['key' => 'SHOP-12', 'ticket' => 'SHOP-12'], $takesOnly];
+        yield 'a name in another case' => [['Key' => 'SHOP-12'], $takesOnly];
+        yield 'a list instead of names' => [['SHOP-12'], $takesOnly];
+        yield 'a number for the key' => [['key' => 12], \sprintf(GatedPromptGetHandler::MUST_BE_TEXT, 'key')];
+        yield 'a list for the optional round' => [['key' => 'SHOP-12', 'round' => ['2']], \sprintf(GatedPromptGetHandler::MUST_BE_TEXT, 'round')];
+        yield 'a null key' => [['key' => null], \sprintf(GatedPromptGetHandler::MUST_BE_TEXT, 'key')];
+        yield 'the optional round without the key' => [['round' => '2'], \sprintf(GatedPromptGetHandler::IS_REQUIRED, 'key')];
+        yield 'an empty argument object' => [[], \sprintf(GatedPromptGetHandler::IS_REQUIRED, 'key')];
+        yield 'no arguments' => [null, \sprintf(GatedPromptGetHandler::IS_REQUIRED, 'key')];
+    }
+
+    /**
+     * @param array<mixed>|null $arguments
+     */
+    #[Test]
+    #[DataProvider('refusedArguments')]
+    public function argumentsTheDefinitionDoesNotAllowGetAnInvalidParamsErrorAndOneInvalidInputRowWithoutRendering(?array $arguments, string $problem): void
+    {
+        $prompt = new ScriptedPrompt();
+
+        $answer = $this->handler([$prompt])->handle(self::getOf(ScriptedPrompt::NAME, $arguments), self::createStub(SessionInterface::class));
+
+        self::assertInstanceOf(Error::class, $answer);
+        self::assertSame([self::REQUEST_ID, Error::INVALID_PARAMS, \sprintf(ToolRefusal::INVALID_PROMPT_ARGUMENTS, $problem)], [$answer->id, $answer->code, $answer->message]);
+        self::assertSame([], $prompt->renderedArguments);
+        $this->assertOneRow('invalid_input', ScriptedPrompt::NAME);
+    }
+
+    #[Test]
+    public function aRefusalOfThePromptGetsAnInvalidParamsErrorWithItsMessageAndOneRowWithItsOutcomeAndNoLogLine(): void
+    {
+        $prompt = new ScriptedPrompt();
+
+        $answer = $this->handler([$prompt])->handle(self::getOf(ScriptedPrompt::NAME, ['key' => ScriptedPrompt::UNKNOWN_KEY]), self::createStub(SessionInterface::class));
+
+        self::assertInstanceOf(Error::class, $answer);
+        self::assertSame([self::REQUEST_ID, Error::INVALID_PARAMS, ToolRefusal::NOT_FOUND], [$answer->id, $answer->code, $answer->message]);
+        self::assertSame([['key' => ScriptedPrompt::UNKNOWN_KEY]], $prompt->renderedArguments);
+        $this->assertOneRow('not_found', ScriptedPrompt::NAME);
+        self::assertSame([], $this->logger->records);
+    }
+
+    #[Test]
     public function aPromptFileThatCannotBeReadGetsTheGenericErrorOneErrorRowAndALogLineWithTheClassOnly(): void
     {
         $handler = $this->handler([new ReportWhileInvestigatingPrompt(__DIR__.'/no-such-folder'), new ExplainMyNotebookPrompt()]);
@@ -196,7 +274,7 @@ final class GatedPromptGetHandlerTest extends TestCase
     }
 
     /**
-     * @param ?array<string, string> $arguments left out of the request when null
+     * @param ?array<mixed> $arguments left out of the request when null; unchecked, as a client may send anything
      */
     private static function getOf(string $name, ?array $arguments = null): GetPromptRequest
     {

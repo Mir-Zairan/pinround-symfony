@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi;
 
+use App\AgentApi\Infrastructure\Mcp\McpServerInstructions;
 use App\AgentApi\Infrastructure\Mcp\McpSessionBinding;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -89,6 +90,21 @@ final class McpServerConfigTest extends TestCase
         );
 
         self::assertFalse(self::isTheSharedSessionPool($cache));
+    }
+
+    /**
+     * The bundle reads the instructions as a string when the container is built, so mcp.yaml must name the constant
+     * itself, not a copy of its text that would go stale.
+     */
+    #[Test]
+    public function theServerSendsTheCaptureRuleAsItsInstructionsInEveryEnvironment(): void
+    {
+        $mcp = Yaml::parseFile(\dirname(__DIR__, 3).'/config/packages/mcp.yaml', Yaml::PARSE_CONSTANT);
+        self::assertIsArray($mcp);
+
+        self::assertSame(McpServerInstructions::TEXT, self::at($mcp, 'mcp', 'servers', 'pinround', 'instructions'));
+        self::assertStringContainsString('Upload nothing to pinround until the person asks you to.', McpServerInstructions::TEXT);
+        self::assertSame([], array_filter(array_keys($mcp), static fn (string|int $name): bool => str_starts_with((string) $name, 'when@')));
     }
 
     #[Test]

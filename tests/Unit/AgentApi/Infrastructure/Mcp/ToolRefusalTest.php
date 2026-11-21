@@ -24,4 +24,14 @@ final class ToolRefusalTest extends TestCase
         self::assertSame($reason, $refusal->getMessage());
         self::assertSame(ToolCallOutcome::Refused, $refusal->outcome);
     }
+
+    #[Test]
+    public function aPromptArgumentRefusalNamesThePromptsProblemAndIsAuditedAsInvalidInput(): void
+    {
+        $refusal = ToolRefusal::invalidPromptArguments('"key" must be a ticket key, for example SHOP-12.');
+
+        self::assertSame('The arguments do not match this prompt: "key" must be a ticket key, for example SHOP-12.', $refusal->getMessage());
+        self::assertSame(ToolCallOutcome::InvalidInput, $refusal->outcome);
+        self::assertStringNotContainsString('input schema of this tool', $refusal->getMessage());
+    }
 }
