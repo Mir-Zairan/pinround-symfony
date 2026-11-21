@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
+use App\Review\UI\Component\RoundBar;
 use App\Review\UI\Controller\RoundController;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
@@ -45,9 +46,11 @@ final class RoundPageTest extends WebTestCase
      * main menu's My reports count (MyReportsCounts) and the header's Local AI chip's AI settings (LocalAiChip). The
      * strip's signing and the My reports count, which came in just before the strip, raised it from 23. The move-on
      * buttons of an open hand-off round (MoveOnVerbQueries) read the saved turn and the waiting turns in one query on
-     * ins_ticket_turn for a viewer who may move the ticket, as Omar may here, which raised it from 25.
+     * ins_ticket_turn for a viewer who may move the ticket, as Omar may here, which raised it from 25 (task 8e). The
+     * header's Ready for line (RoundReadyFor) reads whose turn it is on ins_ticket_turn once more, which raised it from 26;
+     * the name comes with the ticket's names.
      */
-    private const int PAGE_QUERIES = 26;
+    private const int PAGE_QUERIES = 27;
     private const string PRIVATE_TITLE = 'Lena private draft picture';
 
     private KernelBrowser $client;
@@ -90,33 +93,33 @@ final class RoundPageTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string}>
+     * @return iterable<string, array{string, string}> the viewer, and the header's Ready for line for them
      */
     public static function peopleOnTheTicket(): iterable
     {
-        yield 'the tester' => ['Mia'];
-        yield 'the lead' => ['Lena'];
-        yield 'a member' => ['Omar'];
+        yield 'the tester, whose turn it is' => ['Mia', 'Ready for you'];
+        yield 'the lead' => ['Lena', 'Ready for Mia'];
+        yield 'a member' => ['Omar', 'Ready for Mia'];
     }
 
     #[Test]
     #[DataProvider('peopleOnTheTicket')]
-    public function theHeaderTabsAndChipsShowWhatEachAreaStandsAt(string $person): void
+    public function theHeaderTabsAndChipsShowWhatEachAreaStandsAt(string $person, string $readyForLine): void
     {
-        $this->seedTwoRoundsOfFiveAreas();
+        $this->addTurnRowOf($this->seedTwoRoundsOfFiveAreas(), 'Mia');
         $this->logIn($this->client, $this->people[$person]);
 
         $page = $this->client->request('GET', self::ROUND_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Round 2 · shot today, 10:12 · Ready for Mia', $page->filter('h1.round-page__title')->text());
-        self::assertSame('· shot today, 10:12 · Ready for Mia', $page->filter('h1.round-page__title .round-page__detail')->text(), 'The rest of the header is muted.');
+        self::assertSame('Round 2 · shot today, 10:12 · '.$readyForLine, $page->filter('h1.round-page__title')->text());
+        self::assertSame('· shot today, 10:12 · '.$readyForLine, $page->filter('h1.round-page__title .round-page__detail')->text(), 'The rest of the header is muted.');
         self::assertSame(
             ['Per order Passed', 'Per product 3 pins', 'Combined Needs fix', 'Totals Question', 'Footer Not reviewed'],
             $page->filter('nav.screenshot-strip a.screenshot-thumb')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
         );
         self::assertSame('Per order', $page->filter('nav.screenshot-strip a[aria-current="page"] .screenshot-thumb__label')->text());
-        self::assertSame('Cart total shows the wrong sum', $page->filter('.round-page__ticket a')->text());
+        self::assertSame(['Cart total shows the wrong sum', '/t/SHOP-1'], [$page->filter('.round-page__ticket a.round-page__ticket-link')->text(), $page->filter('.round-page__ticket a.round-page__ticket-link')->attr('href')]);
         $compare = $page->filter('.round-compare-control[role="group"][aria-label="Compare"][hidden]');
         self::assertSame(
             [['Side by side', 'both', 'true'], ['Before', 'before', 'false'], ['After', 'after', 'false']],
@@ -191,15 +194,13 @@ final class RoundPageTest extends WebTestCase
         }
     }
 
+    /**
+     * Mia is still the Shop team's tester, yet with no turn row nobody's turn is known, as the round bar has it.
+     */
     #[Test]
-    public function aRoundWhoseTicketHasNoTesterSaysNothingOfWhoIsNext(): void
+    public function aRoundWhoseTicketHasNoTurnRowSaysNothingOfWhoIsNext(): void
     {
         $this->seedTwoRoundsOfFiveAreas();
-        $organizationId = $this->acmeFoods->toString();
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "UPDATE org_team_member SET job = 'other' WHERE organization_id = ? AND job = 'tester'",
-            [$organizationId],
-        ));
         $this->logIn($this->client, $this->people['Omar']);
 
         $page = $this->client->request('GET', self::ROUND_PAGE);
@@ -208,10 +209,70 @@ final class RoundPageTest extends WebTestCase
         self::assertSame('Round 2 · shot today, 10:12', $page->filter('h1.round-page__title')->text());
     }
 
+    /**
+     * Only an open hand-off round waits for someone: the report, a checklist round and a closed round name nobody,
+     * although it is Mia's turn.
+     */
+    #[Test]
+    public function aRoundThatWaitsForNoVerdictSaysNothingOfWhoIsNext(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addTurnRowOf($ticketId, 'Mia');
+        $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_EARLIER);
+        $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER);
+        $this->closeRound($this->addRound($ticketId, 2, 'review', 'Omar', self::SHARED_EARLIER));
+        $this->addRound($ticketId, 3, 'review', 'Omar', self::SHARED_TODAY);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $headers = [];
+        foreach ([0, 1, 2, 3] as $number) {
+            $page = $this->client->request('GET', '/t/SHOP-1/rounds/'.$number);
+            self::assertResponseStatusCodeSame(200);
+            $headers[] = $page->filter('h1.round-page__title')->text();
+        }
+
+        self::assertSame(
+            ['Round 0 · shot yesterday, 10:00', 'Round 1 · shot yesterday, 10:00', 'Round 2 · shot yesterday, 10:00', 'Round 3 · shot today, 10:12 · Ready for Mia'],
+            $headers,
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}> the open round's kind and owner, and who it is ready for
+     */
+    public static function openRoundsAndWhoTheyAreReadyFor(): iterable
+    {
+        yield 'Mia\'s findings for Omar, the assignee, whatever the turn row says' => ['draft', 'Mia', 'Omar'];
+        yield 'Omar\'s own shared draft, ready for whose turn it is' => ['draft', 'Omar', 'Mia'];
+        yield 'a review round, ready for whose turn it is' => ['review', 'Lena', 'Mia'];
+    }
+
+    /**
+     * RoundReadyFor is the one rule for both: the round page's header names the person the ticket page's round bar names.
+     */
+    #[Test]
+    #[DataProvider('openRoundsAndWhoTheyAreReadyFor')]
+    public function theHeaderNamesWhomTheTicketPagesRoundBarNames(string $kind, string $owner, string $readyFor): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addTurnRowOf($ticketId, 'Mia');
+        $this->addRound($ticketId, 1, $kind, $owner, self::SHARED_EARLIER);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Round 1 · shot yesterday, 10:00 · Ready for '.$readyFor, $page->filter('h1.round-page__title')->text());
+
+        $bar = $this->client->request('GET', '/t/SHOP-1/round-bar', [], [], ['HTTP_TURBO_FRAME' => RoundBar::FRAME_ID]);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Round 1 is open · Ready for '.$readyFor, $bar->filter('.round-bar .round-bar__text')->text());
+    }
+
     #[Test]
     public function aRoundShotEarlierNamesTheDay(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
+        $this->addTurnRowOf($ticketId, 'Mia');
         $this->addRound($ticketId, 1, 'review', 'Omar', self::SHARED_EARLIER);
         $this->logIn($this->client, $this->people['Omar']);
 
@@ -243,6 +304,7 @@ final class RoundPageTest extends WebTestCase
     public function theDayAndTimeAreTheViewersOwnWhereTheDayHasFlipped(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
+        $this->addTurnRowOf($ticketId, 'Mia');
         $this->addRound($ticketId, 1, 'review', 'Omar', self::SHARED_EARLIER);
         $this->addRound($ticketId, 2, 'review', 'Omar', self::SHARED_TODAY);
         $this->migrator()->executeStatement("UPDATE idn_user SET time_zone = 'Pacific/Auckland' WHERE id = ?", [$this->people['Omar']->id()->toString()]);
@@ -385,6 +447,7 @@ final class RoundPageTest extends WebTestCase
     public function thePageReadsTheSameNumberOfQueriesWhateverTheNumberOfAreasAndPins(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
+        $this->addTurnRowOf($ticketId, 'Mia');
         $this->seedRound($ticketId, 1, 1);
         $this->seedRound($ticketId, 2, 1);
         $this->logIn($this->client, $this->people['Omar']);
@@ -392,6 +455,7 @@ final class RoundPageTest extends WebTestCase
         $oneAreaQueryCount = $this->queryCountOf('/t/SHOP-1/rounds/2');
 
         $manyAreas = $this->addTicket('SHOP-2', 'all', 2);
+        $this->addTurnRowOf($manyAreas, 'Mia');
         $this->seedRound($manyAreas, 1, 5);
         $this->seedRound($manyAreas, 2, 5);
         $this->queryCountOf('/t/SHOP-2/rounds/2?area=1');
@@ -399,6 +463,7 @@ final class RoundPageTest extends WebTestCase
 
         self::assertCount(5, $this->client->getCrawler()->filter('a.screenshot-thumb'));
         self::assertCount(3, $this->client->getCrawler()->filter('.round-compare__side--before button.pin'));
+        self::assertStringEndsWith('· Ready for Mia', $this->client->getCrawler()->filter('h1.round-page__title')->text(), 'The count holds the read of whose turn it is.');
         self::assertSame($oneAreaQueryCount, $manyAreasQueryCount);
         self::assertSame(self::PAGE_QUERIES, $manyAreasQueryCount);
     }
@@ -430,11 +495,13 @@ final class RoundPageTest extends WebTestCase
      * 1 with three pins to check (one fixed, one still wrong, one a kept AI pin nobody checked) and an AI suggestion and
      * a dismissed one that never show; 2 needs fix; 3 question; 4 not reviewed.
      */
-    private function seedTwoRoundsOfFiveAreas(string $visibility = 'all'): void
+    private function seedTwoRoundsOfFiveAreas(string $visibility = 'all'): string
     {
         $ticketId = $this->addTicket('SHOP-1', $visibility);
         $this->seedRound($ticketId, 1, 5);
         $this->seedRound($ticketId, 2, 5);
+
+        return $ticketId;
     }
 
     private function seedRound(string $ticketId, int $number, int $areaCount): void
