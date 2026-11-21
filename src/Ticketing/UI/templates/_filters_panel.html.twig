@@ -1,0 +1,10 @@
+{#- The rail and the page's own TicketFilters ("filters" block), after the heading. Below 600px they sit behind a Filters
+    button; from 600px the button is hidden and tickets.css places them as before. Closed from the first paint. -#}
+<div class="tickets__filters" {{ stimulus_controller('menu', {}, {closed: 'tickets__filters-panel--closed'}) }}>
+    <twig:Button variant="outline" size="sm" class="tickets__filters-button" aria-expanded="false" aria-controls="tickets-filters-panel"
+        data-menu-target="trigger" data-action="menu#toggle">Filters</twig:Button>
+    <div id="tickets-filters-panel" class="tickets__filters-panel tickets__filters-panel--closed" {{ stimulus_target('menu', 'list') }}>
+        {{ include('@Ticketing/_project_rail.html.twig') }}
+        {% block filters %}{% endblock %}
+    </div>
+</div>

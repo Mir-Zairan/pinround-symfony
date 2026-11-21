@@ -4,8 +4,11 @@ import { Controller } from '@hotwired/stimulus';
 // is an action, as in the prototype. Items stay out of the Tab order; arrow keys move focus between them.
 // The avatar menu is a disclosure instead (links, a switch and a form, all in the Tab order): it binds
 // closeOnEscape on its list where the "⋯" menu binds navigate.
+// A list that only some screen widths collapse (the phone main menu, the phone filters) names a "closed" class instead
+// of taking [hidden], which base.css hides at every width.
 export default class extends Controller {
   static targets = ['trigger', 'list', 'item'];
+  static classes = ['closed'];
 
   connect() {
     this.close();
@@ -28,12 +31,12 @@ export default class extends Controller {
   }
 
   open() {
-    this.listTarget.hidden = false;
+    this.#showList(true);
     this.triggerTarget.setAttribute('aria-expanded', 'true');
   }
 
   close() {
-    this.listTarget.hidden = true;
+    this.#showList(false);
     this.triggerTarget.setAttribute('aria-expanded', 'false');
   }
 
@@ -80,8 +83,9 @@ export default class extends Controller {
     }
   }
 
+  // A nested menu that already took the Escape (the Teams list inside the phone menu) keeps the outer one open.
   closeOnEscape(event) {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && !event.defaultPrevented) {
       event.preventDefault();
       this.#closeToTrigger();
     }
@@ -102,6 +106,14 @@ export default class extends Controller {
   #closeToTrigger() {
     this.triggerTarget.focus();
     this.close();
+  }
+
+  #showList(isShown) {
+    if (this.hasClosedClass) {
+      this.listTarget.classList.toggle(this.closedClass, !isShown);
+    } else {
+      this.listTarget.hidden = !isShown;
+    }
   }
 
   #focusItem(index) {

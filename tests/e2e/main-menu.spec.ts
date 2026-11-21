@@ -152,6 +152,10 @@ for (const width of [360, 641]) {
 
     test(`the open team list stays inside the viewport at ${width}px`, async ({ page }) => {
       await openHome(page);
+      // Below 600px the nav waits behind the menu button (phone-layout.spec.ts).
+      if (width < 600) {
+        await page.locator('.site-header').getByRole('button', { name: 'Menu', exact: true }).click();
+      }
       await teamsButton(page).click();
       await expect(teamList(page)).toBeVisible();
 

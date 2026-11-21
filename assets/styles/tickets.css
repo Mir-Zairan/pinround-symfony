@@ -1,11 +1,45 @@
 /* The tickets list (src/Ticketing/UI/templates/list.html.twig): one section per step, in group order. */
 
-/* The page: the project rail on the left, the toolbar and list beside it; on a narrow screen the rail goes on top. */
+/* The page: the project rail on the left, the toolbar, heading and list beside it; on a narrow screen the rail goes on
+   top. The heading comes first in the markup for a phone (below), so these areas put it back under the toolbar; the last
+   row takes what a long rail adds, so the heading stays under the toolbar. */
 .tickets-page {
   display: grid;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas:
+    "rail filters"
+    "rail header"
+    "rail list";
   align-items: start;
   gap: var(--space-24);
+}
+
+.project-rail-frame {
+  grid-area: rail;
+}
+
+.tickets-page .ticket-filters {
+  grid-area: filters;
+}
+
+.tickets__header {
+  grid-area: header;
+}
+
+.tickets__list-frame {
+  grid-area: list;
+}
+
+/* Only holders for the menu controller from 600px: the rail and the toolbar are the grid's own items. */
+.tickets__filters,
+.tickets__filters-panel {
+  display: contents;
+}
+
+/* Two classes, so .btn's display in components.css does not show it from 600px. */
+.tickets__filters > .tickets__filters-button {
+  display: none;
 }
 
 .project-rail {
@@ -92,13 +126,47 @@
 @media (max-width: 52em) {
   .tickets-page {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas:
+      "rail"
+      "filters"
+      "header"
+      "list";
   }
 }
 
-.tickets {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-24);
+/* A phone (P14.T16): the heading, then a Filters button that shows the rail and the toolbar, then the list, so the
+   first ticket shows without scrolling. */
+@media (max-width: 599.98px) {
+  .tickets-page {
+    grid-template-areas:
+      "header"
+      "filters"
+      "list";
+  }
+
+  .tickets__filters {
+    grid-area: filters;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-12);
+  }
+
+  .tickets__filters > .tickets__filters-button {
+    display: inline-flex;
+  }
+
+  .tickets__filters-panel {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-24);
+  }
+
+  .tickets__filters-panel.tickets__filters-panel--closed {
+    display: none;
+  }
 }
 
 /* The toolbar (TicketFilters): search pill, the "Assigned to" chips and "Show done". */

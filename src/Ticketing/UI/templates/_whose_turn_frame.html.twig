@@ -1,5 +1,5 @@
 {# The cards' frame alone, as the whole page holds it and as a Turbo frame request gets it. It has the list frame's id, so the page's ticket-list controller loads each new URL into it; its links leave the page (_top). #}
-<turbo-frame id="ticket-list-frame" target="_top" {{ stimulus_target('ticket-list', 'frame') }}>
+<turbo-frame id="ticket-list-frame" class="tickets__list-frame" target="_top" {{ stimulus_target('ticket-list', 'frame') }}>
     <div class="turn" data-total-line="{{ totalLine }}">
         {% if cards is empty %}
             <twig:EmptyState message="{{ noTickets }}" />
