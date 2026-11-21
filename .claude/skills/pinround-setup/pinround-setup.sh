@@ -172,7 +172,10 @@ cmd_extension() {
     local id=${1:-}
     [[ $id =~ $extension_id_pattern ]] || fail 'an extension id is 32 letters from a to p, as chrome://extensions shows it.'
     local origin="chrome-extension://$id"
-    set_env_line .env.dev.local EXTENSION_ORIGINS "$origin"
+    # .env.dev.local replaces .env.dev's value, so keep its test extension origin or the extension e2e tests get 403.
+    local tracked_origins
+    tracked_origins=$(sed -n 's/^EXTENSION_ORIGINS=//p' .env.dev | tail -n 1)
+    set_env_line .env.dev.local EXTENSION_ORIGINS "$origin${tracked_origins:+,$tracked_origins}"
     set_env_line .env.local MINIO_CORS_ALLOW_ORIGIN "$(base_url),$origin"
     compose_files=(--env-file .env --env-file .env.dev --env-file .env.local)
     echo 'Recreating storage with the new CORS rule, then restarting the app and the workers.'
