@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Web\UI\Controller;
 
 use App\Insight\Api\HomeQueries;
-use App\Insight\Api\TurnGroup;
 use App\Insight\Api\WaitingTicket;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\AiSettingsQueries;
@@ -33,10 +32,10 @@ use Symfony\Component\Routing\Attribute\Route;
  * no such role, and "Your organization" for an Admin with no team role.
  *
  * Until P07's needs-you score exists, the work page's "Needs you now" lists the open tickets where it is the person's
- * turn from the same read as their card on Whose turn? (HomeQueries::whoseTurn, their group opened), so both count the
- * same tickets: the oldest wait first, at most SHOWN_NEEDS_YOU_NOW, and "See all" to that card. "Your team" shows a
- * stack per team, at most SHOWN_TEAMS. The work page's queries do not grow with the tickets that wait: the turn rows
- * come in one query, the team names in one, and the team people from their cache.
+ * turn with the rules of their card on Whose turn? (HomeQueries::viewersTurns), so both count the same tickets: the
+ * oldest wait first, at most SHOWN_NEEDS_YOU_NOW, and "See all" to that card. "Your team" shows a stack per team, at
+ * most SHOWN_TEAMS. The work page's queries do not grow with the tickets that wait: the viewer's turn rows come in one
+ * query, the team names in one, and the team people from their cache.
  */
 final class HomeController extends AbstractController
 {
@@ -83,9 +82,9 @@ final class HomeController extends AbstractController
     private function workHome(ActorContext $actor): Response
     {
         $roles = $actor->roles();
-        $viewersGroup = $this->viewersTurnGroupOf($actor);
-        $waitingCount = $viewersGroup->ticketCount ?? 0;
-        $needsYouNow = \array_slice($viewersGroup->tickets ?? [], 0, self::SHOWN_NEEDS_YOU_NOW);
+        $visibility = $this->ticketVisibilities->of($actor->organizationId(), $actor->userId());
+        $viewersTurns = $this->homeQueries->viewersTurns(TicketViewers::of($visibility), self::SHOWN_NEEDS_YOU_NOW);
+        $waitingCount = $viewersTurns->ticketCount;
         $viewerId = $actor->userId()->toString();
 
         return $this->render('@Web/home/work.html.twig', [
@@ -97,8 +96,8 @@ final class HomeController extends AbstractController
             'isAdmin' => $roles->isAdmin(),
             'adminSettingsUrl' => $roles->isAdmin() ? $this->mainMenu->adminHomeUrl() : null,
             'waitingCount' => $waitingCount,
-            'needsYouNow' => array_map($this->needsYouNowRowOf(...), $needsYouNow),
-            'notShownCount' => $waitingCount - \count($needsYouNow),
+            'needsYouNow' => array_map($this->needsYouNowRowOf(...), $viewersTurns->tickets),
+            'notShownCount' => $waitingCount - \count($viewersTurns->tickets),
             'seeAllUrl' => $this->generateUrl(self::WHOSE_TURN_ROUTE, [
                 self::WHOSE_TURN_OPEN_QUERY => $viewerId,
                 '_fragment' => self::WHOSE_TURN_CARD_ID_PREFIX.$viewerId,
@@ -127,19 +126,6 @@ final class HomeController extends AbstractController
             'aiUrl' => $this->generateUrl(AdminTabRail::AI_ROUTE),
             'adminSettingsUrl' => $this->mainMenu->adminHomeUrl(),
         ]);
-    }
-
-    /**
-     * @return TurnGroup|null the viewer's card of Whose turn?, with up to HomeQueries::SHOWN_TICKETS_OF_THE_OPENED_GROUP
-     *                        tickets; null when nothing waits on them
-     */
-    private function viewersTurnGroupOf(ActorContext $actor): ?TurnGroup
-    {
-        $viewerId = $actor->userId();
-        $visibility = $this->ticketVisibilities->of($actor->organizationId(), $viewerId);
-        $firstGroup = $this->homeQueries->whoseTurn(TicketViewers::of($visibility), null, $viewerId->toString(), null)->groups[0] ?? null;
-
-        return null !== $firstGroup?->turnUserId && $firstGroup->turnUserId->equals($viewerId) ? $firstGroup : null;
     }
 
     /**

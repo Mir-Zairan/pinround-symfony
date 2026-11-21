@@ -8,9 +8,11 @@ use App\Insight\Api\HomeQueries;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
 use App\Insight\Api\TurnGroupCursor;
+use App\Insight\Api\ViewersTurns;
 use App\Insight\Api\WaitingTicket;
 use App\Insight\Application\WhoseTurnRows;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -51,18 +53,8 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
 
     public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit, ?string $searchText = null): array
     {
-        if (!$this->connection->isTransactionActive()) {
-            throw new \LogicException('Whose turn is read in a transaction under the organization as tenant; none is open.');
-        }
-        $organizationId = $this->tenantContext->require();
-        if (!$organizationId->equals($viewer->organizationId)) {
-            throw new \LogicException('Whose turn is read under the viewer\'s own organization as tenant.');
-        }
-
-        $visibleTurn = TicketVisibilitySql::of(
-            TicketVisibility::for($viewer->organizationId, $viewer->viewerId, $viewer->teamIds, $viewer->isAdmin, $viewer->isTriager ? $viewer->viewerId : null),
-            self::TURN_ALIAS,
-        );
+        $organizationId = $this->requireViewersTenant($viewer);
+        $visibleTurn = $this->visibleTurnOf($viewer);
         // The ticket id breaks ties of waiting_since, so the shown rows of a group do not change between two reads.
         // The LEFT JOIN from the count keeps one row, with no ticket, when the page has no group.
         $rows = $this->connection->fetchAllAssociative(
@@ -163,6 +155,70 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
             'ticketCount' => $ticketCount,
             'isSearchCapped' => $isSearchCapped,
         ];
+    }
+
+    /**
+     * The window count runs before the inner LIMIT, so it counts every visible row of the viewer while only the shown
+     * ones are joined to the view. No row means nothing waits on the viewer.
+     */
+    public function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns
+    {
+        $organizationId = $this->requireViewersTenant($viewer);
+        $visibleTurn = $this->visibleTurnOf($viewer);
+        $rows = $this->connection->fetchAllAssociative(
+            'SELECT mine.ticket_id, mine.kind, mine.waiting_since, mine.ticket_count, ticket.key, ticket.title'
+            .' FROM (SELECT turn.ticket_id, turn.kind, turn.waiting_since, count(*) OVER () AS ticket_count'
+            .' FROM ins_ticket_turn AS turn'
+            .' WHERE turn.organization_id = CAST(:organization AS uuid) AND turn.turn_user_id = CAST(:viewer AS uuid)'
+            .' AND '.$visibleTurn->sql()
+            .' ORDER BY turn.waiting_since, turn.ticket_id LIMIT CAST(:limit AS integer)) AS mine'
+            .' JOIN tkt_ticket_list_v AS ticket ON ticket.organization_id = CAST(:organization AS uuid) AND ticket.id = mine.ticket_id'
+            .' ORDER BY mine.waiting_since, mine.ticket_id',
+            [
+                'organization' => $organizationId->toString(),
+                'viewer' => $viewer->viewerId->toString(),
+                'limit' => (string) $limit,
+                ...$visibleTurn->parameters(),
+            ],
+        );
+
+        $ticketCount = 0;
+        $tickets = [];
+        foreach ($rows as $row) {
+            if (!\is_string($row['ticket_id']) || !\is_string($row['kind']) || !\is_string($row['waiting_since'])
+                || !\is_int($row['ticket_count']) || !\is_string($row['key']) || !\is_string($row['title'])) {
+                throw new \LogicException('A row of the viewer\'s turns from the database is not a waiting ticket.');
+            }
+            $ticketCount = $row['ticket_count'];
+            $tickets[] = new WaitingTicket(new TicketId($row['ticket_id']), $row['key'], $row['title'], $row['kind'], new \DateTimeImmutable($row['waiting_since']));
+        }
+
+        return new ViewersTurns($tickets, $ticketCount);
+    }
+
+    /**
+     * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
+     *                         than the tenant
+     */
+    private function requireViewersTenant(TicketViewer $viewer): OrganizationId
+    {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Whose turn is read in a transaction under the organization as tenant; none is open.');
+        }
+        $organizationId = $this->tenantContext->require();
+        if (!$organizationId->equals($viewer->organizationId)) {
+            throw new \LogicException('Whose turn is read under the viewer\'s own organization as tenant.');
+        }
+
+        return $organizationId;
+    }
+
+    private function visibleTurnOf(TicketViewer $viewer): TicketVisibilitySql
+    {
+        return TicketVisibilitySql::of(
+            TicketVisibility::for($viewer->organizationId, $viewer->viewerId, $viewer->teamIds, $viewer->isAdmin, $viewer->isTriager ? $viewer->viewerId : null),
+            self::TURN_ALIAS,
+        );
     }
 
     /**

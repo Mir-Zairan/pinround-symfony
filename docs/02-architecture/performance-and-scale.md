@@ -91,6 +91,8 @@ Query plan:
 3. Pings: one grouped query on `ntf_ping` where `to_id = :me and cleared_at is null`, index `(organization_id, to_id, cleared_at)`.
 4. Release bar and team stack: cached per team (see [Caching](#caching)).
 
+Until the needs-you score exists, "Needs you now" is `HomeQueries::viewersTurns` (P14 build, 2026-11-21): one query on the viewer's own `ins_ticket_turn` rows through `ins_ticket_turn_turn_user_id_base_score_idx`, the oldest wait first, a window `count(*)` for the headline, `LIMIT 10`, and only those 10 joined to `tkt_ticket_list_v`; it never ranks the rest of the organization's turns as the Whose turn page does (`DbalWhoseTurnRowsViewersTurnsTest` pins the plan).
+
 Result: ≤ 8 queries (the Home budget), all index-only or index-range scans.
 
 ### Tickets list (grouped by step)
