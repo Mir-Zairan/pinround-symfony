@@ -14,7 +14,7 @@
 {% endblock %}
 
 {% block main %}
-    <div class="report-draft{% if screenshots is not empty %} report-draft--with-pictures{% endif %}">
+    <div class="report-draft">
         <twig:Button variant="text" href="{{ path('review_report_drafts') }}" class="report-draft__back"><span aria-hidden="true">&lt;</span> Report drafts</twig:Button>
         <h1 class="report-draft__title">Report draft for {{ draft.projectKey }}</h1>
         <p class="report-draft__hint">Only you see this draft. Nothing reaches the team until you press Send.</p>
@@ -25,13 +25,13 @@
         <form class="report-draft__form" method="post" action="{{ path('review_report_draft_save', {id: draft.id}) }}" {% if error %}aria-describedby="report-draft-error"{% endif %}>
             <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
             <input type="hidden" name="version" value="{{ draft.version }}">
-            <label class="report-draft__field">
+            <label class="form-field">
                 What is wrong, in one line
-                <input class="report-draft__input" type="text" name="title" value="{{ title }}" maxlength="200" required>
+                <input class="form-field__input" type="text" name="title" value="{{ title }}" maxlength="200" required>
             </label>
-            <label class="report-draft__field">
+            <label class="form-field">
                 More detail · optional
-                <textarea class="report-draft__input report-draft__detail" name="detail" rows="5">{{ detail }}</textarea>
+                <textarea class="form-field__input" name="detail" rows="5">{{ detail }}</textarea>
             </label>
 
             {% if screenshots is not empty %}

@@ -326,7 +326,7 @@ final class ReportDraftControllerTest extends WebTestCase
         foreach (['shown' => $shown, 'refused' => $refused] as $state => $page) {
             self::assertSame(1, $page->filter('.report-draft > a.report-draft__back[href="'.self::LIST.'"]')->count(), $state);
             self::assertSame(1, $page->filter('.report-draft > h1.report-draft__title')->count(), $state);
-            self::assertSame(1, $page->filter('form.report-draft__form input.report-draft__input[name=title]')->count(), $state);
+            self::assertSame(1, $page->filter('form.report-draft__form label.form-field > input.form-field__input[name=title]')->count(), $state);
             self::assertSame(0, $page->filter('[class*="login__"], [class~="security"], [class*="security__"]')->count(), $state);
             self::assertSame(0, $page->filter('link[href*="login"], link[href*="security"]')->count(), $state);
         }

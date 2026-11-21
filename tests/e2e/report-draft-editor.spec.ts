@@ -185,6 +185,27 @@ test.describe('the report draft page', () => {
     expect(pictureBox.width).toBeGreaterThan(640);
     expect(titleFieldBox.width).toBeGreaterThan(300);
     expect(titleFieldBox.x, 'the fields sit beside the picture').toBeGreaterThan(pictureBox.x + pictureBox.width);
+
+    // Only the editor breaks out: the draft's own fields, the hint and the buttons keep the 560 px column.
+    const editorBox = (await draft.editor.boundingBox())!;
+    expect(editorBox.width, 'the editor takes the page width').toBeGreaterThan(1000);
+    for (const [name, part] of [
+      ['the one-line field', page.getByLabel('What is wrong, in one line')],
+      ['More detail', page.getByLabel('More detail · optional')],
+      ['the hint', page.getByText('Only you see this draft.')],
+      ['the Save and Send row', page.locator('form .report-draft__actions')],
+    ] as const) {
+      expect((await part.boundingBox())!.width, `${name} keeps the 560 px column`).toBeLessThanOrEqual(560);
+    }
+  });
+
+  test('More detail starts at 5 lines, not one', async ({ page }) => {
+    const draft = await openReportDraft(page, seedMiasReportDraft(`Detail has room ${randomUUID().slice(0, 8)}`, FOUR_SCREENSHOTS.slice(0, 1)));
+    const detail = page.getByLabel('More detail · optional');
+    await expect(draft.editor).toBeVisible();
+    const lineHeightPx = await detail.evaluate((field) => parseFloat(getComputedStyle(field).lineHeight));
+
+    expect((await detail.boundingBox())!.height, 'five lines tall').toBeGreaterThanOrEqual(5 * lineHeightPx);
   });
 
   test('the Report drafts back link starts at the left edge of the page, not centred across it', async ({ page }) => {

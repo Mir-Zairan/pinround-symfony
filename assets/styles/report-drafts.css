@@ -19,13 +19,13 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
-    max-width: 560px;
 }
 
-/* The ScreenshotEditor shows the picture large with its fields beside it (P14.T10), which a 560 px column squeezed
-   to a third of the page; with pictures the draft takes the page's width. */
-.report-draft--with-pictures {
-    max-width: none;
+/* A 560 px column. Only the ScreenshotEditor breaks out to the page's width: it shows the picture large with its fields
+   beside it (P14.T10), which the column squeezed to a third of the page. */
+.report-draft > :not(.report-draft__form),
+.report-draft__form > :not(.screenshot-editor) {
+    max-width: 560px;
 }
 
 /* Starts at the column's left edge, as the ticket page's back link does, instead of stretching across it with the
@@ -55,29 +55,6 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-}
-
-.report-draft__field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-weight: 600;
-}
-
-.report-draft__input {
-    height: 44px;
-    padding: 0 12px;
-    border: 1px solid var(--outline);
-    border-radius: var(--radius-input);
-    background: var(--s-lowest);
-    color: var(--on-surface);
-    font: inherit;
-    font-weight: 400;
-}
-
-/* No min-height: the textarea's rows sets its starting height (5 lines). */
-.report-draft__detail {
-    resize: vertical;
 }
 
 .report-draft__picture {
