@@ -105,8 +105,9 @@ final readonly class MainMenu
     }
 
     /**
-     * The teams whose pages TeamVoter lets the person open: a Manager may open every team of the organization, anyone
-     * else only the teams they hold a role in.
+     * The teams the menu lists: every team of the organization for a Manager, only the teams they hold a role in for
+     * anyone else. An Admin who is no Manager gets only their own teams here, although TeamVoter lets an Admin open
+     * every team of the organization by its address.
      *
      * @return MenuItem|null null without a team, when none of the teams is found, which happens only outside the
      *                       request transaction, or when the roles carry no slug for the only team
