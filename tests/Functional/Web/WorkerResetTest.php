@@ -8,7 +8,6 @@ use App\Assist\UI\LocalAiChip;
 use App\Identity\Domain\User;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
 use App\Notification\UI\Controller\PingController;
-use App\Organization\UI\EnterChosenOrganization;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
@@ -245,7 +244,7 @@ final class WorkerResetTest extends WebTestCase
     }
 
     /**
-     * TokenAuthenticator entered Beta Bakery; EnterChosenOrganization found Omar no longer a member of it.
+     * resolve_api_token no longer finds the token of Omar, who left Beta Bakery, so TokenAuthenticator refuses it.
      */
     #[Test]
     public function theNextRequestHasNoTenantAndAnOpenEntityManagerAfterATokenWhoseUserLeftItsOrganizationWasRefused(): void
@@ -259,7 +258,7 @@ final class WorkerResetTest extends WebTestCase
         [, $token] = $this->issueApiToken($omar, $betaBakery);
         $this->removeMembership($omar, $betaBakery);
 
-        $this->assertTheRefusedTokenLeavesTheNextRequestNoTenant($token, EnterChosenOrganization::NOT_A_MEMBER_OF_THE_TOKENS_ORGANIZATION);
+        $this->assertTheRefusedTokenLeavesTheNextRequestNoTenant($token, TokenAuthenticator::REFUSAL_MESSAGE);
     }
 
     #[Test]

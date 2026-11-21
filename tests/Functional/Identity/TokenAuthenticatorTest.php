@@ -6,7 +6,6 @@ namespace App\Tests\Functional\Identity;
 
 use App\Identity\Domain\ApiToken;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
-use App\Organization\UI\EnterChosenOrganization;
 use App\SharedKernel\Application\TenantContext;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -191,26 +190,39 @@ final class TokenAuthenticatorTest extends WebTestCase
     }
 
     /**
-     * Omar is still in Acme Foods, which a browser session would enter as his only organization.
+     * Omar leaves Beta Bakery and stays in Acme Foods: resolve_api_token no longer finds his Beta Bakery token (ADR-0050,
+     * note of 2026-11-21), so it gets the authenticator's 401 like a revoked one and keeps its row, unused; his Acme Foods
+     * token still works.
      */
     #[Test]
-    public function aTokenWhoseUserLeftItsOrganizationGets401(): void
+    public function aTokenWhoseUserLeftItsOrganizationGetsTheSame401AndKeepsItsRow(): void
     {
         $omar = $this->createUserWithoutOrganization('Omar Haddad');
         $acmeFoods = $this->createOrganization('Acme Foods');
         $betaBakery = $this->createOrganization('Beta Bakery');
         $this->addMembership($omar, $acmeFoods);
         $this->addMembership($omar, $betaBakery);
-        [, $token] = $this->issueApiToken($omar, $betaBakery);
+        [$betaTokenId, $betaToken] = $this->issueApiToken($omar, $betaBakery);
+        [$acmeTokenId, $acmeToken] = $this->issueApiToken($omar, $acmeFoods);
+        $this->client->request('POST', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$betaToken]);
+        self::assertResponseStatusCodeSame(200);
+        $this->clock->sleep(120);
         $this->removeMembership($omar, $betaBakery);
 
-        $this->client->request('POST', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$token]);
+        $this->client->request('POST', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$betaToken]);
 
         self::assertResponseStatusCodeSame(401);
-        self::assertSame(['error' => EnterChosenOrganization::NOT_A_MEMBER_OF_THE_TOKENS_ORGANIZATION], $this->responseJson());
+        self::assertSame(['error' => TokenAuthenticator::REFUSAL_MESSAGE], $this->responseJson());
         self::assertResponseHeaderSame('WWW-Authenticate', 'Bearer');
         self::assertNull($this->tenantContext()->get(), 'the refused request left the token\'s organization as tenant');
         $this->assertNoCookieWasSet();
+        self::assertSame(['last_used_at' => '2099-03-20 09:00:00', 'revoked_at' => null], $this->usageOf($betaTokenId, $betaBakery));
+
+        $this->client->request('POST', self::TOKEN_PROBE, server: ['HTTP_AUTHORIZATION' => 'Bearer '.$acmeToken]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($acmeFoods->toString(), $this->responseJson()['organizationId'] ?? null);
+        self::assertSame(['last_used_at' => '2099-03-20 09:02:00', 'revoked_at' => null], $this->usageOf($acmeTokenId, $acmeFoods));
     }
 
     /**
