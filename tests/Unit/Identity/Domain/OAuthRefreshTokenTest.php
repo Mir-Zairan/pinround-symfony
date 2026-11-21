@@ -77,6 +77,29 @@ final class OAuthRefreshTokenTest extends TestCase
     }
 
     #[Test]
+    public function aNewFamilyStartsAtItsFirstTokenAndARefreshedOneKeepsItsStartToTheWholeSecond(): void
+    {
+        $first = self::issue()->token();
+        $next = self::issue(issuedAt: '2027-03-16 10:00:00.200 Europe/Berlin', familyCreatedAt: $first->familyCreatedAt())->token();
+        // Later than the issue by a fraction only, which the whole second drops.
+        $sameSecond = self::issue(familyCreatedAt: new \DateTimeImmutable('2027-03-15 10:00:00.900 Europe/Berlin'))->token();
+
+        self::assertSame('2027-03-15 09:00:00.000000 +00:00', $first->familyCreatedAt()->format('Y-m-d H:i:s.u P'));
+        self::assertSame('2027-03-15 09:00:00.000000 +00:00', $next->familyCreatedAt()->format('Y-m-d H:i:s.u P'));
+        self::assertSame('2027-03-16 09:00:00.000000 +00:00', $next->createdAt()->format('Y-m-d H:i:s.u P'));
+        self::assertSame('2027-03-15 09:00:00.000000 +00:00', $sameSecond->familyCreatedAt()->format('Y-m-d H:i:s.u P'));
+    }
+
+    #[Test]
+    public function aFamilyThatStartsAfterItsTokenIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('A refresh token family cannot start after its token.');
+
+        self::issue(familyCreatedAt: new \DateTimeImmutable(self::ISSUED_AT)->modify('+1 second'));
+    }
+
+    #[Test]
     public function noScopeIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
@@ -111,7 +134,7 @@ final class OAuthRefreshTokenTest extends TestCase
     /**
      * @param list<ApiTokenScope> $scopes
      */
-    private static function issue(array $scopes = [ApiTokenScope::Read]): IssuedOAuthRefreshToken
+    private static function issue(array $scopes = [ApiTokenScope::Read], string $issuedAt = self::ISSUED_AT, ?\DateTimeImmutable $familyCreatedAt = null): IssuedOAuthRefreshToken
     {
         return OAuthRefreshToken::issue(
             self::TOKEN_ID,
@@ -122,7 +145,8 @@ final class OAuthRefreshTokenTest extends TestCase
             $scopes,
             self::ACCESS_TOKEN_ID,
             new HmacApiTokenHashing(self::PEPPER),
-            new \DateTimeImmutable(self::ISSUED_AT),
+            new \DateTimeImmutable($issuedAt),
+            $familyCreatedAt,
         );
     }
 }

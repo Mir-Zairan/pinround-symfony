@@ -14,24 +14,24 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * OAuthConnections on idn_oauth_refresh_token, naming the tenant's organization_id as well as row-level security does.
- * Each row of a list is a family's newest token, the only one neither traded nor revoked, found through
- * idn_oauth_refresh_token_user_id_live_idx; its family's other tokens give when it was connected and whether it was
- * renewed, through idn_oauth_refresh_token_family_id_idx. The client's name comes from idn_oauth_client, a global table.
+ * Each row of a list is a family's newest token, the only one neither traded nor revoked, read alone: its
+ * family_created_at is when the app was connected, and a token issued later than that is a renewal. The person's list
+ * reads idn_oauth_refresh_token_user_id_family_created_at_live_idx, the organization's
+ * idn_oauth_refresh_token_family_created_at_live_idx. The client's name comes from idn_oauth_client, a global table.
  */
 final readonly class DbalOAuthConnections implements OAuthConnections
 {
+    // A refresh in the same second as the code exchange shows as not renewed: the columns keep whole seconds.
     private const string SELECT_LIVE = 'SELECT live.family_id::text AS family_id, live.user_id::text AS user_id,'
         ." COALESCE(NULLIF(client.client_name, ''), live.client_id) AS client_name,"
         .' array_to_json(live.scopes)::text AS scopes,'
-        ." to_char(family.connected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS connected_at,"
-        ." CASE WHEN family.is_renewed THEN to_char(live.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') END AS last_renewed_at"
+        ." to_char(live.family_created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS connected_at,"
+        ." CASE WHEN live.created_at > live.family_created_at THEN to_char(live.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') END AS last_renewed_at"
         .' FROM idn_oauth_refresh_token live'
-        .' CROSS JOIN LATERAL (SELECT min(f.created_at) AS connected_at, bool_or(f.used_at IS NOT NULL) AS is_renewed'
-        .' FROM idn_oauth_refresh_token f WHERE f.organization_id = live.organization_id AND f.family_id = live.family_id) family'
         .' LEFT JOIN idn_oauth_client client ON client.client_id = live.client_id'
         .' WHERE live.organization_id = ? AND live.revoked_at IS NULL AND live.used_at IS NULL AND live.expires_at > ?';
 
-    private const string NEWEST_FIRST = ' ORDER BY family.connected_at DESC, live.family_id DESC LIMIT ?';
+    private const string NEWEST_FIRST = ' ORDER BY live.family_created_at DESC, live.family_id DESC LIMIT ?';
 
     // The columns keep whole seconds, and PostgreSQL rounds a fraction; cutting it here keeps "now" from moving ahead.
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:sP';
@@ -69,7 +69,7 @@ final readonly class DbalOAuthConnections implements OAuthConnections
         }
 
         return $this->connectionsOf($this->connection->fetchAllAssociative(
-            self::SELECT_LIVE.' AND (family.connected_at, live.family_id) < (?::timestamptz, ?::uuid)'.self::NEWEST_FIRST,
+            self::SELECT_LIVE.' AND (live.family_created_at, live.family_id) < (?::timestamptz, ?::uuid)'.self::NEWEST_FIRST,
             [$organizationId, $at->format(self::TIMESTAMP_FORMAT), $beforeConnectedAt->format(self::TIMESTAMP_FORMAT), strtolower($beforeFamilyId), $limit],
             [4 => ParameterType::INTEGER],
         ));

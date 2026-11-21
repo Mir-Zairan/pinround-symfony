@@ -34,6 +34,7 @@ final class OAuthRefreshToken implements TenantOwned
      */
     private mixed $tokenHash;
     private readonly \DateTimeImmutable $expiresAt;
+    private readonly \DateTimeImmutable $familyCreatedAt;
     private ?\DateTimeImmutable $usedAt = null;
     private ?\DateTimeImmutable $revokedAt = null;
 
@@ -50,25 +51,30 @@ final class OAuthRefreshToken implements TenantOwned
         string $tokenHash,
         private readonly string $accessTokenId,
         private readonly \DateTimeImmutable $createdAt,
+        \DateTimeImmutable $familyCreatedAt,
     ) {
         $this->organizationId = $organizationId->toString();
         $this->userId = $userId->toString();
         $this->tokenHash = $tokenHash;
         $this->expiresAt = $createdAt->add(new \DateInterval('P'.self::LIFETIME_DAYS.'D'));
+        $this->familyCreatedAt = $familyCreatedAt;
     }
 
     /**
      * A new refresh token, valid for LIFETIME_DAYS from $issuedAt. The plain token is "prr_" and 32 random bytes in
      * base64url; it is in the result only and never kept.
      *
-     * @param string              $id            a UUID from OAuthRefreshTokens::nextIdentity()
-     * @param string              $familyId      the family's UUID: a new one at the code exchange, the traded token's
-     *                                           at a refresh
-     * @param list<ApiTokenScope> $scopes        at least one; repeats count once
-     * @param string              $accessTokenId the UUID of the access token issued with it
-     * @param \DateTimeImmutable  $issuedAt      kept to the whole second, in UTC
+     * @param string              $id              a UUID from OAuthRefreshTokens::nextIdentity()
+     * @param string              $familyId        the family's UUID: a new one at the code exchange, the traded token's
+     *                                             at a refresh
+     * @param list<ApiTokenScope> $scopes          at least one; repeats count once
+     * @param string              $accessTokenId   the UUID of the access token issued with it
+     * @param \DateTimeImmutable  $issuedAt        kept to the whole second, in UTC
+     * @param ?\DateTimeImmutable $familyCreatedAt when the family's first token was issued: null at the code exchange,
+     *                                             where it is $issuedAt, and the traded token's familyCreatedAt() at a
+     *                                             refresh; kept to the whole second, in UTC
      *
-     * @throws \InvalidArgumentException when no scope is given
+     * @throws \InvalidArgumentException when no scope is given, or the family starts after $issuedAt
      */
     public static function issue(
         string $id,
@@ -80,9 +86,16 @@ final class OAuthRefreshToken implements TenantOwned
         string $accessTokenId,
         ApiTokenHashing $hashing,
         \DateTimeImmutable $issuedAt,
+        ?\DateTimeImmutable $familyCreatedAt = null,
     ): IssuedOAuthRefreshToken {
         if ([] === $scopes) {
             throw new \InvalidArgumentException('A refresh token grants at least one scope.');
+        }
+        // The columns keep whole seconds; PostgreSQL would round a fraction up and could stretch the 30 days.
+        $createdAt = new \DateTimeImmutable('@'.$issuedAt->getTimestamp());
+        $familyCreatedAt = null === $familyCreatedAt ? $createdAt : new \DateTimeImmutable('@'.$familyCreatedAt->getTimestamp());
+        if ($familyCreatedAt > $createdAt) {
+            throw new \InvalidArgumentException('A refresh token family cannot start after its token.');
         }
         $plainToken = self::PLAIN_PREFIX.RandomToken::base64Url(self::RANDOM_BYTES);
         // In the order of the cases, so the same choice is always stored the same way.
@@ -99,8 +112,8 @@ final class OAuthRefreshToken implements TenantOwned
             $scopeValues,
             $hashing->hash($plainToken),
             $accessTokenId,
-            // The columns keep whole seconds; PostgreSQL would round a fraction up and could stretch the 30 days.
-            new \DateTimeImmutable('@'.$issuedAt->getTimestamp()),
+            $createdAt,
+            $familyCreatedAt,
         );
 
         return new IssuedOAuthRefreshToken($token, $plainToken);
@@ -163,6 +176,15 @@ final class OAuthRefreshToken implements TenantOwned
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    /**
+     * When the family's first token was issued, the grant's connection time; every token of the family keeps it, so it
+     * stays when older tokens are purged. Before createdAt() only on a token a refresh issued.
+     */
+    public function familyCreatedAt(): \DateTimeImmutable
+    {
+        return $this->familyCreatedAt;
     }
 
     /**

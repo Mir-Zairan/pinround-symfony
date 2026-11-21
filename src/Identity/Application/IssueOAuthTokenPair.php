@@ -56,7 +56,7 @@ final readonly class IssueOAuthTokenPair
             throw self::tooManyTokens($refusal);
         }
 
-        return $this->pairedWith($accessToken, $client, $familyId, $now);
+        return $this->pairedWith($accessToken, $client, $familyId, null, $now);
     }
 
     /**
@@ -75,7 +75,7 @@ final readonly class IssueOAuthTokenPair
             throw self::tooManyTokens($refusal);
         }
 
-        return $this->pairedWith($accessToken, $client, $traded->familyId(), $now);
+        return $this->pairedWith($accessToken, $client, $traded->familyId(), $traded->familyCreatedAt(), $now);
     }
 
     private static function tooManyTokens(TooManyApiTokens $refusal): OAuthTokenRefused
@@ -85,8 +85,10 @@ final readonly class IssueOAuthTokenPair
 
     /**
      * Adds the refresh token that names $accessToken.
+     *
+     * @param ?\DateTimeImmutable $familyCreatedAt null for a new family, which starts $now
      */
-    private function pairedWith(IssuedApiToken $accessToken, OAuthClient $client, string $familyId, \DateTimeImmutable $now): IssuedOAuthTokens
+    private function pairedWith(IssuedApiToken $accessToken, OAuthClient $client, string $familyId, ?\DateTimeImmutable $familyCreatedAt, \DateTimeImmutable $now): IssuedOAuthTokens
     {
         $token = $accessToken->token();
         $refreshToken = OAuthRefreshToken::issue(
@@ -99,6 +101,7 @@ final readonly class IssueOAuthTokenPair
             $token->id(),
             $this->hashing,
             $now,
+            $familyCreatedAt,
         );
         $this->refreshTokens->add($refreshToken->token());
 

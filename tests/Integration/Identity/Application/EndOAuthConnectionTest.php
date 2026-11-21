@@ -103,7 +103,7 @@ final class EndOAuthConnectionTest extends KernelTestCase
             self::assertNotNull($this->refreshTokens()->markUsed($this->pairs['traded']['refresh']->tokenHash(), self::CLIENT_ID, $this->at('-1 hour')));
             self::assertTrue($this->apiTokens()->revoke($this->pairs['traded']['access']->id(), $this->at('-1 hour')));
         });
-        $this->pairs['live'] = $this->addPair(self::ACME_FOODS, self::CONNECTION, '-1 hour');
+        $this->pairs['live'] = $this->addPair(self::ACME_FOODS, self::CONNECTION, '-1 hour', $this->pairs['traded']['refresh']->familyCreatedAt());
         $this->pairs['other'] = $this->addPair(self::ACME_FOODS, self::OTHER_CONNECTION, '-3 hours');
         $this->pairs['beta'] = $this->addPair(self::BETA_BAKERY, self::BETA_CONNECTION, '-1 hour');
     }
@@ -405,9 +405,11 @@ final class EndOAuthConnectionTest extends KernelTestCase
      * One step of Omar's grant: an access token and the refresh token of the family that names it, as
      * IssueOAuthTokenPair adds them, but with no ApiTokenIssued in the outbox.
      *
+     * @param ?\DateTimeImmutable $familyCreatedAt the traded refresh token's, for the family's next pair
+     *
      * @return array{access: ApiToken, refresh: OAuthRefreshToken}
      */
-    private function addPair(string $organizationId, string $familyId, string $sinceNow): array
+    private function addPair(string $organizationId, string $familyId, string $sinceNow, ?\DateTimeImmutable $familyCreatedAt = null): array
     {
         $hashing = self::getContainer()->get('test.identity_api_token_hashing');
         self::assertInstanceOf(ApiTokenHashing::class, $hashing);
@@ -422,6 +424,7 @@ final class EndOAuthConnectionTest extends KernelTestCase
             $accessToken->id(),
             $hashing,
             $this->at($sinceNow),
+            $familyCreatedAt,
         )->token();
         $this->transactions()->committedAs($organizationId, function () use ($accessToken, $refreshToken): void {
             $this->apiTokens()->add($accessToken);

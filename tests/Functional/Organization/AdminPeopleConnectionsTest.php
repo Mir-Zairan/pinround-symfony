@@ -103,7 +103,7 @@ final class AdminPeopleConnectionsTest extends WebTestCase
         self::assertSame(['Lena Berg', 'Omar Haddad'], $page->filter('main .people__connection-row .people__token-owner')->each(static fn (Crawler $owner): string => $owner->text()));
         self::assertSame('Claude · Connected 15 Mar 2099 · Not renewed yet', $page->filter('main .people__connection-row .people__sub')->first()->text());
         self::assertSame(
-            ['End Lena Berg’s connection of Claude', 'End Omar Haddad’s connection of Claude'],
+            ['End connection: Lena Berg’s Claude', 'End connection: Omar Haddad’s Claude'],
             $page->filter('main .people__connection-row form button[type="submit"]')->each(static fn (Crawler $end): ?string => $end->attr('aria-label')),
         );
         self::assertCount(0, $page->filter('main .people__connections .empty-state'));

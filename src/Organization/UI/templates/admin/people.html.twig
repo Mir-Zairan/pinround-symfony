@@ -162,7 +162,7 @@
                                 {% for name, value in shownPagesQuery %}
                                     <input type="hidden" name="{{ name }}" value="{{ value }}">
                                 {% endfor %}
-                                <twig:Button type="submit" variant="outline" aria-label="End {{ ownerName }}’s connection of {{ connection.clientName }}">End connection</twig:Button>
+                                <twig:Button type="submit" variant="outline" aria-label="End connection: {{ ownerName }}’s {{ connection.clientName }}">End connection</twig:Button>
                             </form>
                         </li>
                     {% endfor %}

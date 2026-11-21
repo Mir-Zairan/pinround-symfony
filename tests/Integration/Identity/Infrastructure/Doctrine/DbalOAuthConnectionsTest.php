@@ -23,9 +23,9 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * DbalOAuthConnections on the real idn_oauth_refresh_token and idn_oauth_client tables as pinround_app, built by hand as
- * no page uses it yet, so the container drops it. Every family is committed by DoctrineOAuthRefreshTokens and the time
- * is fixed in March 2027: the lists compare expiry with the time they are given, never the database clock.
+ * DbalOAuthConnections on the real idn_oauth_refresh_token and idn_oauth_client tables as pinround_app. Every family is
+ * committed by DoctrineOAuthRefreshTokens and the time is fixed in March 2027: the lists compare expiry with the time
+ * they are given, never the database clock.
  *
  * Omar's live families of Acme Foods, newest connected first: NEWEST, RENEWED (connected three days ago, renewed two
  * days ago), the tied TIE_HIGH and TIE_LOW, added lowest id first, and LAST_SECOND, which expires one second after now.
@@ -49,6 +49,7 @@ final class DbalOAuthConnectionsTest extends KernelTestCase
     private const string EXPIRED_AT_NOW = '0197a3c0-0000-7000-8000-0000000041f7';
     private const string OF_LENA = '0197a3c0-0000-7000-8000-0000000041f8';
     private const string OF_BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000041f9';
+    private const string LONG_RENEWED = '0197a3c0-0000-7000-8000-0000000041fa';
 
     private const string NAMED_CLIENT_ID = 'connected-apps-test-client-00041';
     private const string UNREGISTERED_CLIENT_ID = 'unregistered-client-of-test-0041';
@@ -65,8 +66,8 @@ final class DbalOAuthConnectionsTest extends KernelTestCase
         );
         $this->addToken(self::ACME_FOODS, self::NEWEST, self::OMAR, self::UNREGISTERED_CLIENT_ID, [ApiTokenScope::Read], '-1 day');
         $traded = $this->addToken(self::ACME_FOODS, self::RENEWED, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::TicketsMove, ApiTokenScope::Read], '-3 days');
-        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?OAuthRefreshToken => $this->refreshTokens()->markUsed($traded->tokenHash(), self::NAMED_CLIENT_ID, $this->at('-2 days')));
-        $this->addToken(self::ACME_FOODS, self::RENEWED, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::TicketsMove, ApiTokenScope::Read], '-2 days');
+        $this->trade($traded, '-2 days');
+        $this->addToken(self::ACME_FOODS, self::RENEWED, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::TicketsMove, ApiTokenScope::Read], '-2 days', $traded->familyCreatedAt());
         $this->addToken(self::ACME_FOODS, self::TIE_LOW, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::Read], '-5 days');
         $this->addToken(self::ACME_FOODS, self::TIE_HIGH, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::Read], '-5 days');
         $this->addToken(self::ACME_FOODS, self::LAST_SECOND, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::Read], '-30 days +1 second');
@@ -144,22 +145,50 @@ final class DbalOAuthConnectionsTest extends KernelTestCase
     #[Test]
     public function theOrganizationsPagesShowEveryPersonsLiveConnectionsOfTheTenantOnceAcrossATie(): void
     {
-        $firstPage = $this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 2));
-        $pages = [self::familyIdsOf($firstPage)];
-        $last = $firstPage[1] ?? null;
-        while (null !== $last) {
-            $page = $this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 2, $last->connectedAt, strtoupper($last->familyId)));
-            $pages[] = self::familyIdsOf($page);
-            $last = $page[1] ?? null;
-        }
-
         self::assertSame(
             [[self::NEWEST, self::RENEWED], [self::OF_LENA, self::TIE_HIGH], [self::TIE_LOW, self::LAST_SECOND], []],
-            $pages,
+            $this->organizationPagesOfTwo(),
         );
         self::assertSame(
             [self::OF_BETA_BAKERY],
             self::familyIdsOf($this->asTenant(self::BETA_BAKERY, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 100))),
+        );
+    }
+
+    /**
+     * LONG_RENEWED is connected in the same second as TIE_LOW and TIE_HIGH and renewed twice, the last time an hour ago:
+     * its live token is newer than every other, so a list read from the live token's own time would put it first. The
+     * retention job's purge of traded tokens is done by hand, through the migrator.
+     */
+    #[Test]
+    public function theConnectionTimeRenewalAndOrderStayWhenTheTradedTokensArePurged(): void
+    {
+        $first = $this->addToken(self::ACME_FOODS, self::LONG_RENEWED, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::Read], '-5 days');
+        $this->trade($first, '-4 days');
+        $second = $this->addToken(self::ACME_FOODS, self::LONG_RENEWED, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::Read], '-4 days', $first->familyCreatedAt());
+        $this->trade($second, '-1 hour');
+        $this->addToken(self::ACME_FOODS, self::LONG_RENEWED, self::OMAR, self::NAMED_CLIENT_ID, [ApiTokenScope::Read], '-1 hour', $second->familyCreatedAt());
+        $omarsList = [
+            [self::NEWEST, self::OMAR, self::UNREGISTERED_CLIENT_ID, '2027-03-14 10:00:00', null, ['read']],
+            [self::RENEWED, self::OMAR, 'Claude Code', '2027-03-12 10:00:00', '2027-03-13 10:00:00', ['read', 'tickets:move']],
+            [self::LONG_RENEWED, self::OMAR, 'Claude Code', '2027-03-10 10:00:00', '2027-03-15 09:00:00', ['read']],
+            [self::TIE_HIGH, self::OMAR, 'Claude Code', '2027-03-10 10:00:00', null, ['read']],
+            [self::TIE_LOW, self::OMAR, 'Claude Code', '2027-03-10 10:00:00', null, ['read']],
+            [self::LAST_SECOND, self::OMAR, 'Claude Code', '2027-02-13 10:00:01', null, ['read']],
+        ];
+        $organizationPages = [[self::NEWEST, self::RENEWED], [self::OF_LENA, self::LONG_RENEWED], [self::TIE_HIGH, self::TIE_LOW], [self::LAST_SECOND]];
+        self::assertSame($omarsList, self::rowsOf($this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->liveOf(new UserId(self::OMAR), $this->at('+0 seconds')))));
+        self::assertSame($organizationPages, $this->organizationPagesOfTwo());
+        $cursor = $this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 4))[3] ?? null;
+        self::assertSame(self::LONG_RENEWED, $cursor?->familyId);
+
+        self::assertSame(3, $this->purgeTradedTokensOf(self::ACME_FOODS));
+
+        self::assertSame($omarsList, self::rowsOf($this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->liveOf(new UserId(self::OMAR), $this->at('+0 seconds')))));
+        self::assertSame($organizationPages, $this->organizationPagesOfTwo());
+        self::assertSame(
+            [self::TIE_HIGH, self::TIE_LOW],
+            self::familyIdsOf($this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 2, $cursor->connectedAt, $cursor->familyId))),
         );
     }
 
@@ -233,20 +262,67 @@ final class DbalOAuthConnectionsTest extends KernelTestCase
     }
 
     /**
-     * @param list<ApiTokenScope> $scopes
+     * Acme Foods' pages of two, each after the last connection of the one before, until a page is not full.
+     *
+     * @return list<list<string>>
      */
-    private function addToken(string $organizationId, string $familyId, string $userId, string $clientId, array $scopes, string $sinceNow): OAuthRefreshToken
+    private function organizationPagesOfTwo(): array
     {
-        $token = $this->issue($organizationId, $familyId, $userId, $clientId, $scopes, $sinceNow);
+        $firstPage = $this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 2));
+        $pages = [self::familyIdsOf($firstPage)];
+        $last = $firstPage[1] ?? null;
+        while (null !== $last) {
+            $page = $this->asTenant(self::ACME_FOODS, fn (): array => $this->connections()->livePage($this->at('+0 seconds'), 2, $last->connectedAt, strtoupper($last->familyId)));
+            $pages[] = self::familyIdsOf($page);
+            $last = $page[1] ?? null;
+        }
+
+        return $pages;
+    }
+
+    /**
+     * @param list<ApiTokenScope> $scopes
+     * @param ?\DateTimeImmutable $familyCreatedAt the traded token's, for a family's next token
+     */
+    private function addToken(string $organizationId, string $familyId, string $userId, string $clientId, array $scopes, string $sinceNow, ?\DateTimeImmutable $familyCreatedAt = null): OAuthRefreshToken
+    {
+        $token = $this->issue($organizationId, $familyId, $userId, $clientId, $scopes, $sinceNow, $familyCreatedAt);
         $this->transactions()->committedAs($organizationId, fn () => $this->refreshTokens()->add($token));
 
         return $token;
     }
 
+    private function trade(OAuthRefreshToken $token, string $sinceNow): void
+    {
+        $traded = $this->transactions()->committedAs(
+            $token->organizationId()->toString(),
+            fn (): ?OAuthRefreshToken => $this->refreshTokens()->markUsed($token->tokenHash(), $token->clientId(), $this->at($sinceNow)),
+        );
+        self::assertNotNull($traded, 'The token was not traded.');
+    }
+
+    /**
+     * Through the migrator, as the retention job will: the app may not delete.
+     */
+    private function purgeTradedTokensOf(string $organizationId): int
+    {
+        $this->tenantContext()->set(new OrganizationId($organizationId));
+        try {
+            $purged = $this->migrator()->transactional(static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                'DELETE FROM idn_oauth_refresh_token WHERE organization_id = ? AND used_at IS NOT NULL',
+                [$organizationId],
+            ));
+        } finally {
+            $this->tenantContext()->clear();
+        }
+
+        return (int) $purged;
+    }
+
     /**
      * @param list<ApiTokenScope> $scopes
      */
-    private function issue(string $organizationId, string $familyId, string $userId, string $clientId, array $scopes, string $sinceNow): OAuthRefreshToken
+    private function issue(string $organizationId, string $familyId, string $userId, string $clientId, array $scopes, string $sinceNow, ?\DateTimeImmutable $familyCreatedAt = null): OAuthRefreshToken
     {
         return OAuthRefreshToken::issue(
             $this->refreshTokens()->nextIdentity(),
@@ -258,6 +334,7 @@ final class DbalOAuthConnectionsTest extends KernelTestCase
             $this->refreshTokens()->nextIdentity(),
             new HmacApiTokenHashing(self::PEPPER),
             $this->at($sinceNow),
+            $familyCreatedAt,
         )->token();
     }
 

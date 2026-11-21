@@ -82,12 +82,28 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
                 'access_token_id' => $accessTokenId,
                 'created_at' => '2027-03-15 10:00:00',
                 'expires_at' => '2027-04-14 10:00:00',
+                'family_created_at' => '2027-03-15 10:00:00',
                 'used_at' => null,
                 'revoked_at' => null,
             ],
             $this->rowOf(self::ACME_FOODS, $token->id()),
         );
         self::assertSame(0, $this->countAs(self::BETA_BAKERY));
+    }
+
+    #[Test]
+    public function aFamilysNextTokenKeepsWhenTheFamilyStartedAndALoadedTokenReadsIt(): void
+    {
+        $first = $this->add($this->issue(self::ACME_FOODS));
+        $traded = $this->markUsedAs(self::ACME_FOODS, $first->tokenHash(), self::CLIENT_ID, $this->at('+1 hour'));
+        self::assertNotNull($traded);
+        $next = $this->add($this->issue(self::ACME_FOODS, $first->familyId(), '+1 hour', $traded->familyCreatedAt()));
+
+        self::assertSame('2027-03-15 10:00:00', $traded->familyCreatedAt()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'));
+        self::assertSame(
+            ['created_at' => '2027-03-15 11:00:00', 'family_created_at' => '2027-03-15 10:00:00'],
+            array_intersect_key($this->rowOf(self::ACME_FOODS, $next->id()), ['created_at' => true, 'family_created_at' => true]),
+        );
     }
 
     #[Test]
@@ -359,6 +375,7 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
             "UPDATE idn_oauth_refresh_token SET expires_at = expires_at + interval '1 second' WHERE organization_id = ?",
             "UPDATE idn_oauth_refresh_token SET scopes = '{read,tickets:move}' WHERE organization_id = ?",
             'UPDATE idn_oauth_refresh_token SET family_id = id WHERE organization_id = ?',
+            "UPDATE idn_oauth_refresh_token SET family_created_at = family_created_at - interval '1 day' WHERE organization_id = ?",
             'DELETE FROM idn_oauth_refresh_token WHERE organization_id = ?',
         ] as $statement) {
             // On the connection, not through the entity manager, which a failed transaction would close.
@@ -375,8 +392,8 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
         }
 
         self::assertSame(
-            ['family_id' => $token->familyId(), 'scopes' => '["read","rounds:write"]', 'expires_at' => '2027-04-14 10:00:00'],
-            array_intersect_key($this->rowOf(self::ACME_FOODS, $token->id()), ['family_id' => true, 'expires_at' => true, 'scopes' => true]),
+            ['family_id' => $token->familyId(), 'scopes' => '["read","rounds:write"]', 'expires_at' => '2027-04-14 10:00:00', 'family_created_at' => '2027-03-15 10:00:00'],
+            array_intersect_key($this->rowOf(self::ACME_FOODS, $token->id()), ['family_id' => true, 'expires_at' => true, 'scopes' => true, 'family_created_at' => true]),
         );
     }
 
@@ -392,6 +409,7 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
         yield 'a client_id with a final newline' => ["client_id = substr(client_id, 2) || E'\\n'", 'idn_oauth_refresh_token_client_id_check'];
         yield 'no scope' => ["scopes = '{}'", 'idn_oauth_refresh_token_scopes_check'];
         yield 'an unknown scope' => ["scopes = '{read,admin}'", 'idn_oauth_refresh_token_scopes_check'];
+        yield 'a family that starts after its token' => ["family_created_at = created_at + interval '1 second'", 'idn_oauth_refresh_token_family_created_at_check'];
     }
 
     /**
@@ -419,7 +437,7 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
         self::assertSame(['client_id' => self::CLIENT_ID, 'expires_at' => '2027-04-14 10:00:00'], array_intersect_key($this->rowOf(self::ACME_FOODS, $token->id()), ['expires_at' => true, 'client_id' => true]));
     }
 
-    private function issue(string $organizationId, ?string $familyId = null, string $afterIssue = '+0 seconds'): OAuthRefreshToken
+    private function issue(string $organizationId, ?string $familyId = null, string $afterIssue = '+0 seconds', ?\DateTimeImmutable $familyCreatedAt = null): OAuthRefreshToken
     {
         return OAuthRefreshToken::issue(
             $this->refreshTokens()->nextIdentity(),
@@ -431,6 +449,7 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
             $this->refreshTokens()->nextIdentity(),
             new HmacApiTokenHashing(self::PEPPER),
             $this->at($afterIssue),
+            $familyCreatedAt,
         )->token();
     }
 
@@ -468,6 +487,7 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
             "SELECT id, family_id, user_id, client_id, array_to_json(scopes)::text AS scopes, encode(token_hash, 'hex') AS token_hash, access_token_id,"
             ." to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at,"
             ." to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS expires_at,"
+            ." to_char(family_created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS family_created_at,"
             ." to_char(used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS used_at,"
             ." to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS revoked_at"
             .' FROM idn_oauth_refresh_token WHERE organization_id = ? AND id = ?',

@@ -1074,10 +1074,10 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
-     * idn_oauth_refresh_token (Version20261121230000), a tenant table: the app reads and adds tokens and changes only
-     * used_at and revoked_at, never deletes; support gets nothing; resolve_oauth_refresh_token reads only the ids, the
-     * hash, the expiry and the revocation, never the client, family, scopes or use. Every index starts with the
-     * organization but the token_hash key, which the resolver looks up before the organization is known.
+     * idn_oauth_refresh_token (Version20261121230000, Version20261122020000), a tenant table: the app reads and adds
+     * tokens and changes only used_at and revoked_at, never deletes; support gets nothing; resolve_oauth_refresh_token
+     * reads only the ids, the hash, the expiry and the revocation, never the client, family, scopes or use. Every index
+     * starts with the organization but the token_hash key, which the resolver looks up before the organization is known.
      */
     #[Test]
     public function theOAuthRefreshTokenTableLetsTheAppChangeOnlyTheUseAndRevocationAndSupportNothing(): void
@@ -1115,7 +1115,8 @@ final class DatabaseRolesTest extends KernelTestCase
                 'CREATE UNIQUE INDEX idn_oauth_refresh_token_token_hash_key ON public.idn_oauth_refresh_token USING btree (token_hash)',
                 'CREATE INDEX idn_oauth_refresh_token_family_id_idx ON public.idn_oauth_refresh_token USING btree (organization_id, family_id)',
                 'CREATE INDEX idn_oauth_refresh_token_access_token_id_idx ON public.idn_oauth_refresh_token USING btree (organization_id, access_token_id)',
-                'CREATE INDEX idn_oauth_refresh_token_user_id_live_idx ON public.idn_oauth_refresh_token USING btree (organization_id, user_id) WHERE ((revoked_at IS NULL) AND (used_at IS NULL))',
+                'CREATE INDEX idn_oauth_refresh_token_user_id_family_created_at_live_idx ON public.idn_oauth_refresh_token USING btree (organization_id, user_id, family_created_at DESC, family_id DESC) WHERE ((revoked_at IS NULL) AND (used_at IS NULL))',
+                'CREATE INDEX idn_oauth_refresh_token_family_created_at_live_idx ON public.idn_oauth_refresh_token USING btree (organization_id, family_created_at DESC, family_id DESC) WHERE ((revoked_at IS NULL) AND (used_at IS NULL))',
             ],
             $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_oauth_refresh_token'"),
         );
@@ -1125,6 +1126,7 @@ final class DatabaseRolesTest extends KernelTestCase
                 "idn_oauth_refresh_token_client_id_check CHECK ((client_id ~ '^[A-Za-z0-9_-]{32}$'::text))",
                 "idn_oauth_refresh_token_scopes_check CHECK (((cardinality(scopes) >= 1) AND (scopes <@ ARRAY['read'::text, 'rounds:write'::text, 'comments:write'::text, 'tickets:move'::text, 'reports:write'::text, 'notebooks:write'::text])))",
                 "idn_oauth_refresh_token_expires_at_check CHECK (((expires_at > created_at) AND (expires_at <= (created_at + '30 days'::interval))))",
+                'idn_oauth_refresh_token_family_created_at_check CHECK ((family_created_at <= created_at))',
                 'idn_oauth_refresh_token_pkey PRIMARY KEY (organization_id, id)',
             ],
             $connection->fetchFirstColumn(

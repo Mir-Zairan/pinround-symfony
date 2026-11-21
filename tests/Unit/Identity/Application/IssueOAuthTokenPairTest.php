@@ -90,6 +90,30 @@ final class IssueOAuthTokenPairTest extends TestCase
         self::assertCount(1, $refreshTokens->added);
     }
 
+    #[Test]
+    public function aConnectStartsTheFamilyAndARefreshKeepsItsStart(): void
+    {
+        $client = $this->client();
+        $refreshTokens = new AddRecordingOAuthRefreshTokens();
+        $issuePair = $this->issuePair($this->omarsTokens(personal: 0, connectedApp: 0), $refreshTokens);
+        $connectedAt = new \DateTimeImmutable(self::NOW)->modify('-3 days');
+        $traded = OAuthRefreshToken::issue('0197a3c0-0000-7000-8003-000000000002', self::FAMILY, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $client->clientId(), [ApiTokenScope::Read], '0197a3c0-0000-7000-8002-000000000001', new HmacApiTokenHashing(self::PEPPER), new \DateTimeImmutable(self::NOW)->modify('-1 day'), $connectedAt)->token();
+
+        $issuePair(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $client, [ApiTokenScope::Read], self::FAMILY, new \DateTimeImmutable(self::NOW));
+        $issuePair->renewal($traded, $client, new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(
+            [
+                ['2027-03-15 10:00:00', '2027-03-15 10:00:00'],
+                ['2027-03-15 10:00:00', '2027-03-12 10:00:00'],
+            ],
+            array_map(static fn (OAuthRefreshToken $added): array => [
+                $added->createdAt()->format('Y-m-d H:i:s'),
+                $added->familyCreatedAt()->format('Y-m-d H:i:s'),
+            ], $refreshTokens->added),
+        );
+    }
+
     private function issuePair(InMemoryApiTokens $apiTokens, OAuthRefreshTokens $refreshTokens): IssueOAuthTokenPair
     {
         $hashing = new HmacApiTokenHashing(self::PEPPER);

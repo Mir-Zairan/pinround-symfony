@@ -59,6 +59,7 @@ if ('rotate' === $change) {
             $refreshTokens->nextIdentity(),
             new HmacApiTokenHashing('change-family-pepper-of-32-bytes-or-more'),
             $at,
+            $traded->familyCreatedAt(),
         )->token());
 
         return 'won';
