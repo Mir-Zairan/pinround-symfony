@@ -7,12 +7,16 @@ namespace App\Web\UI\Controller;
 use App\Insight\Api\GroupedReports;
 use App\Insight\Api\HomeQueries;
 use App\Insight\Api\MyReport;
+use App\Insight\Api\MyReportsCounts;
 use App\Insight\Api\ReportGroup;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\OrganizationPermission;
 use App\SharedKernel\Application\TenantContext;
 use App\Ticketing\Api\TicketVisibilities;
 use App\Web\UI\MyReports\MyReportsCursorParameter;
+use App\Web\UI\MyReports\ReportCard;
+use App\Web\UI\MyReports\ReportCards;
+use App\Web\UI\MyReports\ReportStage;
 use App\Web\UI\TicketViewers;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -24,8 +28,9 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * My reports (P07.T6, built as P14.T15): one page of the tickets the person reported, sorted into Needs you, Stuck and
  * Moving, with Done folded below them. The groups sort the page they are on, HomeQueries::MY_REPORTS_PER_PAGE reports
- * newest first; "Show more" opens the next page by its keyset cursor (MyReportsCursorParameter). One read of the
- * reports, however many there are.
+ * newest first; "Show more" opens the next page by its keyset cursor (MyReportsCursorParameter). Each report is a card
+ * (ReportCards). Its queries do not grow with the page: one read of the reports, one count for the intro line over all
+ * pages (MyReportsCounts::totalsOf, none for an empty page), and the cards' batch of names and cached steps.
  */
 final class MyReportsController extends AbstractController
 {
@@ -39,6 +44,8 @@ final class MyReportsController extends AbstractController
         private readonly TenantContext $tenantContext,
         private readonly TicketVisibilities $ticketVisibilities,
         private readonly HomeQueries $homeQueries,
+        private readonly MyReportsCounts $myReportsCounts,
+        private readonly ReportCards $reportCards,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -51,9 +58,12 @@ final class MyReportsController extends AbstractController
         $after = $request->query->getString(MyReportsCursorParameter::AFTER_QUERY);
         $cursor = '' === $after ? null : (MyReportsCursorParameter::cursorOf($after) ?? throw new NotFoundHttpException('No such page of my reports.'));
 
-        $visibility = $this->ticketVisibilities->of($actor->organizationId(), $actor->userId());
-        $page = $this->homeQueries->myReports(TicketViewers::of($visibility), $cursor);
-        $grouped = GroupedReports::of($page->reports, $this->clock->now());
+        $viewer = TicketViewers::of($this->ticketVisibilities->of($actor->organizationId(), $actor->userId()));
+        $page = $this->homeQueries->myReports($viewer, $cursor);
+        // One time for the groups and the cards, so a card's side text never contradicts the group it sits in.
+        $now = $this->clock->now();
+        $grouped = GroupedReports::of($page->reports, $now);
+        $cardsByTicketId = $this->reportCards->cardsOf($actor->organizationId(), $actor->userId(), $page->reports, $now);
 
         $sections = [];
         foreach (self::HEADED_GROUPS as $group) {
@@ -62,8 +72,8 @@ final class MyReportsController extends AbstractController
                 $sections[] = [
                     'group' => $group->value,
                     'count' => \count($reports),
-                    'shown' => array_map($this->rowOf(...), $grouped->shownIn($group)),
-                    'folded' => array_map($this->rowOf(...), $grouped->foldedIn($group)),
+                    'shown' => self::cardsIn($grouped->shownIn($group), $cardsByTicketId),
+                    'folded' => self::cardsIn($grouped->foldedIn($group), $cardsByTicketId),
                 ];
             }
         }
@@ -71,8 +81,10 @@ final class MyReportsController extends AbstractController
         return $this->render('@Web/my_reports/show.html.twig', [
             'isFirstPage' => null === $cursor,
             'hasReports' => [] !== $page->reports,
+            'totals' => [] === $page->reports ? null : $this->myReportsCounts->totalsOf($viewer),
+            'stageLabels' => ReportStage::labels(),
             'sections' => $sections,
-            'doneRows' => array_map($this->rowOf(...), $grouped->foldedIn(ReportGroup::Done)),
+            'doneCards' => self::cardsIn($grouped->foldedIn(ReportGroup::Done), $cardsByTicketId),
             'nextPageUrl' => null === $page->nextCursor ? null : $this->generateUrl(self::ROUTE, [
                 MyReportsCursorParameter::AFTER_QUERY => MyReportsCursorParameter::valueOf($page->nextCursor),
             ]),
@@ -81,14 +93,17 @@ final class MyReportsController extends AbstractController
     }
 
     /**
-     * @return array{key: string, title: string, url: string}
+     * @param list<MyReport>            $reports
+     * @param array<string, ReportCard> $cardsByTicketId
+     *
+     * @return list<ReportCard> in the order of $reports
      */
-    private function rowOf(MyReport $report): array
+    private static function cardsIn(array $reports, array $cardsByTicketId): array
     {
-        return [
-            'key' => $report->key,
-            'title' => $report->title,
-            'url' => $this->generateUrl(HomeController::TICKET_ROUTE, ['key' => $report->key]),
-        ];
+        return array_map(
+            static fn (MyReport $report): ReportCard => $cardsByTicketId[$report->ticketId->toString()]
+                ?? throw new \LogicException(\sprintf('The report %s has no card.', $report->key)),
+            $reports,
+        );
     }
 }

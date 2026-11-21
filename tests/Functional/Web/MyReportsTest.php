@@ -112,11 +112,11 @@ final class MyReportsTest extends WebTestCase
         $stuck = $page->filter('.my-reports__group--stuck');
         self::assertSame([$tiedHigher, $tiedLower, 'SHOP-6', 'SHOP-5'], self::keysOf($stuck->filter('.my-reports__group-header + .my-reports__rows')));
         self::assertSame(['SHOP-4', 'SHOP-3'], self::keysOf($stuck->filter('details.my-reports__more:not([open])')));
-        self::assertSame('Show 2 more', $stuck->filter('details summary')->text());
+        self::assertSame(['Show 2 more', 'Show fewer'], self::summaryTextsOf($stuck->filter('details > summary')));
         $moving = $page->filter('.my-reports__group--moving');
         self::assertSame(['APP-1', 'SHOP-2'], self::keysOf($moving));
         self::assertCount(0, $moving->filter('details'));
-        self::assertSame('Show 2 done', $page->filter('details.my-reports__done:not([open]) > summary')->text());
+        self::assertSame(['Show 2 done', 'Hide 2 done'], self::summaryTextsOf($page->filter('details.my-reports__done:not([open]) > summary')));
         self::assertSame(['SHOP-10', 'SHOP-9'], self::keysOf($page->filter('details.my-reports__done')));
         self::assertSame('/t/SHOP-1', $page->filter('.my-reports__group--needs_you .my-reports__link')->attr('href'));
         self::assertSame(['SHOP-1', $tiedHigher, $tiedLower, 'SHOP-6', 'SHOP-5', 'SHOP-4', 'SHOP-3', 'APP-1', 'SHOP-2', 'SHOP-10', 'SHOP-9'], self::keysOf($page));
@@ -136,6 +136,108 @@ final class MyReportsTest extends WebTestCase
         self::assertSame(['Nothing to do. Just follow along.'], self::textsOf($page, '.my-reports__hint'));
         self::assertCount(0, $page->filter('details'));
         self::assertCount(0, $page->filter('.empty-state'));
+        self::assertSame('1 ticket you reported. None needs you right now.', $page->filter('.my-reports__intro')->text());
+    }
+
+    /**
+     * Mia's questions: SHOP-1 and her team-only APP-1. Not hers to answer: SHOP-2's question to Lena, and Omar's
+     * SHOP-11, whose question is to her but which she did not report. Beta Bakery's ticket, reported by Mia with a
+     * question to her, is not of Acme Foods.
+     */
+    #[Test]
+    public function theIntroCountsEveryReportAndTheOnesThatNeedAnAnswer(): void
+    {
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'answer']);
+        $this->addReport('Mia', 'SHOP-3', '2026-09-03 09:00:00', '2026-11-05 09:00:00', closedAt: '2026-11-05 09:00:00');
+        $this->addReport('Mia', 'APP-1', '2026-09-04 09:00:00', '2026-10-01 09:00:00', isTeamOnly: true, turn: ['Mia', 'answer']);
+        $this->addReport('Omar', 'SHOP-11', '2026-09-05 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->addBetaBakeryTicketReportedByMia(withQuestionToMia: true);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('4 tickets you reported. 2 need your answer.', $page->filter('.my-reports__intro')->text());
+    }
+
+    #[Test]
+    public function oneQuestionReadsInTheSingular(): void
+    {
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('1 ticket you reported. 1 needs your answer.', $page->filter('.my-reports__intro')->text());
+    }
+
+    /**
+     * SHOP-1 waits on Mia's answer; SHOP-2 has had no change for 17 days and is Omar's to build; SHOP-4 is in a
+     * checking step with a question to Lena; SHOP-3 is done, its stale turn row still naming Omar.
+     */
+    #[Test]
+    public function eachCardShowsItsKeyTitleProgressTurnPersonAndNowLine(): void
+    {
+        $checkingStep = $this->addStep($this->acmeFoods, 'In test', 'check', 'test');
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-10-01 09:00:00', turn: ['Mia', 'answer']);
+        $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-10-20 12:00:00', turn: ['Omar', 'build']);
+        $this->addReport('Mia', 'SHOP-3', '2026-09-03 09:00:00', '2026-11-05 09:00:00', closedAt: '2026-11-05 09:00:00', turn: ['Omar', 'build']);
+        $this->addReport('Mia', 'SHOP-4', '2026-09-04 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'answer'], stepId: $checkingStep);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        $cards = $page->filter('.my-reports__card');
+        self::assertCount(4, $cards);
+        self::assertSame(
+            [
+                ['SHOP-1', 'Ticket SHOP-1', '/t/SHOP-1', 'updated 1 Oct', false, 'Step 2 of 4: Building, waiting', 'Reported Waiting Checking Done', 'Mia', 'A question waits for your answer'],
+                ['SHOP-2', 'Ticket SHOP-2', '/t/SHOP-2', 'no change for 17 days', true, 'Step 2 of 4: Building', 'Reported Building Checking Done', 'Omar', 'Omar builds it'],
+                ['SHOP-4', 'Ticket SHOP-4', '/t/SHOP-4', 'changed recently', false, 'Step 3 of 4: Checking, waiting', 'Reported Building Waiting Done', 'Lena', 'Lena answers a question'],
+                ['SHOP-3', 'Ticket SHOP-3', '/t/SHOP-3', 'changed recently', false, 'Step 4 of 4: Done', 'Reported Building Checking Done', null, 'Done'],
+            ],
+            $cards->each(static fn (Crawler $card): array => [
+                $card->filter('.my-reports__key')->text(),
+                $card->filter('.my-reports__title')->text(),
+                $card->filter('a.my-reports__link')->attr('href'),
+                $card->filter('.my-reports__side')->text(),
+                1 === $card->filter('strong.my-reports__side--stuck')->count(),
+                $card->filter('.progress-dots[role="img"]')->attr('aria-label'),
+                $card->filter('.progress-dots')->text(),
+                $card->filter('.my-reports__avatar[role="img"]')->count() > 0 ? $card->filter('.my-reports__avatar')->attr('aria-label') : null,
+                $card->filter('.my-reports__now')->text(),
+            ]),
+        );
+        self::assertSame(['progress-dots__stage progress-dots__stage--passed', 'progress-dots__stage progress-dots__stage--current progress-dots__stage--waiting', 'progress-dots__stage progress-dots__stage--later', 'progress-dots__stage progress-dots__stage--later'], $cards->eq(0)->filter('.progress-dots__stage')->each(static fn (Crawler $stage): string => (string) $stage->attr('class')));
+    }
+
+    /**
+     * Only SHOP-1's question waits on Mia; SHOP-2's waits on Lena, and the stuck and done reports offer nothing yet
+     * (Ping and the menu are P07.T7).
+     */
+    #[Test]
+    public function onlyAReportThatNeedsTheViewerOffersAnswerAndNoCardHasMoreThanTwoButtons(): void
+    {
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'answer']);
+        $this->addReport('Mia', 'SHOP-3', '2026-09-03 09:00:00', '2026-10-01 09:00:00', turn: ['Omar', 'build']);
+        $this->addReport('Mia', 'SHOP-4', '2026-09-04 09:00:00', '2026-11-05 09:00:00', closedAt: '2026-11-05 09:00:00');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        $answers = $page->filter('a.my-reports__answer');
+        self::assertSame(['Answer on SHOP-1 → /t/SHOP-1'], $answers->each(static fn (Crawler $answer): string => $answer->text().' → '.$answer->attr('href')));
+        self::assertSame(' on SHOP-1', $answers->filter('.visually-hidden')->text(normalizeWhitespace: false));
+        self::assertCount(1, $page->filter('.my-reports__group--needs_you a.my-reports__answer'));
+        $buttonCounts = $page->filter('.my-reports__card')->each(static fn (Crawler $card): int => $card->filter('.btn, button')->count());
+        self::assertCount(4, $buttonCounts);
+        self::assertSame([1, 0, 0, 0], $buttonCounts);
+        self::assertLessThanOrEqual(2, max($buttonCounts));
     }
 
     #[Test]
@@ -147,8 +249,54 @@ final class MyReportsTest extends WebTestCase
         $page = $this->client->request('GET', self::MY_REPORTS);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('When you report a problem, you can follow it here until it is fixed.', $page->filter('main .empty-state')->text());
-        self::assertCount(0, $page->filter('.my-reports__group, .my-reports__pages, .my-reports__key'));
+        self::assertSame('When you report a problem, you can follow it here until it is fixed.', $page->filter('main .empty-state > p')->text());
+        $reportAProblem = $page->filter('main .empty-state a.btn');
+        self::assertSame(['Report a problem → /report'], $reportAProblem->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')));
+        self::assertCount(0, $page->filter('.my-reports__group, .my-reports__pages, .my-reports__key, .my-reports__intro'));
+    }
+
+    /**
+     * Mia's questions: SHOP-1 and her team-only APP-1. Not counted: SHOP-2's question to Lena, Omar's SHOP-11 with a
+     * question to Mia, and Beta Bakery's ticket with a question to her. Lena has a question in a report of hers, but it
+     * waits on Omar; Sara is in no team, so she has no My reports at all.
+     */
+    #[Test]
+    public function theMenuBadgeCountsTheQuestionsThatWaitOnThePersonInTheirOwnReports(): void
+    {
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->addReport('Mia', 'APP-1', '2026-09-02 09:00:00', '2026-11-05 09:00:00', isTeamOnly: true, turn: ['Mia', 'answer']);
+        $this->addReport('Mia', 'SHOP-2', '2026-09-03 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'answer']);
+        $this->addReport('Omar', 'SHOP-11', '2026-09-04 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->addReport('Lena', 'SHOP-12', '2026-09-05 09:00:00', '2026-11-05 09:00:00', turn: ['Omar', 'answer']);
+        $this->addBetaBakeryTicketReportedByMia(withQuestionToMia: true);
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $miasHomeQueries = $this->queriesOf('/');
+        $miasMenu = $this->client->getCrawler()->filter('header nav[aria-label="Main"]');
+        self::assertSame([', 2 need your answer'], $miasMenu->filter('a.nav[href="/my-reports"] .nav__badge')->each(static fn (Crawler $badge): string => $badge->text()));
+        self::assertCount(1, array_filter($miasHomeQueries, static fn (string $sql): bool => str_contains($sql, 'questions_waiting')), 'the badge is one query');
+
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->queriesOf('/');
+        $lenasMenu = $this->client->getCrawler()->filter('header nav[aria-label="Main"]');
+        self::assertCount(1, $lenasMenu->filter('a.nav[href="/my-reports"]'));
+        self::assertCount(0, $lenasMenu->filter('.nav__badge'));
+
+        $this->logIn($this->client, $this->people['Sara']);
+        $this->queriesOf('/');
+        self::assertCount(0, $this->client->getCrawler()->filter('header .nav__badge, header a.nav[href="/my-reports"]'));
+    }
+
+    #[Test]
+    public function oneQuestionMakesTheBadgeSingular(): void
+    {
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(', 1 needs your answer', $page->filter('header a.nav[href="/my-reports"] .nav__badge')->text());
     }
 
     /**
@@ -175,7 +323,8 @@ final class MyReportsTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(\array_slice($expectedKeys, 0, 50), self::keysOf($firstPage));
         self::assertSame(['Moving 50'], self::textsOf($firstPage, '.my-reports__group-name'));
-        self::assertSame('Show 46 more', $firstPage->filter('.my-reports__group--moving details summary')->text());
+        self::assertSame(['Show 46 more', 'Show fewer'], self::summaryTextsOf($firstPage->filter('.my-reports__group--moving details > summary')));
+        self::assertSame('60 tickets you reported. None needs you right now.', $firstPage->filter('.my-reports__intro')->text());
         self::assertCount(0, $firstPage->filter('.my-reports__first-page'));
         $showMore = $firstPage->filter('.my-reports__pages a.my-reports__next-page');
         self::assertSame('Show more', $showMore->text());
@@ -184,6 +333,7 @@ final class MyReportsTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(\array_slice($expectedKeys, 50), self::keysOf($secondPage));
+        self::assertSame('60 tickets you reported. None needs you right now.', $secondPage->filter('.my-reports__intro')->text(), 'the intro counts every page');
         self::assertCount(0, $secondPage->filter('.my-reports__next-page'));
         self::assertSame(self::MY_REPORTS, $secondPage->filter('.my-reports__pages a.my-reports__first-page')->attr('href'));
     }
@@ -199,7 +349,7 @@ final class MyReportsTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('No more reports. Back to your newest reports', $page->filter('main .empty-state')->text());
         self::assertSame(self::MY_REPORTS, $page->filter('main .empty-state a')->attr('href'));
-        self::assertCount(0, $page->filter('.my-reports__key, .my-reports__pages'));
+        self::assertCount(0, $page->filter('.my-reports__key, .my-reports__pages, .my-reports__intro'));
     }
 
     /**
@@ -251,12 +401,20 @@ final class MyReportsTest extends WebTestCase
         $twoReportsQueries = $this->queriesOf(self::MY_REPORTS);
         self::assertCount(2, $this->client->getCrawler()->filter('.my-reports__key'));
         for ($number = 3; $number <= 60; ++$number) {
-            $this->addReport('Mia', 'SHOP-'.$number, \sprintf('2026-09-%02d 09:00:00', 1 + $number % 28), 0 === $number % 3 ? '2026-10-01 09:00:00' : '2026-11-05 09:00:00', closedAt: 0 === $number % 5 ? '2026-11-05 09:00:00' : null);
+            $this->addReport(
+                'Mia',
+                'SHOP-'.$number,
+                \sprintf('2026-09-%02d 09:00:00', 1 + $number % 28),
+                0 === $number % 3 ? '2026-10-01 09:00:00' : '2026-11-05 09:00:00',
+                closedAt: 0 === $number % 5 ? '2026-11-05 09:00:00' : null,
+                turn: 0 === $number % 5 ? null : [['Lena', 'Omar', 'Mia', 'Raj'][$number % 4], 0 === $number % 7 ? 'answer' : 'build'],
+            );
         }
 
         $sixtyReportsQueries = $this->queriesOf(self::MY_REPORTS);
 
         self::assertCount(50, $this->client->getCrawler()->filter('.my-reports__key'));
+        self::assertGreaterThan(1, $this->client->getCrawler()->filter('.my-reports__card .my-reports__avatar')->count(), 'the cards name their turn people');
         self::assertNotSame([], $twoReportsQueries);
         self::assertSame(\count($twoReportsQueries), \count($sixtyReportsQueries));
     }
@@ -290,6 +448,16 @@ final class MyReportsTest extends WebTestCase
     }
 
     /**
+     * @return array{string, string} the text a closed summary shows, then the one it shows open
+     */
+    private static function summaryTextsOf(Crawler $summary): array
+    {
+        self::assertCount(1, $summary);
+
+        return [$summary->filter('.my-reports__when-closed')->text(), $summary->filter('.my-reports__when-open')->text()];
+    }
+
+    /**
      * @return list<string> the ticket keys in the part of the page, in its order
      */
     private static function keysOf(Crawler $part): array
@@ -313,16 +481,17 @@ final class MyReportsTest extends WebTestCase
 
     /**
      * A ticket of Acme Foods: on SHOP of Shop, or for a team-only one on APP of Mobile; open in progress, or done when
-     * it has a close time. Times are UTC.
+     * it has a close time, unless $stepId names its step. Times are UTC.
      *
      * @param array{string, string}|null $turn the person whose turn it is and the turn's kind; null for no turn row
      *
      * @return string the ticket's id
      */
-    private function addReport(string $reporter, string $key, string $reportedAt, string $updatedAt, ?string $closedAt = null, bool $isTeamOnly = false, ?array $turn = null): string
+    private function addReport(string $reporter, string $key, string $reportedAt, string $updatedAt, ?string $closedAt = null, bool $isTeamOnly = false, ?array $turn = null, ?string $stepId = null): string
     {
         [$projectId, $teamId] = $isTeamOnly ? [$this->mobileProject, $this->mobile] : [$this->shopProject, $this->shop];
-        $ticketId = $this->insertTicket($this->acmeFoods, $projectId, $teamId, $key, null === $closedAt ? $this->doingStep : $this->doneStep, $this->people[$reporter], $reportedAt, $updatedAt, $closedAt, $isTeamOnly ? 'team' : 'all');
+        $stepId ??= null === $closedAt ? $this->doingStep : $this->doneStep;
+        $ticketId = $this->insertTicket($this->acmeFoods, $projectId, $teamId, $key, $stepId, $this->people[$reporter], $reportedAt, $updatedAt, $closedAt, $isTeamOnly ? 'team' : 'all');
         if (null !== $turn) {
             $values = [$this->acmeFoods->toString(), $ticketId, $teamId->toString(), $projectId, $this->people[$turn[0]]->id()->toString(), $turn[1], $updatedAt.'+00', $isTeamOnly ? 'team' : 'all', $this->people[$reporter]->id()->toString()];
             $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
@@ -335,12 +504,24 @@ final class MyReportsTest extends WebTestCase
         return $ticketId;
     }
 
-    private function addBetaBakeryTicketReportedByMia(): void
+    /**
+     * @param bool $withQuestionToMia whether the ticket has a turn row of a question to Mia
+     */
+    private function addBetaBakeryTicketReportedByMia(bool $withQuestionToMia = false): void
     {
         $betaBakery = $this->createOrganization('Beta Bakery');
         $projectId = $this->addProject(null, 'BAKE', 'Bakery', $betaBakery);
         $stepId = $this->addStep($betaBakery, 'In progress', 'doing', 'progress');
-        $this->insertTicket($betaBakery, $projectId, null, 'BAKE-1', $stepId, $this->people['Mia'], '2026-11-01 09:00:00', '2026-11-06 09:00:00', null, 'all');
+        $miaId = $this->people['Mia']->id()->toString();
+        $ticketId = $this->insertTicket($betaBakery, $projectId, null, 'BAKE-1', $stepId, $this->people['Mia'], '2026-11-01 09:00:00', '2026-11-06 09:00:00', null, 'all');
+        if (!$withQuestionToMia) {
+            return;
+        }
+        $this->committedAs($betaBakery, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
+             VALUES (?, ?, NULL, ?, 'doing', ?, NULL, 'answer', 100, '2026-11-06 09:00:00+00', 'all', ?)",
+            [$betaBakery->toString(), $ticketId, $projectId, $miaId, $miaId],
+        ));
     }
 
     /**

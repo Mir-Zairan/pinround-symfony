@@ -2,12 +2,35 @@
 
 {% block title %}My reports · pinround{% endblock %}
 
-{% macro rows(rows) %}
+{% block stylesheets %}
+    <link rel="stylesheet" href="{{ asset('styles/my-reports.css') }}">
+{% endblock %}
+
+{#- The cards of ReportCards (my-reports.md, Card). At most two buttons a card; Answer is the only one until P07.T7
+    adds Ping and the "⋯" menu. -#}
+{% macro cards(cards, stageLabels) %}
     {# No hover prefetch: each link would cost a ticket page's queries. #}
     <ul class="my-reports__rows" data-turbo-prefetch="false">
-        {% for row in rows %}
-            <li class="my-reports__row">
-                <a class="my-reports__link" href="{{ row.url }}"><span class="my-reports__key">{{ row.key }}</span> · <span class="my-reports__title">{{ row.title }}</span></a>
+        {% for card in cards %}
+            <li class="my-reports__card">
+                <div class="my-reports__top">
+                    <a class="my-reports__link" href="{{ card.url }}"><span class="my-reports__key">{{ card.key }}</span> <span class="my-reports__title">{{ card.title }}</span></a>
+                    {% if card.isStuck %}
+                        <strong class="my-reports__side my-reports__side--stuck">{{ card.sideText }}</strong>
+                    {% else %}
+                        <span class="my-reports__side">{{ card.sideText }}</span>
+                    {% endif %}
+                </div>
+                <twig:ProgressDots :labels="stageLabels" :current="card.stage.value" :isWaiting="card.isWaiting" class="my-reports__dots" />
+                <div class="my-reports__bottom">
+                    {% if card.turnPersonName is not null %}<twig:Avatar name="{{ card.turnPersonName }}" class="my-reports__avatar" />{% endif %}
+                    <p class="my-reports__now">{{ card.nowText }}</p>
+                    {% if card.isAnswerOffered %}
+                        <div class="my-reports__actions">
+                            <twig:Button size="sm" href="{{ card.url }}" class="my-reports__answer">Answer<span class="visually-hidden"> on {{ card.key }}</span></twig:Button>
+                        </div>
+                    {% endif %}
+                </div>
             </li>
         {% endfor %}
     </ul>
@@ -19,11 +42,23 @@
     <div class="my-reports">
         <header class="my-reports__header">
             <h1>My reports</h1>
+            {% if totals is not null %}
+                <p class="my-reports__intro">
+                    {{- totals.reportCount|number_format }} {{ totals.reportCount == 1 ? 'ticket' : 'tickets' }} you reported.
+                    {% if totals.needsYouCount > 0 -%}
+                        {{ totals.needsYouCount|number_format }} {{ totals.needsYouCount == 1 ? 'needs' : 'need' }} your answer.
+                    {%- else -%}
+                        None needs you right now.
+                    {%- endif -%}
+                </p>
+            {% endif %}
         </header>
 
         {% if not hasReports %}
             {% if isFirstPage %}
-                <twig:EmptyState message="When you report a problem, you can follow it here until it is fixed." />
+                <twig:EmptyState message="When you report a problem, you can follow it here until it is fixed.">
+                    <twig:block name="action"><twig:Button variant="tonal" size="sm" href="{{ path('ticketing_report') }}" class="my-reports__report">Report a problem</twig:Button></twig:block>
+                </twig:EmptyState>
             {% else %}
                 <twig:EmptyState message="No more reports.">
                     <twig:block name="action"><twig:Button variant="text" size="sm" href="{{ firstPageUrl }}" class="my-reports__first-page">Back to your newest reports</twig:Button></twig:block>
@@ -36,19 +71,20 @@
                         <h2 id="my-reports-{{ section.group }}" class="my-reports__group-name">{{ labels[section.group] }} <span class="my-reports__count">{{ section.count|number_format }}</span></h2>
                         <p class="my-reports__hint">{{ hints[section.group] }}</p>
                     </header>
-                    {{ _self.rows(section.shown) }}
+                    {{ _self.cards(section.shown, stageLabels) }}
                     {% if section.folded is not empty %}
+                        {#- my-reports.css shows one of the two texts, by details[open]. -#}
                         <details class="my-reports__more">
-                            <summary>Show {{ section.folded|length|number_format }} more</summary>
-                            {{ _self.rows(section.folded) }}
+                            <summary><span class="my-reports__when-closed">Show {{ section.folded|length|number_format }} more</span><span class="my-reports__when-open">Show fewer</span></summary>
+                            {{ _self.cards(section.folded, stageLabels) }}
                         </details>
                     {% endif %}
                 </section>
             {% endfor %}
-            {% if doneRows is not empty %}
+            {% if doneCards is not empty %}
                 <details class="my-reports__done">
-                    <summary>Show {{ doneRows|length|number_format }} done</summary>
-                    {{ _self.rows(doneRows) }}
+                    <summary><span class="my-reports__when-closed">Show {{ doneCards|length|number_format }} done</span><span class="my-reports__when-open">Hide {{ doneCards|length|number_format }} done</span></summary>
+                    {{ _self.cards(doneCards, stageLabels) }}
                 </details>
             {% endif %}
         {% endif %}

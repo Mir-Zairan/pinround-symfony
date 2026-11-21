@@ -32,18 +32,20 @@ function teamList(page: Page) {
   return mainMenu(page).locator('.nav-menu__list');
 }
 
-// My reports stays out of the menu until P14.T15 builds its page.
-test('the menu lists Lena\'s items in order and links Home, her team pages and Admin', async ({ page }) => {
+// My reports may carry a count tag after its label, so it is matched from its start.
+test('the menu lists Lena\'s items in order and links Home, My reports, her team pages and Admin', async ({ page }) => {
   await openHome(page);
 
   await expect(mainMenu(page).locator(':scope > a, :scope > span, :scope > div > button')).toHaveText([
     'Home',
     'Tickets',
+    /^My reports/,
     'Teams',
     'Admin',
   ]);
   // The team links sit in the closed list, so they count only with hidden elements included.
-  await expect(mainMenu(page).getByRole('link', { includeHidden: true })).toHaveText(['Home', 'Tickets', 'Mobile', 'Shop', 'Admin']);
+  await expect(mainMenu(page).getByRole('link', { includeHidden: true })).toHaveText(['Home', 'Tickets', /^My reports/, 'Mobile', 'Shop', 'Admin']);
+  await expect(mainMenu(page).getByRole('link', { name: /^My reports/ })).toHaveAttribute('href', '/my-reports');
   await expect(mainMenu(page).getByRole('link', { name: 'Admin', exact: true })).toHaveAttribute('href', '/admin');
   await expect(teamList(page).locator('a[href="/teams/mobile"], a[href="/teams/shop"]')).toHaveCount(2);
 });
