@@ -51,7 +51,7 @@ final class IssueApiTokenTest extends TestCase
 
         $issued = $this->issueForOmar($tokens, 'Claude Code');
 
-        self::assertSame(['lockIssuingFor', 'countLiveOf', 'add'], $tokens->calls);
+        self::assertSame(['lockIssuingFor', 'countLivePersonalOf', 'add'], $tokens->calls);
         self::assertSame([$issued->token()->id()], $tokens->ids());
         self::assertSame('Claude Code', $issued->token()->name());
     }
@@ -86,7 +86,7 @@ final class IssueApiTokenTest extends TestCase
             self::assertSame('You have 20 tokens that still work. Revoke one before you make another.', $refusal->getMessage());
         }
 
-        self::assertSame(['lockIssuingFor', 'countLiveOf'], $tokens->calls);
+        self::assertSame(['lockIssuingFor', 'countLivePersonalOf'], $tokens->calls);
         self::assertSame($idsBefore, $tokens->ids());
         self::assertSame([], $this->events->publishedEvents);
     }
@@ -124,6 +124,54 @@ final class IssueApiTokenTest extends TestCase
         self::assertSame(['lockIssuingFor', 'countLiveOf'], $tokens->calls);
         self::assertSame($idsBefore, $tokens->ids());
         self::assertSame([], $this->events->publishedEvents);
+    }
+
+    /**
+     * Twenty connections within an hour must not block the tokens page, while the twenty-first OAuth access token
+     * counts them and is refused.
+     */
+    #[Test]
+    public function liveOAuthAccessTokensLeaveRoomForAPersonalTokenButNotForAnotherAccessToken(): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+        $this->seedLiveOAuthAccessTokens($tokens, IssueApiToken::MAX_LIVE_TOKENS_PER_USER);
+
+        $issued = $this->issueForOmar($tokens, 'Claude Code');
+        $idsAfterIssue = $tokens->ids();
+        try {
+            $this->renewForOmar($tokens);
+            self::fail('A 22nd live token was renewed.');
+        } catch (TooManyApiTokens $refusal) {
+            self::assertSame('You have 20 tokens that still work. Revoke one before you make another.', $refusal->getMessage());
+        }
+
+        self::assertContains($issued->token()->id(), $idsAfterIssue);
+        self::assertCount(IssueApiToken::MAX_LIVE_TOKENS_PER_USER + 1, $idsAfterIssue);
+        self::assertSame($idsAfterIssue, $tokens->ids());
+        self::assertSame(['lockIssuingFor', 'countLivePersonalOf', 'add', 'lockIssuingFor', 'countLiveOf'], $tokens->calls);
+    }
+
+    /**
+     * 19 personal tokens and one access token: an access token counts both and is refused, a personal one counts 19.
+     */
+    #[Test]
+    public function anOAuthAccessTokenCountsPersonalTokensTowardsTheCap(): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+        $this->seedLiveTokens($tokens, self::ACME_FOODS, self::OMAR, IssueApiToken::MAX_LIVE_TOKENS_PER_USER - 1);
+        $this->seedLiveOAuthAccessTokens($tokens, 1);
+        $idsBefore = $tokens->ids();
+
+        try {
+            $this->renewForOmar($tokens);
+            self::fail('A 21st live token was renewed.');
+        } catch (TooManyApiTokens) {
+        }
+        self::assertSame($idsBefore, $tokens->ids());
+
+        $issued = $this->issueForOmar($tokens, 'Claude Code');
+
+        self::assertContains($issued->token()->id(), $tokens->ids());
     }
 
     #[Test]
@@ -355,6 +403,18 @@ final class IssueApiTokenTest extends TestCase
     {
         for ($i = 0; $i < $count; ++$i) {
             $tokens->seed($this->seededToken($organizationId, $userId, new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d hours', $i + 1))));
+        }
+    }
+
+    /**
+     * Omar's at Acme Foods, issued in the hour before NOW, so each is live then.
+     */
+    private function seedLiveOAuthAccessTokens(InMemoryApiTokens $tokens, int $count): void
+    {
+        for ($i = 0; $i < $count; ++$i) {
+            $id = \sprintf('0197a3c0-0000-7000-8002-%012d', $i + 1);
+            $issuedAt = new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d minutes', $i + 1));
+            $tokens->seed(ApiToken::issueForOAuthClient($id, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), 'Claude', [ApiTokenScope::Read], new HmacApiTokenHashing(self::PEPPER), $issuedAt)->token());
         }
     }
 

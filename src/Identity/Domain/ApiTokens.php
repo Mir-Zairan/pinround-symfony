@@ -8,8 +8,9 @@ use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 
 /**
- * Personal access tokens of the organization of the current transaction, but ownerOfLiveToken(), which runs before
- * any tenant is known.
+ * The tokens of the organization of the current transaction, but ownerOfLiveToken(), which runs before any tenant is
+ * known: personal access tokens and the access tokens of OAuth grants alike, but where a method lists or counts
+ * personal ones only (ApiToken::isPersonal()).
  */
 interface ApiTokens
 {
@@ -35,11 +36,18 @@ interface ApiTokens
     public function lockIssuingFor(OrganizationId $organizationId, UserId $userId): void;
 
     /**
-     * The user's tokens in the tenant that are neither revoked nor expired at $at.
+     * The user's tokens in the tenant that are neither revoked nor expired at $at, OAuth access tokens included.
      *
      * @throws \LogicException when no tenant is set
      */
     public function countLiveOf(UserId $userId, \DateTimeImmutable $at): int;
+
+    /**
+     * As countLiveOf(), personal tokens only.
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function countLivePersonalOf(UserId $userId, \DateTimeImmutable $at): int;
 
     /**
      * @return ApiToken|null null when $id is not a UUID, no token of the tenant has it, or $ownerId does not own it
@@ -56,7 +64,7 @@ interface ApiTokens
     public function byId(string $id): ?ApiToken;
 
     /**
-     * The tenant's tokens of every person that are neither revoked nor expired at $at, the soonest to expire first (by
+     * The tenant's personal tokens of every person that are neither revoked nor expired at $at, the soonest to expire first (by
      * expires_at, then the lower id), after the token whose expiresAt and id are $afterExpiresAt and $afterId when
      * both are given. A keyset page: no offset, so a page deep in the list costs what the first does.
      *
@@ -71,7 +79,7 @@ interface ApiTokens
     public function livePage(\DateTimeImmutable $at, int $limit, ?\DateTimeImmutable $afterExpiresAt = null, ?string $afterId = null): array;
 
     /**
-     * The user's MAX_LISTED_TOKENS newest tokens in the tenant, revoked and expired ones included, newest first (by
+     * The user's MAX_LISTED_TOKENS newest personal tokens in the tenant, revoked and expired ones included, newest first (by
      * created_at, then the later id). Older ones are left out, a live one too when 50 newer tokens were made since.
      *
      * @return list<ApiToken> at most MAX_LISTED_TOKENS
@@ -79,8 +87,9 @@ interface ApiTokens
     public function forUser(UserId $userId): array;
 
     /**
-     * The user's tokens in the tenant that are neither revoked nor expired at $at, newest first (by created_at, then
-     * the later id). IssueApiToken keeps at most 20 live per person, so the cap of MAX_LISTED_TOKENS leaves none out.
+     * The user's personal tokens in the tenant that are neither revoked nor expired at $at, newest first (by
+     * created_at, then the later id). IssueApiToken keeps at most 20 live per person, so the cap of MAX_LISTED_TOKENS
+     * leaves none out.
      *
      * @return list<ApiToken> at most MAX_LISTED_TOKENS
      *
@@ -112,7 +121,7 @@ interface ApiTokens
     /**
      * Marks up to $limit of the tenant's tokens as warned at $warnedAt, in one conditional statement: those neither
      * revoked nor warned yet that expire in [$expiresFrom, $expiresBefore) and live longer than
-     * ApiToken::EXPIRY_WARNING_WINDOW_DAYS, the soonest to expire first (then the lower id). A token warned already is never returned again, so of two claims at once each token goes to one only. Writes
+     * ApiToken::EXPIRY_WARNING_WINDOW_DAYS (so never an OAuth access token), the soonest to expire first (then the lower id). A token warned already is never returned again, so of two claims at once each token goes to one only. Writes
      * at once; a token already loaded keeps its old expiryWarnedAt.
      *
      * @param int $limit at least 1; the caller caps it

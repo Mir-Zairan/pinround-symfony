@@ -45,6 +45,8 @@ final class DoctrineApiTokensTest extends KernelTestCase
     private const string OMAR_NOTEBOOKS = '0197a3c0-0000-7000-8000-000000000ce9';
     private const string OMAR_REFUSED_SCOPE = '0197a3c0-0000-7000-8000-000000000cea';
     private const string LENA_AT_BETA = '0197a3c0-0000-7000-8000-000000000ceb';
+    private const string OMAR_OAUTH_ACCESS = '0197a3c0-0000-7000-8000-000000000cec';
+    private const string OMAR_NINE_DAYS = '0197a3c0-0000-7000-8000-000000000ced';
     private const string PEPPER = 'integration-test-pepper-of-32-bytes-or-more';
     private const string ISSUED_AT = '2099-03-15 10:00:00 UTC';
 
@@ -441,6 +443,7 @@ final class DoctrineApiTokensTest extends KernelTestCase
             'revoke' => fn (): bool => $this->tokens()->revoke(self::OMAR_LIVE, $at),
             'markUsed' => fn (): bool => $this->tokens()->markUsed(self::OMAR_LIVE, $at),
             'countLiveOf' => fn (): int => $this->tokens()->countLiveOf(new UserId(self::OMAR), $at),
+            'countLivePersonalOf' => fn (): int => $this->tokens()->countLivePersonalOf(new UserId(self::OMAR), $at),
         ];
         foreach ($calls as $method => $call) {
             try {
@@ -450,7 +453,7 @@ final class DoctrineApiTokensTest extends KernelTestCase
             }
         }
 
-        self::assertSame(['revoke', 'markUsed', 'countLiveOf'], $refusals);
+        self::assertSame(['revoke', 'markUsed', 'countLiveOf', 'countLivePersonalOf'], $refusals);
         self::assertSame(
             ['revoked_at' => null, 'last_used_at' => null],
             $this->asAcmeFoods(fn (): array|false => $this->connection()->fetchAssociative('SELECT revoked_at, last_used_at FROM idn_api_token WHERE id = ?', [self::OMAR_LIVE])),
@@ -510,6 +513,45 @@ final class DoctrineApiTokensTest extends KernelTestCase
                 "SELECT id, to_char(expiry_warned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') FROM idn_api_token ORDER BY id",
             )),
         );
+    }
+
+    /**
+     * Omar's OAuth access token is his newest and the second to expire, so it would show at the top of his lists and
+     * second on the organization's page; his personal token of nine days expires first, in the same claim range, so
+     * the claim is not empty for a reason that has nothing to do with the kind.
+     */
+    #[Test]
+    public function anOAuthAccessTokenIsNeitherListedNorClaimedForAWarningAndCountsOnlyAmongAllLiveTokens(): void
+    {
+        $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
+        $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
+            $accessToken = ApiToken::issueForOAuthClient(self::OMAR_OAUTH_ACCESS, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), 'Claude', [ApiTokenScope::Read], new HmacApiTokenHashing(self::PEPPER), $issuedAt->modify('+5 minutes'));
+            $this->tokens()->add($accessToken->token());
+            $this->add(self::OMAR_NINE_DAYS, self::ACME_FOODS, self::OMAR, $issuedAt->modify('-9 days +30 minutes'), 9);
+        });
+        $at = $issuedAt->modify('+10 minutes');
+
+        $seen = $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => [
+            'live list' => $this->liveIdsOf(self::OMAR, $at),
+            'list' => array_map(static fn (ApiToken $token): string => $token->id(), $this->tokens()->forUser(new UserId(self::OMAR))),
+            'organization page' => $this->pageIdsOf($at, 10),
+            'live of both kinds' => $this->tokens()->countLiveOf(new UserId(self::OMAR), $at),
+            'live personal' => $this->tokens()->countLivePersonalOf(new UserId(self::OMAR), $at),
+            'claimed' => array_map(static fn (ExpiringApiToken $token): string => $token->id, $this->tokens()->claimExpiryWarnings($issuedAt, $issuedAt->modify('+2 hours'), $at, 10)),
+        ]);
+
+        self::assertSame(
+            [
+                'live list' => [self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER, self::OMAR_NINE_DAYS],
+                'list' => [self::OMAR_SAME_SECOND, self::OMAR_LIVE, self::OMAR_OLDER, self::OMAR_NINE_DAYS, self::OMAR_EXPIRED],
+                'organization page' => [self::OMAR_NINE_DAYS, self::OMAR_OLDER, self::OMAR_LIVE, self::OMAR_SAME_SECOND, self::LENA_AT_ACME],
+                'live of both kinds' => 5,
+                'live personal' => 4,
+                'claimed' => [self::OMAR_NINE_DAYS],
+            ],
+            $seen,
+        );
+        self::assertNull($this->asAcmeFoods(fn (): mixed => $this->utcTextOf('expiry_warned_at', self::OMAR_OAUTH_ACCESS)));
     }
 
     #[Test]

@@ -107,7 +107,7 @@ final class OAuthAuthorizationCode implements TenantOwned
             throw new InvalidOAuthAuthorizationCode($refusal->getMessage(), previous: $refusal);
         }
 
-        $plainCode = rtrim(strtr(base64_encode(random_bytes(self::RANDOM_BYTES)), '+/', '-_'), '=');
+        $plainCode = RandomToken::base64Url(self::RANDOM_BYTES);
         // In the order of the cases, so the same choice is always stored the same way.
         $scopeValues = array_values(array_map(
             static fn (ApiTokenScope $scope): string => $scope->value,
