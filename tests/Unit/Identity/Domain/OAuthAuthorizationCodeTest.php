@@ -27,6 +27,8 @@ final class OAuthAuthorizationCodeTest extends TestCase
     private const string CALLBACK = 'http://127.0.0.1:53127/callback';
     /** The S256 challenge of RFC 7636 Appendix B. */
     private const string CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+    /** The code_verifier of RFC 7636 Appendix B, whose S256 challenge is CHALLENGE. */
+    private const string VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
 
     #[Test]
     public function theCodeIsShownOnceAsThirtyTwoRandomBytesInBase64Url(): void
@@ -179,6 +181,54 @@ final class OAuthAuthorizationCodeTest extends TestCase
         $this->expectExceptionMessage('A redirect URI has no fragment (#).');
 
         self::issue(redirectUri: self::CALLBACK.'#here');
+    }
+
+    #[Test]
+    public function theVerifierOfRfc7636AppendixBVerifiesItsChallenge(): void
+    {
+        self::assertTrue(self::issue()->code()->isVerifiedBy(self::VERIFIER));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function verifiersThatDoNotVerify(): iterable
+    {
+        yield 'another verifier of the same shape' => ['eBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'];
+        yield 'the challenge itself' => [self::CHALLENGE];
+        yield 'empty' => [''];
+        yield 'with a final newline' => [self::VERIFIER."\n"];
+        yield 'with a final CRLF' => [self::VERIFIER."\r\n"];
+        yield 'with a leading byte order mark' => ["\u{FEFF}".self::VERIFIER];
+        yield 'with a multibyte letter' => ["\u{00E9}".substr(self::VERIFIER, 2)];
+        yield '42 characters' => [substr(self::VERIFIER, 1)];
+        yield '129 characters' => [str_repeat('a', 129)];
+    }
+
+    #[Test]
+    #[DataProvider('verifiersThatDoNotVerify')]
+    public function aVerifierThatIsNotTheChallengesDoesNotVerifyIt(string $codeVerifier): void
+    {
+        self::assertFalse(self::issue()->code()->isVerifiedBy($codeVerifier));
+    }
+
+    /**
+     * Without the shape check, a 129-character verifier whose hash is the challenge would verify; RFC 7636 allows only
+     * 43 to 128 characters.
+     */
+    #[Test]
+    public function aVerifierOutsideTheShapeDoesNotVerifyEvenItsOwnChallenge(): void
+    {
+        $tooLong = str_repeat('a', 129);
+        $longest = str_repeat('a', 128);
+
+        self::assertFalse(self::issue(codeChallenge: self::s256($tooLong))->code()->isVerifiedBy($tooLong));
+        self::assertTrue(self::issue(codeChallenge: self::s256($longest))->code()->isVerifiedBy($longest));
+    }
+
+    private static function s256(string $codeVerifier): string
+    {
+        return rtrim(strtr(base64_encode(hash('sha256', $codeVerifier, true)), '+/', '-_'), '=');
     }
 
     /**

@@ -180,6 +180,43 @@ final class ApiTokenTest extends TestCase
         self::assertSame("Claude\u{00A0}Code", self::issue(name: "\u{00A0}\u{3000}Claude\u{00A0}Code\u{2003} ")->token()->name());
     }
 
+    #[Test]
+    public function anOAuthAccessTokenIsATokenLikeAnyOtherThatLastsOneHour(): void
+    {
+        $issuedInBerlin = new \DateTimeImmutable('2027-03-15 11:00:00', new \DateTimeZone('Europe/Berlin'));
+
+        $issued = ApiToken::issueForOAuthClient(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), " Claude Code\r\n", [ApiTokenScope::RoundsWrite, ApiTokenScope::Read], new HmacApiTokenHashing(self::PEPPER), $issuedInBerlin);
+        $token = $issued->token();
+
+        self::assertMatchesRegularExpression(ApiToken::PLAIN_SHAPE, $issued->reveal());
+        self::assertSame(hash_hmac('sha256', $issued->reveal(), self::PEPPER, true), $token->tokenHash());
+        self::assertSame(self::TOKEN_ID, $token->id());
+        self::assertSame(self::ACME_FOODS, $token->organizationId()->toString());
+        self::assertSame(self::OMAR, $token->userId()->toString());
+        self::assertSame('Claude Code', $token->name());
+        self::assertSame([ApiTokenScope::Read, ApiTokenScope::RoundsWrite], $token->scopes());
+        self::assertSame('2027-03-15 11:00:00 UTC', $token->expiresAt()->format('Y-m-d H:i:s T'));
+        self::assertSame(ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS, $token->expiresAt()->getTimestamp() - $issuedInBerlin->getTimestamp());
+    }
+
+    #[Test]
+    public function anOAuthAccessTokenWithNoScopeIsRefused(): void
+    {
+        $this->expectException(InvalidApiToken::class);
+        $this->expectExceptionMessageIsOrContains('Choose at least one thing the token may do.');
+
+        ApiToken::issueForOAuthClient(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), 'Claude Code', [], new HmacApiTokenHashing(self::PEPPER), new \DateTimeImmutable(self::ISSUED_AT));
+    }
+
+    #[Test]
+    public function anOAuthAccessTokenFollowsTheNameRule(): void
+    {
+        $this->expectException(InvalidApiToken::class);
+        $this->expectExceptionMessageIsOrContains('A token name is one line of plain text.');
+
+        ApiToken::issueForOAuthClient(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), "Claude\nCode", [ApiTokenScope::Read], new HmacApiTokenHashing(self::PEPPER), new \DateTimeImmutable(self::ISSUED_AT));
+    }
+
     /**
      * @param list<ApiTokenScope> $scopes
      */
