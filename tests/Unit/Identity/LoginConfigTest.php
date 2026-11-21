@@ -187,7 +187,7 @@ final class LoginConfigTest extends TestCase
     }
 
     #[Test]
-    public function theLoginPasswordResetPasswordChangeTwoStepCodeAndUploadBeginCountersLiveOnTheStateValkeyInEveryEnvironment(): void
+    public function everyRateLimiterCounterLivesOnTheStateValkeyInEveryEnvironment(): void
     {
         $rateLimiter = self::config('packages/rate_limiter.yaml');
 
@@ -199,6 +199,7 @@ final class LoginConfigTest extends TestCase
                 'password_reset_per_ip' => ['policy' => 'fixed_window', 'limit' => 50, 'interval' => '%identity.password_reset_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'password_change_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.password_change_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'two_step_code_per_user' => ['policy' => 'fixed_window', 'limit' => 5, 'interval' => '%identity.two_step_code_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
+                'oauth_client_registration_per_ip' => ['policy' => 'fixed_window', 'limit' => 30, 'interval' => '%identity.oauth_client_registration_per_ip_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'media_upload_begin_per_user' => ['policy' => 'fixed_window', 'limit' => 60, 'interval' => '%media.upload_begin_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'media_upload_status_per_user' => ['policy' => 'fixed_window', 'limit' => 120, 'interval' => '%media.upload_status_per_user_minutes% minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
                 'ai_calls_per_user' => ['policy' => 'fixed_window', 'limit' => 30, 'interval' => '60 minutes', 'storage_service' => ValkeyLimiterStorage::class, 'lock_factory' => 'lock.factory'],
@@ -217,6 +218,7 @@ final class LoginConfigTest extends TestCase
                 'identity.password_reset_per_ip_minutes' => 60,
                 'identity.password_change_per_user_minutes' => 15,
                 'identity.two_step_code_per_user_minutes' => 15,
+                'identity.oauth_client_registration_per_ip_minutes' => 60,
                 'media.upload_begin_per_user_minutes' => 1,
                 'media.upload_status_per_user_minutes' => 1,
             ],
