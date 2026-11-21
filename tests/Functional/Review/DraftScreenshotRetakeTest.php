@@ -26,7 +26,7 @@ use Zenstruck\Foundry\Test\Factories;
  * `POST /api/v1/tickets/SHOP-1/draft/screenshots`, then reads his draft on the ticket page and shares it. His draft
  * holds try 1 of the first screenshot with a pin and a second screenshot with a pin; Mia owns another draft of the
  * same ticket with a pin, which nothing here may show. A second shared round compares its screenshots with the round
- * before it (Before / After). The clock is fixed on 10 Nov 2026, a day aud_event has a
+ * before it (Before / After), on its page and in full screen. The clock is fixed on 10 Nov 2026, a day aud_event has a
  * partition for and not today.
  */
 final class DraftScreenshotRetakeTest extends WebTestCase
@@ -60,6 +60,8 @@ final class DraftScreenshotRetakeTest extends WebTestCase
     private const string CAPTION = '.round-compare__caption';
     private const string BEFORE_SIDE = '.round-compare__side--before';
     private const string AFTER_SIDE = '.round-compare__side--after';
+    private const string FOCUS_SIDES = '.focus-review__sides';
+    private const string FOCUS_IMAGE = '.focus-review__picture img.screenshot__image';
 
     private KernelBrowser $client;
 
@@ -198,22 +200,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
     #[Test]
     public function theNextSharedRoundComparesEachScreenshotWithTheSameNumberedLatestTryOfTheRoundBefore(): void
     {
-        $this->draft = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
-        $this->firstTry = $this->addScreenshot($this->draft, $this->addMedia('ready', 'Omar'), 0, self::FIRST_TRY_TITLE, null);
-        $this->addPin($this->firstTry, 1, '10.00', '20.00', self::FIRST_TRY_NOTE, 'Omar');
-        $this->addScreenshot($this->addRound($this->ticketId, null, 'draft', 'Mia', null), $this->addMedia('ready', 'Mia'), 0, 'Mia shot', null);
-        $this->retakeThroughTheApi($this->draft, $this->firstTry, self::RETAKE_TITLE, self::RETAKE_NOTE);
-        $this->shareDraft($this->draft);
-        $roundOne = $this->draft;
-        $this->closeRound($roundOne);
-
-        $roundTwo = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
-        $nextFirstTry = $this->addScreenshot($roundTwo, $this->addMedia('ready', 'Omar'), 0, self::NEXT_FIRST_TRY_TITLE, null);
-        $this->addPin($nextFirstTry, 1, '15.00', '25.00', self::NEXT_FIRST_TRY_NOTE, 'Omar');
-        $newScreen = $this->addScreenshot($roundTwo, $this->addMedia('ready', 'Omar'), 1, self::NEW_SCREEN_TITLE, null);
-        $this->addPin($newScreen, 1, '55.00', '65.00', self::NEW_SCREEN_NOTE, 'Omar');
-        $this->retakeThroughTheApi($roundTwo, $nextFirstTry, self::NEXT_RETAKE_TITLE, self::NEXT_RETAKE_NOTE);
-        $this->shareDraft($roundTwo);
+        [$roundOne, , $roundTwo] = $this->shareTwoRounds();
         self::assertSame(
             [[$roundOne, 1, 'closed'], [$roundTwo, 2, 'open']],
             array_values(array_map(
@@ -269,6 +256,112 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         foreach ([self::RETAKE_TITLE, self::NEXT_RETAKE_TITLE, self::RETAKE_NOTE] as $hidden) {
             self::assertStringNotContainsString($hidden, $content);
         }
+    }
+
+    /**
+     * The full-screen review of Round 2 offers the same Before as its round page: Screenshot 1 switches to Round 1's
+     * latest try of A with that try's own pin, and the walk keeps the side; the new screen B and Round 1 have none, even
+     * when the address asks for it.
+     */
+    #[Test]
+    public function theNextSharedRoundsFullScreenSwitchesToTheSameNumberedLatestTryOfTheRoundBefore(): void
+    {
+        [, $roundOneRetake, , $roundTwoRetake] = $this->shareTwoRounds();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2/focus');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('SHOP-1 · Round 2 · Screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
+        self::assertSame(
+            [['After', '/t/SHOP-1/rounds/2/focus?screenshot=1&side=after', 'page'], ['Before', '/t/SHOP-1/rounds/2/focus?screenshot=1&side=before', null]],
+            $page->filter(self::FOCUS_SIDES.' a')->each(static fn (Crawler $link): array => [$link->text(), $link->attr('href'), $link->attr('aria-current')]),
+        );
+        self::assertSame('After, round 2: '.self::NEXT_RETAKE_TITLE, $page->filter(self::FOCUS_IMAGE)->attr('alt'));
+        self::assertSame($this->viewPathOf($roundTwoRetake), parse_url((string) $page->filter(self::FOCUS_IMAGE)->attr('src'), \PHP_URL_PATH));
+        self::assertSame([self::NEXT_RETAKE_NOTE], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()));
+
+        $page = $this->client->click($page->filter(self::FOCUS_SIDES)->selectLink('Before')->link());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('page', $page->filter(self::FOCUS_SIDES)->selectLink('Before')->attr('aria-current'));
+        self::assertSame('Before, round 1: '.self::RETAKE_TITLE, $page->filter(self::FOCUS_IMAGE)->attr('alt'));
+        self::assertSame($this->viewPathOf($roundOneRetake), parse_url((string) $page->filter(self::FOCUS_IMAGE)->attr('src'), \PHP_URL_PATH), 'Before is Round 1\'s latest try of the chain.');
+        self::assertSame([self::RETAKE_NOTE], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()), 'The Before walks its own pin.');
+        self::assertSame(
+            ['/t/SHOP-1/rounds/2/focus?screenshot=1&side=before&pin=1', '/t/SHOP-1/rounds/2/focus?screenshot=1&side=before&pin=1'],
+            $page->filter('a.focus-bar__step')->each(static fn (Crawler $link): string => (string) $link->attr('href')),
+            'The walk stays on the Before.',
+        );
+        $content = (string) $this->client->getResponse()->getContent();
+        foreach ([self::FIRST_TRY_TITLE, self::FIRST_TRY_NOTE, self::NEXT_FIRST_TRY_TITLE, self::NEXT_FIRST_TRY_NOTE, self::NEXT_RETAKE_NOTE, 'Mia shot'] as $hidden) {
+            self::assertStringNotContainsString($hidden, $content);
+        }
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2/focus?screenshot=2&side=before');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter(self::FOCUS_SIDES), 'A screenshot new in this round has no Before.');
+        self::assertSame(self::NEW_SCREEN_TITLE, $page->filter(self::FOCUS_IMAGE)->attr('alt'));
+        self::assertSame([self::NEW_SCREEN_NOTE], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()));
+        self::assertStringNotContainsString(self::RETAKE_TITLE, (string) $this->client->getResponse()->getContent());
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus?side=before');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter(self::FOCUS_SIDES), 'Round 1 has no round before it.');
+        self::assertSame(self::RETAKE_TITLE, $page->filter(self::FOCUS_IMAGE)->attr('alt'));
+        self::assertSame($this->viewPathOf($roundOneRetake), parse_url((string) $page->filter(self::FOCUS_IMAGE)->attr('src'), \PHP_URL_PATH));
+        self::assertSame(
+            ['/t/SHOP-1/rounds/1/focus?screenshot=1&pin=1', '/t/SHOP-1/rounds/1/focus?screenshot=1&pin=1'],
+            $page->filter('a.focus-bar__step')->each(static fn (Crawler $link): string => (string) $link->attr('href')),
+            'No side to keep where there is no Before.',
+        );
+    }
+
+    /**
+     * Round 1 is Omar's draft with screenshot A retaken once through REST, shared and then closed; Mia's own draft
+     * holds "Mia shot". Round 2 is his next draft with a new A' (Screenshot 1), retaken after he added the new screen B
+     * (Screenshot 2), shared.
+     *
+     * @return array{string, string, string, string} Round 1, its retake of A, Round 2 and its retake of A'
+     */
+    private function shareTwoRounds(): array
+    {
+        $this->draft = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
+        $this->firstTry = $this->addScreenshot($this->draft, $this->addMedia('ready', 'Omar'), 0, self::FIRST_TRY_TITLE, null);
+        $this->addPin($this->firstTry, 1, '10.00', '20.00', self::FIRST_TRY_NOTE, 'Omar');
+        $this->addScreenshot($this->addRound($this->ticketId, null, 'draft', 'Mia', null), $this->addMedia('ready', 'Mia'), 0, 'Mia shot', null);
+        $roundOneRetake = $this->retakeThroughTheApi($this->draft, $this->firstTry, self::RETAKE_TITLE, self::RETAKE_NOTE);
+        $this->shareDraft($this->draft);
+        $roundOne = $this->draft;
+        $this->closeRound($roundOne);
+
+        $roundTwo = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
+        $nextFirstTry = $this->addScreenshot($roundTwo, $this->addMedia('ready', 'Omar'), 0, self::NEXT_FIRST_TRY_TITLE, null);
+        $this->addPin($nextFirstTry, 1, '15.00', '25.00', self::NEXT_FIRST_TRY_NOTE, 'Omar');
+        $newScreen = $this->addScreenshot($roundTwo, $this->addMedia('ready', 'Omar'), 1, self::NEW_SCREEN_TITLE, null);
+        $this->addPin($newScreen, 1, '55.00', '65.00', self::NEW_SCREEN_NOTE, 'Omar');
+        $roundTwoRetake = $this->retakeThroughTheApi($roundTwo, $nextFirstTry, self::NEXT_RETAKE_TITLE, self::NEXT_RETAKE_NOTE);
+        $this->shareDraft($roundTwo);
+
+        return [$roundOne, $roundOneRetake, $roundTwo, $roundTwoRetake];
+    }
+
+    /**
+     * The path of the signed full-size picture of screenshot $screenshotId, as the page's image source has it.
+     */
+    private function viewPathOf(string $screenshotId): string
+    {
+        $mediaId = null;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($screenshotId, &$mediaId): int {
+            $mediaId = $migrator->fetchOne('SELECT media_id FROM rvw_screenshot WHERE id = ?', [$screenshotId]);
+
+            return 1;
+        });
+        self::assertIsString($mediaId);
+
+        return '/pinround/media/'.$mediaId.'/view.webp';
     }
 
     private function seedDrafts(): void

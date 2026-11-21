@@ -59,7 +59,7 @@
                 <div class="focus-bar" aria-live="polite">
                     {% for stop in page.stops %}
                         {% set isCurrent = stop.position == page.current.position %}
-                        {% set stopQuery = shownQuery|merge(page.areaPosition is null ? {} : {(sideParameter): page.side})|merge(returnParameters) %}
+                        {% set stopQuery = shownQuery|merge(page.areaPosition is null and not page.hasBefore ? {} : {(sideParameter): page.side})|merge(returnParameters) %}
                         <section class="focus-bar__stop" id="focus-pin-{{ stop.position }}" aria-labelledby="focus-pin-{{ stop.position }}-label" data-pin-walker-target="stop" data-pin-number="{{ stop.number }}" data-pin-position="{{ stop.position }}"{% if not isCurrent %} hidden{% endif %}>
                             <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.previousPosition})) }}" aria-label="Previous pin" data-pin-walker-control="previous" data-action="pin-walker#previous">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>

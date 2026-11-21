@@ -20,7 +20,8 @@ final readonly class FocusPage
      * @param string               $line            for example "SHOP-1 · Round 2 · Per product · section 2 of 3"
      * @param int|null             $areaPosition    from 0, the area shown; null exactly when the round has no screen areas
      * @param string               $side            SIDE_AFTER or SIDE_BEFORE, the picture shown
-     * @param bool                 $hasBefore       whether the area has an earlier picture to switch to
+     * @param bool                 $hasBefore       whether the area, or the shared draft's screenshot, has an earlier
+     *                                              picture to switch to
      * @param ScreenshotView|null  $picture         null exactly when the round has nothing to show
      * @param list<FocusPinStop>   $stops           the pins to walk, by number
      * @param FocusPinStop|null    $current         the stop shown first; null exactly when $stops is empty

@@ -117,10 +117,10 @@ final class RoundController extends AbstractController
     /**
      * The full-screen review of one round of any kind (P05.T10, P14.T8, full-screen-review.md), with the round page's
      * access: "?area=N" picks a screen area, "?screenshot=N" the screenshot of a round without areas, as on the round
-     * page, "?side=before" an area's earlier picture and "?pin=N" the pin shown first, from 1. Previous, Next, the
-     * screenshots' Back and Next and the After/Before switch are links, and Fixed, Still wrong and Undo plain forms that
-     * VerdictController answers with this page again, so the walk works without JavaScript; pin-walker switches pins in
-     * place and adds the keys.
+     * page, "?side=before" the earlier picture of an area or of a shared draft's screenshot and "?pin=N" the pin shown
+     * first, from 1. Previous, Next, the screenshots' Back and Next and the After/Before switch are links, and Fixed,
+     * Still wrong and Undo plain forms that VerdictController answers with this page again, so the walk works without
+     * JavaScript; pin-walker switches pins in place and adds the keys.
      *
      * Exit full screen, and Escape, go back to the round page on the same picture, or, with "?from=ticket", to the ticket
      * page's Rounds, naming in the address's fragment where the Full screen link that opened it is, so focus returns to

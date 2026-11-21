@@ -123,7 +123,7 @@ final readonly class RoundPages
             return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::SCREENSHOTS_STRIP_LABEL, [], null, null, null, self::NO_SCREENSHOTS);
         }
         $thumbs = $this->screenshotThumbsOf($ticket, $screenshots, $shownIndex, $now);
-        $previousRound = RoundView::DRAFT === $round->kind ? $this->roundsVisibleTo->previousHandOffRoundOf($ticket->id, $visible->visibility, $round->number) : null;
+        $previousRound = $this->previousHandOffRoundOf($visible, $round);
 
         return new RoundPage(
             $ticket->key,
@@ -158,6 +158,38 @@ final readonly class RoundPages
             $picturesRound,
             array_map(static fn (array $tries): RoundScreenshotView => $tries[\count($tries) - 1], RoundCards::shownChainsOf($picturesRound)),
         ];
+    }
+
+    /**
+     * The hand-off round shared just before a shared draft, whose screenshots are the Befores of the draft's; one read
+     * through RoundsVisibleTo, none for Round 1. Null for any other kind of round, which has no Before by screenshot.
+     * Runs inside the request transaction whose tenant is the viewer's organization.
+     */
+    public function previousHandOffRoundOf(VisibleTicket $visible, ReviewRoundView $round): ?RoundView
+    {
+        if (RoundView::DRAFT !== $round->kind) {
+            return null;
+        }
+
+        return $this->roundsVisibleTo->previousHandOffRoundOf($visible->ticket->id, $visible->visibility, $round->number);
+    }
+
+    /**
+     * No data ties a chain to one of an earlier round (a retake stays in its own draft, ADR-0048), so the Before of
+     * "Screenshot N" is the latest try of "Screenshot N" of the previous hand-off round, the way the review seed pairs
+     * areas by position; a chain numbered past that round's last one is new and has none.
+     *
+     * @param RoundView|null $previousRound as previousHandOffRoundOf gives it
+     * @param int            $number        from 1, the screenshot's place in the strip
+     */
+    public static function beforeScreenshotOf(?RoundView $previousRound, int $number): ?RoundScreenshotView
+    {
+        if (null === $previousRound) {
+            return null;
+        }
+        $tries = RoundCards::shownChainsOf($previousRound)[$number - 1] ?? [];
+
+        return [] === $tries ? null : $tries[\count($tries) - 1];
     }
 
     /**
@@ -236,9 +268,7 @@ final readonly class RoundPages
     }
 
     /**
-     * No data ties a chain to one of an earlier round (a retake stays in its own draft, ADR-0048), so the Before of
-     * "Screenshot N" is "Screenshot N" of the previous hand-off round, the way the review seed pairs areas by position;
-     * a chain numbered past that round's last one is new and stands alone.
+     * The screenshot with its Before, as beforeScreenshotOf pairs them; one without a Before stands alone.
      *
      * @param int            $number        from 1, its place in the strip
      * @param RoundView|null $previousRound the hand-off round shared before a shared draft, with its latest tries; null
@@ -246,7 +276,7 @@ final readonly class RoundPages
      */
     private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, ?RoundView $previousRound, \DateTimeImmutable $now): ShownScreenshot
     {
-        $beforeScreenshot = null === $previousRound ? null : (RoundCards::shownChainsOf($previousRound)[$number - 1][0] ?? null);
+        $beforeScreenshot = self::beforeScreenshotOf($previousRound, $number);
         $mediaIds = null === $beforeScreenshot ? [$screenshot->mediaId] : [$screenshot->mediaId, $beforeScreenshot->mediaId];
         $images = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, array_values(array_unique($mediaIds)), RoundCards::VARIANT, $now);
         $after = RoundCards::screenshotViewOf($picturesRound, $screenshot, $number, $images);
