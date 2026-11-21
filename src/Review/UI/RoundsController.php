@@ -22,11 +22,12 @@ use Symfony\Component\Routing\Attribute\Route;
  * on its visibility facts, after TicketQueries::pageOf reads only what the viewer may see) all answer the same 404 as
  * the ticket's page, so no answer tells that a hidden ticket exists. "Start a draft round" shows only when
  * RoundPermission DRAFT_CREATE grants it and the viewer has no unshared draft shown; DraftRoundController takes its
- * post and the own draft's Share and Delete.
+ * post and the own draft's Share and Delete. The round bar's frame (P14.T7) is read the same way.
  */
 final class RoundsController extends AbstractController
 {
     public const string ROUNDS_ROUTE = 'review_rounds';
+    public const string ROUND_BAR_ROUTE = 'review_round_bar';
 
     /** TicketShowController's route and not-found text, which Review's UI may not import (deptrac); RoundsFrameTest keeps them the same. */
     public const string TICKET_ROUTE = 'ticket_show';
@@ -38,6 +39,7 @@ final class RoundsController extends AbstractController
     public function __construct(
         private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly RoundCards $roundCards,
+        private readonly RoundBars $roundBars,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -65,5 +67,20 @@ final class RoundsController extends AbstractController
         $response->setVary(self::TURBO_FRAME_HEADER);
 
         return $response;
+    }
+
+    /**
+     * The bare frame of RoundBar, for a frame request or not: the page never links here, and the frame reads empty while
+     * no shared round is open. The same 404s as the rounds route.
+     */
+    #[Route('/t/{key}/round-bar', name: self::ROUND_BAR_ROUTE, methods: ['GET'])]
+    public function roundBar(string $key): Response
+    {
+        $visible = $this->visibleTicketLookup->visibleTicketOf($key);
+
+        return $this->render('@Review/round_bar_frame.html.twig', [
+            'ticketKey' => $visible->ticket->key,
+            'bar' => $this->roundBars->forTicket($visible),
+        ]);
     }
 }

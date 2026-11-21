@@ -1,0 +1,2 @@
+{#- Eager, not lazy: the bar sits at the top of the page. The frame holds nothing until its answer comes, and without JavaScript the Rounds section links to every round. -#}
+<turbo-frame{{ attributes.defaults({id: constant('App\\Review\\UI\\Component\\RoundBar::FRAME_ID'), class: 'round-bar-frame', src: path(constant('App\\Review\\UI\\RoundsController::ROUND_BAR_ROUTE'), {key: key})}) }}></turbo-frame>

@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace App\Review\UI;
 
-use App\Identity\Api\UserQueries;
-use App\Identity\Api\UserView;
-use App\Insight\Api\TurnUserQueries;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
 use App\Review\Api\RoundCommands;
@@ -72,8 +69,7 @@ final class DraftRoundController extends AbstractController
         private readonly RoundCommands $roundCommands,
         private readonly ReportDrafts $reportDrafts,
         private readonly RefusalAnswers $refusalAnswers,
-        private readonly TurnUserQueries $turnUserQueries,
-        private readonly UserQueries $userQueries,
+        private readonly RoundReadyFor $roundReadyFor,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -247,19 +243,15 @@ final class DraftRoundController extends AbstractController
      */
     private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, VisibleTicket $visible): string
     {
-        $ticketId = $visible->ticket->id;
-        $verdictGiverId = $readyForUserId ?? $this->turnUserQueries->turnUsersOf([$ticketId])[$ticketId->toString()] ?? null;
+        $verdictGiverId = $this->roundReadyFor->userIdOf($visible->ticket, $readyForUserId);
         if (null === $verdictGiverId) {
             return RoundStillOpenReason::of($openRoundNumber, null);
         }
         if ($verdictGiverId->equals($visible->actor->userId())) {
             return RoundStillOpenReason::forTheVerdictGiver($openRoundNumber);
         }
-        $displayName = $visible->ticket->displayNames[$verdictGiverId->toString()]
-            ?? $this->userQueries->byIds([$verdictGiverId])[$verdictGiverId->toString()]->displayName
-            ?? null;
 
-        return RoundStillOpenReason::of($openRoundNumber, null === $displayName ? null : new UserView($verdictGiverId, $displayName)->firstName());
+        return RoundStillOpenReason::of($openRoundNumber, $this->roundReadyFor->firstNameOf($verdictGiverId, $visible->ticket));
     }
 
     /**
