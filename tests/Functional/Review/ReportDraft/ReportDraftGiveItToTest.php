@@ -126,6 +126,24 @@ final class ReportDraftGiveItToTest extends WebTestCase
     }
 
     /**
+     * Lena, Shop's lead, left the team and nobody leads it now: the team chip names nobody rather than an empty
+     * "( decides)".
+     */
+    #[Test]
+    public function aTeamWithNoLeadIsOfferedAsThePlainTeam(): void
+    {
+        $draft = $this->addDraft('Mia');
+        $parameters = [$this->shop->toString(), $this->people['Lena']->id()->toString()];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM org_team_member WHERE team_id = ? AND user_id = ?', $parameters));
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::DRAFTS.'/'.$draft);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([['', 'The team'], [$this->people['Omar']->id()->toString(), 'Omar']], $this->giveToChoicesOf($page->filter('form.login__form fieldset')));
+    }
+
+    /**
      * Raj is in no team, so Report a problem gives him no "Give it to", and nor does his draft's page.
      */
     #[Test]

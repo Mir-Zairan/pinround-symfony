@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\AgentApi\Infrastructure\Mcp\Tool;
 
-use App\AgentApi\Infrastructure\Mcp\AgentTool;
 use App\AgentApi\Infrastructure\Mcp\PlacedPinArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextRequiredOverMcp;
 use App\AgentApi\Infrastructure\Mcp\TicketVisibilityCheck;
 use App\AgentApi\Infrastructure\Mcp\ToolArguments;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -35,8 +36,10 @@ use Psr\Clock\ClockInterface;
  * ReportDrafts::ofOwner finds for the logged-in person, with ReportDraftPermission EDIT; another person's draft, an
  * upload the caller did not begin and one begun for anything but the draft's project are not found. The upload is
  * finished in the gate's savepoint, so a refusal leaves it unused. It never makes a ticket. Holds no state (ADR-0008).
+ *
+ * Over MCP the title and the summary are required (P14.T11); /api/v1 for the browser extension keeps them optional.
  */
-final readonly class AddReportScreenshot implements AgentTool
+final readonly class AddReportScreenshot implements ScreenshotContextRequiredOverMcp
 {
     public const string NAME = 'add_report_screenshot';
     public const string AUDIT_TARGET_TYPE = 'report_draft';
@@ -55,25 +58,56 @@ final readonly class AddReportScreenshot implements AgentTool
     ) {
     }
 
+    /**
+     * /api/v1's, where the title and the summary stay optional.
+     */
     public function definition(): Tool
+    {
+        return self::toolOf(self::inputSchema(), 'title?, summary?', '');
+    }
+
+    public function mcpDefinition(): Tool
+    {
+        return self::toolOf(ScreenshotContextArguments::requiredIn(self::inputSchema()), 'title, summary', ' '.ScreenshotContextArguments::RULE);
+    }
+
+    public function refuseMissingScreenshotContext(array $arguments): void
+    {
+        ScreenshotContextArguments::refuseMissingIn($arguments, '');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function inputSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'report' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The draft_id create_report gave.'],
+                'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave for the draft\'s project, after the file was PUT to its put_url.'],
+                'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
+                'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
+                'pins' => PlacedPinArguments::schema(),
+            ],
+            'required' => ['report', 'upload_id'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $inputSchema
+     * @param string               $pictureFields how the description writes the title and the summary
+     * @param string               $pictureRule   appended to the description
+     */
+    private static function toolOf(array $inputSchema, string $pictureFields, string $pictureRule): Tool
     {
         return new Tool(
             name: self::NAME,
             title: 'Add a screenshot to a report draft',
-            inputSchema: [
-                'type' => 'object',
-                'properties' => [
-                    'report' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The draft_id create_report gave.'],
-                    'upload_id' => ['type' => 'string', 'minLength' => 1, 'maxLength' => ToolArguments::MAX_ID_LENGTH, 'description' => 'The upload_id create_report_upload gave for the draft\'s project, after the file was PUT to its put_url.'],
-                    'title' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_TITLE_LENGTH, 'description' => \sprintf('What the picture is of, at most %d characters.', RoundCommands::MAX_TITLE_LENGTH)],
-                    'summary' => ['type' => 'string', 'maxLength' => RoundCommands::MAX_SUMMARY_LENGTH, 'description' => \sprintf('What the picture shows, in plain words: at most %d characters.', RoundCommands::MAX_SUMMARY_LENGTH)],
-                    'pins' => PlacedPinArguments::schema(),
-                ],
-                'required' => ['report', 'upload_id'],
-                'additionalProperties' => false,
-            ],
-            description: 'Adds a picture at the end of one of your own report drafts: {report, upload_id, title?,'
-                .' summary?, pins?: [{x_pct, y_pct, note}]}. Begin the upload with create_report_upload for the'
+            inputSchema: $inputSchema,
+            description: 'Adds a picture at the end of one of your own report drafts: {report, upload_id, '.$pictureFields.','
+                .' pins?: [{x_pct, y_pct, note}]}.'.$pictureRule.' Begin the upload with create_report_upload for the'
                 .' draft\'s project, as for create_report. A draft holds at most '.ReportDrafts::MAX_SCREENSHOTS
                 .' pictures; a picture in it already is not added twice. A picture still being processed is fine; a'
                 .' rejected one is refused. It never makes a ticket. Answers draft_id, media_id, status and'

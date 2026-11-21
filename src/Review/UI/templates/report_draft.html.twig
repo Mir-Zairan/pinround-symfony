@@ -67,7 +67,7 @@
                     <div class="report__chip-row">
                         <label class="chip report__chip">
                             <input class="visually-hidden" type="radio" name="assignee_id" value=""{% if not giveTo.offers(assigneeId) %} checked{% endif %}>
-                            The team ({{ giveTo.leadFirstName }} decides)
+                            The team{% if giveTo.leadFirstName is not null %} ({{ giveTo.leadFirstName }} decides){% endif %}
                         </label>
                         {% for person in giveTo.people %}
                             <label class="chip report__chip">

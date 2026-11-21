@@ -152,7 +152,7 @@ final class McpEndpointTest extends WebTestCase
         self::assertIsArray($whoAmI);
         self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
         self::assertSame(['type' => 'object', 'properties' => [], 'additionalProperties' => false], $whoAmI['inputSchema'] ?? null);
-        foreach ([AddScreenshot::NAME => ['key', 'upload_id', 'title', 'summary'], AddNotebookScreenshot::NAME => ['notebook', 'upload_id', 'title', 'summary']] as $pictureToolName => $requiredOverMcp) {
+        foreach ([AddScreenshot::NAME => ['key', 'upload_id', 'title', 'summary'], AddNotebookScreenshot::NAME => ['notebook', 'upload_id', 'title', 'summary'], AddReportScreenshot::NAME => ['report', 'upload_id', 'title', 'summary']] as $pictureToolName => $requiredOverMcp) {
             $pictureTool = $toolsByName[$pictureToolName];
             self::assertIsArray($pictureTool);
             $pictureToolSchema = $pictureTool['inputSchema'] ?? null;

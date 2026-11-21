@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\AgentApi\Tool;
 
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddReportScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -16,6 +17,7 @@ use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -46,6 +48,9 @@ final class AddReportScreenshotTest extends WebTestCase
     private const string LENAS_MOBILE_DRAFT = '0197a3c0-0000-7000-8000-0000000f0002';
     private const string OMARS_DRAFT = '0197a3c0-0000-7000-8000-0000000f0003';
     private const string FIRST_PICTURE = '0197a3c0-0000-7000-8000-0000000e0001';
+    private const array PICTURE_CONTEXT = ['title' => 'The cart', 'summary' => 'The total goes below 0.'];
+    /** JSON-RPC's "Invalid params". */
+    private const int INVALID_PARAMS = -32602;
 
     private KernelBrowser $client;
 
@@ -116,7 +121,7 @@ final class AddReportScreenshotTest extends WebTestCase
         $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', null);
         [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(2, $this->answer()['screenshot_count'] ?? null);
         self::assertSame([[$uploadId, 'new_report', 'SHOP', '2026-11-10 09:00:20']], $this->uploadIntentsOf($this->acmeFoods));
@@ -132,9 +137,9 @@ final class AddReportScreenshotTest extends WebTestCase
         $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', 'ready');
         [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
         self::assertSame(AddReportScreenshot::ADDED, $this->answer()['status'] ?? null);
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(['draft_id' => self::LENAS_DRAFT, 'media_id' => $uploadId, 'status' => AddReportScreenshot::ALREADY_IN_DRAFT, 'screenshot_count' => 2], $this->answer());
         [$screenshots, $version] = $this->screenshotsVersionAndUpdatedAtOf(self::LENAS_DRAFT);
@@ -152,9 +157,9 @@ final class AddReportScreenshotTest extends WebTestCase
         $thirdPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', null);
         [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $secondPicture]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $secondPicture, ...self::PICTURE_CONTEXT]);
         self::assertSame(['draft_id' => self::LENAS_DRAFT, 'media_id' => $secondPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 2], $this->answer());
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $thirdPicture]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $thirdPicture, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(['draft_id' => self::LENAS_DRAFT, 'media_id' => $thirdPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 3], $this->answer());
         [$screenshots, $version] = $this->screenshotsVersionAndUpdatedAtOf(self::LENAS_DRAFT);
@@ -173,11 +178,11 @@ final class AddReportScreenshotTest extends WebTestCase
         $this->addReportDraft($this->people['Lena'], $nearlyFullDraft, 'SHOP', $pictures);
         $tenthPicture = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', 'ready');
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $nearlyFullDraft, 'upload_id' => $tenthPicture]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $nearlyFullDraft, 'upload_id' => $tenthPicture, ...self::PICTURE_CONTEXT]);
         self::assertSame(['draft_id' => $nearlyFullDraft, 'media_id' => $tenthPicture, 'status' => AddReportScreenshot::ADDED, 'screenshot_count' => 10], $this->answer());
         $draftsBefore = $this->draftRows();
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $nearlyFullDraft, 'upload_id' => $tenthPicture]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $nearlyFullDraft, 'upload_id' => $tenthPicture, ...self::PICTURE_CONTEXT]);
 
         self::assertSame(['draft_id' => $nearlyFullDraft, 'media_id' => $tenthPicture, 'status' => AddReportScreenshot::ALREADY_IN_DRAFT, 'screenshot_count' => 10], $this->answer());
         self::assertSame($draftsBefore, $this->draftRows());
@@ -192,7 +197,7 @@ final class AddReportScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
         $draftsBefore = $this->draftRows();
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(AddReportScreenshot::PICTURE_REJECTED);
         self::assertSame($draftsBefore, $this->draftRows());
@@ -212,7 +217,7 @@ final class AddReportScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
         $draftsBefore = $this->draftRows();
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $fullDraft, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $fullDraft, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(ReportDraftRefused::TOO_MANY_SCREENSHOTS);
         self::assertSame($draftsBefore, $this->draftRows());
@@ -241,7 +246,7 @@ final class AddReportScreenshotTest extends WebTestCase
             $uploadId = $this->addUpload($organizationId, $person, 'new_report', 'SHOP', null);
             [$tokenId, $token] = $this->issueApiToken($person, $organizationId, scopes: [ApiTokenScope::ReportsWrite]);
 
-            $this->callTool($token, AddReportScreenshot::NAME, ['report' => $draftId, 'upload_id' => $uploadId]);
+            $this->callTool($token, AddReportScreenshot::NAME, ['report' => $draftId, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
             $this->assertRefused(ToolRefusal::NOT_FOUND);
             self::assertContains([$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, AddReportScreenshot::NAME, 'not_found'], $this->toolRowsOf($organizationId));
@@ -268,7 +273,7 @@ final class AddReportScreenshotTest extends WebTestCase
         $intentsBefore = $this->uploadIntentsOf($this->acmeFoods);
 
         foreach ($uploads as $uploadId) {
-            $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+            $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
             $this->assertRefused(ToolRefusal::NOT_FOUND);
         }
@@ -289,7 +294,7 @@ final class AddReportScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
         $draftsBefore = $this->draftRows();
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(AddReportScreenshot::UPLOAD_EXPIRED);
         self::assertSame($draftsBefore, $this->draftRows());
@@ -311,7 +316,7 @@ final class AddReportScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
         $draftsBefore = $this->draftRows();
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $looseDraft, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => $looseDraft, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         self::assertSame($draftsBefore, $this->draftRows());
@@ -326,12 +331,70 @@ final class AddReportScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::RoundsWrite, ApiTokenScope::NotebooksWrite]);
         $draftsBefore = $this->draftRows();
 
-        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId]);
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...self::PICTURE_CONTEXT]);
 
         $this->assertRefused(\sprintf(ToolRefusal::MISSING_SCOPE, 'reports:write'));
         self::assertSame($draftsBefore, $this->draftRows());
         self::assertSame([[$uploadId, 'new_report', 'SHOP', null]], $this->uploadIntentsOf($this->acmeFoods));
         self::assertSame([[$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, AddReportScreenshot::NAME, 'missing_scope']], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string}> the picture's context and the pointer refused
+     */
+    public static function picturesWithoutContext(): iterable
+    {
+        yield 'no title' => [['summary' => self::PICTURE_CONTEXT['summary']], '/title'];
+        yield 'no summary' => [['title' => self::PICTURE_CONTEXT['title']], '/summary'];
+        yield 'neither, which names the title first' => [[], '/title'];
+        yield 'an empty title' => [['title' => '', 'summary' => self::PICTURE_CONTEXT['summary']], '/title'];
+        yield 'a title of only CR LF, a tab and spaces' => [['title' => " \r\n\t ", 'summary' => self::PICTURE_CONTEXT['summary']], '/title'];
+        yield 'a summary of only a BOM and a zero-width space' => [['title' => self::PICTURE_CONTEXT['title'], 'summary' => "\u{FEFF}\u{200B}"], '/summary'];
+    }
+
+    /**
+     * Over MCP the picture needs its title and summary (P14.T11): the gate refuses the call after the scope check,
+     * before the upload is completed or the draft looked up.
+     *
+     * @param array<string, string> $context
+     */
+    #[Test]
+    #[DataProvider('picturesWithoutContext')]
+    public function aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndTheDraftAndUploadStayAsTheyWere(array $context, string $pointer): void
+    {
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', null);
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $draftsBefore = $this->draftRows();
+
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, ...$context]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['code' => self::INVALID_PARAMS, 'message' => \sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, $pointer))],
+            $this->responseValueAt('error'),
+        );
+        self::assertSame($draftsBefore, $this->draftRows());
+        self::assertSame([[$uploadId, 'new_report', 'SHOP', null]], $this->uploadIntentsOf($this->acmeFoods));
+        self::assertSame([[$tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, AddReportScreenshot::NAME, 'invalid_input']], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * Review trims the line breaks around a text and keeps the ones inside it and every multibyte character.
+     */
+    #[Test]
+    public function aTitleAndSummaryWithLineBreaksAndMultibyteTextAreStoredTrimmedAndOtherwiseAsSent(): void
+    {
+        $uploadId = $this->addUpload($this->acmeFoods, $this->people['Lena'], 'new_report', 'SHOP', 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+
+        $this->callTool($token, AddReportScreenshot::NAME, ['report' => self::LENAS_DRAFT, 'upload_id' => $uploadId, 'title' => "Prix affiché 価格\r\n", 'summary' => "Le total est faux.\r\nDer Preis ist 0 €"]);
+
+        self::assertSame(AddReportScreenshot::ADDED, $this->answer()['status'] ?? null);
+        self::assertEquals([
+            self::storedPicture(self::FIRST_PICTURE),
+            ['media_id' => $uploadId, 'title' => 'Prix affiché 価格', 'summary' => "Le total est faux.\r\nDer Preis ist 0 €", 'pins' => []],
+        ], $this->screenshotsVersionAndUpdatedAtOf(self::LENAS_DRAFT)[0]);
+        self::assertSame([[$tokenId, AddReportScreenshot::AUDIT_TARGET_TYPE, self::LENAS_DRAFT, AddReportScreenshot::NAME, 'ok']], $this->toolRowsOf($this->acmeFoods));
     }
 
     /**
