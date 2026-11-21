@@ -7,7 +7,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Install it](#install-it) — load the folder, find its id
 - [Let pinround accept it](#let-pinround-accept-it) — the two origin settings an admin sets once
 - [Connect it](#connect-it) — make a token and paste it
-- [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket
+- [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket, as a new screenshot or a retake
 - [Notebooks](#notebooks) — make one, pin a page and capture it there
 - [Ask Claude Code about a notebook](#ask-claude-code-about-a-notebook) — the `explain_my_notebook` prompt and its token
 - [Play scenarios](#play-scenarios) — Play, Step, Stop, Next and Back, and what stops a run
@@ -48,8 +48,9 @@ A browser sends the extension's origin with every request. pinround and its stor
 2. In **Put the screenshot in**, choose **A new report** or **My draft round on SHOP-12**.
 3. For a new report, type the project key (for example `SHOP`) and what is wrong in one line.
 4. The title starts as the page's title, and **What this picture shows** as "Page: <address> · Window <width>×<height> · <browser and version>". The address has no user name, password, query (`?…`) or fragment (`#…`), as those can hold a token. Change or clear either; the title holds up to 120 characters and the summary up to 600, and a longer page title or address is cut with "…".
-5. Press **Capture this page**. For a draft round the picture is added at once; pinround processes it first, which can take a few seconds.
-6. For a new report, open the next page and capture again, up to 10 pictures; each goes into the same report draft. Then press **Done**. pinround opens the draft: check it and press **Send**.
+5. For a draft round, **Add it as** offers **New screenshot** (chosen at first) and one **Retake of screenshot N · <title>** for each screenshot already in your draft round, in its order. Choose a retake to add the picture as that screenshot's next try, for example after a fix; the earlier tries keep their pins. A screenshot keeps at most 5 tries: a sixth is refused with pinround's reason ("This screenshot already has 5 tries. Remove one before you add another."), and a screenshot removed from your draft since the popup opened is "Not found". Nothing is added then, and your pins stay on the page for the next try. When the list cannot be loaded, the popup says so and offers only **New screenshot**. After each capture it goes back to **New screenshot**.
+6. Press **Capture this page**. For a draft round the picture is added at once; pinround processes it first, which can take a few seconds.
+7. For a new report, open the next page and capture again, up to 10 pictures; each goes into the same report draft. Then press **Done**. pinround opens the draft: check it and press **Send**.
 
 ## Notebooks
 A notebook is a private set of screenshots of your own app, each with numbered pins on the spots you want to ask about. Only you see it. You find yours in pinround under **My notebooks** (`/notebooks`).
@@ -129,7 +130,8 @@ Run by hand on the dev stack after a change to the extension:
 1. Load the extension, set `EXTENSION_ORIGINS` and `MINIO_CORS_ALLOW_ORIGIN` as above, and connect with a token that has `read`, `rounds:write` and `reports:write`.
 2. Capture two pages as a new report for `SHOP`, press **Done**, check that pinround opens the draft with both pictures (after "Processing…"), and press **Send**: the ticket has Round 0 with both pictures.
 3. As the assignee of a ticket, capture into **My draft round on** it: the picture is in your draft round, and the tester does not see it.
-4. Sign out, then try to capture: the popup asks you to connect first, and the old token gets 401 from `GET /api/v1/me/tickets`.
+4. Capture the same page again with **Add it as** set to **Retake of screenshot 1**: the draft round shows screenshot 1 with two tries. Retake it until it has 5 tries, then once more: the popup shows "This screenshot already has 5 tries. Remove one before you add another." and the pins stay on the page.
+5. Sign out, then try to capture: the popup asks you to connect first, and the old token gets 401 from `GET /api/v1/me/tickets`.
 
 Last run: not run yet.
 

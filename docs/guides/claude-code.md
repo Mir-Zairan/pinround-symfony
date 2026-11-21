@@ -8,8 +8,8 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
 - [Example prompts](#example-prompts) — what to say to Claude Code
-- [The tools](#the-tools) — what each of the ten tools does
-- [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`, and a retake with `retake_of`
+- [The tools](#the-tools) — what each of the eleven tools does
+- [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`, and a retake with `list_draft_screenshots` and `retake_of`
 - [Reporting while you check](#reporting-while-you-check) — the prompt `report_while_investigating`, and where to read more
 - [Notebooks](#notebooks) — the six notebook tools, their scopes, and the prompt `explain_my_notebook`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
@@ -76,6 +76,7 @@ Every tool works as you, with your permissions in the app, and only inside the t
 | `create_report_upload` | `reports:write` | Begins the upload of one screenshot for a new report in a project (`project`, such as `SHOP`). Answers where to send the file, as `create_upload` does. |
 | `create_report` | `reports:write` | Makes a private report draft from a title, a detail and up to 10 uploaded screenshots with titles, summaries and pins. It never makes a ticket: open the `url` it answers, check the draft and press **Send**. A token gets `reports:write` only when you tick it. |
 | `add_screenshot` | `rounds:write` | Adds the uploaded picture to your draft round, with an optional title (at most 120 characters), summary (at most 600) and pins (at most 100, each note at most 1,000). With `retake_of`, it is the next try of a screenshot already in that draft (at most 5 tries). |
+| `list_draft_screenshots` | `read` | For one ticket key: the screenshots of your own open draft round on it, in the order and with the numbers the draft round shows ("Screenshot n"). Each has its `screenshot_id` (the id `add_screenshot` takes as `retake_of`), `number`, the latest try's `title` (or none) and `try_count` (1 to 5). The list is empty when you have no open draft round there; another person's draft and a shared round are never listed. |
 
 Claude Code reads each tool's own description, so you do not need to name tools in your prompts.
 
@@ -99,7 +100,7 @@ Pictures never travel inside a tool call. A call body over 1 MB is refused. Clau
 
 A picture that is not a PNG, JPEG or WebP pinround can read, or is too big, is refused: upload another one. An `upload_id` that no `add_screenshot` used within a day expires: begin a new one.
 
-**A retake.** To add a new try of a screenshot, for example after a fix, pass its `screenshot_id` as `retake_of` (any try of it works). The picture becomes the next try of that screenshot, with its own pins; the earlier tries keep theirs. A screenshot keeps at most 5 tries: a sixth is refused with "This screenshot already has 5 tries. Remove one before you add another." A `retake_of` that is not a screenshot of your own draft round on that ticket (another person's draft, a shared round, another organization, or a wrong id) is "Not found", and nothing is added. The REST call `POST /api/v1/tickets/{key}/draft/screenshots` takes the same `retake_of`: 404 when it is not found, 422 for a sixth try ([v1.yaml](../api/v1.yaml)).
+**A retake.** To add a new try of a screenshot, for example after a fix, pass its `screenshot_id` as `retake_of` (any try of it works). `list_draft_screenshots` with `{key}` gives the `screenshot_id` of each screenshot in your draft round, with its number and title; the REST call `GET /api/v1/tickets/{key}/draft/screenshots` answers the same, and the browser extension fills its **Add it as** list from it ([browser-extension.md](browser-extension.md#capture-a-page)). The picture becomes the next try of that screenshot, with its own pins; the earlier tries keep theirs. A screenshot keeps at most 5 tries: a sixth is refused with "This screenshot already has 5 tries. Remove one before you add another." A `retake_of` that is not a screenshot of your own draft round on that ticket (another person's draft, a shared round, another organization, or a wrong id) is "Not found", and nothing is added. The REST call `POST /api/v1/tickets/{key}/draft/screenshots` takes the same `retake_of`: 404 when it is not found, 422 for a sixth try ([v1.yaml](../api/v1.yaml)).
 
 Each person may begin 60 uploads a minute (the web page counts too) and have at most 20 uploads waiting.
 

@@ -41,7 +41,7 @@ export function choiceValueOf(target) {
 export const ticketChoice = (ticketKey) => ({ value: `ticket:${ticketKey}`, label: `My draft round on ${shownText(ticketKey, MAX_ID_LENGTH)}`, target: { kind: 'ticket', ticketKey } });
 export const notebookChoice = (notebookId, title) => ({ value: `notebook:${notebookId}`, label: `Notebook: ${shownText(title, MAX_SHOWN_TITLE_LENGTH)}`, target: { kind: 'notebook', notebookId, title } });
 
-const isId = (value) => 'string' === typeof value && '' !== value && value.length <= MAX_ID_LENGTH;
+export const isId = (value) => 'string' === typeof value && '' !== value && value.length <= MAX_ID_LENGTH;
 
 /** @returns {CaptureTarget|null} null when nothing is remembered or what is stored is not a target this version knows */
 export function checkedTarget(stored) {
