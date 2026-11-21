@@ -15,7 +15,8 @@ use App\SharedKernel\Domain\UserId;
 interface DraftRoundContents
 {
     /**
-     * Reads only.
+     * Reads only. The earlier tries of a retaken screenshot stay out (ADR-0048): the report draft gets the latest try of
+     * each, so its picture cap counts screenshots, not tries.
      *
      * @throws RoundRefused NOT_FOUND for an id that is not $ownerId's undeleted draft (a malformed one too)
      */

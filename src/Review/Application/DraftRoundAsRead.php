@@ -14,7 +14,8 @@ use App\SharedKernel\Domain\TicketId;
 final readonly class DraftRoundAsRead
 {
     /**
-     * @param list<ScreenshotWithPins> $screenshots by position, each with its media id, title, summary and pins by number
+     * @param list<ScreenshotWithPins> $screenshots the latest try of each screenshot (ADR-0048), by position, each with
+     *                                              its media id, title, summary and pins by number
      */
     public function __construct(
         public string $roundId,

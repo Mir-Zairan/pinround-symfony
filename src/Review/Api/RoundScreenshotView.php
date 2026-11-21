@@ -16,7 +16,8 @@ final readonly class RoundScreenshotView
      * @param string|null        $verdict      looks_right, not_right, or null
      * @param list<RoundPinView> $pins         by number
      * @param string|null        $retakeOf     the first try of its chain when it is a later try (ADR-0048); null for a
-     *                                         first try, and always null in a shared round
+     *                                         first try. A shared round lists only each chain's latest try, which
+     *                                         keeps its retakeOf though the first try it names is not listed
      */
     public function __construct(
         public string $id,

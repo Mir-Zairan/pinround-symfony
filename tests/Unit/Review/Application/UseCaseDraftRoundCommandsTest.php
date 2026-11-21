@@ -7,9 +7,12 @@ namespace App\Tests\Unit\Review\Application;
 use App\Media\Api\MediaImageStatus;
 use App\Review\Api\AddedDraftScreenshot;
 use App\Review\Api\PlacedPin;
+use App\Review\Api\ReportDraftContent;
+use App\Review\Api\ReportDrafts;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\ReportDraft\ReportDraftContentRules;
 use App\Review\Application\ReportPictures;
 use App\Review\Application\UseCaseRoundCommands;
 use App\Review\Domain\DraftDecision;
@@ -25,7 +28,6 @@ use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotTriesFull;
-use App\Review\Domain\ScreenshotTry;
 use App\Review\Domain\ScreenshotVerdict;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
@@ -437,7 +439,7 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             [\count($draft->screenshots()[3]->pins()), $draft->screenshots()[3]->position(), $draft->screenshots()[3]->title()],
         ]);
         self::assertCount(1, $draft->screenshots()[0]->pins(), 'The first try keeps its own pin.');
-        self::assertSame([[1, 3], [1, 1], [2, 3], [3, 3]], array_map(static fn (ScreenshotTry $try): array => [$try->number, $try->count], $draft->tries()));
+        self::assertSame([self::SECOND_SCREENSHOT, $thirdTry->screenshotId], array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $draft->latestTries()));
     }
 
     /**
@@ -478,7 +480,10 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
         }
         $this->rounds->save($draft, self::at());
         $fifthTry = $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::FRESH_MEDIA), self::at(), self::FIRST_SCREENSHOT);
-        self::assertSame([5, 5], [$this->storedRound(self::DRAFT)->tries()[5]->number, $this->storedRound(self::DRAFT)->tries()[5]->count]);
+        self::assertSame(
+            [$fifthTry->screenshotId, Screenshot::MAX_TRIES],
+            [$this->storedRound(self::DRAFT)->screenshots()[5]->id()->toString(), \count(array_filter($this->storedRound(self::DRAFT)->screenshots(), static fn (Screenshot $screenshot): bool => self::FIRST_SCREENSHOT === $screenshot->firstTryId()->toString()))],
+        );
 
         $refused = $this->assertRefusedAndNothingSaved(ScreenshotTriesFull::REASON, fn () => $this->commands->addDraftScreenshotOnce(self::DRAFT, $lena, new ScreenshotWithPins(self::SECOND_FRESH_MEDIA, 'Title'), self::at(), $fifthTry->screenshotId));
 
@@ -901,6 +906,55 @@ final class UseCaseDraftRoundCommandsTest extends TestCase
             new ScreenshotWithPins(self::OTHER_MEDIA, null, null, []),
         ], $read->screenshots);
         self::assertSame($before, $this->snapshot());
+    }
+
+    /**
+     * "Make it a new ticket" copies what the owner would share (ADR-0048): the retake with its own text and pin, not
+     * the first try it replaced.
+     */
+    #[Test]
+    public function readingTheContentsOfADraftWithARetakeGivesOnlyTheLatestTryOfEachScreenshot(): void
+    {
+        $lena = new UserId(self::LENA);
+        $draft = $this->rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('The seeded draft is missing.');
+        $draft->addScreenshot($lena, new ScreenshotId(self::CONCURRENT_SCREENSHOT), self::FRESH_MEDIA, new ScreenshotId(self::FIRST_SCREENSHOT));
+        $draft->editScreenshotText($lena, new ScreenshotId(self::CONCURRENT_SCREENSHOT), 'Cart, fixed', null);
+        $draft->replacePins($lena, new ScreenshotId(self::CONCURRENT_SCREENSHOT), [Pin::placedBy(new PinId('0197a3c0-0000-7000-8000-000000000c02'), 1, 5.0, 6.0, 'Now right', $lena)]);
+        $this->rounds->save($draft, self::at());
+
+        $read = $this->commands->contentsOf(self::DRAFT, $lena);
+
+        self::assertEquals([
+            new ScreenshotWithPins(self::OTHER_MEDIA, null, null, []),
+            new ScreenshotWithPins(self::FRESH_MEDIA, 'Cart, fixed', null, [new PlacedPin(5.0, 6.0, 'Now right')]),
+        ], $read->screenshots);
+    }
+
+    /**
+     * Ten screenshots, one of them taken three times, are twelve pictures in the round but ten in the report draft, so
+     * its cap of ReportDrafts::MAX_SCREENSHOTS takes them.
+     */
+    #[Test]
+    public function theContentsOfADraftCountScreenshotsNotTriesAgainstTheReportDraftsCap(): void
+    {
+        $lena = new UserId(self::LENA);
+        $draft = $this->rounds->get(new RoundId(self::DRAFT)) ?? throw new \LogicException('The seeded draft is missing.');
+        for ($chain = 0; $chain < ReportDrafts::MAX_SCREENSHOTS - 2; ++$chain) {
+            $draft->addScreenshot($lena, new ScreenshotId(\sprintf('0197a3c0-0000-7000-8000-%012x', 0x1A00 + $chain)), \sprintf('0197a3c0-0000-7000-8000-%012x', 0x1D00 + $chain));
+        }
+        foreach ([0x1A80, 0x1A81] as $retake) {
+            $draft->addScreenshot($lena, new ScreenshotId(\sprintf('0197a3c0-0000-7000-8000-%012x', $retake)), \sprintf('0197a3c0-0000-7000-8000-%012x', $retake + 0x300), new ScreenshotId(self::FIRST_SCREENSHOT));
+        }
+        $this->rounds->save($draft, self::at());
+        self::assertCount(ReportDrafts::MAX_SCREENSHOTS + 2, $this->storedRound(self::DRAFT)->screenshots());
+
+        $read = $this->commands->contentsOf(self::DRAFT, $lena);
+
+        $mediaIds = array_map(static fn (ScreenshotWithPins $screenshot): string => $screenshot->mediaId, $read->screenshots);
+        self::assertCount(ReportDrafts::MAX_SCREENSHOTS, $mediaIds);
+        self::assertSame([self::OTHER_MEDIA, '0197a3c0-0000-7000-8000-000000001d81'], [$mediaIds[0], $mediaIds[ReportDrafts::MAX_SCREENSHOTS - 1]], 'The second screenshot first, the third try of the first one last.');
+        self::assertNotContains(self::MEDIA, $mediaIds, 'The first try of the retaken screenshot stays out.');
+        self::assertCount(ReportDrafts::MAX_SCREENSHOTS, ReportDraftContentRules::checked(new ReportDraftContent('Cart', '', $read->screenshots))->screenshots);
     }
 
     /**

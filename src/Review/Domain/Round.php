@@ -176,29 +176,6 @@ final class Round
     }
 
     /**
-     * Where each screenshot stands in its chain of tries, by position; a screenshot no one retook is "Try 1 of 1".
-     *
-     * @return list<ScreenshotTry>
-     */
-    public function tries(): array
-    {
-        $countByChain = [];
-        foreach ($this->screenshots as $screenshot) {
-            $chain = $screenshot->firstTryId()->toString();
-            $countByChain[$chain] = ($countByChain[$chain] ?? 0) + 1;
-        }
-        $tries = [];
-        $numberByChain = [];
-        foreach ($this->screenshots as $screenshot) {
-            $chain = $screenshot->firstTryId()->toString();
-            $numberByChain[$chain] = ($numberByChain[$chain] ?? 0) + 1;
-            $tries[] = new ScreenshotTry($screenshot->id(), $screenshot->firstTryId(), $numberByChain[$chain], $countByChain[$chain]);
-        }
-
-        return $tries;
-    }
-
-    /**
      * The last try of each chain, which is all anyone but the owner sees of a shared round (ADR-0048); a try keeps its
      * retakeOf, so it may name a first try that is not in this list.
      *
@@ -245,7 +222,8 @@ final class Round
     /**
      * Removes the picture with its pins; the others keep their positions. When it was the first try of a chain, the
      * next try becomes the first and the later ones point at it, so the chain stays one chain. A pin of the chain fixed
-     * on the removed try loses its mark, and one fixed on a later try names that try by its new number.
+     * on the removed try loses its mark, and one fixed on a later try names that try by its new number. When it was the
+     * latest try, the try before it is the latest now and its pins lose every mark, as a pin on the latest try takes none.
      *
      * @throws \DomainException when the round is not an open unshared draft of $actorId, or has no such picture; the
      *                          round stays as it was
@@ -259,13 +237,15 @@ final class Round
             $this->triesOfChain($removed->firstTryId()),
             static fn (Screenshot $try): bool => $try->position() <= $removed->position(),
         ));
+        $wasLatestTry = $this->isLatestTry($removed);
 
         $remaining = $this->screenshots;
         unset($remaining[$index]);
-        $this->screenshots = self::withChainStartedAgain(
-            self::withFixesRenumbered(array_values($remaining), $removed->firstTryId(), $removedTryNumber),
-            $screenshotId,
-        );
+        $remaining = self::withFixesRenumbered(array_values($remaining), $removed->firstTryId(), $removedTryNumber);
+        if ($wasLatestTry) {
+            $remaining = self::withMarksClearedOnLatestTry($remaining, $removed->firstTryId());
+        }
+        $this->screenshots = self::withChainStartedAgain($remaining, $screenshotId);
         ++$this->version;
     }
 
@@ -696,6 +676,31 @@ final class Round
         }
 
         return $screenshots;
+    }
+
+    /**
+     * The screenshots with no Fixed or Still wrong mark left on the latest try of $firstTryId's chain, if any try of it
+     * is left.
+     *
+     * @param list<Screenshot> $screenshots by position
+     *
+     * @return list<Screenshot>
+     */
+    private static function withMarksClearedOnLatestTry(array $screenshots, ScreenshotId $firstTryId): array
+    {
+        $latestIndex = null;
+        foreach ($screenshots as $index => $screenshot) {
+            if ($screenshot->firstTryId()->equals($firstTryId)) {
+                $latestIndex = $index;
+            }
+        }
+        if (null === $latestIndex) {
+            return $screenshots;
+        }
+        $latest = $screenshots[$latestIndex];
+        $screenshots[$latestIndex] = $latest->withPins(array_map(static fn (Pin $pin): Pin => $pin->withVerdict(null, null), $latest->pins()));
+
+        return array_values($screenshots);
     }
 
     /**
