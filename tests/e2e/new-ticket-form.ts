@@ -20,7 +20,7 @@ export async function openNewTicketForm(page: Page) {
     frame: form.locator('.screenshot__frame'),
     pins: form.locator('.screenshot__frame .pin'),
     pinCount: form.locator('.screenshot-report__count'),
-    submit: form.getByRole('button', { name: 'Make ticket' }),
+    submit: form.getByRole('button', { name: 'Create ticket' }),
   };
 }
 
@@ -30,8 +30,14 @@ export type TicketForm = Awaited<ReturnType<typeof openNewTicketForm>>;
 export async function fillTicket(form: TicketForm, title: string) {
   await form.title.fill(title);
   await form.description.fill(TICKET_DESCRIPTION);
-  await form.form.locator('input[name="type"]').first().check();
-  await form.form.locator('input[name="priority"]').first().check();
+  await chipOf(form, 'type').first().click();
+  await chipOf(form, 'priority').first().click();
+}
+
+/** The chips of a Type or Priority choice, one per value or only the one for value; the radio inside each is visually hidden, so a person clicks the chip. */
+export function chipOf(form: TicketForm, name: 'type' | 'priority', value?: string) {
+  const radio = form.form.page().locator(value === undefined ? `input[type="radio"][name="${name}"]` : `input[type="radio"][name="${name}"][value="${value}"]`);
+  return form.form.locator('label.report__chip').filter({ has: radio });
 }
 
 /** Clicks the picture where it is 25% and 70% across, and 40% and 75% down: two pins in different places. */

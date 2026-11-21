@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Request, type Route } from '@playwright/test';
 import { useAiSettingsInEachTest } from './ai-settings';
 import { OMAR_STORAGE_STATE } from './auth';
-import { openNewTicketForm, type TicketForm } from './new-ticket-form';
+import { chipOf, openNewTicketForm, type TicketForm } from './new-ticket-form';
 
 // "Check with AI" on the New ticket form (intake-check_controller.js over IntakeCheck's frame). The polls are answered
 // here, and so is every press but the refused one, so no check is queued on the shared async_ai queue and the spec
@@ -248,7 +248,7 @@ test.describe('"Check with AI" on the New ticket form', () => {
     await expect(checkButton).toBeHidden();
     await form.title.fill(TITLE);
     await form.description.fill(DETAIL);
-    await radio(form, 'priority', 'minor').check();
+    await chipOf(form, 'priority', 'minor').click();
     const project = await form.form.locator('select[name="project_id"]').inputValue();
     await page.evaluate(() => {
       (window as Window & { beforeTheCheck?: boolean }).beforeTheCheck = true;
@@ -308,7 +308,7 @@ test.describe('"Check with AI" on the New ticket form', () => {
     await nextPoll(page, polls, 1);
     await expect(radio(form, 'type', 'story')).toBeChecked();
     await expect(radio(form, 'priority', 'major')).toBeChecked();
-    await radio(form, 'priority', 'normal').check();
+    await chipOf(form, 'priority', 'normal').click();
 
     await pressCheck(page, CHECK_AGAIN_LABEL, 'running');
     expect(presses).toHaveLength(2);
@@ -337,10 +337,10 @@ test.describe('"Check with AI" on the New ticket form', () => {
     await expect(radio(form, 'priority', 'normal')).toBeChecked();
   });
 
-  test('after a refused "Make ticket" the check keeps the Priority the person picked before it', async ({ page }) => {
+  test('after a refused "Create ticket" the check keeps the Priority the person picked before it', async ({ page }) => {
     const { form, token } = await openFormWithPausedClock(page, async (openForm) => {
       await openForm.title.fill(TITLE);
-      await radio(openForm, 'priority', 'minor').check();
+      await chipOf(openForm, 'priority', 'minor').click();
       await openForm.form.locator('input[name="_csrf_token"]').evaluate((field) => {
         (field as HTMLInputElement).value = 'a-token-from-a-page-open-too-long';
       });

@@ -45,7 +45,7 @@ async function makeTicket(page: Page): Promise<string> {
   const title = `Talk about the basket ${randomUUID().slice(0, 8)}`;
   await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Give it to').selectOption({ label: 'Omar' });
-  await page.getByRole('button', { name: 'Make ticket' }).click();
+  await page.getByRole('button', { name: 'Create ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
   await expectTicketPageOf(page, title);
   return new URL(page.url()).pathname.replace('/t/', '');

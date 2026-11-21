@@ -75,7 +75,7 @@ final class NewTicketTest extends WebTestCase
 
         $this->client->request('GET', self::NEW_TICKET);
         self::assertResponseStatusCodeSame(200);
-        $this->client->submitForm('Make ticket', [
+        $this->client->submitForm('Create ticket', [
             'project_id' => $projectId,
             'title' => '  Checkout button does nothing ',
             'description' => 'Tapping Pay on the cart page shows no answer.',
@@ -146,7 +146,7 @@ final class NewTicketTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['bug'], $form->filter('input[name="type"][checked]')->extract(['value']));
         self::assertSame(['normal'], $form->filter('input[name="priority"][checked]')->extract(['value']));
-        $this->client->submitForm('Make ticket', ['title' => 'Search shows no results']);
+        $this->client->submitForm('Create ticket', ['title' => 'Search shows no results']);
 
         self::assertResponseRedirects('/t/SHOP-1', 302);
         self::assertSame([[
@@ -180,7 +180,7 @@ final class NewTicketTest extends WebTestCase
         $offeredAssigneeIds = $form->filter('select[name="assignee_id"] optgroup option')->extract(['value']);
         self::assertContains($people['Omar']->id()->toString(), $offeredAssigneeIds);
         self::assertNotContains($people['Raj']->id()->toString(), $offeredAssigneeIds);
-        $this->client->submitForm('Make ticket', ['project_id' => $projectId, 'title' => 'Search shows no results', 'assignee_id' => $people['Omar']->id()->toString()]);
+        $this->client->submitForm('Create ticket', ['project_id' => $projectId, 'title' => 'Search shows no results', 'assignee_id' => $people['Omar']->id()->toString()]);
 
         self::assertResponseRedirects('/t/SHOP-1', 302);
         self::assertSame($people['Omar']->id()->toString(), $this->committedTickets()[0]['assignee_id']);
@@ -218,7 +218,7 @@ final class NewTicketTest extends WebTestCase
 
         $this->client->request('GET', self::NEW_TICKET);
         self::assertResponseStatusCodeSame(200);
-        $this->client->submitForm('Make ticket', ['project_id' => $projectId, 'title' => 'Prices show no currency']);
+        $this->client->submitForm('Create ticket', ['project_id' => $projectId, 'title' => 'Prices show no currency']);
 
         self::assertResponseRedirects('/t/SHOP-1', 302);
         self::assertSame(['SHOP-1'], array_column($this->committedTickets(), 'key'));

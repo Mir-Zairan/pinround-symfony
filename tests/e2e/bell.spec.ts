@@ -49,7 +49,7 @@ async function pingOmarOnNewTicket(browser: Browser, message: string): Promise<s
   const title = `Check the bell ${randomUUID().slice(0, 8)}`;
   await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Give it to').selectOption({ label: 'Omar' });
-  await page.getByRole('button', { name: 'Make ticket' }).click();
+  await page.getByRole('button', { name: 'Create ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
   const key = new URL(page.url()).pathname.replace('/t/', '');
   await expectTicketPageOf(page, title);

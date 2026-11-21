@@ -18,7 +18,7 @@ export async function makeTicketGivenTo(browser: Browser, title: string, assigne
   await page.getByLabel('Project').selectOption(shopValue ?? '');
   await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Give it to').selectOption({ label: assigneeFirstName });
-  await page.getByRole('button', { name: 'Make ticket' }).click();
+  await page.getByRole('button', { name: 'Create ticket' }).click();
   await expect(page).toHaveURL(/\/t\/SHOP-\d+$/);
   const key = new URL(page.url()).pathname.replace('/t/', '');
   await expectTicketPageOf(page, title);
@@ -27,7 +27,7 @@ export async function makeTicketGivenTo(browser: Browser, title: string, assigne
 }
 
 /**
- * The page a Make ticket redirects to shows the new ticket. Not its "Ticket … made." toast: every Lena spec shares one
+ * The page a Create ticket redirects to shows the new ticket. Not its "Ticket … made." toast: every Lena spec shares one
  * session, and a page another worker opens in it at that moment takes the flash. NewTicketTest checks the toast.
  */
 export async function expectTicketPageOf(page: Page, title: string): Promise<void> {

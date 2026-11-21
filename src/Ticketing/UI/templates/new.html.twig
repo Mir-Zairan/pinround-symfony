@@ -2,12 +2,13 @@
 
 {% block title %}New ticket · pinround{% endblock %}
 
-{# The form fields and errors of the profile page, which this form shares. #}
+{# The form fields and errors of the profile page, which this form shares; report.css gives Type and Priority the chips of Report a problem. #}
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/intake-check.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/report.css') }}">
 {% endblock %}
 
 {% block main %}
@@ -58,29 +59,33 @@
                     <twig:ScreenshotReportField :uploadTargetKind="constant('App\\Ticketing\\UI\\Media\\NewTicketMediaTarget::KIND')" :uploadTargetId="screenshotProject.teamId.toString" :postedReport="report|default({})" :error="errors.screenshot|default(null)" />
                 {% endif %}
                 {# Assist's check by its component name, as Ticketing's UI may not use Assist (deptrac.yaml); inside the form, so its button posts the typed fields. #}
-                <fieldset class="where-it-goes">
+                <fieldset class="where-it-goes report__where">
                     <legend class="where-it-goes__title">Where it goes</legend>
                     {{ component('IntakeCheck') }}
-                    <fieldset class="profile__themes"{% if errors.type is defined %} aria-describedby="ticket-type-error"{% endif %}>
-                        <legend class="profile__legend">Type</legend>
-                        {% for value, typeLabel in typeLabels %}
-                            <label class="profile__theme">
-                                <input type="radio" name="type" value="{{ value }}"{% if value == input.type %} checked{% endif %} required>
-                                {{ typeLabel }}
-                            </label>
-                        {% endfor %}
+                    <fieldset class="report__chips"{% if errors.type is defined %} aria-describedby="ticket-type-error"{% endif %}>
+                        <legend class="report__label">Type</legend>
+                        <div class="report__chip-row">
+                            {% for value, typeLabel in typeLabels %}
+                                <label class="chip report__chip">
+                                    <input class="visually-hidden" type="radio" name="type" value="{{ value }}"{% if value == input.type %} checked{% endif %} required>
+                                    {{ typeLabel }}
+                                </label>
+                            {% endfor %}
+                        </div>
                         {% if errors.type is defined %}
                             <p class="profile__error" id="ticket-type-error">{{ errors.type }}</p>
                         {% endif %}
                     </fieldset>
-                    <fieldset class="profile__themes"{% if errors.priority is defined %} aria-describedby="ticket-priority-error"{% endif %}>
-                        <legend class="profile__legend">Priority</legend>
-                        {% for value, priorityLabel in priorityLabels %}
-                            <label class="profile__theme">
-                                <input type="radio" name="priority" value="{{ value }}"{% if value == input.priority %} checked{% endif %} required>
-                                {{ priorityLabel }}
-                            </label>
-                        {% endfor %}
+                    <fieldset class="report__chips"{% if errors.priority is defined %} aria-describedby="ticket-priority-error"{% endif %}>
+                        <legend class="report__label">Priority</legend>
+                        <div class="report__chip-row">
+                            {% for value, priorityLabel in priorityLabels %}
+                                <label class="chip report__chip">
+                                    <input class="visually-hidden" type="radio" name="priority" value="{{ value }}"{% if value == input.priority %} checked{% endif %} required>
+                                    {{ priorityLabel }}
+                                </label>
+                            {% endfor %}
+                        </div>
                         {% if errors.priority is defined %}
                             <p class="profile__error" id="ticket-priority-error">{{ errors.priority }}</p>
                         {% endif %}
@@ -109,8 +114,9 @@
                     </div>
                 {% endif %}
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
-                <div>
-                    <twig:Button type="submit">Make ticket</twig:Button>
+                <div class="report__buttons">
+                    <twig:Button variant="text" href="{{ path('web_home') }}">Cancel</twig:Button>
+                    <twig:Button type="submit">Create ticket</twig:Button>
                 </div>
             </form>
         </twig:Card>

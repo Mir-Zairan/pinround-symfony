@@ -42,8 +42,27 @@ test.describe('as Lena', () => {
     expect(await looksOf('project_id')).toEqual(await looksOf('title'));
   });
 
-  test('radios take the primary colour', async ({ page }) => {
+  test('the new ticket page picks Type and Priority with the chips of Report a problem, and offers Cancel beside Create ticket', async ({ page }) => {
     await open(page, '/tickets/new', 'New ticket');
+    const form = page.locator('main form[action="/tickets/new"]');
+    // Bug is the form's default pick, so Story starts unpicked.
+    const storyChip = form.locator('label.report__chip').filter({ has: page.locator('input[name="type"][value="story"]') });
+    const chipLooks = (chip: typeof storyChip) => chip.evaluate((label) => getComputedStyle(label).backgroundColor);
+
+    await expect(form.getByRole('group', { name: 'Type' }).locator('label.chip')).not.toHaveCount(0);
+    await expect(form.getByRole('group', { name: 'Priority' }).locator('label.chip')).not.toHaveCount(0);
+    await expect(storyChip.getByRole('radio')).not.toBeChecked();
+    const unpicked = await chipLooks(storyChip);
+    await storyChip.click();
+    await expect(storyChip.getByRole('radio')).toBeChecked();
+    expect(await chipLooks(storyChip)).not.toBe(unpicked);
+    await expect(form.locator('.report__buttons').getByRole('link')).toHaveText(['Cancel']);
+    await expect(form.locator('.report__buttons').getByRole('link', { name: 'Cancel' })).toHaveAttribute('href', '/');
+    await expect(form.locator('.report__buttons').getByRole('button')).toHaveText(['Create ticket']);
+  });
+
+  test('radios take the primary colour', async ({ page }) => {
+    await open(page, '/me/profile', 'Profile');
     const primary = await page.evaluate(() => {
       const probe = document.createElement('span');
       probe.style.color = 'var(--primary)';
@@ -53,7 +72,7 @@ test.describe('as Lena', () => {
       return colour;
     });
 
-    expect(await page.getByRole('radio', { name: 'Bug' }).evaluate((radio) => getComputedStyle(radio).accentColor)).toBe(primary);
+    expect(await page.locator('main input[type="radio"][name="theme"]').first().evaluate((radio) => getComputedStyle(radio).accentColor)).toBe(primary);
   });
 
   test('Report a problem has no serious or critical accessibility violations', async ({ page }) => {

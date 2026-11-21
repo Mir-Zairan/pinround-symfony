@@ -140,7 +140,7 @@ final class IntakeCheckControllerTest extends WebTestCase
         self::assertSame(null === $expectedLine ? [IntakeCheck::NOTE] : [], self::textsOf($frame->filter('.intake-check__line')));
         self::assertSame(null === $expectedLine ? [IntakeCheck::CHECK_LABEL] : [], self::textsOf($frame->filter('button.intake-check__button')));
         self::assertCount(0, $page->filter('[autofocus]'), 'Only a frame answer moves the focus.');
-        self::assertSame(['Make ticket'], self::textsOf($page->filter('form[action="/tickets/new"] button[type="submit"]')));
+        self::assertSame(['Create ticket'], self::textsOf($page->filter('form[action="/tickets/new"] button[type="submit"]')));
     }
 
     #[Test]
