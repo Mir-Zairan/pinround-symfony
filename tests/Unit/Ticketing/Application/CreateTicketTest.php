@@ -9,7 +9,9 @@ use App\Organization\Api\Roles;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Api\AssigneeRefused;
 use App\Ticketing\Api\Event\TicketCreated;
+use App\Ticketing\Api\ProblemReport;
 use App\Ticketing\Application\CreateTicket\AssigneeNotInTeam;
 use App\Ticketing\Application\CreateTicket\CreateTicket;
 use App\Ticketing\Application\CreateTicket\ProjectHasNoTeam;
@@ -162,6 +164,42 @@ final class CreateTicketTest extends TestCase
         self::assertSame([], $this->writes->writes);
     }
 
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function reportsGivenOutsideTheShopTeam(): iterable
+    {
+        yield 'an assignee who is a member of another team only' => [self::LENA, self::MIA, 'That person is not a lead or member of the project\'s team, so they cannot take the ticket.'];
+        yield 'a reporter who is in another team only' => [self::MIA, self::OMAR, 'Only someone in the team can give the report to a person in it.'];
+    }
+
+    /**
+     * Another module catches the refusal of report by the Api type alone, as it cannot name the Application's.
+     */
+    #[Test]
+    #[DataProvider('reportsGivenOutsideTheShopTeam')]
+    public function aReportGivenOutsideTheTeamIsRefusedAsTheApisAssigneeRefusedBeforeANumberIsTaken(string $reporterId, string $assigneeId, string $message): void
+    {
+        try {
+            $this->reportTicket(new UserId($reporterId), new UserId($assigneeId));
+            self::fail('A report was given to a person outside the project\'s team.');
+        } catch (AssigneeRefused $refused) {
+            self::assertSame($message, $refused->getMessage());
+        }
+
+        self::assertSame([], $this->nextTicketNumber->takenFor);
+        self::assertSame([], $this->writes->writes);
+    }
+
+    #[Test]
+    public function aReportGivenToAMemberOfTheTeamStartsInToDoWithThem(): void
+    {
+        $key = $this->reportTicket(new UserId(self::LENA), new UserId(self::OMAR));
+
+        self::assertSame('SHOP-12', $key);
+        self::assertSame([self::TO_DO_STEP, self::OMAR], [$this->writes->addedTickets[0]->stepId(), $this->writes->addedTickets[0]->assignee()?->toString()]);
+    }
+
     #[Test]
     public function theTeamsLeadMayBeTheAssignee(): void
     {
@@ -257,7 +295,45 @@ final class CreateTicketTest extends TestCase
         ?array $steps = null,
         string $description = 'Steps: open the cart on a phone.',
     ): string {
-        $createTicket = new CreateTicket(
+        return $this->createTicketUseCase($project, $steps)->create(
+            new OrganizationId(self::ACME_FOODS),
+            new UserId(self::LENA),
+            self::SHOP_PROJECT,
+            $title,
+            $description,
+            $type,
+            $priority,
+            $assignee,
+            new \DateTimeImmutable(self::REPORTED_AT.' UTC'),
+        );
+    }
+
+    /**
+     * @return string the new ticket's key
+     */
+    private function reportTicket(UserId $reporter, UserId $assignee): string
+    {
+        return $this->createTicketUseCase(self::shopProject(), null)->report(new ProblemReport(
+            new OrganizationId(self::ACME_FOODS),
+            $reporter,
+            self::SHOP_PROJECT,
+            new TeamId(self::SHOP_TEAM),
+            'Checkout button is hidden',
+            'Steps: open the cart on a phone.',
+            'bug',
+            'normal',
+            $assignee,
+            [],
+            new \DateTimeImmutable(self::REPORTED_AT.' UTC'),
+        ))->key;
+    }
+
+    /**
+     * @param list<StepView>|null $steps as createTicket takes them
+     */
+    private function createTicketUseCase(Project $project, ?array $steps): CreateTicket
+    {
+        return new CreateTicket(
             new OrganizationProjects(new InMemoryProjects(false, $project)),
             self::shopTeamRoles(),
             new FixedStepQueries($steps ?? [
@@ -271,18 +347,6 @@ final class CreateTicketTest extends TestCase
             $this->writes,
             $this->writes,
             new \App\Ticketing\Domain\Intake\CheckReasons(),
-        );
-
-        return $createTicket->create(
-            new OrganizationId(self::ACME_FOODS),
-            new UserId(self::LENA),
-            self::SHOP_PROJECT,
-            $title,
-            $description,
-            $type,
-            $priority,
-            $assignee,
-            new \DateTimeImmutable(self::REPORTED_AT.' UTC'),
         );
     }
 

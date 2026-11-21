@@ -209,6 +209,31 @@ final class ReportDraftGiveItToTest extends WebTestCase
         self::assertSame(['SHOP-90'], $this->ticketKeys());
     }
 
+    /**
+     * Omar leaves Shop after Mia's page filled the team people cache, which still offers him: Ticketing's own check on
+     * the team refuses him, and Send answers as for any person not offered.
+     */
+    #[Test]
+    public function sendToAPersonWhoLeftTheTeamSinceThePageWasShownIsRefusedAndChangesNothing(): void
+    {
+        $draft = $this->addDraft('Mia');
+        $this->logIn($this->client, $this->people['Mia']);
+        $omarId = $this->people['Omar']->id()->toString();
+        $page = $this->client->request('GET', self::DRAFTS.'/'.$draft);
+        self::assertResponseStatusCodeSame(200);
+        self::assertContains([$omarId, 'Omar'], $this->giveToChoicesOf($page->filter('form.login__form fieldset')), 'Omar is offered before he leaves.');
+        $parameters = [$this->shop->toString(), $omarId];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM org_team_member WHERE team_id = ? AND user_id = ?', $parameters));
+
+        $page = $this->client->request('POST', self::DRAFTS.'/'.$draft.'/send', [...$this->sendFields($draft), 'title' => 'Edited before Send', ReportDraftController::ASSIGNEE_FIELD => $omarId]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(ReportGiveTo::NOT_OFFERED, $page->filter('#report-draft-error')->text());
+        self::assertSame('Edited before Send', $page->filter('input[name=title]')->attr('value'));
+        self::assertSame([self::TITLE, 1, $this->people['Mia']->id()->toString()], array_values($this->rowOf('SELECT title, version, owner_id FROM rvw_report_draft WHERE id = ?', [$draft])));
+        self::assertSame(['SHOP-90'], $this->ticketKeys());
+    }
+
     #[Test]
     public function nobodyButTheOwnerSendsTheDraftToAPerson(): void
     {
