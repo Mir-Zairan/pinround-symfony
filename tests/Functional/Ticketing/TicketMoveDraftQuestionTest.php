@@ -198,7 +198,9 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $content = (string) $this->client->getResponse()->getContent();
         $roundsTarget = '<turbo-stream action="replace" target="'.TicketPageParts::ROUNDS_ID.'"><template>';
         self::assertSame(1, substr_count($content, $roundsTarget), 'The move\'s stream replaces the Rounds section once.');
-        $roundsStream = new Crawler(strstr(substr($content, (int) strpos($content, $roundsTarget)), '</template>', true) ?: '');
+        $roundsTemplate = strstr(substr($content, (int) strpos($content, $roundsTarget)), '</template>', true);
+        self::assertIsString($roundsTemplate, 'The Rounds stream closes its template.');
+        $roundsStream = new Crawler($roundsTemplate);
         self::assertSame(self::TICKET_PAGE.'/rounds', $roundsStream->filter('section#'.TicketPageParts::ROUNDS_ID.' > turbo-frame#'.RoundsSection::FRAME_ID.'[loading="lazy"][data-live-refresh]')->attr('src'));
 
         $after = $this->roundsFrame();
@@ -206,7 +208,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         self::assertCount(1, array_filter($headlines, static fn (string $headline): bool => str_starts_with($headline, 'Round 2 · ')), implode(' | ', $headlines));
         self::assertNotContains('Draft round · only you can see this', $headlines);
         self::assertCount(0, $after->filter('.round-card__share'));
-        self::assertStringNotContainsString('Share with the team now', $this->client->getResponse()->getContent() ?: '');
+        self::assertStringNotContainsString('Share with the team now', (string) $this->client->getResponse()->getContent());
     }
 
     /**
