@@ -55,7 +55,7 @@ final class NowNextContextTest extends TestCase
         self::assertSame(F::OMAR, $context->viewerId?->toString());
         self::assertSame(F::LENA, $context->askerId?->toString());
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The Next sentence needs the team; this context was made for Now only.');
+        $this->expectExceptionMessageIsOrContains('The Next sentence needs the team; this context was made for Now only.');
 
         $context->teamForNext();
     }

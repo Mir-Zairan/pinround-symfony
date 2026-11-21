@@ -156,7 +156,7 @@ final class PlainNowNextTest extends TestCase
         $context = NowNextContext::forNowOnly('In progress', [F::LENA => 'Lena Hart', F::OMAR => 'Omar'], F::user(F::LENA));
 
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('The Next sentence needs the team');
+        $this->expectExceptionMessageIsOrContains('The Next sentence needs the team');
 
         self::nowNext()->next(F::ticket('progress', 'doing', ['assigneeId' => $omar]), new Turn($omar, null, NeedsYouKind::Build), $context);
     }
