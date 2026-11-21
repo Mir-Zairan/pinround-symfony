@@ -6,10 +6,12 @@
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/account-tabs.css') }}">
 {% endblock %}
 
 {% block main %}
     <div class="security">
+        {% include '@Identity/_account_tabs.html.twig' with {current: 'identity_security'} only %}
         <h1 class="security__title">Security</h1>
         {% for notice in page_flashes('notice') %}
             <p class="login__notice" role="status">{{ notice }}</p>

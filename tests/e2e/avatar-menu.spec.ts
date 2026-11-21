@@ -221,7 +221,8 @@ test('Tab past the last item closes the menu and moves on to the page', async ({
   await page.keyboard.press('Tab');
 
   await expect(avatar(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByLabel('Display name')).toBeFocused();
+  // The account tab rail is the page's first stop, above the title.
+  await expect(page.getByRole('navigation', { name: 'Your account' }).getByRole('link', { name: 'Profile' })).toBeFocused();
 });
 
 for (const theme of ['Light', 'Dark'] as const) {

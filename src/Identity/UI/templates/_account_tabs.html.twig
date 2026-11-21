@@ -1,0 +1,13 @@
+{#- The small tab rail between a person's own pages, which the avatar menu also lists, in the menu's order. current is the
+    route of the page it sits on; every person may open all three, so the rail asks no voter. account-tabs.css styles it. -#}
+<nav class="account-tabs" aria-label="Your account">
+    <ul class="account-tabs__list">
+        {% for tab in [
+            {label: 'Profile', route: 'identity_profile'},
+            {label: 'Security', route: 'identity_security'},
+            {label: 'API tokens', route: 'identity_tokens'},
+        ] %}
+            <li><a class="account-tabs__tab" href="{{ path(tab.route) }}"{% if tab.route == current %} aria-current="page"{% endif %}>{{ tab.label }}</a></li>
+        {% endfor %}
+    </ul>
+</nav>

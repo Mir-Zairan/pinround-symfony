@@ -28,6 +28,23 @@ test('the profile page has the name, the time zone, the theme and a Save button'
   await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
 });
 
+test('the account tab rail goes from Profile to Security and API tokens, marking the open page', async ({ page }) => {
+  await openProfilePage(page);
+  const rail = page.getByRole('navigation', { name: 'Your account' });
+  await expect(rail.getByRole('link')).toHaveText(['Profile', 'Security', 'API tokens']);
+  await expect(rail.locator('[aria-current="page"]')).toHaveText('Profile');
+
+  await rail.getByRole('link', { name: 'Security' }).click();
+  await expect(page).toHaveURL(/\/me\/security$/);
+  await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Your account' }).locator('[aria-current="page"]')).toHaveText('Security');
+
+  await page.getByRole('navigation', { name: 'Your account' }).getByRole('link', { name: 'API tokens' }).click();
+  await expect(page).toHaveURL(/\/me\/tokens$/);
+  await expect(page.getByRole('heading', { name: 'API tokens', level: 1 })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Your account' }).locator('[aria-current="page"]')).toHaveText('API tokens');
+});
+
 test('the theme choice looks like the avatar menu\'s: the chosen theme is filled as the menu\'s pressed segment', async ({ page }) => {
   await openProfilePage(page);
   const chosenTheme = page.getByRole('group', { name: 'Theme' }).locator('label', { has: page.locator('input:checked') });
