@@ -213,7 +213,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   4. Use the design-system components, not login or security classes.
 - **Acceptance:**
   - [ ] With 4 screenshots, one shows at a time; switching keeps every pin and note (Playwright).
-  - [ ] The form posts the same data as before (functional test unchanged or extended).
+  - [x] The form posts the same data as before (functional test unchanged or extended). (`tests/Functional/Review/ReportDraft/ReportDraftScreenshotEditorTest::savingTheFormUntouchedKeepsEveryScreenshotPinAndNote` and `::aSaveWithFourScreenshotsStoresEachTypedNoteAndDropsTheRemovedOne`)
 - **Prototype check:** `Main › Report a problem`.
 - **Size:** M
 
@@ -393,3 +393,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (P14.T7, 7f): Round 0 loads the thumb variant at its derived size (`SignedUrls::forVariants` returns the thumb size in the same query), drawn no taller than 360 px; a picture with no thumb falls back to the view variant.
 - 2026-11-21 (P14.T8): the round page header says "Ready for you" only to the person the round is ready for (`RoundReadyFor`, shared with the ticket page's round bar), and nothing on a round that waits for no verdict. Steps 3 and 4 are proven by `RoundPageTest::theHeaderNamesWhomTheTicketPagesRoundBarNames`, `Unit/Review/UI/RoundReadyForTest` and `RoundPageTest::theHeaderTabsAndChipsShowWhatEachAreaStandsAt` (breadcrumb link style); T8 has no acceptance criterion for them, so nothing was ticked.
 - 2026-11-21 (P14.T8): Full screen works for every round kind and from Round 0's card; Exit and Escape go back where you came from (round page or ticket). The Full screen criterion stays open: its Escape check still needs the Playwright run (`focus-review.spec.ts`).
+- 2026-11-21 (T10): Report a problem and the report draft page show screenshots in the shared ScreenshotEditor; neither page can add pictures there (canAdd off). The New ticket form still uses the old picture markup (usesScreenshotEditor off).
+- 2026-11-21 (T8): the round page's pager nav is named 'Back and next' so it no longer contains the strip's name; strip thumbnails carry their size and load at once.
+- 2026-11-21 (T7): review rows end in '· N screenshots', counted by the rounds query; the round bar reads one narrow query of the lowest open shared round.
+- 2026-11-21 (T7): to fit five rounds under 1,400 px at 1440x900, Round 0's picture is at most 200 px high with its title beside it, round rows are shorter, and the thread composer stays one line until focused (estimate ~1,344 px, waiting on ticket-rounds-height.spec.ts).
+- 2026-11-21: the ticket page markup runs main column, Your next step, Rounds, aside, so keyboard focus follows what people see; wide screens place them with grid areas (resolves the focus-order caveat above).

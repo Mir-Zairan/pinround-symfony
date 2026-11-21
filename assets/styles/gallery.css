@@ -43,7 +43,7 @@
   margin: 0 0 8px;
 }
 
-/* About as wide as the ticket page's aside column (ticket.css, .ticket__aside, from 300px), where the box sits. */
+/* About as wide as the ticket page's aside column (ticket.css, 300px), where grid areas place the box. */
 .gallery-next-step {
   max-width: 360px;
 }
