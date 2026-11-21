@@ -36,17 +36,21 @@ const OPEN_EDITORS = 'dialog[open], details[open] :is(textarea, input[type="text
 // A box whose Cancel folds it away and keeps the text (the thread's Answer and Reply boxes) is still in use while that
 // text is changed, open or not.
 const KEPT_TEXT = '[data-live-keeps-text] :is(textarea, input[type="text"])';
+// An upload in flight, or a picture not yet added where it was uploaded (presigned-upload): a swap would stop it, and the
+// picture would never be added.
+const BUSY_UPLOADS = '[data-upload-busy]';
 
-// Events after which a held part or visit may be free again: focus moved, a disclosure opened or closed, a dialog closed. None
-// of toggle and close bubbles, so they are heard in the capture phase.
-const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close'];
+// Events after which a held part or visit may be free again: focus moved, a disclosure opened or closed, a dialog closed,
+// an upload ended. None of toggle and close bubbles, so they are heard in the capture phase.
+const HOLD_ENDING_EVENTS = ['focusin', 'focusout', 'toggle', 'close', 'presigned-upload:idle'];
 
 // A part with an open editor, with a field being typed in, or with a folded box that promises to keep its text, is held
 // rather than lose the text: a swapped part loses both, a reloaded frame keeps only what sits in a data-turbo-permanent
-// element. A focused button or link holds nothing: its copy in the fresh part takes the focus back.
+// element. A part with an upload in flight is held too. A focused button or link holds nothing: its copy in the fresh
+// part takes the focus back.
 function isPartInUse(part) {
   const focused = document.activeElement;
-  if (part.querySelector(OPEN_EDITORS) !== null || [...part.querySelectorAll(KEPT_TEXT)].some(isFieldChanged)) {
+  if (part.querySelector(OPEN_EDITORS) !== null || part.querySelector(BUSY_UPLOADS) !== null || [...part.querySelectorAll(KEPT_TEXT)].some(isFieldChanged)) {
     return true;
   }
   if (focused === null || !part.contains(focused) || !focused.matches(FORM_FIELDS)) {
@@ -75,9 +79,10 @@ function isFieldChanged(field) {
   return field.value !== field.defaultValue;
 }
 
-// A whole-page visit would lose any field the person changed and close any open editor, wherever it sits on the page.
+// A whole-page visit would lose any field the person changed, close any open editor and stop any upload, wherever it sits
+// on the page.
 function isPageInUse() {
-  return document.querySelector(OPEN_EDITORS) !== null || [...document.querySelectorAll(FORM_FIELDS)].some(isFieldChanged);
+  return document.querySelector(OPEN_EDITORS) !== null || document.querySelector(BUSY_UPLOADS) !== null || [...document.querySelectorAll(FORM_FIELDS)].some(isFieldChanged);
 }
 
 // Web Locks exist only in a secure context (HTTPS or localhost); without them a tab asks and connects unguarded.

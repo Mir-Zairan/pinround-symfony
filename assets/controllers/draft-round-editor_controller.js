@@ -53,20 +53,28 @@ export default class extends Controller {
   }
 
   // The picture is ready: add it, then empty the upload (also when the server refused the add, which it shows itself).
+  // preventDefault keeps the upload busy, so a live refresh of the Rounds section waits until the picture is added.
   async addUploaded(event) {
+    const upload = this.hasPresignedUploadOutlet ? this.presignedUploadOutlet : null;
+    if (upload !== null) {
+      event.preventDefault();
+    }
     this.extraWaits = 0;
-    const component = await this.component();
-    await this.send(component, 'addScreenshot', { mediaId: event.detail.mediaId });
-    if (this.hasPresignedUploadOutlet) {
-      this.presignedUploadOutlet.clear();
+    try {
+      const component = await this.component();
+      await this.send(component, 'addScreenshot', { mediaId: event.detail.mediaId });
+    } finally {
+      upload?.clear();
     }
   }
 
-  // Still processing after 15 s: keep the media id and poll again, a bounded number of times.
-  keepWaiting() {
+  // Still processing after 15 s: keep the media id and poll again, a bounded number of times. The upload stays busy
+  // meanwhile (preventDefault), as for addUploaded.
+  keepWaiting(event) {
     if (!this.hasPresignedUploadOutlet) {
       return;
     }
+    event.preventDefault();
     if (this.extraWaits >= MAX_EXTRA_PROCESSING_WAITS) {
       this.extraWaits = 0;
       this.presignedUploadOutlet.clear();
