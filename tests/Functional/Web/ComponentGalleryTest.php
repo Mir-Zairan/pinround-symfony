@@ -23,16 +23,12 @@ final class ComponentGalleryTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Give SHOP-12 to…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar', 'Screenshot with pins', 'Screenshot with pins you place', 'Screenshot with pins already placed', 'Screenshot being processed', 'Screenshot that could not be processed', 'Screenshot upload'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
-        // 4 variants x 2 sizes x (normal, disabled, link)
-        // plus the one action button inside the empty-state example, the dialog's trigger, Cancel and Confirm, the
-        // two person pickers' Cancel and the Assign one's "Give it to…", the next step box's verb, its "Move to another
-        // step…" summary, Cancel and Move, and the two queue bars' Previous, Next ticket or Finish, and Stop, and the
-        // editable screenshots' two Add pin buttons and the placed pins' Remove buttons
-        self::assertCount(46, $crawler->filter('main .btn'));
+        self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Give SHOP-12 to…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar', 'Screenshot with pins', 'Screenshot with pins you place', 'Screenshot with pins already placed', 'Screenshot being processed', 'Screenshot that could not be processed', 'Screenshot editor', 'Progress dots', 'Screenshot upload'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
+        // 4 variants x 2 sizes x (normal, disabled, link), plus the buttons of the examples further down the page.
+        self::assertCount(53, $crawler->filter('main .btn'));
         self::assertCount(11, $crawler->filter('main a.btn[href]'));
         self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
-        self::assertCount(11, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertCount(14, $crawler->filter('main button.btn.btn-text:not([disabled])'));
     }
 
     #[Test]
@@ -221,6 +217,38 @@ final class ComponentGalleryTest extends WebTestCase
                 $bar->filter('form')->each(static fn (Crawler $form): ?string => $form->attr('action')),
             ]),
         );
+    }
+
+    #[Test]
+    public function theGalleryShowsTheScreenshotEditorWithItsStylesheet(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $crawler->filter('link[rel="stylesheet"][href*="styles/screenshot-editor-"]'));
+        $editor = $crawler->filter('#gallery-screenshot-editor-heading ~ form#gallery-screenshot-editor-form [data-controller="screenshot-editor"]');
+        self::assertCount(1, $editor);
+        self::assertCount(3, $editor->filter('[role="tablist"] button[role="tab"]'));
+        self::assertCount(3, $editor->filter('[role="tabpanel"] button.pin'));
+    }
+
+    /**
+     * The four stages of a report, one row per state: the first, a middle one, a waiting one and the last.
+     */
+    #[Test]
+    public function theGalleryShowsEveryStateOfTheProgressDots(): void
+    {
+        $client = self::createClient();
+        $crawler = $client->request('GET', '/_gallery');
+
+        self::assertResponseStatusCodeSame(200);
+        $rows = $crawler->filter('#gallery-progress-dots-heading ~ .gallery-panel .progress-dots[role="img"]');
+        self::assertSame(
+            ['Step 1 of 4: Reported', 'Step 2 of 4: Building', 'Step 3 of 4: Checking, waiting', 'Step 4 of 4: Done'],
+            $rows->each(static fn (Crawler $row): string => (string) $row->attr('aria-label')),
+        );
+        self::assertSame('Waiting', $rows->eq(2)->filter('.progress-dots__stage--waiting .progress-dots__label')->text());
     }
 
     #[Test]
