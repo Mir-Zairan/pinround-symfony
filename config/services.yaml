@@ -472,6 +472,14 @@ when@test:
         test.identity_issue_api_token:
             alias: App\Identity\Application\IssueApiToken
             public: true
+        # Nothing issues or trades an OAuth code before the consent page and the token endpoint;
+        # DoctrineOAuthAuthorizationCodesTest and NamedMemberOrganizationsTest get them as those will.
+        test.identity_oauth_authorization_codes:
+            alias: App\Identity\Domain\OAuthAuthorizationCodes
+            public: true
+        test.identity_member_organizations:
+            alias: App\Identity\Api\MemberOrganizations
+            public: true
         # The container drops a private service no test asks for; the integration tests get the Api as a page does.
         test.review_round_queries:
             alias: App\Review\Api\RoundQueries
