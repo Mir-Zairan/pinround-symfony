@@ -12,7 +12,7 @@ The contract of what pinround shall do. Phase plans cite these IDs; tests prove 
 - [INT — Intake and checks](#int--intake-and-checks): report a problem, duplicates, check reasons, checker, visibility (FR-INT-01…15).
 - [CNV — Conversation](#cnv--conversation): comments, questions, answers, replies, resolve (FR-CNV-01…08).
 - [PNG — Pings and notifications](#png--pings-and-notifications): ping, limits, grouping, bell, auto-clear, quiet hours, live updates (FR-PNG-01…11).
-- [RND — Screenshots, pins and rounds](#rnd--screenshots-pins-and-rounds): uploads, pins, Round 0/1, review rounds, draft rounds, findings, live pins (FR-RND-01…18).
+- [RND — Screenshots, pins and rounds](#rnd--screenshots-pins-and-rounds): uploads, pins, Round 0/1, review rounds, draft rounds, findings, live pins, one-click connect (FR-RND-01…18, 21).
 - [HOME — Home page](#home--home-page): headline, needs-you score, groups, pings, focus chips, admin card (FR-HOME-01…11).
 - [MINE — My reports](#mine--my-reports): parcel tracking, groups, inline answer, menu (FR-MINE-01…08).
 - [MGR — Manager overview](#mgr--manager-overview): teams at a glance (FR-MGR-01…04).
@@ -509,7 +509,7 @@ The draft shows a copyable line "Read my pinround notes for SHOP-88 and fix what
 Lists rounds in order (Round 0, 1, review rounds, shared drafts) with "Open round"; when none: "No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here."
 
 **FR-RND-15 — Browser capture plugin** · Could · Prototype: "Capture with pinround" button
-A browser extension captures the visible page (or a selected area) and sends it to a report or to the user's draft round on a chosen ticket, using a personal access token. It sends the optional title and summary with the screenshot ([FR-RND-16](#rnd--screenshots-pins-and-rounds)).
+A browser extension captures the visible page (or a selected area) and sends it to a report or to the user's draft round on a chosen ticket. It connects through the consent page ([FR-RND-21](#rnd--screenshots-pins-and-rounds)) or with a pasted personal access token. It sends the optional title and summary with the screenshot ([FR-RND-16](#rnd--screenshots-pins-and-rounds)).
 
 **FR-RND-16 — Picture title and summary** · Must · Prototype: none (product owner's decision, 2026-11-14)
 Every screenshot in every round kind (report, checklist, review, draft) has an optional **title** (max 120 characters, e.g. "Case B: a new delivery date leaves the invoice total alone") and an optional **summary** (one free text box, max 600 characters, plain words, "what this picture shows"). On a before picture the summary says what is wrong; on an after picture it says what changed and what it shows now. Both are shown above the picture as text, never drawn into the image pixels. Pictures keep their order, so several titled pictures read like cases A, B, C. The purpose: a screenshot is understandable without opening the ticket description, for people and for coding agents.
@@ -530,6 +530,13 @@ The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)) has "Pin 
 - Accept: a pin lands at the same percent (± 0.5) on the captured image.
 - Accept: captures on several pages end in one report draft, in order, up to 10.
 - Accept: with no title and no summary nothing extra is shown and nothing is required.
+
+**FR-RND-21 — One-click connect** · Should · Prototype: none (product owner's decision, 2026-11-21)
+The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)), Claude Code and a Claude custom connector connect to pinround through a consent page, with no pasted token (OAuth 2.1, authorization code with PKCE, [ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)). The consent page shows the app's name, the host it sends the person back to and what each scope lets it do; the person picks one organization they are a member of and presses **Allow** or **Deny**. It asks for the same recent password and two-step login as making a token ([FR-ID-05](#id--identity-and-access)). The tokens act as the person, with their permissions and the asked scopes, in the picked organization only: an access token works for 1 hour, a refresh token is replaced at each use. Pasted personal access tokens keep working. FR-RND-19 and FR-RND-20 are kept for the tries and the one open round per ticket of phase 14.
+- Accept: the extension connects without a pasted token, and its calls use the issued token.
+- Accept: a consent posted with the id of an organization the person is not a member of gets 404, and no code is issued; a token of Acme Foods answers not found for another organization's data.
+- Accept: the extension's "Sign out" revokes its tokens, and a revoked token is refused at once; a refresh token used twice, or a code used twice, revokes every token issued from that consent.
+- Accept: once the person leaves the organization, its access and refresh tokens are refused.
 
 ---
 

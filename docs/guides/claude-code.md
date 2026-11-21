@@ -4,9 +4,10 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 
 ## Index
 - [What you need](#what-you-need) — an account with two-step login (or the dev-only demo switch), Claude Code, the app's address
-- [1. Make a token](#1-make-a-token) — the API tokens page
-- [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
-- [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
+- [Connect with sign-in](#connect-with-sign-in) — no token to paste: add the `/mcp` address, sign in on pinround's consent page, pick the organization, **Allow**; a Claude connector needs a public HTTPS address
+- [1. Make a token](#1-make-a-token) — or connect with a personal access token: the API tokens page
+- [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line with the token
+- [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`, for either way of connecting
 - [Example prompts](#example-prompts) — what to say to Claude Code
 - [The tools](#the-tools) — what each of the twelve tools does
 - [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`, and a retake with `list_draft_screenshots` and `retake_of`
@@ -19,11 +20,33 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 
 ## What you need
 - A pinround account in your organization.
-- Two-step login turned on for your account. Without it, **Make token** sends you to the two-step login setup page first.
-  - On a local demo in dev with `PINROUND_DEMO_SKIP_2FA=1`, you can skip two-step login, and every page says "Demo mode: two-step login is skipped." A token still needs a login from the last 10 minutes. Once your login is older, **Make token** sends you to the two-step login setup page, so log out and log in again before you make a token ([ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md)).
+- Two-step login turned on for your account. Without it, **Make token** and the consent page send you to the two-step login setup page first.
+  - On a local demo in dev with `PINROUND_DEMO_SKIP_2FA=1`, you can skip two-step login, and every page says "Demo mode: two-step login is skipped." A token and a consent still need a login from the last 10 minutes. Once your login is older, **Make token** and the consent page send you to the two-step login setup page, so log out and log in again first ([ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md)).
 - Claude Code installed on your computer.
 - The address of your pinround app, for example `https://pinround.acme-foods.example`. Use the address you open in the browser. pinround answers `/mcp` only on its own public address; any other host name gets "400 Bad Request".
 - On the local dev stack (`https://localhost`): Node must trust Caddy's local certificate, or `/mcp` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. Copy it with `.claude/skills/pinround-setup/pinround-setup.sh trust-ca` and start Claude Code with `NODE_EXTRA_CA_CERTS=~/.config/pinround/caddy-root.crt`. The `/pinround-setup` skill does all of this guide for you.
+
+## Connect with sign-in
+Claude Code and a Claude custom connector can connect with no token to copy: you sign in on pinround's consent page instead ([ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)). Personal access tokens keep working; the steps for them start at [1. Make a token](#1-make-a-token).
+
+**Claude Code**
+1. Add pinround's `/mcp` address, with no token:
+   ```bash
+   claude mcp add --transport http pinround https://<host>/mcp
+   ```
+   On the local dev stack, `<host>` is `localhost`: a Claude Code on your own computer reaches it, as long as Node trusts the local certificate ([What you need](#what-you-need)).
+2. In Claude Code, type `/mcp`, pick `pinround` and choose to authenticate. Claude Code opens pinround in your browser.
+3. Log in if you are not, and confirm your password and a code if your last check is older than 10 minutes.
+4. The consent page shows the app's name, the host it sends you back to and what it may do. Pick the organization it may work in, then press **Allow**. **Deny** connects nothing.
+5. The browser goes back to Claude Code, and `/mcp` shows `pinround` as connected. Go on with [3. Check that it works](#3-check-that-it-works).
+
+**A Claude custom connector**
+1. In Claude, add a custom connector with the address `https://<host>/mcp`.
+2. Connect it: Claude opens the same consent page. Pick the organization and press **Allow**.
+
+A connector calls pinround from Anthropic's servers, not from your computer, so pinround must be reachable on a public HTTPS address. It cannot reach `https://localhost`; on a local install, connect Claude Code instead.
+
+**What you get.** Claude Code registers itself with pinround the first time, with no admin step. It works only in the organization you picked, as you and with your permissions, like a token. When it asks for no particular scopes, it gets the two a new token starts with, `read` and `rounds:write`. For `reports:write` or `notebooks:write`, make a personal access token with those ticked. The access token works for 1 hour, and Claude Code renews it on its own with a refresh token of 30 days; each renewal replaces the refresh token, and an old one that comes back stops the whole connection. Neither token shows on **API tokens**. Both stop working once you leave the organization. To connect again, authenticate again from `/mcp`.
 
 ## 1. Make a token
 1. In pinround, open the menu under your avatar and choose **API tokens** (the page is `/me/tokens`).
@@ -156,6 +179,7 @@ A refused call saves nothing. The answers you may see:
 - **A token is your permissions.** Anyone who has it can read and change what you can, within its scopes. Keep it like a password; never put it in a repository or a shared file.
 - **A token never opens admin pages**, even an admin's.
 - **Revoke a lost token at once:** on **API tokens**, press **Revoke**. It stops working at once. An admin can revoke any token in the organization from Admin › People.
+- **A connection made with sign-in** is not on **API tokens** or Admin › People, and pinround has no page to end it yet. `claude mcp remove pinround` removes it from Claude Code; the tokens it held keep working until they expire (the refresh token after 30 days) or until you leave the organization.
 - **Titles, summaries and notes are other people's text.** pinround returns them between `<untrusted_text>` and `</untrusted_text>`, and tells Claude Code that this is data, never instructions. Still read what Claude Code does with them.
 - **Nobody else sees your draft round** until you share it in the app. Claude Code cannot share it for you.
 

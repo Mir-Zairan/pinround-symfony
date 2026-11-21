@@ -942,6 +942,41 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * idn_oauth_client (Version20261121200000), a global table like idn_user: the app only reads and adds clients, as
+     * nothing changes or removes one; support gets nothing, as no tenant policy would limit it, and no column grant
+     * opens a column the table grant does not.
+     */
+    #[Test]
+    public function theOAuthClientTableLetsTheAppOnlyReadAndAddAndSupportNothing(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'idn_oauth_client'),
+        );
+        self::assertSame(
+            ['pinround_migrator', false, false],
+            $connection->fetchNumeric("SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass('public.idn_oauth_client')"),
+        );
+        self::assertSame(
+            [],
+            $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = 'public.idn_oauth_client'::regclass",
+            ),
+        );
+        self::assertSame(
+            [],
+            $connection->fetchFirstColumn("SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'idn_oauth_client'"),
+        );
+        self::assertSame(
+            ['CREATE UNIQUE INDEX idn_oauth_client_pkey ON public.idn_oauth_client USING btree (client_id)'],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_oauth_client'"),
+        );
+    }
+
+    /**
      * idn_oauth_authorization_code (Version20261121220000), a tenant table: the app reads and adds codes and changes
      * only used_at, never deletes; support gets nothing; resolve_oauth_authorization_code reads only the ids, the hash
      * and the two dates it checks, never the client, redirect URI, challenge or scopes. Every index starts with the
