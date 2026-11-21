@@ -18,6 +18,9 @@ use Symfony\UX\TwigComponent\Attribute\PostMount;
  * The screenshot-editor controller switches screenshots and turns a remove field on and off. "Add screenshot" fires
  * screenshot-editor:add and "Remove screenshot" screenshot-editor:remove (detail.index) for the page to act on; a
  * screenshot without a remove field is removed only by the page. Renders the first screenshot shown.
+ *
+ * A screenshot that places pins is the report form's one picture: its frame always holds the image and its thumbnail
+ * an image, so the presigned-upload and screenshot-report controllers around the editor can draw a new upload in both.
  */
 #[AsTwigComponent(name: 'ScreenshotEditor', template: '@Review/components/ScreenshotEditor.html.twig')]
 final class ScreenshotEditor
@@ -38,6 +41,9 @@ final class ScreenshotEditor
     public bool $canAdd = true;
 
     public string $notePlaceholder = ScreenshotReportField::NOTE_PLACEHOLDER;
+
+    /** The id of the page's message about the screenshots, such as why it refused them, which each title and summary field is described by. */
+    public ?string $describedBy = null;
 
     #[PostMount]
     public function refuseInvalidProps(): void

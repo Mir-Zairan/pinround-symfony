@@ -7,9 +7,11 @@ import { isSubmitHeldFor, WAITING_MESSAGE } from '../review/submit_hold.js';
 // the upload fails, processing rejects it or Remove screenshot is clicked; a new upload also starts with no pins. It
 // keeps the line under the pins in step with pin-placer:change. While the picture uploads or is pending it holds the
 // form's submit and sends it once presigned-upload:ready fires; after presigned-upload:still-processing it lets the
-// submit through, so the server refuses it with its own text.
+// submit through, so the server refuses it with its own text. Inside a ScreenshotEditor the picture's thumbnail
+// follows the picture, and the editor's Remove screenshot (screenshot-editor:remove) removes it; there is no Remove of
+// its own.
 export default class extends Controller {
-  static targets = ['picture', 'empty', 'remove', 'count', 'frame', 'image', 'placeholder', 'file', 'status'];
+  static targets = ['picture', 'empty', 'remove', 'count', 'frame', 'image', 'placeholder', 'file', 'status', 'thumb', 'thumbPlaceholder'];
   static outlets = ['pin-placer'];
 
   connect() {
@@ -39,15 +41,17 @@ export default class extends Controller {
     this.isWaitOver = false;
     this.clearPins();
     this.forgetPagePicture();
+    this.showThumb(this.imageTarget.getAttribute('src'));
     this.showPictureArea(true);
   }
 
   // A failed or rejected upload hides the area and the Remove button: focus inside them would fall to the page.
   dropPicture() {
-    const isFocusInHiddenPart = [this.pictureTarget, this.removeTarget].some((part) => part.contains(document.activeElement));
+    const isFocusInHiddenPart = [this.pictureTarget, ...this.removeTargets].some((part) => part.contains(document.activeElement));
     this.releaseSubmit();
     this.clearPins();
     this.forgetPagePicture();
+    this.showThumb(null);
     this.showPictureArea(false);
     if (isFocusInHiddenPart) {
       this.fileTarget.focus();
@@ -98,9 +102,27 @@ export default class extends Controller {
     }
   }
 
+  // presigned-upload draws the new upload into the image only; the editor's thumbnail shows the same picture.
+  showThumb(src) {
+    if (!this.hasThumbTarget) {
+      return;
+    }
+    this.thumbTarget.removeAttribute('width');
+    this.thumbTarget.removeAttribute('height');
+    if (src) {
+      this.thumbTarget.src = src;
+    } else {
+      this.thumbTarget.removeAttribute('src');
+    }
+    this.thumbTarget.hidden = !src;
+    this.thumbPlaceholderTarget.hidden = Boolean(src);
+  }
+
   showPictureArea(isShown) {
     this.pictureTarget.hidden = !isShown;
-    this.removeTarget.hidden = !isShown;
+    this.removeTargets.forEach((remove) => {
+      remove.hidden = !isShown;
+    });
     this.emptyTarget.hidden = isShown;
   }
 }

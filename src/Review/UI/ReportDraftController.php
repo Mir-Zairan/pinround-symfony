@@ -282,22 +282,61 @@ final class ReportDraftController extends AbstractController
     private function renderPage(ReportDraftView $draft, ?string $error, int $status, ?Request $postedForm = null): Response
     {
         $views = $this->screenshotViews->viewsOf($this->tenantContext->require(), $draft->screenshots, 'draft-shot', 'Screenshot %d of the report');
-        $pictures = [];
-        foreach ($draft->screenshots as $index => $screenshot) {
-            $pictures[] = ['index' => $index, 'screenshot' => $screenshot, 'view' => $views[$index]];
-        }
 
         return $this->render('@Review/report_draft.html.twig', [
             'draft' => $draft,
-            'pictures' => $pictures,
+            'screenshots' => self::editorItemsOf($views, $postedForm?->request->all('screenshots') ?? []),
             'error' => $error,
             'title' => $postedForm?->request->getString('title') ?? $draft->title,
             'detail' => $postedForm?->request->getString('detail') ?? $draft->detail,
-            'postedScreenshots' => $postedForm?->request->all('screenshots'),
             'giveTo' => $this->giveToOf($draft),
             'assigneeId' => $postedForm?->request->getString(self::ASSIGNEE_FIELD) ?? '',
             'csrfId' => self::csrfIdOf($draft->id),
         ], new Response(null, $status));
+    }
+
+    /**
+     * The draft's pictures for the ScreenshotEditor, under the names postedContentOf reads. A refused form shows again
+     * what it posted for each picture, matched by position as postedContentOf matches it: the typed title, summary and
+     * pin notes, and Remove. A posted value that is not UTF-8 text is left out, as Twig cannot print it.
+     *
+     * @param list<ScreenshotView> $views
+     * @param array<mixed>         $postedScreenshots
+     *
+     * @return list<ScreenshotEditorItem>
+     */
+    private static function editorItemsOf(array $views, array $postedScreenshots): array
+    {
+        $items = [];
+        foreach ($views as $index => $view) {
+            $posted = $postedScreenshots[$index] ?? [];
+            if (!\is_array($posted)) {
+                $posted = [];
+            }
+            $postedNotes = \is_array($posted['pins'] ?? null) ? $posted['pins'] : [];
+            $typedPinNotes = [];
+            foreach ($postedNotes as $position => $note) {
+                $typedNote = self::typedTextOf($note);
+                if (\is_int($position) && null !== $typedNote) {
+                    $typedPinNotes[$position] = $typedNote;
+                }
+            }
+            $items[] = new ScreenshotEditorItem(
+                $view,
+                ScreenshotFieldNames::ofReportDraft($index),
+                '1' === ($posted['remove'] ?? null),
+                self::typedTextOf($posted['title'] ?? null),
+                self::typedTextOf($posted['summary'] ?? null),
+                $typedPinNotes,
+            );
+        }
+
+        return $items;
+    }
+
+    private static function typedTextOf(mixed $posted): ?string
+    {
+        return \is_string($posted) && mb_check_encoding($posted, 'UTF-8') ? $posted : null;
     }
 
     /**

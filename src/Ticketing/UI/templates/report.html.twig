@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/screenshot-editor.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/intake-check.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report.css') }}">
 {% endblock %}
@@ -58,7 +59,7 @@
             </div>
 
             {% if uploadProjectKey %}
-                <twig:ScreenshotReportField :uploadTargetKind="uploadTargetKind" :uploadTargetId="uploadProjectKey" :postedReport="report" :error="errors.screenshot|default(null)" :offersCapture="true" />
+                <twig:ScreenshotReportField :uploadTargetKind="uploadTargetKind" :uploadTargetId="uploadProjectKey" :postedReport="report" :error="errors.screenshot|default(null)" :offersCapture="true" :usesScreenshotEditor="true" />
             {% endif %}
 
             <fieldset class="where-it-goes report__where">

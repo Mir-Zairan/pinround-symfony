@@ -1,7 +1,8 @@
 {% extends '@Web/base.html.twig' %}
 
-{#- One of the person's report drafts (ReportDraftController::page): edit the text, each picture's title, summary and pin
-    notes, remove a picture, then Send (makes the ticket with Round 0) or Delete. Pins keep their spots here. -#}
+{#- One of the person's report drafts (ReportDraftController::page): edit the text, then in the ScreenshotEditor, one
+    picture at a time, each picture's title, summary and pin notes, or remove it; then Send (makes the ticket with
+    Round 0) or Delete. Pins keep their spots here. -#}
 
 {% block title %}{{ draft.title }} · Report draft · pinround{% endblock %}
 
@@ -9,6 +10,7 @@
     <link rel="stylesheet" href="{{ asset('styles/login.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/security.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/screenshot-editor.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report-drafts.css') }}">
 {% endblock %}
@@ -31,34 +33,12 @@
             </label>
             <label class="login__field">
                 More detail · optional
-                <textarea class="login__input report-draft__detail" name="detail" rows="6">{{ detail }}</textarea>
+                <textarea class="login__input report-draft__detail" name="detail" rows="5">{{ detail }}</textarea>
             </label>
 
-            {% for picture in pictures %}
-                {% set posted = postedScreenshots[picture.index] ?? {} %}
-                <twig:Card tag="section" class="security__section report-draft__picture" aria-labelledby="draft-shot-{{ picture.index + 1 }}-heading">
-                    <h2 class="security__heading" id="draft-shot-{{ picture.index + 1 }}-heading">Screenshot {{ picture.index + 1 }}</h2>
-                    <twig:Screenshot :view="picture.view" :headingLevel="3" loading="lazy" />
-                    <label class="login__field">
-                        Title · optional
-                        <input class="login__input" type="text" name="screenshots[{{ picture.index }}][title]" value="{{ posted.title ?? picture.screenshot.title }}" maxlength="120">
-                    </label>
-                    <label class="login__field">
-                        What this picture shows · optional
-                        <textarea class="login__input" name="screenshots[{{ picture.index }}][summary]" rows="3" maxlength="600">{{ posted.summary ?? picture.screenshot.summary }}</textarea>
-                    </label>
-                    {% for pin in picture.screenshot.pins %}
-                        <label class="login__field">
-                            Pin {{ loop.index }} note
-                            <input class="login__input" type="text" name="screenshots[{{ picture.index }}][pins][{{ loop.index0 }}]" value="{{ (posted.pins ?? {})[loop.index0] ?? pin.note }}" maxlength="1000">
-                        </label>
-                    {% endfor %}
-                    <label class="report-draft__remove">
-                        <input type="checkbox" name="screenshots[{{ picture.index }}][remove]" value="1" {% if (posted.remove ?? null) == '1' %}checked{% endif %}>
-                        Remove this screenshot
-                    </label>
-                </twig:Card>
-            {% endfor %}
+            {% if screenshots is not empty %}
+                <twig:ScreenshotEditor :screenshots="screenshots" fieldId="draft-shots" :canAdd="false" />
+            {% endif %}
 
             {#- Report a problem's "Give it to" for the project's team; only Send reads it, a draft does not keep it. -#}
             {% if giveTo %}
