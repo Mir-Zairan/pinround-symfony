@@ -181,6 +181,36 @@
   min-width: 0;
 }
 
+/*
+ * On a phone the Your next step box sits above the Rounds (P14.T7), not after the whole main column. The columns give
+ * up their boxes, so their parts share one column: the ask and the thread, the next step box, the Rounds, then the rest
+ * of the aside. The markup keeps the desktop order, so keyboard focus reaches the Rounds before the box here.
+ * 640px is the phone breakpoint of shell.css and review.css.
+ */
+@media (max-width: 640px) {
+  .ticket__columns {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: var(--space-28);
+  }
+
+  .ticket__main,
+  .ticket__aside {
+    display: contents;
+  }
+
+  .ticket__rounds {
+    order: 1;
+  }
+
+  .ticket__people > *,
+  .ticket__activity > *,
+  .ticket__aside > .ticket__section {
+    order: 2;
+  }
+}
+
 .ticket__section {
   display: flex;
   flex-direction: column;
