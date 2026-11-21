@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { LENA_STORAGE_STATE } from './auth';
+import { BEN_STORAGE_STATE, LENA_STORAGE_STATE } from './auth';
 
 // The pages the P14.T17 polish pass changed that no spec of their own checks with axe. Profile, API tokens, the team
 // page and Admin › AI have theirs in profile.spec.ts, tokens-page.spec.ts, team-page.spec.ts and admin-people.spec.ts.
@@ -55,4 +55,31 @@ test.describe('as Lena', () => {
 
     expect(await page.getByRole('radio', { name: 'Bug' }).evaluate((radio) => getComputedStyle(radio).accentColor)).toBe(primary);
   });
+
+  test('Report a problem has no serious or critical accessibility violations', async ({ page }) => {
+    await open(page, '/report', 'Report a problem');
+    await expect(page.locator('.report__drafts')).toContainText('Claude Code and the browser extension can prepare a report for you to check and send');
+
+    expect(await seriousViolations(page)).toEqual([]);
+  });
+});
+
+// Ben leads in Beta Bakery, where no spec makes report drafts or notebooks, so both his lists show how to make the
+// first one.
+test.describe('as Ben, who has no report drafts or notebooks', () => {
+  test.use({ storageState: BEN_STORAGE_STATE });
+
+  const emptyLists = [
+    { url: '/report-drafts', heading: 'Report drafts', firstOne: 'pick “A new report” in the browser extension' },
+    { url: '/notebooks', heading: 'My notebooks', firstOne: 'pick “A new notebook” in the browser extension' },
+  ];
+  for (const list of emptyLists) {
+    test(`the empty ${list.heading} page says how to make the first one and has no serious or critical accessibility violations`, async ({ page }) => {
+      await open(page, list.url, list.heading);
+      await expect(page.locator('.empty-state')).toContainText(list.firstOne);
+      await expect(page.locator('.empty-state').getByRole('link', { name: 'Make an API token' })).toHaveAttribute('href', '/me/tokens');
+
+      expect(await seriousViolations(page)).toEqual([]);
+    });
+  }
 });

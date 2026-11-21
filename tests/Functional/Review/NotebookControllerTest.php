@@ -115,7 +115,9 @@ final class NotebookControllerTest extends WebTestCase
         $empty = $this->client->request('GET', self::LIST);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(0, $empty->filter('.report-drafts__card')->count());
-        self::assertStringContainsString('You have no notebooks.', $empty->filter('.report-drafts')->text());
+        self::assertSame('You have no notebooks yet. To make one, pick “A new notebook” in the browser extension, or ask Claude Code to make a notebook. Both need an API token that may write to your notebooks.', $empty->filter('.empty-state p')->text());
+        self::assertSame('/me/tokens', $empty->filter('.empty-state__action a')->attr('href'));
+        self::assertStringNotContainsString('No more notebooks.', $empty->filter('.report-drafts')->text());
     }
 
     /**
@@ -181,7 +183,8 @@ final class NotebookControllerTest extends WebTestCase
         $page = $this->client->request('GET', self::LIST, [NotebookController::AFTER_QUERY => '0.000000.'.self::LENAS_NOTEBOOK]);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(0, $page->filter('.report-drafts__card')->count());
-        self::assertStringContainsString('No more notebooks.', $page->filter('.report-drafts')->text());
+        self::assertSame('No more notebooks.', $page->filter('.empty-state p')->text());
+        self::assertSame(0, $page->filter('.empty-state__action')->count(), 'A later page does not explain how to make the first one.');
     }
 
     #[Test]

@@ -14,10 +14,14 @@
 {% block main %}
     <div class="security report-drafts">
         <h1 class="security__title">Report drafts</h1>
-        <p class="login__hint">Reports your Claude Code or the browser extension prepared for you. Only you see them. Check one, then send it to make the ticket.</p>
+        <p class="login__hint">Claude Code and the browser extension can prepare a report for you. It waits here until you check it and send it, which makes the ticket. Only you see it.</p>
         <p><twig:Button variant="text" href="{{ path('review_notebooks') }}">My notebooks</twig:Button></p>
-        {% if drafts is empty %}
-            <twig:EmptyState message="{{ isLaterPage ? 'No more report drafts.' : 'You have no report drafts.' }}" />
+        {% if drafts is empty and isLaterPage %}
+            <twig:EmptyState message="No more report drafts." />
+        {% elseif drafts is empty %}
+            <twig:EmptyState message="You have no report drafts yet. To make one, pick “A new report” in the browser extension, or ask Claude Code to report a problem. Both need an API token that may prepare report drafts.">
+                <twig:block name="action"><twig:Button variant="tonal" size="sm" href="{{ path('identity_tokens') }}">Make an API token</twig:Button></twig:block>
+            </twig:EmptyState>
         {% else %}
             <ul class="report-drafts__list">
                 {% for draft in drafts %}

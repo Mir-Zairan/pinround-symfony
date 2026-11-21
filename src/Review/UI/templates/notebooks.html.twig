@@ -14,9 +14,13 @@
 {% block main %}
     <div class="security report-drafts">
         <h1 class="security__title">My notebooks</h1>
-        <p class="login__hint">Screenshots and scenarios your Claude Code or the browser extension saved for you. Only you see them.</p>
-        {% if notebooks is empty %}
-            <twig:EmptyState message="{{ isLaterPage ? 'No more notebooks.' : 'You have no notebooks.' }}" />
+        <p class="login__hint">A notebook keeps screenshots and scenarios that help you understand a screen. Claude Code and the browser extension fill it for you. Only you see your notebooks.</p>
+        {% if notebooks is empty and isLaterPage %}
+            <twig:EmptyState message="No more notebooks." />
+        {% elseif notebooks is empty %}
+            <twig:EmptyState message="You have no notebooks yet. To make one, pick “A new notebook” in the browser extension, or ask Claude Code to make a notebook. Both need an API token that may write to your notebooks.">
+                <twig:block name="action"><twig:Button variant="tonal" size="sm" href="{{ path('identity_tokens') }}">Make an API token</twig:Button></twig:block>
+            </twig:EmptyState>
         {% else %}
             <ul class="report-drafts__list">
                 {% for notebook in notebooks %}

@@ -21,7 +21,7 @@
         <h1 class="report__title">Report a problem</h1>
         <p class="report__lede">Anyone can do this. It becomes a ticket as soon as you send it. Nobody has to approve it first.</p>
         {# Review owns the drafts (ADR-0040); this page only links to them. #}
-        <p class="report__drafts"><a class="report__drafts-link" href="{{ path('review_report_drafts') }}">Your report drafts</a> · reports your Claude Code or the browser extension prepared</p>
+        <p class="report__drafts"><a class="report__drafts-link" href="{{ path('review_report_drafts') }}">Your report drafts</a> · Claude Code and the browser extension can prepare a report for you to check and send</p>
         {% if errors.form is defined %}
             <p class="login__error" role="alert">{{ errors.form }}</p>
         {% endif %}

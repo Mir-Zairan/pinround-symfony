@@ -91,7 +91,16 @@ final class ReportDraftControllerTest extends WebTestCase
         $list = $this->client->request('GET', self::LIST);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(['Total is doubled on the cart'], $list->filter('.report-drafts__card h2')->each(static fn ($heading): string => $heading->text()));
+        self::assertSame(0, $list->filter('.empty-state')->count());
 
+        $this->logIn($this->client, $this->people['Lena']);
+        $empty = $this->client->request('GET', self::LIST);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(0, $empty->filter('.report-drafts__card')->count());
+        self::assertSame('You have no report drafts yet. To make one, pick “A new report” in the browser extension, or ask Claude Code to report a problem. Both need an API token that may prepare report drafts.', $empty->filter('.empty-state p')->text());
+        self::assertSame('/me/tokens', $empty->filter('.empty-state__action a')->attr('href'));
+
+        $this->logIn($this->client, $this->people['Mia']);
         $this->client->request('GET', self::LIST.'/'.$miasDraft);
         self::assertResponseStatusCodeSame(200);
 
@@ -170,7 +179,8 @@ final class ReportDraftControllerTest extends WebTestCase
         $page = $this->client->request('GET', self::LIST, [ReportDraftController::AFTER_QUERY => '0.000000.'.$draftId]);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(0, $page->filter('.report-drafts__card')->count());
-        self::assertStringContainsString('No more report drafts.', $page->filter('.report-drafts')->text());
+        self::assertSame('No more report drafts.', $page->filter('.empty-state p')->text());
+        self::assertSame(0, $page->filter('.empty-state__action')->count(), 'A later page does not explain how to make the first one.');
     }
 
     #[Test]
