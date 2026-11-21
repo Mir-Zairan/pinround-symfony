@@ -52,9 +52,10 @@ final class RoundPageScreenshotsTest extends WebTestCase
     /**
      * RoundPageTest::PAGE_QUERIES less the review round's areas and their pins, plus the shown round's own read through
      * RoundsVisibleTo::sharedRoundOf: its visibility check, the round, its screenshots and their pins. The open draft's
-     * move-on buttons' read of the saved turn, which RoundPageTest::PAGE_QUERIES counts too, raised it from 27.
+     * move-on buttons' read of the saved turn, which RoundPageTest::PAGE_QUERIES counts too, raised it from 27 (task 8e),
+     * and the header's read of whose turn it is (RoundReadyFor), as Omar's own draft is no findings round, from 28.
      */
-    private const int DRAFT_PAGE_QUERIES = 28;
+    private const int DRAFT_PAGE_QUERIES = 29;
 
     private KernelBrowser $client;
 

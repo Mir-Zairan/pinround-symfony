@@ -1,8 +1,8 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
-import { makeTicketForOmar, openAs } from './ticket';
+import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // The round page of a shared draft (P14.T8 step 1) in a real browser: one screenshot at a time, the right arrow showing
 // the next, and a click in the strip jumping to another. What the page shows for each round kind and query, and who is
@@ -17,6 +17,12 @@ test.use({ viewport: { width: 1280, height: 900 } });
 
 const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** RoundBar::FRAME_ID: the ticket page's frame that holds the round bar while a shared round is open. */
+const ROUND_BAR_FRAME = 'ticket-round-bar';
+
+function nextStepVerb(page: Page, name: string) {
+  return page.locator('#ticket-next-step .next-step-box__verbs').getByRole('button', { name });
+}
 
 /**
  * Adds screenshots 2 and 3 to the draft, copies of its first picture, as the database owner.
@@ -71,6 +77,46 @@ test.describe('The round page of a shared draft', () => {
     await expect(strip.locator('a[aria-current="page"] .screenshot-thumb__label')).toHaveText('Screenshot 3');
     await expect(page.locator('.screenshot__title')).toHaveText('Screenshot copy 2');
     await expect(page.locator('.screenshot-pager__next')).toHaveAttribute('aria-disabled', 'true');
+    await context.close();
+  });
+});
+
+// The move-on buttons (P14.T8, ADR-0048): the person whose turn it is gives the open round's verdict from its page, a
+// plain form post that lands on the ticket with the round closed. Who sees the buttons and what a refused post changes
+// is proven in tests/Functional/Review/RoundPageMoveOnButtonsTest.php.
+test.describe('The move-on buttons of an open round', () => {
+  test('Mia presses Needs changes on Omar\'s shared round and lands on the ticket with the round closed', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const key = await makeTicketForOmar(browser, 'Round page move on for the cart total');
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    await omar.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await nextStepVerb(omar.page, 'Start work').click();
+    await expect(omar.page.locator('#ticket-state')).toContainText('In progress');
+    // Seeded after Start work, so only the hand-off to Testing asks to share it.
+    seedDraftWithPicture(key);
+    await omar.page.reload({ waitUntil: 'networkidle' });
+    await nextStepVerb(omar.page, 'Send to testing').click();
+    await omar.page.getByRole('dialog', { name: 'Share your draft round?' }).getByRole('button', { name: 'Share and move to Testing' }).click();
+    await expect(omar.page.locator(TOAST_REGION)).toContainText(/Sent to testing\. Mia.s turn now\./);
+    await omar.context.close();
+
+    const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+    await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Round 1 · shot .+ · Ready for you$/);
+    const moveOn = page.locator('section.round-move-on');
+    await expect(moveOn.getByRole('heading', { name: 'Your verdict' })).toBeVisible();
+
+    await moveOn.getByRole('button', { name: 'Needs changes' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/t/${key}$`));
+    await expect(page.locator(TOAST_REGION)).toContainText('Sent back to Omar with your notes.');
+    await expect(page.locator('#ticket-state')).toContainText('In progress');
+    const roundBar = page.locator(`turbo-frame#${ROUND_BAR_FRAME}`);
+    await expect(roundBar).toHaveAttribute('complete', '');
+    await expect(roundBar.locator('.round-bar')).toHaveCount(0);
+    const rounds = page.locator('turbo-frame#ticket-rounds');
+    await rounds.scrollIntoViewIfNeeded();
+    await expect(rounds.getByRole('heading', { name: /^Round 1 · self-check by Omar · closed · 1 screenshot$/, level: 3 })).toBeVisible();
     await context.close();
   });
 });

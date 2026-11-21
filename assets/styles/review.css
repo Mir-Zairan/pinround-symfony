@@ -782,6 +782,11 @@ textarea.screenshot-report__input {
   font-family: var(--font-mono);
 }
 
+.round-page__ticket-link {
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .round-page__title {
   flex: 1 1 100%;
   margin: 0;

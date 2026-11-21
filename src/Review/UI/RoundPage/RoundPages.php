@@ -18,6 +18,7 @@ use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Controller\RoundController;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCards;
+use App\Review\UI\RoundReadyFor;
 use App\Review\UI\ScreenshotView;
 use App\Review\UI\VisibleTicket;
 use App\Review\UI\Voter\TicketTesterRule;
@@ -33,8 +34,9 @@ use App\Ticketing\Api\TicketPageView;
  * of each chain, numbered as RoundCards numbers them; a checklist round shows the report's, whose pins it checks.
  *
  * Its reads do not grow with the screenshots or pins: two signing calls (the shown pictures, then every small picture,
- * one more per SignedUrls::MAX_MEDIA_IDS of them), and, for a round without areas other than a review round,
- * RoundsVisibleTo's read of the one round whose screenshots it shows.
+ * one more per SignedUrls::MAX_MEDIA_IDS of them), for a round without areas other than a review round, RoundsVisibleTo's
+ * read of the one round whose screenshots it shows, and, on an open hand-off round, RoundReadyFor's reads of who it is
+ * ready for.
  */
 final readonly class RoundPages
 {
@@ -70,6 +72,7 @@ final readonly class RoundPages
     public function __construct(
         private SignedUrls $signedUrls,
         private RoundsVisibleTo $roundsVisibleTo,
+        private RoundReadyFor $roundReadyFor,
     ) {
     }
 
@@ -90,7 +93,7 @@ final readonly class RoundPages
     {
         $ticket = $visible->ticket;
         $title = \sprintf('Round %d', $round->number);
-        $detail = self::detailOf($ticket, $round, $now, $viewerTimeZone);
+        $detail = $this->detailOf($visible, $round, $now, $viewerTimeZone);
         $selected = self::areaAt($round, $areaPosition ?? 0);
         if (null !== $selected) {
             $thumbs = $this->areaThumbsOf($ticket, $round, $selected, $now);
@@ -448,27 +451,19 @@ final readonly class RoundPages
         };
     }
 
-    private static function detailOf(TicketPageView $ticket, ReviewRoundView $round, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
+    /**
+     * "shot <when>", then, on an open hand-off round, the round bar's "Ready for" line, which names nobody on a closed
+     * round, the report or a checklist round.
+     */
+    private function detailOf(VisibleTicket $visible, ReviewRoundView $round, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
         $parts = ['shot '.self::whenOf($round->sharedAt, $now, $viewerTimeZone)];
-        $readyFor = self::readyForOf($ticket);
-        if (null !== $readyFor) {
-            $parts[] = 'Ready for '.$readyFor;
+        $readyForLine = RoundController::isOpenHandOffRound($round) ? $this->roundReadyFor->readyForLineOf($visible, $round->kind, $round->ownerId) : null;
+        if (null !== $readyForLine) {
+            $parts[] = $readyForLine;
         }
 
         return implode(' · ', $parts);
-    }
-
-    /**
-     * The ticket's tester, else the first tester of its team, by name; null when the ticket has none or Identity does
-     * not know the name.
-     */
-    private static function readyForOf(TicketPageView $ticket): ?string
-    {
-        $snapshot = $ticket->turnSnapshot;
-        $testerId = $snapshot->testerId ?? ($snapshot->testerIds[0] ?? null);
-
-        return null === $testerId ? null : ($ticket->displayNames[$testerId->toString()] ?? null);
     }
 
     /** "today, 09:12", "yesterday, 09:12", "5 Nov, 09:12" or, in another year, "5 Nov 2025, 09:12", in the viewer's zone. */

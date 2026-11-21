@@ -243,7 +243,7 @@ final class DraftRoundController extends AbstractController
      */
     private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, VisibleTicket $visible): string
     {
-        $verdictGiverId = $this->roundReadyFor->userIdOf($visible->ticket, $readyForUserId);
+        $verdictGiverId = $this->roundReadyFor->namedOrTurnUserIdOf($visible->ticket, $readyForUserId);
         if (null === $verdictGiverId) {
             return RoundStillOpenReason::of($openRoundNumber, null);
         }

@@ -17,7 +17,7 @@
     <article class="ticket round-page" data-controller="compare screenshot-pager" data-compare-mode="both" data-action="keydown@document->screenshot-pager#follow">
         <header class="round-page__header">
             <twig:Button variant="text" href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Back to {{ page.ticketKey }}</twig:Button>
-            <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}">{{ page.ticketTitle }}</a></p>
+            <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="round-page__ticket-link">{{ page.ticketTitle }}</a></p>
             <h1 class="round-page__title">{{ page.title }}<span class="round-page__detail"> · {{ page.detail }}</span></h1>
             {% if shown is not null and (shown.before is not null or page.panel is not null) %}
                 <div class="round-page__tools">

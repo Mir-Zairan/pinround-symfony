@@ -6,8 +6,6 @@ namespace App\Review\UI;
 
 use App\Review\Api\RoundView;
 use App\Review\Application\RoundsVisibleTo;
-use App\Review\UI\Component\RoundBar;
-use App\SharedKernel\Domain\UserId;
 
 /**
  * Builds the round bar for one viewer from the rounds they may see, so a private draft never reaches it, not even its
@@ -32,27 +30,12 @@ final readonly class RoundBars
      */
     public function forTicket(VisibleTicket $visible): ?RoundBarView
     {
-        $ticket = $visible->ticket;
-        $openRound = self::lowestOpenSharedRoundOf($this->roundsVisibleTo->forVisibleTo($ticket->id, $visible->visibility)->rounds);
+        $openRound = self::lowestOpenSharedRoundOf($this->roundsVisibleTo->forVisibleTo($visible->ticket->id, $visible->visibility)->rounds);
         if (null === $openRound) {
             return null;
         }
-        $readyForId = $this->roundReadyFor->userIdOf($ticket, self::findingsReadyFor($openRound, $ticket->turnSnapshot->assigneeId));
 
-        return new RoundBarView($openRound->number ?? 0, $this->readyForLineOf($readyForId, $visible));
-    }
-
-    private function readyForLineOf(?UserId $readyForId, VisibleTicket $visible): ?string
-    {
-        if (null === $readyForId) {
-            return null;
-        }
-        if ($readyForId->equals($visible->actor->userId())) {
-            return RoundBar::READY_FOR_YOU;
-        }
-        $firstName = $this->roundReadyFor->firstNameOf($readyForId, $visible->ticket);
-
-        return null === $firstName || '' === trim($firstName) ? null : \sprintf(RoundBar::READY_FOR, $firstName);
+        return new RoundBarView($openRound->number ?? 0, $this->roundReadyFor->readyForLineOf($visible, $openRound->kind, $openRound->ownerId));
     }
 
     /**
@@ -74,13 +57,5 @@ final readonly class RoundBars
         }
 
         return $lowest;
-    }
-
-    /**
-     * Round::findingsReadyFor's rule: a shared draft of anyone but the assignee is their findings, ready for them.
-     */
-    private static function findingsReadyFor(RoundView $round, ?UserId $assigneeId): ?UserId
-    {
-        return null !== $assigneeId && RoundView::DRAFT === $round->kind && !$round->ownerId->equals($assigneeId) ? $assigneeId : null;
     }
 }
