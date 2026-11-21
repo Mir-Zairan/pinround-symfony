@@ -10,6 +10,8 @@ use App\Media\Api\UploadedMedia;
 use App\Organization\Api\CurrentActor;
 use App\Review\Api\RoundCommands;
 use App\Review\UI\PinView;
+use App\Review\UI\ScreenshotEditorItem;
+use App\Review\UI\ScreenshotFieldNames;
 use App\Review\UI\ScreenshotView;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\SecurityBundle\Security;
@@ -55,6 +57,12 @@ final class ScreenshotReportField
 
     /** Report a problem offers "Capture with pinround", which explains the browser extension (P10.T8 step 3). */
     public bool $offersCapture = false;
+
+    /**
+     * Report a problem shows the picture in the ScreenshotEditor, with its title and summary beside it, and those only
+     * once there is a picture (P14.T10). The fields post the same names either way.
+     */
+    public bool $usesScreenshotEditor = false;
 
     public string $title = '';
     public string $summary = '';
@@ -131,6 +139,22 @@ final class ScreenshotReportField
     public function frameId(): string
     {
         return $this->fieldId.'-frame';
+    }
+
+    public function editorId(): string
+    {
+        return $this->fieldId.'-editor';
+    }
+
+    /**
+     * The one screenshot the editor shows: the kept picture with its pins, or a picture-less one the next upload draws
+     * into; the title and summary as posted, which may be past their caps after a refusal.
+     *
+     * @return list<ScreenshotEditorItem>
+     */
+    public function editorItems(): array
+    {
+        return [new ScreenshotEditorItem($this->view, ScreenshotFieldNames::ofReportForm(), typedTitle: $this->title, typedSummary: $this->summary)];
     }
 
     private function keptPicture(): ?ScreenshotView

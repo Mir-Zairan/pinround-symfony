@@ -30,7 +30,15 @@
                                 data-action="click->pin-placer#onClick keydown->pin-placer#onKeydown input->pin-placer#onInput focusin->pin-placer#onFocusin pointerdown->pin-placer#onPointerdown pointermove->pin-placer#onPointermove pointerup->pin-placer#onPointerend pointercancel->pin-placer#onPointerend"
                             >
                                 <p class="screenshot-editor__hint">Click on the screenshot to drop a pin. Then say what is wrong at that pin.</p>
-                                <twig:Screenshot :view="item.picture" />
+                                <div class="screenshot__frame{% if not item.picture.isReady %} screenshot__frame--placeholder{% endif %}" id="{{ domId }}-frame" data-screenshot-report-target="frame">
+                                    <img class="screenshot__image" alt="{{ item.picture.altText }}" decoding="async"
+                                        {%- if item.picture.isReady %} src="{{ item.picture.imageUrl }}" width="{{ item.picture.width }}" height="{{ item.picture.height }}"{% else %} hidden{% endif %}
+                                        data-presigned-upload-target="preview" data-screenshot-report-target="image">
+                                    {% if item.picture.isPending %}
+                                        <div class="screenshot__placeholder" role="status" data-screenshot-report-target="placeholder">Processing…</div>
+                                    {% endif %}
+                                    <twig:PinLayer :view="item.picture" />
+                                </div>
                                 <twig:Button variant="outline" class="pin-placer__add" data-pin-add data-action="pin-placer#addAtCentre">Add pin</twig:Button>
                                 <p class="pin-placer__status" role="status" data-pin-placer-target="status"></p>
                                 <twig:PinList :view="item.picture" :isEditable="true" :notePlaceholder="this.notePlaceholder" />
@@ -45,7 +53,7 @@
                                             <span class="pin-list__number">{{ pin.number }}</span>
                                             <textarea class="pin-list__note" name="{{ item.fieldNames.pinNoteNameOf(loop.index0) }}" rows="2"
                                                 aria-label="Note for pin {{ pin.number }}" placeholder="{{ this.notePlaceholder }}"
-                                                data-screenshot-editor-pin-note>{{ pin.note }}</textarea>
+                                                data-screenshot-editor-pin-note>{{ item.pinNoteAt(loop.index0) }}</textarea>
                                         </li>
                                     {% endfor %}
                                 </ol>
@@ -54,9 +62,11 @@
                     </div>
                     <div class="screenshot-editor__side">
                         <label class="screenshot-editor__label" for="{{ domId }}-title">Picture title · optional</label>
-                        <input class="text-field screenshot-editor__input" id="{{ domId }}-title" type="text" name="{{ item.fieldNames.title }}" value="{{ item.view.title }}" maxlength="{{ this.titleMaxLength }}">
+                        <input class="text-field screenshot-editor__input" id="{{ domId }}-title" type="text" name="{{ item.fieldNames.title }}" value="{{ item.title }}" maxlength="{{ this.titleMaxLength }}"
+                            {%- if this.describedBy is not null %} aria-describedby="{{ this.describedBy }}"{% endif %}>
                         <label class="screenshot-editor__label" for="{{ domId }}-summary">What this picture shows · optional</label>
-                        <textarea class="text-field" id="{{ domId }}-summary" name="{{ item.fieldNames.summary }}" rows="4" maxlength="{{ this.summaryMaxLength }}">{{ item.view.summary }}</textarea>
+                        <textarea class="text-field" id="{{ domId }}-summary" name="{{ item.fieldNames.summary }}" rows="4" maxlength="{{ this.summaryMaxLength }}"
+                            {%- if this.describedBy is not null %} aria-describedby="{{ this.describedBy }}"{% endif %}>{{ item.summary }}</textarea>
                         <twig:Button variant="text" class="screenshot-editor__remove" data-action="screenshot-editor#remove">Remove screenshot</twig:Button>
                     </div>
                 </div>
@@ -75,7 +85,12 @@
                         id="{{ this.tabId(index) }}" aria-controls="{{ this.panelId(index) }}"
                         aria-selected="{{ loop.first ? 'true' : 'false' }}" tabindex="{{ loop.first ? '0' : '-1' }}"
                         data-screenshot-editor-target="tab" data-action="screenshot-editor#show">
-                        {% if item.view.isReady %}
+                        {% if item.fieldNames.placesPins %}
+                            <img class="screenshot-editor__thumb-image" alt="" decoding="async"
+                                {%- if item.view.isReady %} src="{{ item.view.imageUrl }}" width="{{ item.view.width }}" height="{{ item.view.height }}"{% else %} hidden{% endif %}
+                                data-screenshot-report-target="thumb">
+                            <span class="screenshot-editor__thumb-placeholder" aria-hidden="true"{% if item.view.isReady %} hidden{% endif %} data-screenshot-report-target="thumbPlaceholder"></span>
+                        {% elseif item.view.isReady %}
                             <img class="screenshot-editor__thumb-image" src="{{ item.view.imageUrl }}" alt="" width="{{ item.view.width }}" height="{{ item.view.height }}" loading="lazy" decoding="async">
                         {% else %}
                             <span class="screenshot-editor__thumb-placeholder" aria-hidden="true"></span>

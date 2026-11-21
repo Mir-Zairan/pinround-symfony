@@ -13,20 +13,14 @@
     overflow-wrap: anywhere;
 }
 
+/* No min-height: the textarea's rows sets its starting height (5 lines). */
 .report-draft__detail {
-    min-height: 8rem;
     resize: vertical;
 }
 
 .report-draft__picture {
     display: grid;
     gap: var(--space-12);
-}
-
-.report-draft__remove {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-8);
 }
 
 .report-draft__actions {
