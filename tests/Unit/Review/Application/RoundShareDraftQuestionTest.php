@@ -467,7 +467,7 @@ final class RoundShareDraftQuestionTest extends TestCase
 
         $draft = $this->inTransaction(fn () => $this->questionInTransactions->undecidedDraftOf(new TicketId(self::TICKET), self::move(self::LENA, isLeadOnlyMove: true, isMoversTurn: true)));
 
-        self::assertEquals(new UndecidedDraft(self::LENAS_DRAFT, 1, 5, 3, new UserId(self::OMAR)), $draft, 'Mia\'s round 3, added after round 4, waits for Omar.');
+        self::assertEquals(new UndecidedDraft(self::LENAS_DRAFT, 1, 5, 3, new UserId(self::OMAR), new UserId(self::MIA)), $draft, 'Mia\'s round 3, added after round 4, waits for Omar.');
         self::assertNotNull($draft);
         self::assertTrue($draft->isSharingBlocked());
         self::assertSame($before, $this->roundStates(), 'Asking closes nothing.');
@@ -481,7 +481,7 @@ final class RoundShareDraftQuestionTest extends TestCase
 
         $draft = $this->inTransaction(fn () => $this->questionInTransactions->undecidedDraftOf(new TicketId(self::TICKET), self::move(self::OMAR, isLeadOnlyMove: false, isMoversTurn: true)));
 
-        self::assertEquals(new UndecidedDraft(self::OMARS_DRAFT, 2, 4, 3, null), $draft, 'Neither his move nor his share closes his own round; its verdict is whoever\'s turn it is.');
+        self::assertEquals(new UndecidedDraft(self::OMARS_DRAFT, 2, 4, 3, null, new UserId(self::OMAR)), $draft, 'Neither his move nor his share closes his own round; so it waits for whoever\'s turn it is but his.');
     }
 
     #[Test]

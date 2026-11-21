@@ -9,6 +9,7 @@ use App\Review\Api\ReviewRoundQueries;
 use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
+use App\Review\Domain\DraftDecision;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -51,7 +52,7 @@ final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
 
         // An unshared draft, and so a deleted one, has no number: it never matches.
         $roundRow = $this->connection->fetchAssociative(
-            'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state,'
+            'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state, round.decision,'
             .' EXISTS (SELECT 1 FROM rvw_area AS area WHERE area.organization_id = round.organization_id AND area.round_id = round.id) AS has_areas'
             .' FROM rvw_round AS round'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
@@ -71,6 +72,7 @@ final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
             new \DateTimeImmutable(self::text($roundRow['shared_at'], 'shared_at')),
             self::text($roundRow['state'], 'state'),
             self::boolean($roundRow['has_areas'], 'has_areas') ? $this->areasOf($organizationId, $roundId) : [],
+            DraftDecision::Shared->value === $roundRow['decision'],
         );
     }
 

@@ -31,6 +31,6 @@ final readonly class RoundBars
             return null;
         }
 
-        return new RoundBarView($openRound->number, $this->roundReadyFor->readyForLineOf($visible, $openRound->kind, $openRound->ownerId));
+        return new RoundBarView($openRound->number, $this->roundReadyFor->readyForLineOf($visible, $openRound));
     }
 }

@@ -26,6 +26,25 @@ final class UndecidedDraftTest extends TestCase
     }
 
     #[Test]
+    public function aPersonTheRoundIsNotReadyForNamedForNoOpenRoundIsRefused(): void
+    {
+        try {
+            new UndecidedDraft(self::ROUND, 1, 3, null, null, new UserId(self::OMAR));
+            self::fail('A draft named a person no open round is not ready for.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('Only an open round that blocks the share waits for a person.', $refused->getMessage());
+        }
+    }
+
+    #[Test]
+    public function aBlockedShareMayNameWhomItsOpenRoundIsNotReadyFor(): void
+    {
+        $draft = new UndecidedDraft(self::ROUND, 1, 3, 2, null, new UserId(self::OMAR));
+
+        self::assertSame([2, null, self::OMAR], [$draft->openRoundNumber, $draft->openRoundReadyForUserId, $draft->openRoundNotReadyForUserId?->toString()]);
+    }
+
+    #[Test]
     public function aBlockedShareMayNameWhoseVerdictItsOpenRoundWaitsFor(): void
     {
         $draft = new UndecidedDraft(self::ROUND, 1, 3, 2, new UserId(self::OMAR));
@@ -41,5 +60,6 @@ final class UndecidedDraftTest extends TestCase
 
         self::assertFalse($draft->isSharingBlocked());
         self::assertNull($draft->openRoundReadyForUserId);
+        self::assertNull($draft->openRoundNotReadyForUserId);
     }
 }

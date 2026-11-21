@@ -14,6 +14,7 @@ use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Api\VerdictCommands;
+use App\Review\Application\OpenSharedRound;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Controller\RoundController;
 use App\Review\UI\PinView;
@@ -478,7 +479,8 @@ final readonly class RoundPages
     private function detailOf(VisibleTicket $visible, ReviewRoundView $round, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
         $parts = ['shot '.self::whenOf($round->sharedAt, $now, $viewerTimeZone)];
-        $readyForLine = RoundController::isOpenHandOffRound($round) ? $this->roundReadyFor->readyForLineOf($visible, $round->kind, $round->ownerId) : null;
+        $openRound = OpenSharedRound::ofReviewRound($round);
+        $readyForLine = null === $openRound ? null : $this->roundReadyFor->readyForLineOf($visible, $openRound);
         if (null !== $readyForLine) {
             $parts[] = $readyForLine;
         }

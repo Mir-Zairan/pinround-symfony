@@ -280,7 +280,7 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
                 null,
                 null,
             ),
-        ]), $round);
+        ], false), $round);
     }
 
     /**
@@ -429,6 +429,27 @@ final class DbalReviewRoundQueriesTest extends KernelTestCase
         self::assertNotNull($sharedDraft);
         self::assertSame([self::SHARED_DRAFT, 'draft', []], [$sharedDraft->id, $sharedDraft->kind, $sharedDraft->areas]);
         self::assertSame(['tkt_ticket', 'rvw_round'], $tables);
+    }
+
+    /**
+     * Omar's draft 3 was shared with "Share now", which records no decision; recorded as shared at hand-off, it reads
+     * as shared in a move. Round 2 is a review round, which no move shares.
+     */
+    #[Test]
+    public function aRoundSaysWhetherItsOwnerSharedItInAMove(): void
+    {
+        [$userId, $organizationId] = self::VIEWERS['Mia'];
+
+        [$sharedNow, $sharedAtHandOff] = self::transactions()->rolledBackAs($organizationId, function () use ($userId): array {
+            $sharedNow = $this->reviewRoundQueries()->roundOf(new TicketId(self::TICKET), 3, new UserId($userId));
+            self::connection()->executeStatement("UPDATE rvw_round SET decision = 'shared', decided_at = shared_at WHERE id = ?", [self::SHARED_DRAFT]);
+
+            return [$sharedNow, $this->reviewRoundQueries()->roundOf(new TicketId(self::TICKET), 3, new UserId($userId))];
+        });
+
+        self::assertFalse($sharedNow?->isSharedInAMove);
+        self::assertTrue($sharedAtHandOff?->isSharedInAMove);
+        self::assertFalse($this->roundFor(self::TICKET, 2, 'Mia')?->isSharedInAMove);
     }
 
     /**

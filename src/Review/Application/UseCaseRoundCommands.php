@@ -333,7 +333,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
             if (!$openRound->isClosedByShareOf($sharerId, $assigneeId)) {
                 $number = $openRound->number() ?? throw new \LogicException('An open shared round has a number.');
 
-                throw RoundRefused::roundStillOpen($number, $openRound->findingsReadyFor($assigneeId));
+                throw RoundRefused::roundStillOpen($number, $openRound->findingsReadyFor($assigneeId), $openRound->notReadyForUserId());
             }
         }
 

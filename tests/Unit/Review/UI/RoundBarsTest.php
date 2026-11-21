@@ -79,7 +79,7 @@ final class RoundBarsTest extends TestCase
     private static function roundBars(array $lenasDisplayName, string $turnUserId = self::LENA, bool $isRoundOpen = true): RoundBars
     {
         // Round 2 is the ticket's open review round, while one is open; no other ticket has one.
-        $openRoundsByTicket = $isRoundOpen ? [self::TICKET => new OpenSharedRound(2, 'review', new UserId(self::MIA))] : [];
+        $openRoundsByTicket = $isRoundOpen ? [self::TICKET => new OpenSharedRound(2, 'review', new UserId(self::MIA), false)] : [];
         $openSharedRoundQueries = new class($openRoundsByTicket) implements OpenSharedRoundQueries {
             /**
              * @param array<string, OpenSharedRound> $openRoundsByTicket

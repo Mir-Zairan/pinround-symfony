@@ -21,6 +21,7 @@ use App\Review\Api\TicketRounds;
 use App\Review\Application\OpenSharedRound;
 use App\Review\Application\OpenSharedRoundQueries;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\Domain\DraftDecision;
 use App\Review\Domain\RoundId;
 use App\Review\Domain\ScreenshotId;
 use App\SharedKernel\Application\TenantContext;
@@ -159,7 +160,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         // Round::isOpenSharedRound's predicate, as DbalRounds::openSharedRoundsOf reads it, without its locks; by
         // rvw_round_ticket_id_number_key, which gives each shared round of a ticket its own number.
         $roundRow = $this->connection->fetchAssociative(
-            'SELECT round.number, round.kind, round.owner_id FROM rvw_round AS round'
+            'SELECT round.number, round.kind, round.owner_id, round.decision FROM rvw_round AS round'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
             ." AND round.kind IN ('review', 'draft') AND round.shared_at IS NOT NULL AND round.deleted_at IS NULL AND round.state = 'open'"
             .' ORDER BY round.number LIMIT 1',
@@ -173,6 +174,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             self::integer($roundRow['number'], 'number'),
             self::text($roundRow['kind'], 'kind'),
             new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            DraftDecision::Shared->value === $roundRow['decision'],
         );
     }
 

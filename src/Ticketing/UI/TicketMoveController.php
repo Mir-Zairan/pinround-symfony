@@ -292,7 +292,7 @@ final class TicketMoveController extends AbstractController
                 'moveUrl' => $moveUrl,
                 'draft' => $draft,
                 'stepName' => $targetStepName($ticket, $actor),
-                'shareBlockedReason' => null === $openRoundNumber ? null : $this->roundStillOpenReasonOf($openRoundNumber, $draft->openRoundReadyForUserId, $ticket, $actor),
+                'shareBlockedReason' => null === $openRoundNumber ? null : $this->roundStillOpenReasonOf($openRoundNumber, $draft->openRoundReadyForUserId, $draft->openRoundNotReadyForUserId, $ticket, $actor),
                 'fields' => $fields,
                 'choiceField' => self::DRAFT_CHOICE_FIELD,
                 'failedToast' => MoveToasts::MOVE_FAILED,
@@ -408,16 +408,21 @@ final class TicketMoveController extends AbstractController
         return $this->transactions->run(function () use ($key, $openRoundNumber, $refused): string {
             [$actor, $ticket] = $this->movableTicketOf($key);
 
-            return $this->roundStillOpenReasonOf($openRoundNumber, $refused->openRoundReadyForUserId(), $ticket, $actor);
+            return $this->roundStillOpenReasonOf($openRoundNumber, $refused->openRoundReadyForUserId(), $refused->openRoundNotReadyForUserId(), $ticket, $actor);
         });
     }
 
     /**
-     * Names who gives the verdict on the open round: the person Review named, else whoever's turn it is now.
+     * Names who gives the verdict on the open round: the person Review named, else whoever's turn it is now, unless
+     * Review said their own move leaves the round open; RoundReadyFor's reading of Review's answer, which Ticketing's UI
+     * may not call (deptrac).
+     *
+     * @param UserId|null $notReadyForUserId whose turn names nobody, as Review said (the owner of a round shared with
+     *                                       "Share now")
      */
-    private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, TicketPageView $ticket, ActorContext $reader): string
+    private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, ?UserId $notReadyForUserId, TicketPageView $ticket, ActorContext $reader): string
     {
-        $verdictGiverId = $readyForUserId ?? $this->turnUserIdOf($ticket);
+        $verdictGiverId = $readyForUserId ?? $this->turnVerdictGiverOf($ticket, $notReadyForUserId);
         if (null === $verdictGiverId) {
             return RoundStillOpenReason::of($openRoundNumber, null);
         }
@@ -426,6 +431,16 @@ final class TicketMoveController extends AbstractController
         }
 
         return RoundStillOpenReason::of($openRoundNumber, $this->firstNameOf($verdictGiverId, $ticket));
+    }
+
+    /**
+     * Whoever's turn it is now, unless it is $notReadyForUserId's. One query on ins_ticket_turn.
+     */
+    private function turnVerdictGiverOf(TicketPageView $ticket, ?UserId $notReadyForUserId): ?UserId
+    {
+        $turnUserId = $this->turnUserIdOf($ticket);
+
+        return null !== $turnUserId && null !== $notReadyForUserId && $turnUserId->equals($notReadyForUserId) ? null : $turnUserId;
     }
 
     private function refusalToastOf(MoveRefused $refused, TicketPageView $ticket): string

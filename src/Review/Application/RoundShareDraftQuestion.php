@@ -45,6 +45,7 @@ final readonly class RoundShareDraftQuestion implements ShareDraftQuestion
             $this->rounds->nextFreeNumberOf($ticketId),
             $roundStillOpen?->number(),
             $roundStillOpen?->findingsReadyFor($move->assigneeId),
+            $roundStillOpen?->notReadyForUserId(),
         );
     }
 
@@ -72,7 +73,7 @@ final readonly class RoundShareDraftQuestion implements ShareDraftQuestion
         } catch (RoundRefused $refused) {
             $openRoundNumber = $refused->openRoundNumber();
             if (null !== $openRoundNumber) {
-                throw MoveRefused::roundStillOpen($refused->getMessage(), $openRoundNumber, $refused->readyForUserId(), $refused);
+                throw MoveRefused::roundStillOpen($refused->getMessage(), $openRoundNumber, $refused->readyForUserId(), $refused->notReadyForUserId(), $refused);
             }
             if ($refused->isSharingBlocked()) {
                 throw new MoveRefused($refused->getMessage(), [], $refused);

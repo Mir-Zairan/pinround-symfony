@@ -40,6 +40,8 @@ final class DbalLowestOpenSharedRoundOfTest extends KernelTestCase
     private const string OTHER_TICKET = '0197a3c0-0000-7000-8000-0000000f9a22';
     private const string QUIET_TICKET = '0197a3c0-0000-7000-8000-0000000f9a23';
     private const string UNKNOWN_TICKET = '0197a3c0-0000-7000-8000-0000000f9a24';
+    private const string HANDED_OFF_TICKET = '0197a3c0-0000-7000-8000-0000000f9a25';
+    private const string HANDED_OFF_DRAFT = '0197a3c0-0000-7000-8000-0000000f9a70';
 
     private const string REPORTED_AT = '2027-03-15 10:20:30+00';
     private const string SHARED_AT = '2027-03-16 09:00:00+00';
@@ -60,7 +62,12 @@ final class DbalLowestOpenSharedRoundOfTest extends KernelTestCase
             ['0197a3c0-0000-7000-8000-0000000f9a51', self::QUIET_TICKET, 1, 'review', self::LENA, self::SHARED_AT, 'closed'],
             ['0197a3c0-0000-7000-8000-0000000f9a52', self::QUIET_TICKET, 2, 'draft', self::OMAR, self::SHARED_AT, 'closed'],
             ['0197a3c0-0000-7000-8000-0000000f9a53', self::QUIET_TICKET, null, 'draft', self::OMAR, null, 'open'],
+            [self::HANDED_OFF_DRAFT, self::HANDED_OFF_TICKET, 2, 'draft', self::OMAR, self::SHARED_AT, 'open'],
         ]);
+        $handedOffDraft = self::HANDED_OFF_DRAFT;
+        self::transactions()->committedAs(self::ACME_FOODS, static function () use ($handedOffDraft): void {
+            self::connection()->executeStatement("UPDATE rvw_round SET decision = 'shared', decided_at = shared_at WHERE id = ?", [$handedOffDraft]);
+        });
         // rvw_round.ticket_id has no foreign key, so Beta Bakery may hold a round with Acme's ticket id.
         self::addRounds(self::BETA_BAKERY, [
             ['0197a3c0-0000-7000-8000-0000000f9a60', self::TICKET, 3, 'review', self::BEN, self::SHARED_AT, 'open'],
@@ -89,8 +96,18 @@ final class DbalLowestOpenSharedRoundOfTest extends KernelTestCase
     #[Test]
     public function theLowestNumberedOpenSharedRoundOfTheTicketIsFound(): void
     {
-        self::assertEquals(new OpenSharedRound(4, 'draft', new UserId(self::OMAR)), $this->lowestOpenSharedRoundAs(self::ACME_FOODS, self::TICKET));
-        self::assertEquals(new OpenSharedRound(3, 'review', new UserId(self::LENA)), $this->lowestOpenSharedRoundAs(self::ACME_FOODS, self::OTHER_TICKET));
+        self::assertEquals(new OpenSharedRound(4, 'draft', new UserId(self::OMAR), false), $this->lowestOpenSharedRoundAs(self::ACME_FOODS, self::TICKET));
+        self::assertEquals(new OpenSharedRound(3, 'review', new UserId(self::LENA), false), $this->lowestOpenSharedRoundAs(self::ACME_FOODS, self::OTHER_TICKET));
+    }
+
+    /**
+     * Omar shared draft 4 with "Share now", which records no decision, and draft 2 of the other ticket at hand-off.
+     */
+    #[Test]
+    public function theRoundSaysWhetherItsOwnerSharedItInAMove(): void
+    {
+        self::assertFalse($this->lowestOpenSharedRoundAs(self::ACME_FOODS, self::TICKET)?->isSharedInAMove);
+        self::assertEquals(new OpenSharedRound(2, 'draft', new UserId(self::OMAR), true), $this->lowestOpenSharedRoundAs(self::ACME_FOODS, self::HANDED_OFF_TICKET));
     }
 
     #[Test]
@@ -103,7 +120,7 @@ final class DbalLowestOpenSharedRoundOfTest extends KernelTestCase
     #[Test]
     public function anotherOrganizationGetsOnlyItsOwnRoundOnTheTicketId(): void
     {
-        self::assertEquals(new OpenSharedRound(3, 'review', new UserId(self::BEN)), $this->lowestOpenSharedRoundAs(self::BETA_BAKERY, self::TICKET));
+        self::assertEquals(new OpenSharedRound(3, 'review', new UserId(self::BEN), false), $this->lowestOpenSharedRoundAs(self::BETA_BAKERY, self::TICKET));
         self::assertNull($this->lowestOpenSharedRoundAs(self::BETA_BAKERY, self::OTHER_TICKET));
     }
 
