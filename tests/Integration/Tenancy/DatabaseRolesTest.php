@@ -942,6 +942,103 @@ final class DatabaseRolesTest extends KernelTestCase
     }
 
     /**
+     * idn_oauth_authorization_code (Version20261121220000), a tenant table: the app reads and adds codes and changes
+     * only used_at, never deletes; support gets nothing; resolve_oauth_authorization_code reads only the ids, the hash
+     * and the two dates it checks, never the client, redirect URI, challenge or scopes. Every index starts with the
+     * organization but the code_hash key, which the resolver looks up before the organization is known.
+     */
+    #[Test]
+    public function theOAuthAuthorizationCodeTableLetsTheAppChangeOnlyTheUseAndSupportNothing(): void
+    {
+        $connection = $this->connection();
+
+        self::assertEqualsCanonicalizing(
+            ['pinround_app INSERT', 'pinround_app SELECT'],
+            $this->grantsToOthersThanTheOwner($connection, 'idn_oauth_authorization_code'),
+        );
+        self::assertSame(
+            ['pinround_migrator', true, true],
+            $connection->fetchNumeric("SELECT relowner::regrole::text, relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = to_regclass('public.idn_oauth_authorization_code')"),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'pinround_app UPDATE used_at',
+                'pinround_resolver SELECT organization_id', 'pinround_resolver SELECT user_id', 'pinround_resolver SELECT code_hash',
+                'pinround_resolver SELECT expires_at', 'pinround_resolver SELECT used_at',
+            ],
+            $connection->fetchFirstColumn(
+                "SELECT acl.grantee::regrole::text || ' ' || acl.privilege_type || ' ' || a.attname
+                 FROM pg_attribute a, aclexplode(a.attacl) acl WHERE a.attrelid = 'public.idn_oauth_authorization_code'::regclass",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            ['tenant_isolation {public} ALL', 'resolver_read {pinround_resolver} SELECT'],
+            $connection->fetchFirstColumn(
+                "SELECT policyname || ' ' || roles::text || ' ' || cmd FROM pg_policies WHERE schemaname = 'public' AND tablename = 'idn_oauth_authorization_code'",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'CREATE UNIQUE INDEX idn_oauth_authorization_code_pkey ON public.idn_oauth_authorization_code USING btree (organization_id, id)',
+                'CREATE UNIQUE INDEX idn_oauth_authorization_code_code_hash_key ON public.idn_oauth_authorization_code USING btree (code_hash)',
+            ],
+            $connection->fetchFirstColumn("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'idn_oauth_authorization_code'"),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                'idn_oauth_authorization_code_code_hash_check CHECK ((octet_length(code_hash) = 32))',
+                "idn_oauth_authorization_code_client_id_check CHECK ((client_id ~ '^[A-Za-z0-9_-]{32}$'::text))",
+                'idn_oauth_authorization_code_redirect_uri_check CHECK (((octet_length(redirect_uri) >= 1) AND (octet_length(redirect_uri) <= 512)))',
+                "idn_oauth_authorization_code_code_challenge_check CHECK ((code_challenge ~ '^[A-Za-z0-9._~-]{43,128}$'::text))",
+                "idn_oauth_authorization_code_scopes_check CHECK (((cardinality(scopes) >= 1) AND (scopes <@ ARRAY['read'::text, 'rounds:write'::text, 'comments:write'::text, 'tickets:move'::text, 'reports:write'::text, 'notebooks:write'::text])))",
+                "idn_oauth_authorization_code_expires_at_check CHECK (((expires_at > created_at) AND (expires_at <= (created_at + '00:01:00'::interval))))",
+                'idn_oauth_authorization_code_pkey PRIMARY KEY (organization_id, id)',
+            ],
+            $connection->fetchFirstColumn(
+                "SELECT conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
+                 WHERE conrelid = 'public.idn_oauth_authorization_code'::regclass AND contype IN ('c', 'p', 'u', 'f')",
+            ),
+        );
+    }
+
+    /**
+     * resolve_oauth_authorization_code runs as its owner pinround_resolver with a fixed search_path; besides that owner
+     * only the app may call it, and it returns the organization of a code that is neither used nor expired and whose
+     * person is still a member of that organization.
+     */
+    #[Test]
+    public function theOAuthAuthorizationCodeResolverReturnsOnlyTheOrganizationOfALiveCode(): void
+    {
+        $connection = $this->connection();
+
+        self::assertSame(
+            [
+                'owner' => 'pinround_resolver',
+                'is_security_definer' => true,
+                'config' => '{"search_path=pg_catalog, public, pg_temp"}',
+                'arguments' => 'p_code_hash bytea',
+                'result' => 'TABLE(organization_id uuid)',
+                'body' => 'SELECT c.organization_id FROM public.idn_oauth_authorization_code c'
+                    ."\n".'WHERE c.code_hash = p_code_hash AND c.used_at IS NULL AND c.expires_at > now()'
+                    ."\n".'AND EXISTS (SELECT 1 FROM public.org_membership m WHERE m.organization_id = c.organization_id AND m.user_id = c.user_id)',
+            ],
+            $connection->fetchAssociative(
+                "SELECT p.proowner::regrole::text AS owner, p.prosecdef AS is_security_definer, p.proconfig::text AS config,
+                        pg_get_function_arguments(p.oid) AS arguments, pg_get_function_result(p.oid) AS result, btrim(p.prosrc, E' \\n') AS body
+                 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'resolve_oauth_authorization_code'",
+            ),
+        );
+        self::assertEqualsCanonicalizing(
+            ['pinround_app', 'pinround_resolver'],
+            $connection->fetchFirstColumn(
+                "SELECT CASE acl.grantee WHEN 0 THEN 'PUBLIC' ELSE acl.grantee::regrole::text END
+                 FROM pg_proc p, aclexplode(p.proacl) acl
+                 WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'resolve_oauth_authorization_code' AND acl.privilege_type = 'EXECUTE'",
+            ),
+        );
+    }
+
+    /**
      * The upload slot and picture tables (Version20261115120000): the app reads, adds and changes them and removes
      * neither, as a used slot and a rejected picture keep their rows; support reads under the tenant policy.
      */
@@ -1060,7 +1157,7 @@ final class DatabaseRolesTest extends KernelTestCase
     public function theSchemaFilterHidesOnlyTheTablesNoEntityMapsOnBothConnections(): void
     {
         $hidden = ['processed_message', 'idn_login_attempt', 'web_home_focus', 'aud_event', 'aud_event_202611', 'aud_event_209912', 'public.aud_event', 'public.processed_message', 'public.idn_login_attempt', 'public.web_home_focus', 'wf_rule_set', 'public.wf_rule_set', 'ins_ticket_turn', 'public.ins_ticket_turn', 'rvw_report_draft', 'public.rvw_report_draft', 'rvw_notebook', 'public.rvw_notebook', 'api_idempotency_key', 'public.api_idempotency_key', 'ins_project_counts', 'public.ins_project_counts', 'ins_project_count_ticket', 'tkt_summary', 'public.tkt_summary', 'tkt_ticket_event', 'public.tkt_ticket_event', 'tkt_ticket_event_202611', 'tkt_ticket_event_209912', 'ntf_notification', 'public.ntf_notification', 'ntf_notification_202611', 'ntf_notification_209912', 'ntf_mute', 'public.ntf_mute', 'ntf_delivery', 'public.ntf_delivery', 'rvw_round', 'public.rvw_round', 'rvw_screenshot', 'public.rvw_screenshot', 'rvw_pin', 'public.rvw_pin', 'rvw_area', 'public.rvw_area', 'rvw_check_item', 'public.rvw_check_item', 'ast_usage', 'public.ast_usage', 'ast_usage_202611', 'ast_usage_209912', 'ast_suggestion', 'public.ast_suggestion', 'ast_local_package', 'public.ast_local_package'];
-        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'idn_api_token', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_drafts', 'api_idempotency_keys', 'rvw_report_draft_note', 'rvw_notebooks', 'rvw_notebook_note', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
+        $kept = ['messenger_outbox', 'messenger_failed', 'aud_export', 'aud_event_note', 'aud_event_2026', 'aud_events', 'processed_message_v2', 'tkt_ticket_events', 'tkt_ticket_event_2026', 'tkt_ticket_event_note', 'zz_tenant_probe', 'idn_user', 'idn_credential', 'idn_login_attempts', 'idn_password_reset', 'idn_api_token', 'idn_oauth_authorization_code', 'web_home_focuses', 'web_home', 'wf_step', 'wf_rule_sets', 'ins_ticket_turns', 'ins_ticket', 'ins_project_count', 'ins_project_count_tickets', 'tkt_ticket', 'tkt_summaries', 'tkt_project', 'cnv_message', 'cnv_reply', 'ntf_ping', 'ntf_notifications', 'ntf_notification_2026', 'ntf_notification_note', 'ntf_mutes', 'ntf_delivery_log', 'med_upload_intent', 'med_object', 'rvw_rounds', 'rvw_round_note', 'rvw_screenshots', 'rvw_pins', 'rvw_areas', 'rvw_area_note', 'rvw_check_items', 'rvw_check_item_note', 'rvw_report_drafts', 'api_idempotency_keys', 'rvw_report_draft_note', 'rvw_notebooks', 'rvw_notebook_note', 'ast_usages', 'ast_usage_2026', 'ast_usage_note', 'ast_explanation', 'ast_suggestions', 'ast_suggestion_note', 'ast_suggestion_202611', 'ast_local_packages', 'ast_local_package_note', 'ast_local_package_202611', 'ast_local', 'public.ast_local_packages'];
 
         foreach (['doctrine.dbal.default_connection', 'doctrine.dbal.migrator_connection'] as $connectionId) {
             $connection = self::getContainer()->get($connectionId);

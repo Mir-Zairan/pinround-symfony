@@ -53,6 +53,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'digest_recipients' => "digest_recipients('1970-01-01 00:00:00+00'::timestamptz)",
         // No token expires in 1969: each lasts at most a year from its issue.
         'organizations_with_expiring_api_tokens' => "organizations_with_expiring_api_tokens('1969-01-01 00:00:00+00'::timestamptz, '1970-01-01 00:00:00+00'::timestamptz)",
+        'resolve_oauth_authorization_code' => "resolve_oauth_authorization_code(sha256('unknown code'::bytea))",
     ];
 
     private const array OUTPUT_COLUMNS = [
@@ -66,6 +67,7 @@ final class ResolverFunctionTest extends KernelTestCase
         'organizations_with_due_notifications' => ['organization_id'],
         'digest_recipients' => ['organization_id', 'user_id'],
         'organizations_with_expiring_api_tokens' => ['organization_id'],
+        'resolve_oauth_authorization_code' => ['organization_id'],
     ];
 
     /**
