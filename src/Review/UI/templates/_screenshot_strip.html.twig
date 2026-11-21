@@ -6,7 +6,8 @@
             <li class="screenshot-strip__item">
                 <a class="screenshot-thumb" href="{{ path(roundRoute, {key: page.ticketKey, number: roundNumber}|merge(thumb.parameters)) }}"{% if thumb.isShown %} aria-current="page"{% endif %}>
                     {% if thumb.imageUrl is not null %}
-                        <img class="screenshot-thumb__image" src="{{ thumb.imageUrl }}" alt="" loading="lazy" decoding="async">
+                        <img class="screenshot-thumb__image" src="{{ thumb.imageUrl }}" alt=""
+                            {%- if thumb.hasImageSize %} width="{{ thumb.imageWidth }}" height="{{ thumb.imageHeight }}"{% endif %} decoding="async">
                     {% else %}
                         <span class="screenshot-thumb__image screenshot-thumb__image--none" aria-hidden="true"></span>
                     {% endif %}
