@@ -94,6 +94,38 @@ final class NextStepChoicesTest extends TestCase
     }
 
     #[Test]
+    public function theMoveOnVerbsLeaveOutGiveItToAndTheLeadOnlyVerbs(): void
+    {
+        $review = self::pageTurn(GuardFixtures::ticket('review', 'check', assignee: GuardFixtures::OMAR, reviewer: GuardFixtures::LENA), new Turn(new UserId(GuardFixtures::LENA), null, NeedsYouKind::Review));
+        $choices = new NextStepChoices($this->policy, new FixedStepQueries([], GuardFixtures::steps()), new PlainVerbFor(), self::nowNext(), $this->memberships);
+
+        $boxVerbs = self::verbsOf($choices->of($review, self::lead(GuardFixtures::LENA), true));
+        $moveOnVerbs = array_map(static fn (TransitionView $transition): string => $transition->verb, $choices->moveOnTransitionsOf($review, self::lead(GuardFixtures::LENA)));
+
+        self::assertContains('put_on_hold', $boxVerbs, 'The box offers the lead a lead-only verb here.');
+        self::assertSame(['approve_code', 'ask_for_changes'], $moveOnVerbs);
+
+        $unassigned = self::pageTurn(GuardFixtures::ticket('todo', 'todo'), new Turn(new UserId(GuardFixtures::LENA), null, NeedsYouKind::Assign));
+        $unassignedBoxVerbs = self::verbsOf($choices->of($unassigned, self::lead(GuardFixtures::LENA), true));
+        $unassignedMoveOnVerbs = array_map(static fn (TransitionView $transition): string => $transition->verb, $choices->moveOnTransitionsOf($unassigned, self::lead(GuardFixtures::LENA)));
+
+        self::assertSame(['give_it_to', 'put_on_hold'], $unassignedBoxVerbs, 'The box offers the lead Give it to… here.');
+        self::assertSame([], $unassignedMoveOnVerbs);
+    }
+
+    #[Test]
+    public function theMoveOnVerbsOfAMemberAreTheBoxsVerbsAsTheyHoldNoLeadOnlyOne(): void
+    {
+        $testing = self::pageTurn(GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA), new Turn(new UserId(GuardFixtures::MIA), null, NeedsYouKind::Test));
+        $choices = new NextStepChoices($this->policy, new FixedStepQueries([], GuardFixtures::steps()), new PlainVerbFor(), self::nowNext(), $this->memberships);
+
+        $moveOn = $choices->moveOnTransitionsOf($testing, self::member(GuardFixtures::MIA));
+
+        self::assertSame(['pass_it', 'needs_changes'], array_map(static fn (TransitionView $transition): string => $transition->verb, $moveOn));
+        self::assertEquals($choices->of($testing, self::member(GuardFixtures::MIA), true)->transitions, $moveOn);
+    }
+
+    #[Test]
     public function aManagerWithoutATeamRoleReadsTheNowSentenceAndTheManagersNote(): void
     {
         $pageTurn = self::pageTurn(GuardFixtures::ticket('test', 'check', assignee: GuardFixtures::OMAR, tester: GuardFixtures::MIA), new Turn(new UserId(GuardFixtures::MIA), null, NeedsYouKind::Test));

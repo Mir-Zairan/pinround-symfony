@@ -23,11 +23,7 @@
                             pickForm="{{ giveFormId }}" pickField="{{ constant(moveController ~ '::ASSIGNEE_FIELD') }}" :isTriggerPrimary="transition.isPrimary" />
                     </div>
                 {% else %}
-                    <form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: transition.verb}) }}" data-turbo="true" data-failed-toast="{{ moveFailedToast }}">
-                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                        <input type="hidden" name="{{ versionField }}" value="{{ version }}">
-                        <twig:Button type="submit" variant="{{ transition.isPrimary ? 'filled' : 'outline' }}">{{ transition.label }}</twig:Button>
-                    </form>
+                    {{ include('@Ticketing/_move_verb_form.html.twig', {ticketKey: ticketKey, version: version, csrfToken: csrfToken, verb: transition, isTurbo: true}, with_context = false) }}
                 {% endif %}
             {% endfor %}
         </div>

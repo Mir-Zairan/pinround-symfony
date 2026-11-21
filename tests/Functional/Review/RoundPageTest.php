@@ -43,9 +43,11 @@ final class RoundPageTest extends WebTestCase
      * teams, the settings, the ticket, the names, the visibility checks, the round, its areas, the pins, the round and
      * verdict voters' ticket facts, the signing of the shown pictures and of the strip's small ones (one query each), the
      * main menu's My reports count (MyReportsCounts) and the header's Local AI chip's AI settings (LocalAiChip). The
-     * strip's signing and the My reports count, which came in just before the strip, raised it from 23.
+     * strip's signing and the My reports count, which came in just before the strip, raised it from 23. The move-on
+     * buttons of an open hand-off round (MoveOnVerbQueries) read the saved turn and the waiting turns in one query on
+     * ins_ticket_turn for a viewer who may move the ticket, as Omar may here, which raised it from 25.
      */
-    private const int PAGE_QUERIES = 25;
+    private const int PAGE_QUERIES = 26;
     private const string PRIVATE_TITLE = 'Lena private draft picture';
 
     private KernelBrowser $client;

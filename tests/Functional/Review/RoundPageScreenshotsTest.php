@@ -51,9 +51,10 @@ final class RoundPageScreenshotsTest extends WebTestCase
     private const string HIDDEN_TITLE_PREFIX = 'Screenshot titled ';
     /**
      * RoundPageTest::PAGE_QUERIES less the review round's areas and their pins, plus the shown round's own read through
-     * RoundsVisibleTo::sharedRoundOf: its visibility check, the round, its screenshots and their pins.
+     * RoundsVisibleTo::sharedRoundOf: its visibility check, the round, its screenshots and their pins. The open draft's
+     * move-on buttons' read of the saved turn, which RoundPageTest::PAGE_QUERIES counts too, raised it from 27.
      */
-    private const int DRAFT_PAGE_QUERIES = 27;
+    private const int DRAFT_PAGE_QUERIES = 28;
 
     private KernelBrowser $client;
 

@@ -19,6 +19,7 @@ use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\TeamMemberLoad;
 use App\Workflow\Api\TransitionPolicy;
+use App\Workflow\Api\TransitionView;
 use App\Workflow\Api\VerbFor;
 
 /**
@@ -87,6 +88,25 @@ final readonly class NextStepChoices
             $moveChoices->groups,
             self::offersMoveToNeedsInput($moveChoices->groups) ? $this->peopleToWaitOnOf($pageTurn, $viewer->organizationId()) : [],
         );
+    }
+
+    /**
+     * The verbs of the box that move the ticket on (ADR-0048): those TransitionPolicy::available gives the viewer, as a
+     * mover of the team, that TicketMoveController's verb route makes and that are not lead-only, so Give it to… and the
+     * lead's "Plan it", "Go on" and "Put on hold" are left out. Whether it is the viewer's turn is the caller's.
+     *
+     * @return list<TransitionView> in the policy's order
+     */
+    public function moveOnTransitionsOf(PageTurn $pageTurn, ActorContext $viewer): array
+    {
+        $actor = $this->actorInTeamOf($pageTurn, $viewer, true);
+        $transitions = $this->transitionPolicy->available($pageTurn->ticket, $actor, $pageTurn->rules, $pageTurn->team)->transitions;
+
+        return array_values(array_filter(
+            $transitions,
+            fn (TransitionView $transition): bool => 1 === preg_match('/\A(?:'.TicketMoveController::VERB_REQUIREMENT.')\z/', $transition->verb)
+                && !$this->transitionPolicy->check($pageTurn->ticket, $actor, $pageTurn->rules, $pageTurn->team, $transition->verb)->isLeadOnlyMove,
+        ));
     }
 
     /**

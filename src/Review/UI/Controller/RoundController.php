@@ -16,6 +16,7 @@ use App\Review\UI\RoundPage\RoundPages;
 use App\Review\UI\RoundsController;
 use App\Review\UI\VisibleTicket;
 use App\Review\UI\VisibleTicketLookup;
+use App\Ticketing\Api\MoveOnVerbQueries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -28,7 +29,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * of its screenshots, one shown with its pins and, for a review round's screen area, the earlier round's picture and the
  * side panel with the verdict forms VerdictController answers for a person VerdictPermission SET grants. The viewer is
  * only ever the logged-in person; "?area=N" picks a screen area by its position, and "?screenshot=N", from 1, the
- * screenshot of a round without areas.
+ * screenshot of a round without areas. On an open hand-off round the person whose turn it is also gets the ticket's
+ * move-on verbs (MoveOnVerbQueries), which post to the ticket page's move and so close the round (ADR-0048).
  *
  * Runs in the request transaction. An unknown or malformed key or number, another organization's ticket, a ticket the
  * viewer may not see and a round RoundPermission VIEW denies all answer the same 404, so no answer tells that a hidden
@@ -51,7 +53,11 @@ final class RoundController extends AbstractController
     public const string NOT_FOUND = 'No round you may see has that number.';
     public const string SCREENSHOT_NOT_FOUND = 'This round has no screenshot with that number.';
 
+    private const string OPEN_ROUND = 'open';
+    private const array HAND_OFF_KINDS = ['review', 'draft'];
+
     public function __construct(
+        private readonly MoveOnVerbQueries $moveOnVerbQueries,
         private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly ReviewRoundQueries $reviewRoundQueries,
         private readonly RoundPages $roundPages,
@@ -90,7 +96,19 @@ final class RoundController extends AbstractController
             'roundNumber' => $round->number,
             'areaParameter' => self::AREA_PARAMETER,
             'focusRoute' => self::FOCUS_ROUTE,
+            'moveOnForm' => self::isOpenHandOffRound($round) ? $this->moveOnVerbQueries->moveOnFormOf($ticket) : null,
         ]);
+    }
+
+    /**
+     * A shared review or draft round after the report that is still open: the round a move-on verb of the person whose
+     * turn it is closes (ADR-0048). Round 0 and the checklist round never wait for one.
+     */
+    public static function isOpenHandOffRound(ReviewRoundView $round): bool
+    {
+        return $round->number >= 1
+            && self::OPEN_ROUND === $round->state
+            && \in_array($round->kind, self::HAND_OFF_KINDS, true);
     }
 
     /**

@@ -1,0 +1,10 @@
+{% set csrfToken = csrf_token(form.csrfTokenId) %}
+<section{{ attributes.defaults({class: 'round-move-on', 'aria-labelledby': 'round-move-on-label'}) }}>
+    <h2 class="round-move-on__label" id="round-move-on-label">{{ constant('App\\Review\\UI\\Component\\MoveOnButtons::LABEL') }}</h2>
+    <p class="round-move-on__sentence">{{ this.sentence }}</p>
+    <div class="round-move-on__verbs">
+        {% for verb in form.verbs %}
+            {{ include('@Ticketing/_move_verb_form.html.twig', {ticketKey: form.ticketKey, version: form.version, csrfToken: csrfToken, verb: verb, isTurbo: false}, with_context = false) }}
+        {% endfor %}
+    </div>
+</section>
