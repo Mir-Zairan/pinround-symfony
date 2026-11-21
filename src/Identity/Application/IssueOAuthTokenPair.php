@@ -27,6 +27,12 @@ final readonly class IssueOAuthTokenPair
     /** The access token's name on the tokens page when the client gave no name. */
     public const string UNNAMED_CLIENT = 'Connected app';
 
+    /**
+     * The cap counts the access tokens of connected apps, which the tokens page does not list, beside the personal
+     * tokens it does (ApiToken::isPersonal), so the refusal names both ways to free one.
+     */
+    public const string TOO_MANY_TOKENS = 'You have %d tokens that still work in this organization, counting the ones your connected apps hold. Revoke a personal token on the tokens page or sign out of a connected app, then connect again.';
+
     public function __construct(private IssueApiToken $issueApiToken, private OAuthRefreshTokens $refreshTokens, private ApiTokenHashing $hashing)
     {
     }
@@ -74,7 +80,7 @@ final readonly class IssueOAuthTokenPair
 
     private static function tooManyTokens(TooManyApiTokens $refusal): OAuthTokenRefused
     {
-        return new OAuthTokenRefused(OAuthTokenRefused::INVALID_GRANT, \sprintf('You have %d tokens that still work in this organization. Revoke one on the tokens page, then connect again.', IssueApiToken::MAX_LIVE_TOKENS_PER_USER), $refusal);
+        return new OAuthTokenRefused(OAuthTokenRefused::INVALID_GRANT, \sprintf(self::TOO_MANY_TOKENS, IssueApiToken::MAX_LIVE_TOKENS_PER_USER), $refusal);
     }
 
     /**

@@ -26,7 +26,7 @@ export const OTHER_HOST = 'The extension only talks to the pinround address you 
 export const MISSING_SCOPE = 'missing_scope';
 export const NOT_FOUND = 'not_found';
 export const PAIR_AGAIN = 'pinround does not accept this token any more. Pair the extension again in its options.';
-export const CONNECT_AGAIN = 'Your pinround connection ended. Connect again in the extension options.';
+export const CONNECT_AGAIN = 'Your pinround connection ended. Press Connect to pinround in the extension options.';
 
 export class PinroundApi {
     /**
@@ -34,7 +34,8 @@ export class PinroundApi {
      * @param {string} token a personal access token, or an access token a Connect issued
      * @param {typeof fetch} fetchFn
      * @param {((refusedToken: string) => Promise<string|null>)|null} renewToken for an issued access token: answers the
-     *   token to retry with once after a 401, or null when the connection ended; null for a personal access token
+     *   token to retry with once after a 401, or null when the connection ended, or throws the ApiError to show; null
+     *   for a personal access token
      */
     constructor(origin, token, fetchFn = (...args) => fetch(...args), renewToken = null) {
         this.origin = origin;
