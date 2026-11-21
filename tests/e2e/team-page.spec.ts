@@ -250,6 +250,19 @@ test.describe('as a member who is not the lead', () => {
     await expect(projectRows(page)).toHaveCount(1);
   });
 
+  test('the People title counts the people and the open tickets their rows add up to', async ({ page }) => {
+    await openShopTeam(page);
+
+    const loads = (await page.locator('.team__person-load').allTextContents()).map(Number);
+    expect(loads.length).toBeGreaterThan(1);
+    const total = loads.reduce((sum, load) => sum + load, 0);
+    expect(total).toBeGreaterThan(1);
+    await expect(page.getByRole('heading', { name: /^People / })).toHaveText(
+      `People ${loads.length} ${total} open tickets waiting on them`,
+    );
+    expect(await seriousViolations(page)).toEqual([]);
+  });
+
   test('the page offers no Add a team step and no x on steps', async ({ page }) => {
     await openShopTeam(page);
 

@@ -220,7 +220,7 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('People 7 waiting on them', $page->filter('#team-people')->text());
+        self::assertSame('People 7 60 open tickets waiting on them', $page->filter('#team-people')->text());
         self::assertSame(
             ['Noor 20 Too much', 'Ben 19 Busy', 'Omar 8 Busy', 'Lena (you) 7', 'Tom 3', 'Zoe 3', 'Pia 0'],
             $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
@@ -324,6 +324,7 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
+        self::assertSame('People 2 No open tickets waiting on them', $page->filter('#team-people')->text());
         self::assertSame(
             [['Lena 0', '0', '1'], ['Omar (you) 0', '0', '1']],
             $page->filter('.team__person')->each(static fn (Crawler $person): array => [
@@ -335,12 +336,12 @@ final class TeamPageTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string, string, array{string, string}}> the viewer, Omar's row and his bar's value and max
+     * @return iterable<string, array{string, string, array{string, string}, string}> the viewer, Omar's row, his bar's value and max, and the People title
      */
     public static function viewersOfOmarsLoad(): iterable
     {
-        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2', ['2', '2']];
-        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1', ['1', '1']];
+        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2', ['2', '2'], 'People 2 2 open tickets waiting on them'];
+        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1', ['1', '1'], 'People 2 1 open ticket waiting on them'];
     }
 
     /**
@@ -348,7 +349,7 @@ final class TeamPageTest extends WebTestCase
      */
     #[Test]
     #[DataProvider('viewersOfOmarsLoad')]
-    public function aBarCountsOnlyTheTeamsTicketsTheViewerMaySee(string $viewer, string $omarsLoad, array $omarsMeter): void
+    public function aBarAndThePeopleTitleCountOnlyTheTeamsTicketsTheViewerMaySee(string $viewer, string $omarsLoad, array $omarsMeter, string $peopleTitle): void
     {
         $people = $this->createAcmeFoodsPeople();
         $shopProjectId = $this->addProject($this->shop, 'SHOP', 'Web shop');
@@ -366,6 +367,7 @@ final class TeamPageTest extends WebTestCase
             $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
         ));
         self::assertSame($omarsMeter, [$page->filter('.team__meter')->first()->attr('value'), $page->filter('.team__meter')->first()->attr('max')]);
+        self::assertSame($peopleTitle, $page->filter('#team-people')->text());
     }
 
     #[Test]

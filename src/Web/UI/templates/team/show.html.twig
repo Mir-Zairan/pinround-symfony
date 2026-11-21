@@ -187,8 +187,18 @@
             </section>
 
             {% set hasMorePeople = workload.people|length > peopleShownAtFirst %}
+            {# A ticket has one turn (ins_ticket_turn is keyed by ticket), so the people's loads add up without counting a ticket twice. #}
+            {% set waitingTicketsTotal = workload.people|reduce((total, person) => total + person.waitingTickets, 0) %}
             <section class="team__column team__column--aside" aria-labelledby="team-people" {{ stimulus_controller('team-people', {shownAtFirst: peopleShownAtFirst, isShowingAll: false}) }}>
-                <h2 class="team__section-title" id="team-people">People <span class="team__count">{{ workload.people|length }}</span> <span class="team__hint">waiting on them</span></h2>
+                <h2 class="team__section-title" id="team-people">People <span class="team__count">{{ workload.people|length }}</span> <span class="team__hint">
+                    {%- if waitingTicketsTotal == 0 -%}
+                        No open tickets waiting on them
+                    {%- elseif waitingTicketsTotal == 1 -%}
+                        1 open ticket waiting on them
+                    {%- else -%}
+                        {{ waitingTicketsTotal }} open tickets waiting on them
+                    {%- endif -%}
+                </span></h2>
                 {% if hasMorePeople %}
                     <input class="login__input team__people-search" type="search" placeholder="Find a person" aria-label="Find a person" autocomplete="off" {{ stimulus_target('team-people', 'search') }} data-action="input->team-people#filter">
                 {% endif %}
