@@ -14,7 +14,14 @@
             <twig:Card tag="section" class="login__card" aria-labelledby="oauth-refusal-title">
                 <h1 class="login__title" id="oauth-refusal-title">This app cannot connect</h1>
                 <p class="login__error" role="alert">{{ refusal }}</p>
+                {% if goBackUrl %}
+                    <p class="login__hint">For the app's developer: {{ developerNote }}</p>
+                {% endif %}
                 <div>
+                    {# A link, never a redirect: going to the app's address is the person's choice (RFC 9700, 4.11.2). #}
+                    {% if goBackUrl %}
+                        <twig:Button href="{{ goBackUrl }}" rel="noreferrer">Go back to {{ goBackHost }}</twig:Button>
+                    {% endif %}
                     <twig:Button href="{{ path('web_home') }}" variant="text">Go to Home</twig:Button>
                 </div>
             </twig:Card>

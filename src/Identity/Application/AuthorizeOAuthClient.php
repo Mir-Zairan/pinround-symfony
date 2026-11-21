@@ -159,9 +159,9 @@ final readonly class AuthorizeOAuthClient
             $state = null;
         }
         if (null !== $state && (false === $state || 1 !== preg_match(\sprintf(self::STATE_SHAPE, self::MAX_STATE_LENGTH), $state))) {
-            throw OAuthAuthorizationRefused::toClient($redirectUri->toString(), OAuthAuthorizationRefused::INVALID_REQUEST, \sprintf('state is 1 to %d printable ASCII characters.', self::MAX_STATE_LENGTH), null);
+            throw OAuthAuthorizationRefused::toClient($redirectUri, OAuthAuthorizationRefused::INVALID_REQUEST, \sprintf('state is 1 to %d printable ASCII characters.', self::MAX_STATE_LENGTH), null);
         }
-        $refuse = static fn (string $error, string $description): OAuthAuthorizationRefused => OAuthAuthorizationRefused::toClient($redirectUri->toString(), $error, $description, $state);
+        $refuse = static fn (string $error, string $description): OAuthAuthorizationRefused => OAuthAuthorizationRefused::toClient($redirectUri, $error, $description, $state);
 
         $responseType = self::textOf($parameters, 'response_type');
         if (null === $responseType || false === $responseType || '' === $responseType) {
@@ -267,13 +267,11 @@ final readonly class AuthorizeOAuthClient
         } catch (\InvalidArgumentException) {
             throw new OAuthConsentOrganizationNotFound();
         }
-        foreach ($this->memberOrganizations->of($userId) as $memberOrganization) {
-            if ($memberOrganization->id->equals($postedOrganizationId)) {
-                return $memberOrganization->id;
-            }
+        if (!$this->memberOrganizations->isMember($userId, $postedOrganizationId)) {
+            throw new OAuthConsentOrganizationNotFound();
         }
 
-        throw new OAuthConsentOrganizationNotFound();
+        return $postedOrganizationId;
     }
 
     /**

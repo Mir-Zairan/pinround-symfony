@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Identity\Api;
 
 use App\SharedKernel\Application\TenantSwitchRefused;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 
 /**
@@ -24,4 +25,11 @@ interface MemberOrganizations
      * @throws TenantSwitchRefused when a transaction is open
      */
     public function of(UserId $userId): array;
+
+    /**
+     * Whether the person is a member of the organization now, in one read that needs no tenant, opens no transaction
+     * and leaves the entity manager as it is. An organization the person left, another person's or an unknown one
+     * gives false.
+     */
+    public function isMember(UserId $userId, OrganizationId $organizationId): bool;
 }
