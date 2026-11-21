@@ -8,9 +8,10 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
 - [Example prompts](#example-prompts) — what to say to Claude Code
-- [The tools](#the-tools) — what each of the eleven tools does
+- [The tools](#the-tools) — what each of the twelve tools does
 - [Adding a screenshot](#adding-a-screenshot) — `create_upload`, `curl -T`, `add_screenshot`, and a retake with `list_draft_screenshots` and `retake_of`
-- [Reporting while you check](#reporting-while-you-check) — the prompt `report_while_investigating`, and where to read more
+- [Reporting while you check](#reporting-while-you-check) — the prompt `report_while_investigating`, the capture rule the server sends, and where to read more
+- [Fixing your round notes](#fixing-your-round-notes) — the prompt `fix_my_round_notes` with a ticket key
 - [Notebooks](#notebooks) — the six notebook tools, their scopes, and the prompt `explain_my_notebook`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
 - [Safety](#safety) — your token is your permissions
@@ -55,6 +56,7 @@ Then ask: "List my pinround tickets." You should see the tickets where it is you
 
 ## Example prompts
 - "Read my pinround notes for SHOP-88 and fix what is marked “Not right yet”." This is the line the **For Claude Code** box on your draft round gives you to copy.
+- `/mcp__pinround__fix_my_round_notes SHOP-88`, the same with pinround's prompt: fix pin by pin, keep each retake, and upload the retakes as tries only when you ask ([Fixing your round notes](#fixing-your-round-notes)).
 - "Which pinround tickets are waiting for me?"
 - "Which open pinround ticket is about the checkout total?"
 - "What does SHOP-88 ask for, and who tests it?"
@@ -75,6 +77,7 @@ Every tool works as you, with your permissions in the app, and only inside the t
 | `create_upload` | `rounds:write` | Begins the upload of one screenshot into your own draft round on a ticket. When you have no draft there and you are the assignee, or it is your turn (for example the tester in Testing), it starts one. Answers where to send the file. |
 | `create_report_upload` | `reports:write` | Begins the upload of one screenshot for a new report in a project (`project`, such as `SHOP`). Answers where to send the file, as `create_upload` does. |
 | `create_report` | `reports:write` | Makes a private report draft from a title, a detail and up to 10 uploaded screenshots, each with its title and summary, which a call must give, and optional pins. It never makes a ticket: open the `url` it answers, check the draft and press **Send**. A token gets `reports:write` only when you tick it. |
+| `add_report_screenshot` | `reports:write` | Adds a picture uploaded with `create_report_upload` for the draft's project at the end of your own report draft (`report`, `upload_id`), with its title and summary, which a call must give, and optional pins; a draft holds at most 10. The same picture again changes nothing. It never makes a ticket. |
 | `add_screenshot` | `rounds:write` | Adds the uploaded picture to your draft round, with its title (at most 120 characters) and summary (at most 600), which a call must give, and optional pins (at most 100, each note at most 1,000). With `retake_of`, it is the next try of a screenshot already in that draft (at most 5 tries). |
 | `list_draft_screenshots` | `read` | For one ticket key: the screenshots of your own open draft round on it, in the order and with the numbers the draft round shows ("Screenshot n"). Each has its `screenshot_id` (the id `add_screenshot` takes as `retake_of`), `number`, the latest try's `title` (or none) and `try_count` (1 to 5). The list is empty when you have no open draft round there; another person's draft and a shared round are never listed. |
 
@@ -107,6 +110,17 @@ Each person may begin 60 uploads a minute (the web page counts too) and have at 
 ## Reporting while you check
 pinround also offers the MCP prompt `report_while_investigating` (in Claude Code: `/mcp__pinround__report_while_investigating`). With it, Claude Code keeps an evidence log while it checks a problem and uploads nothing until you choose. At the end it files a new report draft, or adds the pictures to your draft round on a ticket. A report draft needs a token with `reports:write` ticked, and you press **Send** in pinround yourself. See [reporting-with-claude-code.md](reporting-with-claude-code.md).
 
+**The capture rule.** pinround's server sends a short rule to Claude Code when it connects (its MCP server instructions), so it applies even when you start no prompt: save each screenshot it takes for you in a local evidence log at that moment, with its title, summary and pins, and upload nothing to pinround until you ask.
+
+## Fixing your round notes
+The MCP prompt `fix_my_round_notes` takes one argument, the ticket key:
+
+```text
+/mcp__pinround__fix_my_round_notes SHOP-88
+```
+
+Claude Code then reads `get_round_notes` for SHOP-88, tells you pin by pin what it is going to fix, fixes one screenshot at a time and saves each retake in the evidence log as it goes. When you ask, it uploads each retake with `create_upload` and `add_screenshot` with `retake_of`, so it becomes the next try of its screenshot in your draft round. You mark each pin "Fixed on try N" or "Still wrong" in pinround yourself. The prompt needs a token with `read`; a malformed key is "The arguments do not match this prompt: …", and an unknown key or a ticket you may not see is "Not found". More: [reporting-with-claude-code.md › Fix your round notes](reporting-with-claude-code.md#fix-your-round-notes).
+
 ## Notebooks
 A notebook is your private set of pinned screenshots of your own app; only you see it ([browser-extension.md › Notebooks](browser-extension.md#notebooks)). Six tools work on your own notebooks, never anyone else's:
 
@@ -133,6 +147,7 @@ A refused call saves nothing. The answers you may see:
 | "This is read-only now, so it cannot be changed." | The draft round was shared, or the checklist item is fixed or confirmed already. |
 | "This token does not have the "…" scope." | Make a token with that scope ticked. |
 | "The arguments do not match the input schema of this tool: …" | Claude Code sent wrong or too long input. "/summary is missing or blank" (or "/screenshots/1/title" for `create_report`) names a picture's title or summary that Claude Code left out or left blank. |
+| "The arguments do not match this prompt: …" | A prompt was started with a wrong argument, for example `fix_my_round_notes` without a ticket key or with a malformed one. |
 | 401 | The token is missing, wrong, revoked or expired. |
 | 429 | Too many calls: 60 a minute or 600 an hour per token, or 600 a minute for the whole organization. Wait as long as `Retry-After` says. |
 
