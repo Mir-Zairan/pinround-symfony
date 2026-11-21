@@ -247,7 +247,10 @@ test('a capture into my draft round on a ticket sends the pins with the picture 
   expect(posts.map((request) => [request.path, request.answerStatus])).toEqual([['/api/v1/uploads', 201], ['/api/v1/tickets/SHOP-12/draft/screenshots', 200]]);
   expect([posts[0].body?.ticket, posts[0].body?.project, posts[0].body?.mime]).toEqual(['SHOP-12', undefined, 'image/png']);
   const draftRoundBody = posts[1].body ?? {};
-  expect([Object.keys(draftRoundBody).sort(), draftRoundBody.upload_id]).toEqual([['pins', 'upload_id'], 'upload-1']);
+  // P14.T11: the popup starts the title and summary from the page, and a capture sends them with the pins.
+  expect([Object.keys(draftRoundBody).sort(), draftRoundBody.upload_id]).toEqual([['pins', 'summary', 'title', 'upload_id'], 'upload-1']);
+  expect(draftRoundBody.title).toBe('Acme Foods shop');
+  expect(draftRoundBody.summary).toMatch(/^Page: http:\/\/shop\.acme-foods\.test\/ · Window \d+×\d+ · \S.* \d+(\.\d+)*$/);
   const sentPins = draftRoundBody.pins as StoredPin[];
   expect(sentPins.map((pin) => pin.note)).toEqual(['Logo is cut off', '']);
   expectPinsAt(sentPins, [[30, 60], [80, 20]]);
