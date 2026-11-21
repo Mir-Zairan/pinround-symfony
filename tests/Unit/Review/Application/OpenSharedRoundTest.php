@@ -63,6 +63,37 @@ final class OpenSharedRoundTest extends TestCase
         self::assertNull($sharedAtHandOff->notReadyForUserId());
     }
 
+    /**
+     * @return iterable<string, array{int, string, string, bool, string, bool}> the round's number, kind and state, whether
+     *                                                                          Omar shared it in a move, the mover, and
+     *                                                                          whether their move on their turn closes it
+     */
+    public static function roundsAndMovers(): iterable
+    {
+        yield 'Mia on an open review round' => [2, 'review', 'open', false, self::MIA, true];
+        yield 'Mia on an open draft Omar shared now' => [1, 'draft', 'open', false, self::MIA, true];
+        yield 'Omar on an open draft he shared at hand-off' => [1, 'draft', 'open', true, self::OMAR, true];
+
+        yield 'Omar on an open draft he shared now' => [1, 'draft', 'open', false, self::OMAR, false];
+        yield 'Omar on his open review round' => [2, 'review', 'open', false, self::OMAR, false];
+        yield 'Mia on a closed review round' => [2, 'review', 'closed', false, self::MIA, false];
+        yield 'Mia on a closed shared draft' => [1, 'draft', 'closed', true, self::MIA, false];
+        yield 'Mia on the report, round 0' => [0, 'report', 'open', false, self::MIA, false];
+        yield 'Mia on an open checklist round' => [1, 'checklist', 'open', false, self::MIA, false];
+    }
+
+    /**
+     * The round page's rule for its move-on verbs (RoundController). SHOP-1 is Omar's; Omar owns every round here.
+     */
+    #[Test]
+    #[DataProvider('roundsAndMovers')]
+    public function onlyAMoveOnThatClosesAnOpenHandOffRoundClosesTheRoundPagesRound(int $number, string $kind, string $state, bool $isSharedInAMove, string $moverId, bool $isClosed): void
+    {
+        $omar = new UserId(self::OMAR);
+
+        self::assertSame($isClosed, true === OpenSharedRound::ofReviewRound(self::reviewRound($number, $kind, $state, $isSharedInAMove))?->isClosedByMoveOf(new UserId($moverId), true, $omar));
+    }
+
     #[Test]
     public function anotherPersonsSharedDraftIsTheAssigneesFindings(): void
     {

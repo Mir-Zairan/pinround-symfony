@@ -104,11 +104,12 @@ final class RoundController extends AbstractController
     /**
      * Whether a move-on verb of $viewerId would close the round (ADR-0048), were it their turn: MoveOnVerbQueries
      * gives verbs only to the person whose turn it is. False for Round 0, the checklist round and a closed round, and
-     * for the owner of a round shared with "Share now", whose own move leaves it open.
+     * for the owner of a round shared with "Share now", whose own move leaves it open. Private: the container makes
+     * a public controller method's class-typed parameters action arguments, and UserId is no service.
      *
      * @param UserId|null $assigneeId the ticket's assignee; null when nobody has it
      */
-    public static function isClosedByMoveOnOf(UserId $viewerId, ReviewRoundView $round, ?UserId $assigneeId): bool
+    private static function isClosedByMoveOnOf(UserId $viewerId, ReviewRoundView $round, ?UserId $assigneeId): bool
     {
         return true === OpenSharedRound::ofReviewRound($round)?->isClosedByMoveOf($viewerId, true, $assigneeId);
     }

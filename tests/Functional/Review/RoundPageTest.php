@@ -46,11 +46,12 @@ final class RoundPageTest extends WebTestCase
      * main menu's My reports count (MyReportsCounts) and the header's Local AI chip's AI settings (LocalAiChip). The
      * strip's signing and the My reports count, which came in just before the strip, raised it from 23. The move-on
      * buttons of an open hand-off round (MoveOnVerbQueries) read the saved turn and the waiting turns in one query on
-     * ins_ticket_turn for a viewer who may move the ticket, as Omar may here, which raised it from 25 (task 8e). The
-     * header's Ready for line (RoundReadyFor) reads whose turn it is on ins_ticket_turn once more, which raised it from 26;
-     * the name comes with the ticket's names.
+     * ins_ticket_turn for a viewer who may move the ticket, which raised it from 25 (task 8e), but Omar owns this review
+     * round, which nobody shares in a move, so his own move never closes it and his page skips that read (HandOffRound,
+     * task 16l). The header's Ready for line (RoundReadyFor) reads whose turn it is on ins_ticket_turn once more, which
+     * raised it from 25; the name comes with the ticket's names.
      */
-    private const int PAGE_QUERIES = 27;
+    private const int PAGE_QUERIES = 26;
     private const string PRIVATE_TITLE = 'Lena private draft picture';
 
     private KernelBrowser $client;
