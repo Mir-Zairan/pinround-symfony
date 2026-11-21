@@ -164,6 +164,38 @@ final class TicketThreadTest extends WebTestCase
     }
 
     /**
+     * P14.T7: thread.css folds an unused composer to one line, its kinds beside a one-line field, until it holds focus
+     * or text. It keys on the field's placeholder (:placeholder-shown matches only a field with one) and on the field,
+     * the note and the button being the form's own children; the note and the button stay in the markup, so a screen
+     * reader reads them and Tab reaches the button, which opens the composer.
+     */
+    #[Test]
+    public function theComposersFieldNoteAndButtonAreTheFormsOwnPartsAndTheFieldIsLabelledWithAPlaceholder(): void
+    {
+        $this->addTicket();
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::THREAD_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $composer = $page->filter('turbo-frame#'.Thread::FRAME_ID.' form.thread__composer');
+        self::assertCount(1, $composer);
+        self::assertSame(
+            ['input', 'div.thread__kinds', 'div.thread__ask-choices', 'label.visually-hidden', 'textarea.text-field thread__composer-body', 'p.thread__note thread__composer-note', 'button.btn btn-filled thread__composer-send'],
+            $composer->children()->each(static fn (Crawler $part): string => $part->nodeName().(null === $part->attr('class') ? '' : '.'.$part->attr('class'))),
+        );
+        $body = $composer->filter('textarea.thread__composer-body');
+        self::assertSame('thread-composer-body', $body->attr('id'));
+        self::assertSame('Write a comment', $composer->filter('label[for="thread-composer-body"]')->text());
+        self::assertSame(Thread::COMMENT_PLACEHOLDER, $body->attr('placeholder'));
+        self::assertSame('3', $body->attr('rows'), 'Opened, the composer is three lines, as before it folded.');
+        self::assertSame('', $body->text(), 'An empty composer shows its placeholder, so it starts folded.');
+        self::assertSame(Thread::COMMENT_NOTE, $composer->filter('.thread__composer-note')->text());
+        self::assertSame(Thread::COMMENT_BUTTON, trim($composer->filter('button.thread__composer-send')->text()));
+        self::assertSame('submit', $composer->filter('button.thread__composer-send')->attr('type'));
+    }
+
+    /**
      * Without JavaScript the frame's link opens the thread as a page of its own, with a way back to the ticket.
      */
     #[Test]

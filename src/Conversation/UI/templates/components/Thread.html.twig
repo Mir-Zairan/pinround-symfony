@@ -158,10 +158,11 @@
         </div>
         <div class="thread__ask-choices" {{ stimulus_target('ask-choices', 'choices') }}>{{ askChoices }}</div>
         <label class="visually-hidden" for="thread-composer-body" {{ stimulus_target('thread-composer', 'label') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}</label>
-        <textarea id="thread-composer-body" class="text-field" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3"
+        {#- thread.css folds the composer to one line while this field is empty and nothing in the form has focus. -#}
+        <textarea id="thread-composer-body" class="text-field thread__composer-body" name="{{ constant('App\\Conversation\\UI\\ThreadController::BODY_FIELD') }}" placeholder="{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_PLACEHOLDER') }}" required maxlength="{{ this.maxBodyLength }}" rows="3"
             {{ stimulus_target('thread-composer', 'body') }} data-action="input->thread-composer#update"></textarea>
-        <p class="thread__note" {{ stimulus_target('thread-composer', 'note') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_NOTE') }}</p>
-        <button type="submit" class="btn btn-filled" {{ stimulus_target('thread-composer', 'submit') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_BUTTON') }}</button>
+        <p class="thread__note thread__composer-note" {{ stimulus_target('thread-composer', 'note') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_NOTE') }}</p>
+        <button type="submit" class="btn btn-filled thread__composer-send" {{ stimulus_target('thread-composer', 'submit') }}>{{ constant('App\\Conversation\\UI\\Component\\Thread::COMMENT_BUTTON') }}</button>
     </form>
 </div>
 {% endif %}

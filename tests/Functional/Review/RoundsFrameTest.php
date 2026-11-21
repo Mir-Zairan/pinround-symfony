@@ -116,7 +116,7 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     #[Test]
-    public function roundZeroShowsItsReporterItsPinCountAndEachScreenshotsTextAboveItsPictureWithPinsAndNoWayToAddOne(): void
+    public function roundZeroShowsItsReporterItsPinCountAndEachScreenshotsTextBeforeItsPictureWithPinsAndNoWayToAddOne(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $roundId = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
@@ -137,7 +137,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertSame(self::REPORT_SUMMARY, $card->filter('.screenshot__summary')->text());
         self::assertStringNotContainsString('<b>total</b>', (string) $this->client->getResponse()->getContent(), 'A title is text, never markup.');
         $order = $card->filter('figure.screenshot')->children()->each(static fn (Crawler $child): string => (string) $child->attr('class'));
-        self::assertSame(['screenshot__text', 'screenshot__frame'], $order, 'The text comes above the picture.');
+        self::assertSame(['screenshot__text', 'screenshot__frame'], $order, 'The text is read before the picture; review.css draws it beside the picture on a wide screen.');
         self::assertStringContainsString('/media/'.$readyMedia.'/thumb.webp', (string) $card->filter('img.screenshot__image')->attr('src'));
         self::assertSame(
             ['Pin 1: The total is off', 'Pin 2: Pay button is hidden'],
@@ -151,14 +151,16 @@ final class RoundsFrameTest extends WebTestCase
 
     /**
      * P14.T7: review.css caps Round 0's picture by the thumbnail hook, so five rounds fit one screen; the owner's draft
-     * editor keeps its pictures full width, as pins are placed on them.
+     * editor keeps its pictures full width, as pins are placed on them. On a wide screen the hook's grid draws the
+     * picture's title and summary, then the pin list, beside the picture: it places the figure's caption and frame and
+     * the pin list, the hook's only children.
      */
     #[Test]
     public function roundZerosPictureAndPinListCarryTheThumbnailHookAndTheOwnersDraftPictureDoesNot(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
-        $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Report shot', null);
+        $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Report shot', 'What the reporter saw');
         $this->addPin($reportShot, 1, '12.35', '7.10', 'The total is off', 'Mia');
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addScreenshot($draft, $this->addMedia('ready'), 0, 'Draft shot', null);
@@ -169,6 +171,10 @@ final class RoundsFrameTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $thumbnails = $page->filter(self::ROUNDS.' article#round-'.$report.' .round-card__screenshot--thumbnail');
         self::assertCount(1, $thumbnails);
+        $classesOf = static fn (Crawler $element): string => $element->nodeName().'.'.$element->attr('class');
+        self::assertSame(['figure.screenshot', 'ol.pin-list'], $thumbnails->children()->each($classesOf));
+        self::assertSame(['figcaption.screenshot__text', 'div.screenshot__frame'], $thumbnails->filter('figure.screenshot')->children()->each($classesOf));
+        self::assertSame(['h4.screenshot__title', 'p.screenshot__summary'], $thumbnails->filter('figcaption.screenshot__text')->children()->each($classesOf));
         self::assertSame(['Report shot'], $thumbnails->filter('figure.screenshot .screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertSame(['The total is off'], $thumbnails->filter('.pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
         $draftCard = $page->filter(self::ROUNDS.' article#round-'.$draft);
@@ -178,8 +184,8 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     /**
-     * P14.T7f: Round 0 loads the 480 px thumb, drawn at the thumb's size (1280 × 800 scaled to 480 × 300), while the
-     * owner's draft keeps the 1920 px view its pins are placed on.
+     * P14.T7f: Round 0 loads the 480 px thumb (1280 × 800 scaled to 480 × 300), drawn no higher than
+     * RoundCards::THUMBNAIL_MAX_HEIGHT (200 px), while the owner's draft keeps the 1920 px view its pins are placed on.
      */
     #[Test]
     public function roundZerosPictureLoadsItsThumbAndTheOwnersDraftItsView(): void
@@ -198,14 +204,14 @@ final class RoundsFrameTest extends WebTestCase
         $reportPicture = $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail img.screenshot__image');
         self::assertCount(1, $reportPicture);
         self::assertSame('/pinround/media/'.$reportMedia.'/thumb.webp', parse_url((string) $reportPicture->attr('src'), \PHP_URL_PATH));
-        self::assertSame(['480', '300'], [$reportPicture->attr('width'), $reportPicture->attr('height')]);
+        self::assertSame(['320', '200'], [$reportPicture->attr('width'), $reportPicture->attr('height')], '480 × 300 scaled to 200 high is 320 wide.');
         $draftPictures = $page->filter(self::ROUNDS.' article#round-'.$draft.' img.screenshot__image')->each(static fn (Crawler $image): string => (string) parse_url((string) $image->attr('src'), \PHP_URL_PATH));
         self::assertNotEmpty($draftPictures);
         self::assertSame(['/pinround/media/'.$draftMedia.'/view.webp'], array_values(array_unique($draftPictures)));
     }
 
     /**
-     * A tall phone shot (1170 × 2532, its thumb 480 × 1039) is drawn at most RoundCards::THUMBNAIL_MAX_HEIGHT (360 px)
+     * A tall phone shot (1170 × 2532, its thumb 480 × 1039) is drawn at most RoundCards::THUMBNAIL_MAX_HEIGHT (200 px)
      * high with its aspect ratio kept, so the pins, placed in percent of the picture, stay on their spots.
      */
     #[Test]
@@ -221,18 +227,19 @@ final class RoundsFrameTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $picture = $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail img.screenshot__image');
         self::assertCount(1, $picture);
-        self::assertSame(['166', '360'], [$picture->attr('width'), $picture->attr('height')], '480 × 1039 scaled to 360 high is 166.3 wide.');
+        self::assertSame(['92', '200'], [$picture->attr('width'), $picture->attr('height')], '480 × 1039 scaled to 200 high is 92.4 wide.');
         self::assertSame(['Pin 1: Footer link'], $page->filter(self::ROUNDS.' button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('aria-label')));
     }
 
     /**
-     * A picture stored with no thumb shows its view in Round 0, as before thumbs were used, never a broken picture.
+     * A picture stored with no thumb shows its view in Round 0, as before thumbs were used, never a broken picture. One
+     * exactly THUMBNAIL_MAX_HEIGHT high is drawn at its own size.
      */
     #[Test]
     public function aRoundZeroPictureStoredWithNoThumbShowsItsView(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
-        $media = $this->addMedia('ready', viewWidth: 960, viewHeight: 240, hasThumb: false);
+        $media = $this->addMedia('ready', viewWidth: 960, viewHeight: RoundCards::THUMBNAIL_MAX_HEIGHT, hasThumb: false);
         $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), $media, 0, 'Old shot', null);
         $this->logIn($this->client, $this->people['Omar']);
 
@@ -242,7 +249,7 @@ final class RoundsFrameTest extends WebTestCase
         $picture = $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail img.screenshot__image');
         self::assertCount(1, $picture);
         self::assertSame('/pinround/media/'.$media.'/view.webp', parse_url((string) $picture->attr('src'), \PHP_URL_PATH));
-        self::assertSame(['960', '240'], [$picture->attr('width'), $picture->attr('height')]);
+        self::assertSame(['960', '200'], [$picture->attr('width'), $picture->attr('height')]);
         self::assertCount(0, $page->filter(self::ROUNDS.' .screenshot__placeholder'));
     }
 

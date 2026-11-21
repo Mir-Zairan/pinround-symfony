@@ -218,6 +218,43 @@ turbo-frame#ticket-thread {
   background: var(--s-low);
 }
 
+/* Until it is used, the composer is one line: its kinds beside a one-line field, so the thread keeps the ticket page
+   short (P14.T7). Focus anywhere in it, or text in the field, opens it to three lines with the note and the button.
+   Folded, the note and the button are hidden from the eye only: a screen reader still reads them, and Tab still
+   reaches the button, whose focus opens the composer. The kinds keep their top-left place in both states, so a click
+   on one ends where it began. */
+.thread__composer:not(:focus-within):has(> .thread__composer-body:placeholder-shown) {
+  flex-flow: row wrap;
+  align-items: flex-start;
+}
+
+.thread__composer:not(:focus-within):has(> .thread__composer-body:placeholder-shown) .thread__ask-choices > * {
+  flex-basis: 100%;
+}
+
+.thread__composer:not(:focus-within):has(> .thread__composer-body:placeholder-shown) > .thread__composer-body {
+  flex: 1 1 16rem;
+  min-height: 0;
+  /* One line of .text-field: its line, padding and border. max-height also folds a field resized by hand, whose height
+     the browser keeps in its style attribute. */
+  height: calc(1lh + 2 * var(--space-10) + 2px);
+  max-height: calc(1lh + 2 * var(--space-10) + 2px);
+  resize: none;
+}
+
+.thread__composer:not(:focus-within):has(> .thread__composer-body:placeholder-shown) > .thread__composer-note,
+.thread__composer:not(:focus-within):has(> .thread__composer-body:placeholder-shown) > .thread__composer-send {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .thread__kinds {
   display: flex;
   flex-wrap: wrap;
