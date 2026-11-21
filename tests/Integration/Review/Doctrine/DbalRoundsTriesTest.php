@@ -15,7 +15,6 @@ use App\Review\Domain\RoundId;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotTriesFull;
-use App\Review\Domain\ScreenshotTry;
 use App\Review\Infrastructure\Doctrine\DbalAreas;
 use App\Review\Infrastructure\Doctrine\DbalRounds;
 use App\SharedKernel\Application\TenantContext;
@@ -101,9 +100,10 @@ final class DbalRoundsTriesTest extends KernelTestCase
         );
         $draft = $this->readDraft();
         self::assertSame(
-            [[self::CHECKOUT, 1, 3], [self::BASKET, 1, 1], [self::CHECKOUT, 2, 3], [self::CHECKOUT, 3, 3]],
-            array_map(static fn (ScreenshotTry $try): array => [$try->firstTryId->toString(), $try->number, $try->count], $draft->tries()),
+            [self::CHECKOUT, self::BASKET, self::CHECKOUT, self::CHECKOUT],
+            array_map(static fn (Screenshot $screenshot): string => $screenshot->firstTryId()->toString(), $draft->screenshots()),
         );
+        self::assertSame([self::BASKET, self::tryId(2)->toString()], array_map(static fn (Screenshot $screenshot): string => $screenshot->id()->toString(), $draft->latestTries()));
         self::assertSame([self::CHECKOUT_PIN], array_map(static fn (Pin $pin): string => $pin->id()->toString(), $draft->screenshots()[0]->pins()), 'The try-1 pin stays on try 1.');
         self::assertSame([], $draft->screenshots()[2]->pins());
         self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
@@ -383,6 +383,30 @@ final class DbalRoundsTriesTest extends KernelTestCase
     }
 
     /**
+     * Once try 2 goes, try 1 is the latest: a Still wrong left on its pin would reach rvw_pin.verdict, where a later
+     * area's "before" reads it as a reviewer's verdict.
+     */
+    #[Test]
+    public function removingTheLatestTryClearsTheStoredMarkOfAPinOnTheTryBeforeIt(): void
+    {
+        $otherRoundsBefore = $this->rowsOfOtherRounds();
+        $lena = new UserId(self::LENA);
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->addScreenshot($lena, self::tryId(1), self::MEDIA, new ScreenshotId(self::CHECKOUT));
+            $draft->setPinVerdict($lena, new PinId(self::CHECKOUT_PIN), PinVerdict::StillWrong);
+        });
+        self::assertSame(['verdict' => 'still_wrong', 'fixed_on_try' => null], $this->storedMarkOfCheckoutPin());
+
+        $this->changeDraft(static function (Round $draft) use ($lena): void {
+            $draft->removeScreenshot($lena, self::tryId(1));
+        });
+
+        self::assertSame(['verdict' => null, 'fixed_on_try' => null], $this->storedMarkOfCheckoutPin());
+        self::assertSame([null, null], $this->markOfCheckoutPinReadBack());
+        self::assertSame($otherRoundsBefore, $this->rowsOfOtherRounds());
+    }
+
+    /**
      * @return iterable<string, array{int}>
      */
     public static function triesNoPinIsFixedOn(): iterable
@@ -547,7 +571,7 @@ final class DbalRoundsTriesTest extends KernelTestCase
     {
         return $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): int {
             $this->debugData()->reset();
-            self::assertNotSame([], $this->storedDraft()->tries());
+            self::assertNotSame([], $this->storedDraft()->screenshots());
 
             return self::queryCountOf($this->debugData());
         });

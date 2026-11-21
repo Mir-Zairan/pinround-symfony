@@ -12,7 +12,9 @@ use Doctrine\Migrations\AbstractMigration;
  * when its owner marked it, so a later retake leaves "Fixed on try N" as it was. From 2, as only a later try fixes a pin,
  * to Screenshot::MAX_TRIES, and only beside the fixed verdict. Row-level security and the table grants of
  * Version20261115180000 cover the new column as they are. No pin is filled in: under forced row-level security the
- * migrator sees no tenant's rows, and RoundCards shows a fixed pin without a try as plain "Fixed".
+ * migrator sees no tenant's rows, and RoundCards shows a fixed pin without a try as plain "Fixed". The CHECK is added
+ * NOT VALID, so rvw_pin is not scanned under this transaction's ACCESS EXCLUSIVE lock; Version20261121180100 validates
+ * it.
  */
 final class Version20261121120000 extends AbstractMigration
 {
@@ -26,7 +28,7 @@ final class Version20261121120000 extends AbstractMigration
         $this->addSql('ALTER TABLE rvw_pin ADD fixed_on_try SMALLINT DEFAULT NULL');
         $this->addSql(
             'ALTER TABLE rvw_pin ADD CONSTRAINT rvw_pin_fixed_on_try_check'
-            ." CHECK (fixed_on_try IS NULL OR (verdict = 'fixed' AND fixed_on_try BETWEEN 2 AND 5))",
+            ." CHECK (fixed_on_try IS NULL OR (verdict = 'fixed' AND fixed_on_try BETWEEN 2 AND 5)) NOT VALID",
         );
     }
 

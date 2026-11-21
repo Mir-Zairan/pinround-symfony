@@ -17,7 +17,6 @@ use App\Review\Domain\RoundState;
 use App\Review\Domain\Screenshot;
 use App\Review\Domain\ScreenshotId;
 use App\Review\Domain\ScreenshotTriesFull;
-use App\Review\Domain\ScreenshotTry;
 use App\Review\Domain\ScreenshotVerdict;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -832,22 +831,6 @@ final class RoundTest extends TestCase
     }
 
     #[Test]
-    public function aTryIsAPlaceFromOneUpToTheChainsCount(): void
-    {
-        $id = self::screenshotId(0);
-        self::assertSame(3, new ScreenshotTry($id, $id, 3, 3)->number);
-
-        foreach ([[0, 2], [3, 2]] as [$number, $count]) {
-            try {
-                new ScreenshotTry($id, $id, $number, $count);
-                self::fail(\sprintf('Try %d of %d was accepted.', $number, $count));
-            } catch (\InvalidArgumentException $refused) {
-                self::assertSame(\sprintf('Try %d of %d is not a place in a chain.', $number, $count), $refused->getMessage());
-            }
-        }
-    }
-
-    #[Test]
     public function aTextEditSetsTrimmedTitleAndSummaryAndKeepsPinsAndVerdict(): void
     {
         $draft = self::draftWithScreenshots(2);
@@ -1033,7 +1016,7 @@ final class RoundTest extends TestCase
 
         $draft->addScreenshot($owner, new ScreenshotId(self::NEW_SCREENSHOT), self::MEDIA, self::screenshotId(3));
 
-        self::assertSame([4, 4, 4, 4], array_map(static fn (ScreenshotTry $try): int => $try->count, array_values(array_filter($draft->tries(), static fn (ScreenshotTry $try): bool => $try->firstTryId->equals(self::screenshotId(0))))), 'The chain has a fourth try.');
+        self::assertSame([[0, 4, 4]], array_values(array_filter(self::triesOf($draft), static fn (array $try): bool => 4 === $try[1])), 'The chain has a fourth try.');
         self::assertSame([[3], [], [], [null], [2], [], []], self::fixedOnTriesOf($draft), 'The fourth try leaves "Fixed on try 3" as it was.');
 
         $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::Fixed);
@@ -1098,6 +1081,48 @@ final class RoundTest extends TestCase
 
         self::assertSame([[PinVerdict::Fixed], []], self::pinVerdictsOf($draft));
         self::assertSame([[2], []], self::fixedOnTriesOf($draft));
+    }
+
+    /**
+     * A pin on the latest try takes no mark and shows no chips, so a mark left there could never be taken back.
+     */
+    #[Test]
+    public function removingTheLatestTryClearsEveryMarkOnTheTryThatIsLatestNowAndNoOther(): void
+    {
+        $draft = self::draftWithTries();
+        $owner = new UserId(self::OMAR);
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::StillWrong);
+        $draft->setPinVerdict($owner, self::pin(3)->id(), PinVerdict::StillWrong);
+        $version = $draft->version();
+
+        $draft->removeScreenshot($owner, self::screenshotId(5));
+
+        self::assertSame([[PinVerdict::StillWrong], [], [], [null], [null]], self::pinVerdictsOf($draft), 'Chain C\'s try 1 is its latest now; chain A keeps its mark.');
+        self::assertSame([[null], [], [], [null], [null]], self::fixedOnTriesOf($draft));
+        self::assertSame($version + 1, $draft->version());
+
+        $draft->removeScreenshot($owner, self::screenshotId(3));
+
+        self::assertSame([[PinVerdict::StillWrong], [], [], [null]], self::pinVerdictsOf($draft), 'Try 2 of chain A is its latest now; try 1 is still an earlier try.');
+
+        $draft->removeScreenshot($owner, self::screenshotId(2));
+
+        self::assertSame([[null], [], [null]], self::pinVerdictsOf($draft), 'Try 1 of chain A is its latest now.');
+        self::assertSame(['Header is cut off'], array_map(static fn (Pin $pin): string => $pin->note(), $draft->screenshots()[0]->pins()), 'The pin stays, only its mark goes.');
+    }
+
+    #[Test]
+    public function removingATryBeforeTheLatestLeavesTheMarksOfTheChainsOtherTries(): void
+    {
+        $draft = self::draftWithTries();
+        $owner = new UserId(self::OMAR);
+        $draft->replacePins($owner, self::screenshotId(2), [self::pin(4)]);
+        $draft->setPinVerdict($owner, self::pin(1)->id(), PinVerdict::StillWrong);
+        $draft->setPinVerdict($owner, self::pin(4)->id(), PinVerdict::StillWrong);
+
+        $draft->removeScreenshot($owner, self::screenshotId(0));
+
+        self::assertSame([[], [PinVerdict::StillWrong], [null], [null], []], self::pinVerdictsOf($draft), 'Try 3 is still the latest, so the mark on the try before it stays.');
     }
 
     #[Test]
@@ -1570,11 +1595,21 @@ final class RoundTest extends TestCase
     private static function triesOf(Round $round): array
     {
         $positionById = [];
+        $countByChain = [];
         foreach ($round->screenshots() as $screenshot) {
             $positionById[$screenshot->id()->toString()] = $screenshot->position();
+            $chain = $screenshot->firstTryId()->toString();
+            $countByChain[$chain] = ($countByChain[$chain] ?? 0) + 1;
+        }
+        $numberByChain = [];
+        $tries = [];
+        foreach ($round->screenshots() as $screenshot) {
+            $chain = $screenshot->firstTryId()->toString();
+            $numberByChain[$chain] = ($numberByChain[$chain] ?? 0) + 1;
+            $tries[] = [$positionById[$chain], $numberByChain[$chain], $countByChain[$chain]];
         }
 
-        return array_map(static fn (ScreenshotTry $try): array => [$positionById[$try->firstTryId->toString()], $try->number, $try->count], $round->tries());
+        return $tries;
     }
 
     private static function restoredDraft(RoundState $state, int $version = 1): Round

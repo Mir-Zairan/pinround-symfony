@@ -160,7 +160,8 @@ final class UseCaseRoundCommandsShareTest extends TestCase
         self::assertSame([[self::OMARS_DRAFT, '2026-03-04 09:30:00']], $this->checklistCommands->findingsCreated);
 
         $read = $this->inTransaction(fn (): DraftRoundAsRead => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::OMAR)));
-        self::assertCount(4, $read->screenshots, 'Omar still reads his earlier tries.');
+        self::assertCount(2, $read->screenshots, 'Make it a new ticket copies the latest try of each screenshot only.');
+        self::assertCount(4, $this->storedRound(self::OMARS_DRAFT)->screenshots(), 'Omar still reads his earlier tries.');
         self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::MIA))));
         self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::LENA))));
     }
@@ -202,7 +203,8 @@ final class UseCaseRoundCommandsShareTest extends TestCase
         $this->addChainOfThreeTriesToOmarsDraft();
 
         $read = $this->inTransaction(fn (): DraftRoundAsRead => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::OMAR)));
-        self::assertCount(4, $read->screenshots);
+        self::assertCount(2, $read->screenshots, 'The contents give the latest try of each screenshot.');
+        self::assertCount(4, $this->storedRound(self::OMARS_DRAFT)->screenshots());
         self::assertSame(RoundRefused::NOT_FOUND, $this->refusalOf(fn () => $this->commands->contentsOf(self::OMARS_DRAFT, new UserId(self::MIA))));
 
         $this->inTransaction(function (): void {

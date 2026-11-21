@@ -257,7 +257,7 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
                 $screenshot->summary(),
                 array_map(static fn (Pin $pin): PlacedPin => new PlacedPin($pin->xPercent(), $pin->yPercent(), $pin->note()), $screenshot->pins()),
             ),
-            $draft->screenshots(),
+            $draft->latestTries(),
         );
 
         return new DraftRoundAsRead($draft->id()->toString(), $draft->ticketId(), $draft->version(), $screenshots);

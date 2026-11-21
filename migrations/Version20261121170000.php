@@ -10,7 +10,8 @@ use Doctrine\Migrations\AbstractMigration;
 /**
  * rvw_pin_fixed_on_try_check of Version20261121120000 let a pin with no verdict name a try: verdict = 'fixed' is null
  * then, and a CHECK passes on null. IS NOT DISTINCT FROM is false for a null verdict, so the check refuses that row too.
- * A new migration, not an edit of that one, as databases may have run it already.
+ * A new migration, not an edit of that one, as databases may have run it already. Both checks are added NOT VALID, so
+ * rvw_pin is not scanned under this transaction's ACCESS EXCLUSIVE lock; Version20261121180100 validates it.
  */
 final class Version20261121170000 extends AbstractMigration
 {
@@ -24,7 +25,7 @@ final class Version20261121170000 extends AbstractMigration
         $this->addSql('ALTER TABLE rvw_pin DROP CONSTRAINT rvw_pin_fixed_on_try_check');
         $this->addSql(
             'ALTER TABLE rvw_pin ADD CONSTRAINT rvw_pin_fixed_on_try_check'
-            ." CHECK (fixed_on_try IS NULL OR (verdict IS NOT DISTINCT FROM 'fixed' AND fixed_on_try BETWEEN 2 AND 5))",
+            ." CHECK (fixed_on_try IS NULL OR (verdict IS NOT DISTINCT FROM 'fixed' AND fixed_on_try BETWEEN 2 AND 5)) NOT VALID",
         );
     }
 
@@ -33,7 +34,7 @@ final class Version20261121170000 extends AbstractMigration
         $this->addSql('ALTER TABLE rvw_pin DROP CONSTRAINT rvw_pin_fixed_on_try_check');
         $this->addSql(
             'ALTER TABLE rvw_pin ADD CONSTRAINT rvw_pin_fixed_on_try_check'
-            ." CHECK (fixed_on_try IS NULL OR (verdict = 'fixed' AND fixed_on_try BETWEEN 2 AND 5))",
+            ." CHECK (fixed_on_try IS NULL OR (verdict = 'fixed' AND fixed_on_try BETWEEN 2 AND 5)) NOT VALID",
         );
     }
 }
