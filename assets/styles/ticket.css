@@ -1,6 +1,8 @@
 /* The ticket page (src/Ticketing/UI/templates/show.html.twig): the header, then the main column and the aside. */
 
+/* The container .ticket__columns asks for its two columns: the page's width, not the viewport's. */
 .ticket {
+  container: ticket / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-24);
@@ -115,7 +117,7 @@
   overflow-wrap: anywhere;
 }
 
-/* The parts a move's Turbo Stream answer replaces: they hold their children in the layout of the header or aside. */
+/* The parts a move's Turbo Stream answer replaces: they hold their children in the layout of the header, columns or aside. */
 .ticket__header-state,
 .ticket__next-step,
 .ticket__people,
@@ -157,17 +159,18 @@
   font-size: 14px;
 }
 
-/* The prototype's two columns: the main one grows first, the aside wraps under it when both do not fit. */
+/*
+ * One column in the markup's order, which keyboard focus follows (WCAG 2.4.3): the ask and the thread, the Your next
+ * step box above the Rounds (P14.T7), then the aside. Never reorder these parts with order.
+ */
 .ticket__columns {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-32);
+  flex-direction: column;
+  gap: var(--space-28);
 }
 
 .ticket__main {
   display: flex;
-  flex: 999 1 560px;
   flex-direction: column;
   gap: var(--space-28);
   min-width: 0;
@@ -175,39 +178,51 @@
 
 .ticket__aside {
   display: flex;
-  flex: 1 1 300px;
   flex-direction: column;
   gap: var(--space-24);
   min-width: 0;
 }
 
 /*
- * On a phone the Your next step box sits above the Rounds (P14.T7), not after the whole main column. The columns give
- * up their boxes, so their parts share one column: the ask and the thread, the next step box, the Rounds, then the rest
- * of the aside. The markup keeps the desktop order, so keyboard focus reaches the Rounds before the box here.
- * 640px is the phone breakpoint of shell.css and review.css.
+ * The prototype's two columns once a 560px main column, the 32px gap and the 300px aside fit: the Rounds under the main
+ * column, the box above the rest of the aside. The rounds row is 1fr so the aside, which spans it, sizes only that row
+ * and never pushes the Rounds down; the main column spans the box's row and the next. The empty box wrapper is a block
+ * here, so its row stays 0px tall rather than taking half the main column's height. Rows have no gap, so the absent box
+ * leaves none: the box and the Rounds carry their own space.
  */
-@media (max-width: 640px) {
+@container ticket (min-width: 892px) {
   .ticket__columns {
-    flex-direction: column;
-    flex-wrap: nowrap;
-    align-items: stretch;
-    gap: var(--space-28);
+    display: grid;
+    grid-template-areas:
+      "main next"
+      "main aside"
+      "rounds aside";
+    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-rows: auto auto 1fr;
+    align-items: start;
+    gap: 0 var(--space-32);
   }
 
-  .ticket__main,
-  .ticket__aside {
-    display: contents;
+  .ticket__main {
+    grid-area: main;
+  }
+
+  .ticket__next-step {
+    display: block;
+    grid-area: next;
+  }
+
+  .ticket__next-step > .next-step-box {
+    margin-bottom: var(--space-24);
   }
 
   .ticket__rounds {
-    order: 1;
+    grid-area: rounds;
+    margin-top: var(--space-28);
   }
 
-  .ticket__people > *,
-  .ticket__activity > *,
-  .ticket__aside > .ticket__section {
-    order: 2;
+  .ticket__aside {
+    grid-area: aside;
   }
 }
 

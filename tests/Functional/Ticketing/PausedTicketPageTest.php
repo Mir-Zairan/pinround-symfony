@@ -248,7 +248,7 @@ final class PausedTicketPageTest extends WebTestCase
 
     private function nextStepBoxOf(Crawler $page): Crawler
     {
-        $box = $page->filter('.ticket__aside .next-step-box');
+        $box = $page->filter('.ticket__columns > .ticket__next-step > .next-step-box');
         self::assertCount(1, $box);
 
         return $box;
