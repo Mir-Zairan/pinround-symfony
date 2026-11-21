@@ -31,6 +31,10 @@
             {% endif %}
         </header>
 
+        {% if moveOnForm is not null %}
+            <twig:MoveOnButtons :form="moveOnForm" :roundNumber="roundNumber" />
+        {% endif %}
+
         {% if shown is null or page.pager is null %}
             <twig:EmptyState message="{{ page.emptyMessage }}" />
         {% else %}

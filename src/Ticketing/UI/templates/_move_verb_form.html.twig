@@ -1,0 +1,11 @@
+{#- One verb button of the Your next step box as a POST form to TicketMoveController's verb move, with the ticket's form
+    token and the version the page read. The ticket page's forms opt in to Turbo (isTurbo) and get a Turbo Stream back;
+    the round page's post without it, so the move redirects to the ticket page with its toast and the Share draft
+    question is a page of its own. Expects ticketKey, version, csrfToken, verb (verb, label, isPrimary) and isTurbo. -#}
+{% set moveController = 'App\\Ticketing\\UI\\TicketMoveController' %}
+<form method="post" action="{{ path(constant(moveController ~ '::MOVE_ROUTE'), {key: ticketKey, verb: verb.verb}) }}"
+    {%- if isTurbo %} data-turbo="true" data-failed-toast="{{ constant('App\\Ticketing\\UI\\MoveToasts::MOVE_FAILED') }}"{% else %} data-turbo="false"{% endif %}>
+    <input type="hidden" name="{{ constant(moveController ~ '::CSRF_FIELD') }}" value="{{ csrfToken }}">
+    <input type="hidden" name="{{ constant(moveController ~ '::VERSION_FIELD') }}" value="{{ version }}">
+    <twig:Button type="submit" variant="{{ verb.isPrimary ? 'filled' : 'outline' }}">{{ verb.label }}</twig:Button>
+</form>

@@ -445,6 +445,45 @@ textarea.screenshot-report__input {
   margin-inline-start: auto;
 }
 
+/* The round page's move-on buttons (MoveOnButtons), in the colours of the ticket page's Your next step box. */
+
+.round-move-on {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  border-radius: var(--radius-card);
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+
+.round-move-on__label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.round-move-on__sentence {
+  flex: 1 1 12rem;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.round-move-on__verbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.round-move-on__verbs form {
+  margin: 0;
+}
+
 /* The ticket page's Rounds section (RoundsSection). */
 
 .round-card {

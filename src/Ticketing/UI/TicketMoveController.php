@@ -274,35 +274,35 @@ final class TicketMoveController extends AbstractController
      */
     private function answerWithDraftQuestion(Request $request, string $key, UndecidedDraft $draft, string $moveUrl, \Closure $targetStepName): Response
     {
-        [$stepName, $shareBlockedReason] = $this->transactions->run(function () use ($key, $targetStepName, $draft): array {
+        $fields = [
+            self::CSRF_FIELD => $request->request->getString(self::CSRF_FIELD),
+            self::VERSION_FIELD => $request->request->getString(self::VERSION_FIELD),
+            self::WAITING_ON_USER_FIELD => $request->request->getString(self::WAITING_ON_USER_FIELD),
+            self::WAITING_ON_LABEL_FIELD => $request->request->getString(self::WAITING_ON_LABEL_FIELD),
+        ];
+        $isStream = TurboBundle::STREAM_FORMAT === $request->getPreferredFormat();
+
+        // Rendered inside the read's transaction, as answerWithToast renders: the page's layout counts My reports under
+        // the tenant, which fails outside a transaction.
+        return $this->transactions->run(function () use ($key, $targetStepName, $draft, $moveUrl, $fields, $isStream): Response {
             [$actor, $ticket] = $this->movableTicketOf($key);
             $openRoundNumber = $draft->openRoundNumber;
-
-            return [
-                $targetStepName($ticket, $actor),
-                null === $openRoundNumber ? null : $this->roundStillOpenReasonOf($openRoundNumber, $draft->openRoundReadyForUserId, $ticket, $actor),
+            $parameters = [
+                'ticketKey' => $key,
+                'moveUrl' => $moveUrl,
+                'draft' => $draft,
+                'stepName' => $targetStepName($ticket, $actor),
+                'shareBlockedReason' => null === $openRoundNumber ? null : $this->roundStillOpenReasonOf($openRoundNumber, $draft->openRoundReadyForUserId, $ticket, $actor),
+                'fields' => $fields,
+                'choiceField' => self::DRAFT_CHOICE_FIELD,
+                'failedToast' => MoveToasts::MOVE_FAILED,
             ];
-        });
-        $parameters = [
-            'ticketKey' => $key,
-            'moveUrl' => $moveUrl,
-            'draft' => $draft,
-            'stepName' => $stepName,
-            'shareBlockedReason' => $shareBlockedReason,
-            'fields' => [
-                self::CSRF_FIELD => $request->request->getString(self::CSRF_FIELD),
-                self::VERSION_FIELD => $request->request->getString(self::VERSION_FIELD),
-                self::WAITING_ON_USER_FIELD => $request->request->getString(self::WAITING_ON_USER_FIELD),
-                self::WAITING_ON_LABEL_FIELD => $request->request->getString(self::WAITING_ON_LABEL_FIELD),
-            ],
-            'choiceField' => self::DRAFT_CHOICE_FIELD,
-            'failedToast' => MoveToasts::MOVE_FAILED,
-        ];
-        if (TurboBundle::STREAM_FORMAT === $request->getPreferredFormat()) {
-            return $this->render('@Ticketing/draft_question.stream.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]));
-        }
+            if ($isStream) {
+                return $this->render('@Ticketing/draft_question.stream.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]));
+            }
 
-        return $this->render('@Ticketing/draft_question.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT));
+            return $this->render('@Ticketing/draft_question.html.twig', $parameters, new Response(null, Response::HTTP_CONFLICT));
+        });
     }
 
     /**
