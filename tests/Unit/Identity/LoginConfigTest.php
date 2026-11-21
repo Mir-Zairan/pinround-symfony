@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Identity;
 
+use App\Identity\Application\RecentAuth;
 use App\Identity\Infrastructure\Security\BlockedUserChecker;
 use App\Identity\Infrastructure\Security\ConsumeFirstLoginRateLimiter;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
@@ -149,6 +150,24 @@ final class LoginConfigTest extends TestCase
         self::assertSame(30, self::at($services, 'parameters', 'identity.session_absolute_days'));
         self::assertSame([], self::environmentsRedefining($services, 'parameters', 'identity.session_idle_seconds'));
         self::assertSame([], self::environmentsRedefining($services, 'parameters', 'identity.session_absolute_days'));
+    }
+
+    /**
+     * RecentAuth is the one reader of the switch (ADR-0049); without this wiring its defaults leave the switch off, so
+     * the dev demo would silently keep asking for two-step login.
+     */
+    #[Test]
+    public function theDemoSwitchReachesRecentAuthWithTheKernelEnvironmentAndIsOffWhereUnset(): void
+    {
+        $services = self::config('services.yaml');
+
+        self::assertSame(
+            ['$isDemoSwitchOn' => '%env(bool:PINROUND_DEMO_SKIP_2FA)%', '$appEnvironment' => '%kernel.environment%'],
+            self::at($services, 'services', RecentAuth::class, 'arguments'),
+        );
+        self::assertSame('', self::at($services, 'parameters', 'env(PINROUND_DEMO_SKIP_2FA)'));
+        self::assertSame([], self::environmentsRedefining($services, 'services', RecentAuth::class));
+        self::assertSame([], self::environmentsRedefining($services, 'parameters', 'env(PINROUND_DEMO_SKIP_2FA)'));
     }
 
     #[Test]

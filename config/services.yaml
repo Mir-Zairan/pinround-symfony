@@ -21,6 +21,8 @@ parameters:
     # How long SymfonyAiProvider waits on a provider when AI_PROVIDER_TIMEOUT_SECONDS is unset or empty, both for the
     # next byte and for the whole answer, so a hung provider cannot hold an async_ai worker.
     assist.ai_provider_timeout_default_seconds: 30
+    # The demo switch of ADR-0049 is off where nothing sets it: a prod environment without .env never fails on it.
+    env(PINROUND_DEMO_SKIP_2FA): ''
     # The routes a logged-in user may open before choosing an organization (EnterChosenOrganization); every other one
     # sends a user without a chosen organization to the picker. Deny by default: a new route is not in this list.
     organization.routes_without_organization:
@@ -178,6 +180,13 @@ services:
             $objectStorage: '@media.object_storage'
     # Runs the vips tool of the image's libvips-tools package (Dockerfile, base stage); the test env binds a fake below.
     App\Media\Application\Processing\ImageEncoder: '@App\Media\Infrastructure\Processing\VipsImageEncoder'
+
+    # The one reader of the demo switch (ADR-0049); it counts only in dev, and the Kernel refuses to boot with it on
+    # anywhere else. Wired here: the Application layer may not use a Vendor class (deptrac.yaml).
+    App\Identity\Application\RecentAuth:
+        arguments:
+            $isDemoSwitchOn: '%env(bool:PINROUND_DEMO_SKIP_2FA)%'
+            $appEnvironment: '%kernel.environment%'
 
     # Several services read the step policy on one page; it is read once per request. AddStep and SetRule check it
     # again inside their own transaction, after the voter, so they read it fresh.
