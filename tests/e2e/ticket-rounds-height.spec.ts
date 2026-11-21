@@ -99,7 +99,12 @@ test('a SHOP ticket with five rounds is under 1,400 px tall at 1440x900, with th
   await expect(composerNote, 'a screen reader still reads the folded note').toHaveText(COMMENT_NOTE);
   expect((await composerNote.boundingBox())!.width, 'the folded note is hidden from the eye').toBeLessThanOrEqual(1);
 
-  const pageHeight = await page.evaluate(() => document.scrollingElement?.scrollHeight ?? Number.POSITIVE_INFINITY);
+  // The demo banner shows only on a dev stack with PINROUND_DEMO_SKIP_2FA on (ADR-0049), never in production, so its
+  // 38 px are not the ticket page's.
+  const pageHeight = await page.evaluate(() => {
+    const demoBannerHeight = document.querySelector('.demo-mode-banner')?.getBoundingClientRect().height ?? 0;
+    return (document.scrollingElement?.scrollHeight ?? Number.POSITIVE_INFINITY) - demoBannerHeight;
+  });
   expect(pageHeight, 'the ticket page height at 1440x900').toBeLessThan(MAX_PAGE_HEIGHT_PX);
 
   // On a wide screen the box keeps its place in the aside, right of the Rounds.
