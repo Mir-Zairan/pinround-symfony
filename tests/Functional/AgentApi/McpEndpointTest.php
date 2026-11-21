@@ -152,6 +152,13 @@ final class McpEndpointTest extends WebTestCase
         self::assertIsArray($whoAmI);
         self::assertSame(WhoAmI::NAME, $whoAmI['name'] ?? null);
         self::assertSame(['type' => 'object', 'properties' => [], 'additionalProperties' => false], $whoAmI['inputSchema'] ?? null);
+        foreach ([AddScreenshot::NAME => ['key', 'upload_id', 'title', 'summary'], AddNotebookScreenshot::NAME => ['notebook', 'upload_id', 'title', 'summary']] as $pictureToolName => $requiredOverMcp) {
+            $pictureTool = $toolsByName[$pictureToolName];
+            self::assertIsArray($pictureTool);
+            $pictureToolSchema = $pictureTool['inputSchema'] ?? null;
+            self::assertIsArray($pictureToolSchema);
+            self::assertSame($requiredOverMcp, $pictureToolSchema['required'] ?? null, $pictureToolName);
+        }
         self::assertSame(['last_used_at' => '2099-03-20 09:00:20', 'revoked_at' => null], $this->usageOf($tokenId, $acmeFoods));
         self::assertSame(3, $this->callsCounted('mcp_calls_per_token_minute', $tokenId));
         self::assertSame(3, $this->callsCounted('mcp_calls_per_organization_minute', $acmeFoods->toString()));

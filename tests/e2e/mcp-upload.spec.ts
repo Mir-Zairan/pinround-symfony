@@ -84,7 +84,7 @@ test.describe('Screenshots from Claude Code', () => {
     const session = await McpSession.start(request, token.plainToken);
 
     const uploadId = await uploadThroughMcp(request, session, key, CHECKOUT_PNG);
-    const added = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId, title: 'Checkout page after the fix' });
+    const added = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId, title: 'Checkout page after the fix', summary: 'The total now shows the discount.' });
 
     expect(added.isError, added.text).toBe(false);
     expect(added.structured).toMatchObject({ status: 'added', pin_count: 0 });
@@ -97,6 +97,7 @@ test.describe('Screenshots from Claude Code', () => {
     const shot = omar.locator(`section.draft-shot[data-screenshot-id="${screenshotId}"]`);
     await expect(omar.locator('section.draft-shot')).toHaveCount(1);
     await expect(shot.getByLabel('Picture title · optional')).toHaveValue('Checkout page after the fix');
+    await expect(shot.getByLabel('Picture summary · optional')).toHaveValue('The total now shows the discount.');
     const picture = shot.locator('img').first();
     await picture.scrollIntoViewIfNeeded();
     await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0), { message: 'the processed picture loads' }).toBe(true);
@@ -136,7 +137,7 @@ test.describe('Screenshots from Claude Code', () => {
     const oversized = mediaFixture('pngClaiming(50000, 50000)');
 
     const uploadId = await uploadThroughMcp(request, session, key, oversized);
-    const refused = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId, title: 'Huge picture' });
+    const refused = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId, title: 'Huge picture', summary: 'A picture far over the pixel limit.' });
 
     expect(refused.isError).toBe(true);
     expect(refused.text).toBe(PICTURE_REJECTED);

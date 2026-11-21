@@ -59,7 +59,7 @@ The prompt asks Claude Code to:
 
 1. Keep an ordered evidence log in a local file, for example `pinround-evidence/log.json` in the working folder, with each picture as a file beside it. It writes the log after every case.
 2. Capture the "before" picture of each case: the screen as it is when the problem shows, before it changes anything. PNG, JPEG or WebP.
-3. Give each picture:
+3. Give each picture (pinround refuses a picture without a title or a summary, or with a blank one):
    - a title, at most 120 characters;
    - a summary, what the picture shows, at most 600 characters;
    - pins, one per spot that matters, at `x_pct` and `y_pct` (0 to 100, from the left and top edge) with a note of at most 1,000 characters. When it knows the element's box, it puts the pin at the box's centre instead of guessing from the picture.
@@ -77,7 +77,7 @@ Claude Code tells you what it found, case by case. Then:
    - **"Add to <key>"**, only for tickets where `find_tickets` says `may_start_draft` is true: the ticket is assigned to you, or it is your turn. The pictures go into your own draft round there.
    - **"Check more"**: it goes on checking and keeps the log.
 3. It uploads and files in this order:
-   - "New report": `create_report_upload` with the project key for each picture, then a PUT of the file to `put_url` with the headers it gave, before `expires_at` (5 minutes). Then one `create_report` with the project key, a title (at most 200 characters), the detail (the steps to see it, what you expected and what happened) and every picture in the log's order.
+   - "New report": `create_report_upload` with the project key for each picture, then a PUT of the file to `put_url` with the headers it gave, before `expires_at` (5 minutes). Then one `create_report` with the project key, a title (at most 200 characters), the detail (the steps to see it, what you expected and what happened) and every picture in the log's order, each with its title, summary and pins.
    - "Add to <key>": `create_upload` with the key for each picture, then the PUT, then `add_screenshot` with the key, the `upload_id`, the title, the summary and the pins. While it answers `processing`, it calls again a few seconds later.
 4. It marks each filed entry in the log as filed.
 5. It tells you where to look.

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\AgentApi\Tool;
 
 use App\AgentApi\Infrastructure\Mcp\McpRequestGuard;
+use App\AgentApi\Infrastructure\Mcp\ScreenshotContextArguments;
 use App\AgentApi\Infrastructure\Mcp\Tool\AddScreenshot;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -159,7 +160,7 @@ final class AddScreenshotTest extends WebTestCase
     {
         $uploadId = $this->addOpenUpload('Omar', $this->omarsDraft);
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
-        $arguments = ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE];
+        $arguments = ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY];
 
         $sessionId = $this->callAddScreenshot($token, $arguments);
 
@@ -193,7 +194,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY]);
 
         $this->assertRefused(AddScreenshot::PICTURE_REJECTED);
         self::assertSame($before, $this->stored());
@@ -206,12 +207,12 @@ final class AddScreenshotTest extends WebTestCase
         $uploadId = $this->addUsedUpload('Omar', $this->omarsDraft, 'ready');
         [, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
 
-        $sessionId = $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'pins' => [['x_pct' => 1, 'y_pct' => 2, 'note' => self::PIN_NOTE]]]);
+        $sessionId = $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY, 'pins' => [['x_pct' => 1, 'y_pct' => 2, 'note' => self::PIN_NOTE]]]);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(AddScreenshot::ADDED, $this->responseValueAt('result', 'structuredContent', 'status'));
         $afterFirst = $this->stored();
 
-        $this->callTool($token, $sessionId, ['key' => 'SHOP-1', 'upload_id' => strtoupper($uploadId), 'title' => 'Another title']);
+        $this->callTool($token, $sessionId, ['key' => 'SHOP-1', 'upload_id' => strtoupper($uploadId), 'title' => 'Another title', 'summary' => 'Another summary']);
 
         self::assertResponseStatusCodeSame(200);
         $newShot = $afterFirst['screenshots'][$this->omarsDraft][1]['id'] ?? null;
@@ -227,7 +228,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $miasUpload]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $miasUpload, 'title' => self::TITLE, 'summary' => self::SUMMARY]);
 
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         self::assertSame($before, $this->stored());
@@ -241,7 +242,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY]);
 
         $this->assertRefused(ToolRefusal::READ_ONLY);
         self::assertSame($before, $this->stored());
@@ -266,7 +267,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY]);
 
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         self::assertSame($before, $this->stored());
@@ -282,7 +283,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueReadOnlyToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY]);
 
         $this->assertRefused(\sprintf(ToolRefusal::MISSING_SCOPE, 'rounds:write'));
         self::assertSame($before, $this->stored());
@@ -304,7 +305,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $betaBakery);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY]);
 
         $this->assertRefused(ToolRefusal::NOT_FOUND);
         self::assertSame($before, $this->stored());
@@ -456,7 +457,7 @@ final class AddScreenshotTest extends WebTestCase
         [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
         $before = $this->stored();
 
-        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, ...$pastTheCap]);
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => self::TITLE, 'summary' => self::SUMMARY, ...$pastTheCap]);
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(self::INVALID_PARAMS, $this->responseValueAt('error', 'code'));
@@ -464,6 +465,66 @@ final class AddScreenshotTest extends WebTestCase
         self::assertSame([['id' => $uploadId, 'used_at' => null]], $this->intentsOf($this->acmeFoods));
         self::assertSame([], $this->queuedMessages());
         self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'invalid_input')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string}> the picture's context and the pointer refused
+     */
+    public static function picturesWithoutContext(): iterable
+    {
+        yield 'no title' => [['summary' => self::SUMMARY], '/title'];
+        yield 'no summary' => [['title' => self::TITLE], '/summary'];
+        yield 'neither, which names the title first' => [[], '/title'];
+        yield 'an empty title' => [['title' => '', 'summary' => self::SUMMARY], '/title'];
+        yield 'a title of only CR LF, a tab and spaces' => [['title' => " \r\n\t ", 'summary' => self::SUMMARY], '/title'];
+        yield 'a summary of only a BOM and a zero-width space' => [['title' => self::TITLE, 'summary' => "\u{FEFF}\u{200B}"], '/summary'];
+    }
+
+    /**
+     * Over MCP each picture needs its title and summary (P14.T11): the gate refuses the call after the scope check,
+     * before the upload is completed or the draft looked up.
+     *
+     * @param array<string, string> $context
+     */
+    #[Test]
+    #[DataProvider('picturesWithoutContext')]
+    public function aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndNothingIsWrittenOrCompleted(array $context, string $pointer): void
+    {
+        $uploadId = $this->addOpenUpload('Omar', $this->omarsDraft);
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+        $before = $this->stored();
+
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, ...$context]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['code' => self::INVALID_PARAMS, 'message' => \sprintf(ToolRefusal::INVALID_INPUT, \sprintf(ScreenshotContextArguments::MISSING_OR_BLANK, $pointer))],
+            $this->responseValueAt('error'),
+        );
+        self::assertSame($before, $this->stored());
+        self::assertSame([['id' => $uploadId, 'used_at' => null]], $this->intentsOf($this->acmeFoods));
+        self::assertSame([], $this->picturesOf($uploadId));
+        self::assertSame([$this->toolRow('Omar', $tokenId, ToolCallAuditor::TOOL_TARGET_TYPE, null, 'invalid_input')], $this->toolRowsOf($this->acmeFoods));
+    }
+
+    /**
+     * Review trims the line breaks around a text and keeps the ones inside it and every multibyte character.
+     */
+    #[Test]
+    public function aTitleAndSummaryWithLineBreaksAndMultibyteTextAreStoredTrimmedAndOtherwiseAsSent(): void
+    {
+        $uploadId = $this->addUsedUpload('Omar', $this->omarsDraft, 'ready');
+        [$tokenId, $token] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods);
+
+        $this->callAddScreenshot($token, ['key' => 'SHOP-1', 'upload_id' => $uploadId, 'title' => "Prix affiché 価格\r\n", 'summary' => "Le total est faux.\r\nDer Preis ist 0 €"]);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(AddScreenshot::ADDED, $this->responseValueAt('result', 'structuredContent', 'status'));
+        $screenshots = $this->screenshotsOf($this->omarsDraft);
+        self::assertCount(2, $screenshots);
+        self::assertSame([$uploadId, 'Prix affiché 価格', "Le total est faux.\r\nDer Preis ist 0 €"], [$screenshots[1]['media_id'], $screenshots[1]['title'], $screenshots[1]['summary']]);
+        self::assertSame([$this->toolRow('Omar', $tokenId, 'round', $this->omarsDraft, 'ok')], $this->toolRowsOf($this->acmeFoods));
+        $this->assertNoAuditRowHolds(['Prix affiché', 'Der Preis']);
     }
 
     /**
