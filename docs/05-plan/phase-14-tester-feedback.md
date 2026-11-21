@@ -123,7 +123,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   4. Add them to the [ADR index](../03-adr/README.md) as Proposed and ask the product owner to accept them.
 - **Acceptance:**
   - [x] Three ADRs follow [template.md](../03-adr/template.md), each with options and consequences; the index lists them.
-  - [ ] The product owner has accepted each one (date in the ADR).
+  - [x] The product owner has accepted each one (date in the ADR). (ADR-0048 on 2026-11-20, amended 2026-11-21; ADR-0049 and ADR-0050 on 2026-11-21.)
 - **Size:** S
 
 ### P14.T5 — Round rules: one open round, no empty share
@@ -331,7 +331,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 ### P14.T20 — One-click connect with OAuth
 - **Why:** everyone pastes a token into the extension and into Claude Code, and making a token needs two-step login first. A Claude custom connector needs OAuth anyway.
 - **Steps:**
-  1. OAuth 2.1 authorization server in Identity: authorization code with PKCE, redirect URIs registered per client and matched exactly (also at the token step), consent page listing the scopes where the person picks one of their organizations (the consent POST checks the membership on the server; otherwise 404 and no code; the Allow POST needs a valid CSRF token, otherwise 422 and no code), tokens bound to it and refused once that membership ends, access tokens of 1 hour, refresh tokens with rotation, revocation; discovery and protected-resource metadata for `/mcp`.
+  1. OAuth 2.1 authorization server in Identity: authorization code with PKCE (`S256`), dynamic client registration of public clients (no secret; redirect URIs `https`, loopback `http` or the extension's `chromiumapp.org` address; rate-limited), redirect URIs matched exactly (also at the token step), consent behind the same recent password and two-step login as token creation (`#[RequiresRecentAuth]`), codes and tokens stored only as HMAC-SHA256 hashes (ADR-0043), consent page listing the scopes where the person picks one of their organizations (the consent POST checks the membership on the server; otherwise 404 and no code; the Allow POST needs a valid CSRF token, otherwise 422 and no code), tokens bound to it and refused once that membership ends, access tokens of 1 hour, refresh tokens with rotation, revocation; discovery and protected-resource metadata for `/mcp`.
   2. Extension: "Connect" opens the consent page with `chrome.identity.launchWebAuthFlow`; "Sign out" revokes.
   3. Claude Code and the Claude connector: document the steps; note that a Claude connector reaches pinround from Anthropic's servers, so it needs a public HTTPS address (not `https://localhost`).
   4. Personal tokens keep working.
@@ -343,13 +343,14 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   - [ ] A token issued for Acme Foods answers not found for another organization, and its access and refresh tokens are refused once the person leaves Acme Foods.
   - [ ] A consent posted with another organization's id gets 404, and no code is issued.
   - [ ] An Allow POST with a missing or wrong CSRF token gets 422, and no code is issued.
+  - [ ] Consent without a recent two-step login sends the person to "Confirm it's you", and no code is issued; the database holds no usable code or token (only hashes).
 - **Depends on:** ADR-0050 accepted.
 - **Size:** L
 
 ## Definition of done
 - [ ] All P14 tasks ticked; the three journeys of the [outcome](#outcome) pass in Playwright.
 - [ ] The UI check of every page at 1440×900 and 390×844 finds no high or medium problem.
-- [ ] ADR-0048, 0049 and 0050 accepted; FR, guides, config and ADR index updated with their Index.
+- [ ] ADR-0048, 0049 and 0050 accepted (done 2026-11-21); FR, guides, config and ADR index updated with their Index.
 - [ ] Quality gates green: `composer test`, `composer phpstan`, `composer deptrac`, `composer cs`, `composer audit`.
 
 ## Hand-off notes
@@ -398,3 +399,4 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (T7): review rows end in '· N screenshots', counted by the rounds query; the round bar reads one narrow query of the lowest open shared round.
 - 2026-11-21 (T7): to fit five rounds under 1,400 px at 1440x900, Round 0's picture is at most 200 px high with its title beside it, round rows are shorter, and the thread composer stays one line until focused (estimate ~1,344 px, waiting on ticket-rounds-height.spec.ts).
 - 2026-11-21: the ticket page markup runs main column, Your next step, Rounds, aside, so keyboard focus follows what people see; wide screens place them with grid areas (resolves the focus-order caveat above).
+- 2026-11-21 (T4 done): the product owner accepted ADR-0049 and ADR-0050 on 2026-11-21 and answered their open points: no audit field records a skipped two-step login (0049); consent asks for the same recent password and two-step login as token creation, clients self-register as public PKCE clients, and codes and tokens are stored only as HMAC-SHA256 hashes (0050). T20's step 1 and a new criterion carry these; ADR-0012 and ADR-0021 say they are superseded in part. T18 and T20 may start.

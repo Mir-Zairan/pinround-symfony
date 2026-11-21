@@ -5,25 +5,25 @@ with a consent page instead of a pasted token. Pasted personal access tokens kee
 
 ## Index
 
-- [Status](#status) — proposed, date, what it would supersede in ADR-0021.
+- [Status](#status) — accepted, date, what it supersedes in ADR-0021.
 - [Context and problem statement](#context-and-problem-statement) — Mia and Omar paste tokens; a Claude connector cannot.
 - [Decision drivers](#decision-drivers) — one click, same scopes and voters, short-lived tokens, nothing in logs.
 - [Considered options](#considered-options) — our own OAuth server, pasted tokens only, an outside identity server.
-- [Decision outcome](#decision-outcome) — the flow, redirect URIs, consent (its organization, its CSRF token), the tokens, the clients, pasted tokens.
+- [Decision outcome](#decision-outcome) — the flow, redirect URIs, consent (its organization, its CSRF token, step-up), client registration, the tokens and their storage, the clients, pasted tokens.
   - [Consequences](#consequences) — what gets easier and what it costs.
 - [Confirmation](#confirmation) — the tests of P14.T20.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — the trade-offs.
-- [Open points before acceptance](#open-points-before-acceptance) — what the product owner still has to say.
+- [Decided at acceptance](#decided-at-acceptance) — the product owner's answers on step-up, clients and storage.
 - [More information](#more-information) — related ADRs, requirements, revisit triggers.
 
 ## Status
 
-Proposed · 2026-11-21 · Deciders: Zairan Mir (lead, product owner), not yet accepted.
+Accepted · 2026-11-21 · Deciders: Zairan Mir (lead, product owner).
 
-When accepted, it supersedes in part [ADR-0021](0021-mcp-server.md): the consequence "no OAuth flow for MCP in v1",
+It supersedes in part [ADR-0021](0021-mcp-server.md): the consequence "no OAuth flow for MCP in v1",
 and its "Authentication" line, which allows only a personal access token as the Bearer token on `/mcp`. Everything
 else in ADR-0021 stands: the same voters, scopes, request checks, limits and audit.
-[P14.T20](../05-plan/phase-14-tester-feedback.md#p14t20--one-click-connect-with-oauth) waits for its acceptance.
+[P14.T20](../05-plan/phase-14-tester-feedback.md#p14t20--one-click-connect-with-oauth) builds it.
 
 ## Context and problem statement
 
@@ -53,7 +53,7 @@ How do the extension, Claude Code and a Claude connector connect in one click, w
 
 ## Decision outcome
 
-Proposed option: **1, an OAuth 2.1 authorization server in pinround**, because it gives one-click connect to all three
+Chosen option: **1, an OAuth 2.1 authorization server in pinround**, because it gives one-click connect to all three
 clients, is the only way a Claude connector can connect, and keeps tokens, scopes and voters in one place.
 
 - **Where.** Identity owns the authorization server, as it owns personal access tokens ([ADR-0012](0012-authentication.md)).
@@ -68,6 +68,9 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
   person is a member of the posted organization; otherwise it answers 404 and issues no code. The Allow POST needs a
   valid CSRF token; without one it answers 422 ("The page was open too long. Try again.", as the other forms do) and
   issues no code.
+- **Step-up on consent.** The consent page asks for the same proof as making a personal access token: password and
+  two-step login within the last 10 minutes (`#[RequiresRecentAuth]`, [ADR-0012](0012-authentication.md)). The demo
+  switch of [ADR-0049](0049-demo-switch-for-two-step-login.md) counts here as it does for tokens.
 - **One organization per grant.** The code, the access token and the refresh token are bound to the organization
   picked on the consent page, as a personal access token is bound to its organization. A token reads and writes only
   that organization, and stops working (access and refresh) when the person's membership of it ends.
@@ -77,6 +80,15 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
   voters, and `ADMIN_*` voters still deny every request made with one.
 - **Discovery.** Authorization server metadata and protected-resource metadata for `/mcp`, so an MCP client finds the
   server on its own.
+- **Client registration.** Clients register themselves with dynamic client registration (RFC 7591), as the MCP
+  authorization spec allows; no admin step. Only public clients: no client secret, and PKCE with `S256` is required.
+  A redirect URI is `https`, `http` on a loopback host (`localhost`, `127.0.0.1`, `[::1]`) as native clients such as
+  Claude Code use, or the extension's `https://<id>.chromiumapp.org/` address; anything else is refused at
+  registration. Registration is rate-limited per IP, and the consent page shows the client's name with the host of
+  its redirect URI, so a person sees where the code goes.
+- **Token storage.** Codes, access tokens and refresh tokens are stored only as HMAC-SHA256 hashes keyed by
+  `API_TOKEN_PEPPER`, as [ADR-0043](0043-api-token-hash-is-hmac-sha256.md) stores personal access tokens. The
+  database never holds a usable token.
 - **Clients.**
   - The extension: "Connect" opens the consent page with `chrome.identity.launchWebAuthFlow`; "Sign out" revokes.
   - Claude Code: the guide documents the steps.
@@ -133,14 +145,15 @@ clients, is the only way a Claude connector can connect, and keeps tokens, scope
 - Bad, because small organizations run one more service, which ADR-0012 already turned down.
 - Bad, because scopes, users and revocation live in two places.
 
-## Open points before acceptance
+## Decided at acceptance
 
-- **Step-up.** ADR-0012 asks for password and two-step login within the last 10 minutes to make a personal access
-  token. Does the consent page ask for the same? The phase file does not say.
-- **Client registration.** How do Claude Code and a Claude connector register as clients (registered by an admin, or
-  registered by the client itself as the MCP authorization spec allows)? The phase file does not say.
-- **Token storage.** Are issued tokens stored as hashes the way ADR-0043 stores personal access tokens? Expected, but
-  not stated.
+The product owner answered on 2026-11-21:
+
+- **Step-up.** The consent page asks for the same recent password and two-step login as making a personal access
+  token.
+- **Client registration.** Clients register themselves (dynamic client registration), public clients with PKCE only;
+  a Claude connector cannot wait for an admin.
+- **Token storage.** Hashes only, as for personal access tokens.
 
 ## More information
 

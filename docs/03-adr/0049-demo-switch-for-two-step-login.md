@@ -6,7 +6,7 @@ else.
 
 ## Index
 
-- [Status](#status) — proposed, date, what it would supersede in ADR-0012.
+- [Status](#status) — accepted, date, what it supersedes in ADR-0012.
 - [Context and problem statement](#context-and-problem-statement) — Sara tries a local demo and hits two-step login first.
 - [Decision drivers](#decision-drivers) — a quick demo, no weaker production, people still see two-step login.
 - [Considered options](#considered-options) — a dev-only switch, a known demo secret, no exception.
@@ -14,18 +14,18 @@ else.
   - [Consequences](#consequences) — what gets easier and what it risks.
 - [Confirmation](#confirmation) — the tests of P14.T18.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — the trade-offs.
-- [Open points before acceptance](#open-points-before-acceptance) — what the product owner still has to say.
+- [Decided at acceptance](#decided-at-acceptance) — the product owner's answer on the audit entry.
 - [More information](#more-information) — related ADRs, requirements, revisit triggers.
 
 ## Status
 
-Proposed · 2026-11-21 · Deciders: Zairan Mir (lead, product owner), not yet accepted.
+Accepted · 2026-11-21 · Deciders: Zairan Mir (lead, product owner).
 
-When accepted, it supersedes in part [ADR-0012](0012-authentication.md): the "no exception" rule, that admin pages and
+It supersedes in part [ADR-0012](0012-authentication.md): the "no exception" rule, that admin pages and
 token creation always need two-step login. It gets one exception, a local `dev` demo with this switch on. Every real
 deployment keeps the rule, as ADR-0012's "not an exception to NFR-SEC-05 for any real deployment" says. Everything
 else in ADR-0012 stands.
-[P14.T18](../05-plan/phase-14-tester-feedback.md#p14t18--demo-switch-for-two-step-login) waits for its acceptance.
+[P14.T18](../05-plan/phase-14-tester-feedback.md#p14t18--demo-switch-for-two-step-login) builds it.
 
 ## Context and problem statement
 
@@ -58,7 +58,7 @@ How does a local demo skip two-step login without any real deployment being able
 
 ## Decision outcome
 
-Proposed option: **1, a dev-only switch**, because it makes a local demo quick, keeps two-step login on by default so
+Chosen option: **1, a dev-only switch**, because it makes a local demo quick, keeps two-step login on by default so
 people see it, and cannot be turned on in a real deployment.
 
 - **The switch.** `PINROUND_DEMO_SKIP_2FA`, a bool environment variable, default false. "Set" means a value Symfony's
@@ -79,6 +79,8 @@ people see it, and cannot be turned on in a real deployment.
   recent password, and `ADMIN_*` voters still deny every request made with a token ([ADR-0013](0013-authorization.md)).
 - **Visible while on.** Every page shows a banner: "Demo mode: two-step login is skipped."
 - **Setup.** `.env` explains the switch, and the `pinround-setup` skill asks whether to turn it on.
+- **No audit field.** An action taken with the switch on writes the same audit entry as any other; nothing records
+  that two-step login was skipped, because the switch runs only on a local `dev` demo.
 
 ### Consequences
 
@@ -119,10 +121,11 @@ people see it, and cannot be turned on in a real deployment.
 - Bad, because every demo starts with a setup step unrelated to what the person came to see, which the hands-on test
   of 2026-11-20 found.
 
-## Open points before acceptance
+## Decided at acceptance
 
-- Should an admin action taken with the switch on write an audit entry that says two-step login was skipped, as the
-  hackathon flag planned (`mfa_skipped: true`)? The phase file does not say.
+- **Audit entry.** The product owner decided on 2026-11-21 that no audit entry records a skipped two-step login (the
+  hackathon flag's planned `mfa_skipped: true` is not built): the switch runs only on a local `dev` demo, whose audit
+  log no one reviews.
 
 ## More information
 

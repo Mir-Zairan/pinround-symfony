@@ -17,7 +17,9 @@ People sign in with email and password (with MFA) or with their company login; t
 
 ## Status
 
-Accepted · 2026-11-06 · Deciders: Zairan Mir (lead).
+Accepted · 2026-11-06 · Deciders: Zairan Mir (lead). Superseded in part by
+[ADR-0049](0049-demo-switch-for-two-step-login.md): a local `dev` demo may skip two-step login with
+`PINROUND_DEMO_SKIP_2FA`; every real deployment keeps the rule.
 
 Superseded in part by [ADR-0043](0043-api-token-hash-is-hmac-sha256.md): the personal access token hash ("stored as a SHA-256 hash (with a server pepper)") is HMAC-SHA256 keyed by the `API_TOKEN_PEPPER` environment variable. Everything else here still stands.
 
