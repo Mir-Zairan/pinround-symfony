@@ -19,7 +19,7 @@ The assignee can check their own work in a private round. Nobody else sees it un
 
 - Status: Accepted. Superseded in part by [ADR-0044](0044-whose-turn-it-is-may-keep-a-draft-round.md): who may start a draft round (the assignee, or the person whose turn it is). Superseded in part by [ADR-0048](0048-tries-in-a-draft-and-one-open-round-per-ticket.md): a share may be refused and then stays unnumbered, it copies the latest try of each screenshot, and the hand-off dialog drops "Share and move" when sharing is refused. Everything else here still stands.
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

@@ -18,7 +18,7 @@ The same image runs in a small company's Docker Compose and in our hosted setup.
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

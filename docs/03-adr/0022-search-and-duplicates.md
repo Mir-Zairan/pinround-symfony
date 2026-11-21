@@ -21,7 +21,7 @@ We find tickets and likely duplicates inside PostgreSQL. There is no separate se
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

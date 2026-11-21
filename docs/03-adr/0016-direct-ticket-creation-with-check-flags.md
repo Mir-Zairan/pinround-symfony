@@ -18,7 +18,7 @@ A report becomes a real ticket the moment it is sent. A lead takes a quick look 
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

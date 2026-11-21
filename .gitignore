@@ -31,3 +31,6 @@
 # Keys the specs keep across runs (login-code.spec.ts); Playwright empties test-results/ at every run.
 /tests/e2e/.auth/
 ###< playwright (tests/e2e) ###
+
+# Personal Claude Code notes, such as the private prototype link (CLAUDE.md)
+/CLAUDE.local.md

@@ -19,7 +19,7 @@ Important actions are recorded in a log that the app itself cannot change or del
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

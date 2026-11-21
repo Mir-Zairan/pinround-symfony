@@ -89,7 +89,7 @@ See [ADR-0028](../03-adr/0028-testing-and-quality-gates.md).
 - Only neutral, invented data: Acme Foods, project SHOP, Lena (lead), Omar (developer), Mia (tester), Raj (manager), Sara (admin), plus a second org "Globex" for isolation tests.
 - Screenshots in tests are small generated images. No real product screenshots.
 - A "large org" generator for staging and k6 creates the scale shape from [performance-and-scale.md](performance-and-scale.md#capacity-model).
-- Never copy data from the prototype (it contains internal company data).
+- Never copy data from the prototype (it is private).
 
 ## CI pipeline
 

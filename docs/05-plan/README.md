@@ -8,7 +8,7 @@ How pinround gets built: 15 phases, each split into tasks that fit one Claude Co
 - [Phases](#phases) — table of P00–P14 with goal, dependencies, task count and 🏁 tasks
 - [Dependency graph](#dependency-graph) — which phase needs which
 - [Hackathon slice](#hackathon-slice) — what we build by 22 Nov 2026 18:00 CET and what we cut
-- [Hackathon schedule](#hackathon-schedule) — day by day, three people, every 🏁 task with a day and an owner
+- [Hackathon schedule](#hackathon-schedule) — who built it and how a slipped day is handled
 - [What the demo shows](#what-the-demo-shows) — the 5-minute story for the judges
 - [After the hackathon](#after-the-hackathon) — the order of the remaining work
 - [Definition of done for every task](#definition-of-done-for-every-task) — the global checklist
@@ -25,15 +25,15 @@ How pinround gets built: 15 phases, each split into tasks that fit one Claude Co
 ## The prototype
 The product must look and behave like the clickable prototype. Every task names the screens to compare with.
 
-- **Link:** https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2 (private to its owner).
-- **Read it in Claude Code:** use the Artifact tool with `action: "read"`, `url: "https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2"` and `path` set to one of:
+- **Link:** in your git-ignored `CLAUDE.local.md` (private to its owner, not in the repository).
+- **Read it in Claude Code:** use the Artifact tool with `action: "read"`, `url` = the prototype link and `path` set to one of:
   - `project/Main.dc.html` — the app (Home, Tickets, ticket page, Report a problem, My reports, Team, Admin);
   - `project/Review.dc.html` — a review round;
   - `project/Focus.dc.html` — full-screen review;
   - `project/Shot.dc.html` — the simulated screenshot.
 - **Fallback:** if you cannot open the link, use [the prototype guide](../04-prototype/prototype-guide.md). It describes every screen, text, state and rule, one file per screen in [04-prototype/screens](../04-prototype/screens).
 - **Prototype-only:** the "view as" switch, the "Big team" toggle, the simulated screenshot and the made-up pings are demo devices. Do not build them ([prototype-only devices](../04-prototype/prototype-guide.md#prototype-only-devices)).
-- The prototype contains internal company data. Never copy names, ticket keys or text from it. Use Acme Foods, SHOP, Lena, Omar, Mia, Raj, Sara.
+- The prototype is private. Never copy names, ticket keys or text from it. Use Acme Foods, SHOP, Lena, Omar, Mia, Raj, Sara.
 
 ## Phases
 | Phase | Goal | Depends on | Tasks (= sessions) | 🏁 |
@@ -111,28 +111,7 @@ The hackathon slice breaks this order on purpose: it builds only the 🏁 tasks,
 **Risk control:** if a day slips, cut in this order: laptop AI (stretch) → server-side Ollama provider (keep Hugging Face only) → P03.T4 search → `set_verdict` (the developer sets verdicts in the UI) → P05.T1/T2 presigned upload (fall back to a size-limited upload controller that still runs the processing worker; write it in the hand-off notes as a hackathon shortcut). Never cut tenancy, voters, the visibility predicate or the tests of what is built.
 
 ## Hackathon schedule
-Three people: **Zairan** (lead, developer), **Toyib** (developer), **Anka** (tester). Each developer runs about two M-sized Claude Code sessions per day. Anka tests every 🏁 task the day after it lands, writes the Playwright journeys and owns the demo script.
-
-| Day | Zairan | Toyib | Anka |
-|---|---|---|---|
-| Sat 7 Nov | P00.T1 skeleton + Docker; P00.T2 modules + CI | P00.T5 tokens + base layout (after T1 lands) | Read the prototype guide; demo script v1 |
-| Sun 8 Nov | P00.T3 + P00.T4 tenancy and RLS | P00.T6 components; P01.T1 password login | Playwright project + smoke test; review the RLS tests |
-| Mon 9 Nov | P00.T7 outbox + minimal audit store; start P01.T3 | P05.T3 pin layer (with fixtures, no backend needed) | Test P00 gates; login journey |
-| Tue 10 Nov | P01.T3 (finish); P01.T4 roles + voters | P01.T5 nav + Home shell; P02.T1 projects; P02.T2 core steps | Test org, roles and menus per person |
-| Wed 11 Nov | P02.T4 engine + 8 verbs | P02.T6 turn read model; P02.T7 Now/Next | Test verbs and Now/Next against the prototype texts |
-| Thu 12 Nov | P03.T1 ticket + simple create (L) | P05.T1 upload intents; P05.T2 processing worker | Test create and isolation; upload fixtures |
-| Fri 13 Nov | P03.T2 visibility predicate; P03.T3 list | P03.T4 search; P03.T6 ticket page header | Test list and header against the prototype |
-| Sat 14 Nov | P03.T7 next-step box + verbs (L) | P05.T4 round model; P05.T5 screenshot on create form | Test the ticket journey end to end |
-| Sun 15 Nov | P03.T8 steps 1–2 Give it to; P08.T1 gateway + providers | P05.T8 draft round (L) | Test assign and draft round |
-| Mon 16 Nov | P08.T2 prompt builder + metering; P08.T3 AI policy (min) | P05.T9 hand-off dialog; P09.T1 tokens | Test draft share; AI with neutral fixtures |
-| Tue 17 Nov | P08.T4 summaries; P08.T7 intake suggestions | P09.T2 MCP skeleton; P09.T3 `list_my_tickets` | Test AI features; MCP smoke with a real token |
-| Wed 18 Nov | Stretch: P08.T8 + P08.T9 laptop AI (skip if behind) | P09.T4 `get_round_notes` + `set_verdict`; P09.T5 `create_upload` + `add_screenshot` | Claude Code loop test |
-| Thu 19 Nov | P09.T8 Claude Code guide; bug fixing | Bug fixing; one-command Docker start | Follows the guide alone (P09.T8 check); full demo rehearsal |
-| Fri 20 Nov | Bug fixing and polish against the prototype | Bug fixing | Rehearsal 2; final test pass; bug list |
-| Sat 21 Nov | **Buffer day.** Feature freeze 12:00; record the demo video | README "run it" section; clean-clone check | Test from a clean clone |
-| Sun 22 Nov | Submit by 15:00 (3 h before 18:00 CET) | Standby for fixes | Check the submission works |
-
-If a 🏁 task is not done by its day, the next day starts by deciding what to cut (see [risk control](#hackathon-slice)).
+One person, Zairan, built pinround with Claude Code sessions, in the order of the 🏁 tasks above. If a 🏁 task slips, the next day starts by deciding what to cut (see [risk control](#hackathon-slice)).
 
 ## What the demo shows
 Every step names the 🏁 tasks it needs.

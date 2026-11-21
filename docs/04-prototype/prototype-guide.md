@@ -22,7 +22,7 @@ The prototype is the target for look and behaviour. When this guide and the prot
 
 ## How to open the prototype
 
-- Link: https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2
+- Link: in your `CLAUDE.local.md` (private to its owner).
 - It is private. Only its owner (and people the owner shares it with) can open it.
 - It is a claude.ai Design canvas with four boards:
 
@@ -40,7 +40,7 @@ How to read it in Claude Code:
 3. `project/canvas.json` lists the boards and their titles.
 4. If the tool says you have no access, use this guide and `screens/*.md`. They are complete enough to build from.
 
-The prototype contains internal company data loaded from a separate data file (real ticket titles and names). Never copy that data into this repository. These docs use neutral examples instead.
+The prototype is private. Never copy its names, titles or text into this repository. These docs use neutral examples instead.
 
 ## Prototype-only devices
 

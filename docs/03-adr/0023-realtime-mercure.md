@@ -19,7 +19,7 @@ Pages update by themselves when something changes. A live update never shows any
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

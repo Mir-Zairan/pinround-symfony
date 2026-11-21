@@ -21,12 +21,12 @@ Rules for Claude Code sessions in pinround-symfony. Read this fully before any t
 6. Work only on that task. If you find work for another task, write it in the phase file's **Hand-off notes**.
 
 ## The prototype
-- Link: https://claude.ai/artifact/FmbJosB3s5mDi75cLqMFQ2. It is private to its owner.
+- Link: in your git-ignored `CLAUDE.local.md`. It is private to its owner and not in the repository.
 - In Claude Code, read it with the Artifact tool: `action: "read"`, `url` = the link, `path` = `project/Main.dc.html` (the app), `project/Review.dc.html` (review round), `project/Focus.dc.html` (full-screen review), `project/Shot.dc.html` (simulated screenshot).
 - If you cannot open it, use [docs/04-prototype/prototype-guide.md](docs/04-prototype/prototype-guide.md). It describes every screen, text, state and rule.
 - Prototype-only devices: the "view as" role switch, the "Big team" toggle, simulated screenshots, made-up pings and example teams. Do not build these into the product.
 - The product must match the prototype's layout, words and behaviour unless a requirement or ADR says otherwise. When they differ, the requirement wins. Note the difference in the task's hand-off notes.
-- The prototype contains internal company data. Never copy names, ticket keys, titles or text from it into code, tests, fixtures or docs.
+- The prototype is private. Never copy names, ticket keys, titles or text from it into code, tests, fixtures or docs.
 
 ## Where things are
 - Docs map and reading order: [docs/README.md](docs/README.md).

@@ -19,7 +19,7 @@ Teams can start using pinround next to Jira. Tickets and statuses sync; rounds, 
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 

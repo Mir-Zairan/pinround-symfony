@@ -18,7 +18,7 @@ Each change ships with tests at the right level, and CI blocks the merge if any 
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 
@@ -28,7 +28,7 @@ Much of pinround will be written in Claude Code sessions, one task at a time. A 
 
 - Catch leaks and permission bugs automatically, every time.
 - Fast feedback: the unit and integration suite under 5 minutes in CI.
-- Tests describe behaviour in product words, so Anka (tester) can read them.
+- Tests describe behaviour in product words, so a tester can read them.
 - Gates are the same locally and in CI (`composer` scripts).
 
 ## Considered options

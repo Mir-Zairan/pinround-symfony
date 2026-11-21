@@ -18,7 +18,7 @@ In laptop mode the server never talks to anyone's laptop. The browser does, and 
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 Superseded in part by [ADR-0042](0042-laptop-result-refusal-status-codes.md): the sentence "A wrong or used nonce returns 409 and writes an audit event"; an unknown, another person's or another organization's package answers 404, a used or expired one 410, a rejected text or model 422 and a policy refusal 403, and every refusal writes the `local_ai.result_refused` audit entry. Everything else here still stands.
 

@@ -18,7 +18,7 @@ AI output is a suggestion that a person accepts. Content inside tickets can neve
 
 - Status: Accepted
 - Date: 2026-11-06
-- Deciders: Zairan (lead), Toyib (developer), Anka (tester)
+- Deciders: Zairan Mir (lead)
 
 ## Context and problem statement
 
