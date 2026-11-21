@@ -20,11 +20,12 @@ use App\Ticketing\Api\TicketPageView;
  * area those are the earlier round's pins, the same the round page's side panel lists, in the same order; on a
  * screenshot of any other round, the pins that the round page draws on the picture shown, numbered as the round page
  * numbers its screenshots (RoundPages::screenshotsOf). A shared draft's screenshot has the same Before as on the round
- * page, the same-numbered screenshot of the hand-off round before it (RoundPages::beforeScreenshotOf).
+ * page, the same-numbered screenshot of the hand-off round before it, or of the report when there is none
+ * (RoundPages::beforeScreenshotOf).
  *
  * Its reads do not grow with the screenshots or pins: one signing call, and, for a round without areas other than a
  * review round, RoundPages' read of the one round whose screenshots it shows and, for a shared draft, its read of the
- * hand-off round before it.
+ * hand-off round before it or the report.
  */
 final readonly class FocusPages
 {

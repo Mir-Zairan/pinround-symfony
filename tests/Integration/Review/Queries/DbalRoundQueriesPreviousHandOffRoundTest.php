@@ -29,10 +29,11 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * DbalRoundQueries::previousHandOffRoundOf, the round whose pictures are a shared draft's Befores (ADR-0048), on rows
  * committed once per class in Acme Foods' Shop team (Lena leads it, Omar develops, Mia tests). The team-only ticket
- * holds the report (Round 0), Omar's shared draft Round 1 with the chain A (A1 at 0, its retake A2 at 2) and B at 1,
- * Lena's review Round 2 with two "after" pictures, the checklist Round 3, Omar's shared draft Round 4 and his unshared
- * draft. Another ticket holds its report, its checklist Round 1 and a shared draft Round 3, which a read that forgot the
- * ticket would take for the round before Round 4. Rows go in out of position order. Every time is fixed in March 2027.
+ * holds the report (Round 0, two pictures, the first with a pin), Omar's shared draft Round 1 with the chain A (A1 at 0,
+ * its retake A2 at 2) and B at 1, Lena's review Round 2 with two "after" pictures, the checklist Round 3, Omar's shared
+ * draft Round 4 and his unshared draft. Another ticket holds its report, its checklist Round 1 and a shared draft
+ * Round 3, which a read that forgot the ticket would take for the round before Round 4. A third ticket has no report,
+ * only a shared draft Round 1. Rows go in out of position order. Every time is fixed in March 2027.
  */
 final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
 {
@@ -47,6 +48,7 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
     private const string SHOP_PROJECT = '0197a3c0-0000-7000-8000-00000030a022';
     private const string TICKET = '0197a3c0-0000-7000-8000-00000030a031';
     private const string OTHER_TICKET = '0197a3c0-0000-7000-8000-00000030a032';
+    private const string TICKET_WITHOUT_REPORT = '0197a3c0-0000-7000-8000-00000030a033';
 
     private const string REPORT = '0197a3c0-0000-7000-8000-00000030a041';
     private const string ROUND_ONE = '0197a3c0-0000-7000-8000-00000030a042';
@@ -57,6 +59,7 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
     private const string OTHER_REPORT = '0197a3c0-0000-7000-8000-00000030a047';
     private const string OTHER_CHECKLIST = '0197a3c0-0000-7000-8000-00000030a048';
     private const string OTHER_ROUND_THREE = '0197a3c0-0000-7000-8000-00000030a049';
+    private const string ROUND_ONE_WITHOUT_REPORT = '0197a3c0-0000-7000-8000-00000030a04b';
 
     private const string A1 = '0197a3c0-0000-7000-8000-00000030a051';
     private const string B = '0197a3c0-0000-7000-8000-00000030a052';
@@ -67,10 +70,14 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
     private const string ROUND_FOUR_SHOT = '0197a3c0-0000-7000-8000-00000030a057';
     private const string UNSHARED_SHOT = '0197a3c0-0000-7000-8000-00000030a058';
     private const string OTHER_SHOT = '0197a3c0-0000-7000-8000-00000030a059';
+    private const string REPORT_SECOND_SHOT = '0197a3c0-0000-7000-8000-00000030a05a';
+    private const string OTHER_REPORT_SHOT = '0197a3c0-0000-7000-8000-00000030a05b';
+    private const string WITHOUT_REPORT_SHOT = '0197a3c0-0000-7000-8000-00000030a05c';
 
     private const string A1_PIN = '0197a3c0-0000-7000-8000-00000030a061';
     private const string B_PIN = '0197a3c0-0000-7000-8000-00000030a062';
     private const string A2_PIN = '0197a3c0-0000-7000-8000-00000030a063';
+    private const string REPORT_PIN = '0197a3c0-0000-7000-8000-00000030a064';
 
     private const string MEDIA = '0197a3c0-0000-7000-8000-00000030a081';
 
@@ -88,6 +95,7 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
         $tickets = new TicketRows(self::migrator(), self::tenantContext());
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::TICKET, self::SHOP_PROJECT, 1, 'team', self::SHOP_TEAM, self::MIA);
         $tickets->addWithAudienceOf(self::ACME_FOODS, self::OTHER_TICKET, self::SHOP_PROJECT, 2, 'team', self::SHOP_TEAM, self::MIA);
+        $tickets->addWithAudienceOf(self::ACME_FOODS, self::TICKET_WITHOUT_REPORT, self::SHOP_PROJECT, 3, 'team', self::SHOP_TEAM, self::MIA);
 
         $round = static fn (string $id, string $ticketId, ?int $number, string $kind, string $ownerId, string $state = 'open'): array => ['rvw_round', [
             'organization_id' => self::ACME_FOODS, 'id' => $id, 'ticket_id' => $ticketId, 'number' => $number, 'kind' => $kind,
@@ -113,18 +121,23 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
             $round(self::OTHER_REPORT, self::OTHER_TICKET, 0, 'report', self::MIA),
             $round(self::OTHER_CHECKLIST, self::OTHER_TICKET, 1, 'checklist', self::MIA),
             $round(self::OTHER_ROUND_THREE, self::OTHER_TICKET, 3, 'draft', self::OMAR),
+            $round(self::ROUND_ONE_WITHOUT_REPORT, self::TICKET_WITHOUT_REPORT, 1, 'draft', self::OMAR),
             $screenshot(self::B, self::ROUND_ONE, 1),
             $screenshot(self::A1, self::ROUND_ONE, 0),
             $screenshot(self::A2, self::ROUND_ONE, 2, self::A1),
             $screenshot(self::AFTER_AT_1, self::REVIEW_ROUND_TWO, 1),
             $screenshot(self::AFTER_AT_0, self::REVIEW_ROUND_TWO, 0),
+            $screenshot(self::REPORT_SECOND_SHOT, self::REPORT, 1),
             $screenshot(self::REPORT_SHOT, self::REPORT, 0),
+            $screenshot(self::OTHER_REPORT_SHOT, self::OTHER_REPORT, 0),
+            $screenshot(self::WITHOUT_REPORT_SHOT, self::ROUND_ONE_WITHOUT_REPORT, 0),
             $screenshot(self::ROUND_FOUR_SHOT, self::ROUND_FOUR, 0),
             $screenshot(self::UNSHARED_SHOT, self::UNSHARED_DRAFT, 0),
             $screenshot(self::OTHER_SHOT, self::OTHER_ROUND_THREE, 0),
             $pin(self::A2_PIN, self::A2, 'Still cut off on the latest try'),
             $pin(self::A1_PIN, self::A1, 'Cut off on the first try'),
             $pin(self::B_PIN, self::B, 'The basket'),
+            $pin(self::REPORT_PIN, self::REPORT_SHOT, 'The total is doubled'),
         ]);
         self::ensureKernelShutdown();
     }
@@ -181,26 +194,58 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
     }
 
     /**
+     * With no hand-off round before it, Round 1's Befores are the report's pictures, by position, the first with its
+     * pin; neither the other ticket's report nor any round above Round 1 is taken.
+     */
+    #[Test]
+    public function theRoundBeforeTheFirstSharedDraftIsTheReportWithItsPicturesAndPins(): void
+    {
+        $previous = $this->previousHandOffRoundFor(self::TICKET, self::teamMember(self::MIA), 1);
+
+        self::assertNotNull($previous);
+        self::assertSame([self::REPORT, 0, 'report'], [$previous->id, $previous->number, $previous->kind]);
+        self::assertSame(
+            [[self::REPORT_SHOT, [self::REPORT_PIN]], [self::REPORT_SECOND_SHOT, []]],
+            array_map(static fn (RoundScreenshotView $screenshot): array => [
+                $screenshot->id,
+                array_map(static fn (RoundPinView $pin): string => $pin->id, $screenshot->pins),
+            ], $previous->screenshots),
+        );
+    }
+
+    /**
+     * The checklist Round 1 below the other ticket's draft Round 3 is no hand-off, so the report is its round before.
+     */
+    #[Test]
+    public function theReportIsTheRoundBeforeWhenOnlyTheChecklistRoundStandsBetween(): void
+    {
+        $previous = $this->previousHandOffRoundFor(self::OTHER_TICKET, self::teamMember(self::MIA), 3);
+
+        self::assertNotNull($previous);
+        self::assertSame(self::OTHER_REPORT, $previous->id);
+        self::assertSame([self::OTHER_REPORT_SHOT], array_map(static fn (RoundScreenshotView $screenshot): string => $screenshot->id, $previous->screenshots));
+    }
+
+    /**
      * @return iterable<string, array{string, int}> ticket, number
      */
-    public static function roundsWithNoHandOffBefore(): iterable
+    public static function roundsWithNoRoundBefore(): iterable
     {
-        yield 'Round 1, after only the report' => [self::TICKET, 1];
-        yield 'the other ticket\'s Round 3, after only its report and checklist round' => [self::OTHER_TICKET, 3];
+        yield 'Round 1 of a ticket with no report' => [self::TICKET_WITHOUT_REPORT, 1];
         yield 'Round 0' => [self::TICKET, 0];
     }
 
     #[Test]
-    #[DataProvider('roundsWithNoHandOffBefore')]
-    public function aRoundWithNoHandOffRoundBeforeItHasNone(string $ticketId, int $number): void
+    #[DataProvider('roundsWithNoRoundBefore')]
+    public function aRoundWithNeitherAHandOffRoundNorAReportBeforeItHasNone(string $ticketId, int $number): void
     {
         self::assertNull($this->previousHandOffRoundFor($ticketId, self::teamMember(self::MIA), $number));
     }
 
     /**
      * The read's "deleted_at IS NULL" has no row to meet: a deleted draft keeps no number (rvw_round_deleted_check), so
-     * none can stand between the other ticket's checklist Round 1 and its draft Round 3. Should the schema ever take one,
-     * this fails and asks for the read to be tested against it.
+     * none can stand between the other ticket's checklist Round 1 and its draft Round 3, whose round before stays the
+     * report. Should the schema ever take one, this fails and asks for the read to be tested against it.
      */
     #[Test]
     public function noDeletedSharedDraftCanStandBetweenTwoRoundsSoTheRoundBeforeStaysAsItWas(): void
@@ -219,36 +264,41 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
             self::assertStringContainsString('rvw_round_deleted_check', $refusal->getMessage());
         }
 
-        self::assertNull($this->previousHandOffRoundFor(self::OTHER_TICKET, self::teamMember(self::MIA), 3));
+        self::assertSame(self::OTHER_REPORT, $this->previousHandOffRoundFor(self::OTHER_TICKET, self::teamMember(self::MIA), 3)?->id);
     }
 
     /**
-     * A team-only ticket is not the outsider's to see, so nothing of its rounds comes back: only the visibility check
-     * runs.
+     * A team-only ticket is not the outsider's to see, so nothing of its rounds comes back, the report neither: only the
+     * visibility check runs.
      */
     #[Test]
     public function aViewerWhoMayNotSeeTheTicketGetsNoRoundAndOnlyTheVisibilityCheckRuns(): void
     {
         $outsider = TicketVisibility::for(new OrganizationId(self::ACME_FOODS), new UserId(self::OUTSIDER), [], false, null);
 
-        [$previous, $queryCount] = $this->previousHandOffRoundAndQueryCountFor(self::TICKET, $outsider, 4);
+        foreach ([4 => self::REVIEW_ROUND_TWO, 1 => self::REPORT] as $number => $roundBefore) {
+            [$previous, $queryCount] = $this->previousHandOffRoundAndQueryCountFor(self::TICKET, $outsider, $number);
 
-        self::assertNull($previous);
-        self::assertSame(1, $queryCount);
-        self::assertSame(self::REVIEW_ROUND_TWO, $this->previousHandOffRoundFor(self::TICKET, self::teamMember(self::LENA), 4)?->id, 'Lena of the team gets it.');
+            self::assertNull($previous, 'Round '.$number);
+            self::assertSame(1, $queryCount, 'Round '.$number);
+            self::assertSame($roundBefore, $this->previousHandOffRoundFor(self::TICKET, self::teamMember(self::LENA), $number)?->id, 'Lena of the team gets the round before Round '.$number.'.');
+        }
     }
 
     /**
-     * Four queries whatever the screenshots and pins (visibility, round, screenshots, pins), and none for Round 1.
+     * Four queries whatever the screenshots and pins (visibility, round, screenshots, pins), the report's too, and none
+     * for Round 0.
      */
     #[Test]
-    public function theRoundBeforeCostsFourQueriesAndRoundOneNone(): void
+    public function theRoundBeforeCostsFourQueriesAndRoundZeroNone(): void
     {
-        [$previous, $queryCount] = $this->previousHandOffRoundAndQueryCountFor(self::TICKET, self::teamMember(self::MIA), 2);
-        self::assertSame(self::ROUND_ONE, $previous?->id);
-        self::assertSame(4, $queryCount);
+        foreach ([2 => self::ROUND_ONE, 1 => self::REPORT] as $number => $roundBefore) {
+            [$previous, $queryCount] = $this->previousHandOffRoundAndQueryCountFor(self::TICKET, self::teamMember(self::MIA), $number);
+            self::assertSame($roundBefore, $previous?->id, 'Round '.$number);
+            self::assertSame(4, $queryCount, 'Round '.$number);
+        }
 
-        [$none, $noQueries] = $this->previousHandOffRoundAndQueryCountFor(self::TICKET, self::teamMember(self::MIA), 1);
+        [$none, $noQueries] = $this->previousHandOffRoundAndQueryCountFor(self::TICKET, self::teamMember(self::MIA), 0);
         self::assertNull($none);
         self::assertSame(0, $noQueries);
     }

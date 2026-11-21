@@ -36,8 +36,8 @@ use App\Ticketing\Api\TicketPageView;
  *
  * Its reads do not grow with the screenshots or pins: two signing calls (the shown pictures, then every small picture,
  * one more per SignedUrls::MAX_MEDIA_IDS of them), for a round without areas other than a review round, RoundsVisibleTo's
- * read of the one round whose screenshots it shows, for a shared draft its read of the hand-off round before it, whose
- * pictures are the Befores, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
+ * read of the one round whose screenshots it shows, for a shared draft its read of the hand-off round before it or, with
+ * none, of the report, whose pictures are the Befores, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
  */
 final readonly class RoundPages
 {
@@ -161,8 +161,9 @@ final readonly class RoundPages
     }
 
     /**
-     * The hand-off round shared just before a shared draft, whose screenshots are the Befores of the draft's; one read
-     * through RoundsVisibleTo, none for Round 1. Null for any other kind of round, which has no Before by screenshot.
+     * The hand-off round shared just before a shared draft, or the report when there is none, whose screenshots are the
+     * Befores of the draft's; one read through RoundsVisibleTo. Null for any other kind of round, which has no Before
+     * by screenshot.
      * Runs inside the request transaction whose tenant is the viewer's organization.
      */
     public function previousHandOffRoundOf(VisibleTicket $visible, ReviewRoundView $round): ?RoundView
@@ -271,8 +272,9 @@ final readonly class RoundPages
      * The screenshot with its Before, as beforeScreenshotOf pairs them; one without a Before stands alone.
      *
      * @param int            $number        from 1, its place in the strip
-     * @param RoundView|null $previousRound the hand-off round shared before a shared draft, with its latest tries; null
-     *                                      for Round 0, a checklist round and Round 1
+     * @param RoundView|null $previousRound the hand-off round shared before a shared draft, or the report when there is
+     *                                      none, with its latest tries; null for Round 0, a checklist round and a draft
+     *                                      of a ticket with neither
      */
     private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, ?RoundView $previousRound, \DateTimeImmutable $now): ShownScreenshot
     {
