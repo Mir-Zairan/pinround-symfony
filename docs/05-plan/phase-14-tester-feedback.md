@@ -351,7 +351,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - [ ] All P14 tasks ticked; the three journeys of the [outcome](#outcome) pass in Playwright.
 - [ ] The UI check of every page at 1440×900 and 390×844 finds no high or medium problem.
 - [x] ADR-0048, 0049 and 0050 accepted (done 2026-11-21); FR, guides, config and ADR index updated with their Index.
-- [ ] Quality gates green: `composer test`, `composer phpstan`, `composer deptrac`, `composer cs`, `composer audit`.
+- [x] Quality gates green: `composer test`, `composer phpstan`, `composer deptrac`, `composer cs`, `composer audit` (2026-11-21, `make qa` on dd99a548: 13134 tests OK, phpstan no errors, deptrac 0 violations, cs and Rector clean, no audit advisories).
 
 ## Hand-off notes
 - 2026-11-20 (plan change): phase added from the product owner's hands-on test and a UI check of every page. P07.T6 (My reports page) moves here as T15, and the smallest part of P11.T1 (admin shell with the tabs that exist) as T3; their phase files say so. Evidence for T1 and T2 (live checks on SHOP-42 and Report a problem) is in this session's notes, not in the repo.
