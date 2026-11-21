@@ -27,8 +27,9 @@ use App\Ticketing\Api\TicketVisibility;
  * names in one batch and signs the pictures shown in one query per variant and SignedUrls::MAX_MEDIA_IDS pictures,
  * whatever the number of rounds. On the ticket only the report and the viewer's own unshared draft are cards with
  * pictures, the report's at most MAX_PICTURES_PER_CARD and as thumbs. The checklist round is a card of its rows. Every
- * review round and shared draft is a one-line row that opens its own page and signs no picture; a findings round keeps
- * its check items under its row (ChecklistCards, read only when the ticket has a checklist round or a shared draft).
+ * review round and shared draft is a one-line row that opens its own page, loads and signs no picture and says the
+ * screenshot count the rounds query counted; a findings round keeps its check items under its row (ChecklistCards,
+ * read only when the ticket has a checklist round or a shared draft).
  * The unshared draft's card shows every picture (the domain caps them), so its editor can reach each one, as one
  * screenshot per chain of tries with its earlier tries (ADR-0048). forDraft builds one draft's card alone, shared or
  * not, with its pictures.
@@ -77,8 +78,8 @@ final readonly class RoundCards
     private const string FINDINGS_HEADLINE = 'Round %d · findings by %s';
     private const string FINDINGS_DESCRIPTION = 'What %s found while checking the ticket.';
 
-    /** The rows of later rounds: number, owner's name, open or closed, and for a shared draft its screenshot count. */
-    private const string REVIEW_ROW = 'Round %d · review by %s · %s';
+    /** The rows of later rounds: number, owner's name, open or closed, and the screenshot count. */
+    private const string REVIEW_ROW = 'Round %d · review by %s · %s · %s';
     private const string SELF_CHECK_ROW = 'Round %d · self-check by %s · %s · %s';
     private const string FINDINGS_ROW = 'Round %d · findings by %s · %s · %s';
 
@@ -219,19 +220,22 @@ final readonly class RoundCards
     }
 
     /**
-     * A review round or a shared draft on the ticket: one line and "Open round", no picture. A review round is loaded
-     * without its screenshots (RoundView), so only a shared draft's line counts them, one per chain of tries.
+     * A review round or a shared draft on the ticket: one line and "Open round", no picture. Neither is loaded with its
+     * screenshots (RoundsVisibleTo), so the line says the count the rounds query made: the latest try of each.
      *
      * @param ChecklistCard|null $findingsChecklist a findings round's check items, the one place to mark them fixed
+     *
+     * @throws \LogicException when the round was read without its count, as only a read of one round is
      */
     private static function rowOf(RoundView $round, string $ownerName, ?UserId $assigneeId, ?ChecklistCard $findingsChecklist): RoundCard
     {
         $number = $round->number ?? 0;
+        $screenshotCount = $round->screenshotCount ?? throw new \LogicException(\sprintf('Round %s was read without its screenshot count, which its row shows.', $round->id));
         if (RoundView::DRAFT !== $round->kind) {
-            $headline = \sprintf(self::REVIEW_ROW, $number, $ownerName, $round->state);
+            $headline = \sprintf(self::REVIEW_ROW, $number, $ownerName, $round->state, self::screenshotCountOf($screenshotCount));
         } else {
             $isSelfCheck = null !== $assigneeId && $round->ownerId->equals($assigneeId);
-            $headline = \sprintf($isSelfCheck ? self::SELF_CHECK_ROW : self::FINDINGS_ROW, $number, $ownerName, $round->state, self::screenshotCountOf(\count(self::shownChainsOf($round))));
+            $headline = \sprintf($isSelfCheck ? self::SELF_CHECK_ROW : self::FINDINGS_ROW, $number, $ownerName, $round->state, self::screenshotCountOf($screenshotCount));
         }
 
         return new RoundCard($round->id, 'round-'.$round->id, $headline, null, false, [], true, number: $round->number, findingsChecklist: $findingsChecklist, isRow: true);

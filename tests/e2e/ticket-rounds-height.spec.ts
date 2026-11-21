@@ -18,7 +18,7 @@ const MAX_PAGE_HEIGHT_PX = 1400;
 const ROUND_ZERO_THUMBNAIL_PX = 480;
 const ROUNDS = 5;
 const ROWS = 3;
-const ROW_HEADLINE = /^Round \d+ · (review|self-check|findings) by Omar · (open|closed)( · \d+ screenshots?)?$/;
+const ROW_HEADLINE = /^Round \d+ · (review|self-check|findings) by Omar · (open|closed) · (no screenshots|1 screenshot|\d+ screenshots)$/;
 
 // Omar shares a draft below, and the draft specs read and decide his drafts; playwright.config.ts runs them one test
 // at a time.

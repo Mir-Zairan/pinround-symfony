@@ -42,7 +42,8 @@ use Doctrine\DBAL\Connection;
  * two leave the decision to RoundVoter, the next three read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
  * RoundVoter. draftOf reads one draft of its owner with its screenshots and pins, and needs none either. Of a shared
  * round, forTicket and sharedRoundNotes give only the latest try of each screenshot (ADR-0048), to everyone, and
- * draftScreenshotOf finds no earlier try; draftOf and the viewer's unshared draft give every try.
+ * draftScreenshotOf finds no earlier try; draftOf and the viewer's unshared draft give every try. forTicket and
+ * forVisibleTo count each round's screenshots in the rounds query; forVisibleTo loads no shared draft's screenshots.
  */
 final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries, RoundsVisibleTo, OpenSharedRoundQueries
 {
@@ -101,7 +102,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
     {
         $organizationId = $this->requireTransactionAndTenant();
 
-        return $this->roundsOf($organizationId, $ticketId, $this->ticketVisibilities->of($organizationId, $viewer));
+        return $this->roundsOf($organizationId, $ticketId, $this->ticketVisibilities->of($organizationId, $viewer), true);
     }
 
     public function forVisibleTo(TicketId $ticketId, TicketVisibility $viewer): TicketRounds
@@ -111,7 +112,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             throw new \InvalidArgumentException('The ticket visibility given is not one of the tenant\'s organization.');
         }
 
-        return $this->roundsOf($organizationId, $ticketId, $viewer);
+        return $this->roundsOf($organizationId, $ticketId, $viewer, false);
     }
 
     public function sharedRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView
@@ -124,7 +125,8 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             return null;
         }
 
-        // By rvw_round_ticket_id_number_key; only a shared round has a number. has_screenshots is roundsOf's.
+        // By rvw_round_ticket_id_number_key; only a shared round has a number. has_screenshots spares the screenshot query
+        // of a round with none and of a checklist or review round, which is loaded with none.
         $roundRow = $this->connection->fetchAssociative(
             'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state,'
             ." (round.kind IN ('report', 'draft') AND EXISTS (SELECT 1 FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id)) AS has_screenshots"
@@ -438,21 +440,27 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         return $this->tenantContext->require();
     }
 
-    private function roundsOf(OrganizationId $organizationId, TicketId $ticketId, TicketVisibility $visibility): TicketRounds
+    /**
+     * @param bool $loadsSharedDraftScreenshots false for the ticket page, which shows a shared draft as a row with its
+     *                                          count: then only the report and the viewer's unshared draft are loaded
+     *                                          with their screenshots
+     */
+    private function roundsOf(OrganizationId $organizationId, TicketId $ticketId, TicketVisibility $visibility, bool $loadsSharedDraftScreenshots): TicketRounds
     {
         $viewer = $visibility->viewerId();
         if ([] === $this->ticketQueries->visibleTicketIdsOf($visibility, [$ticketId])) {
             return new TicketRounds([]);
         }
 
-        // A checklist or review round is a row on the page and loads no screenshot or pin: has_screenshots is false for it,
-        // and is computed after the cap so it costs nothing for a round the cap drops.
+        // screenshot_count is computed after the cap, so it costs nothing for a round the cap drops; it counts what the
+        // team sees of a shared round (latestTrySql), and the chains of an unshared draft.
         // A round with no number is an unshared draft; only its owner gets it, after every shared round. Round 0 and the
         // draft are never capped: the numbered rounds (1 and up) are ranked newest first among themselves and only the
         // newest MAX_NUMBERED_ROUNDS go on, with the size of the numbered group to tell how many were left out.
         $roundRows = $this->connection->fetchAllAssociative(
             'SELECT listed.id, listed.number, listed.kind, listed.owner_id, listed.shared_at, listed.state, listed.group_size,'
-            ." (listed.kind IN ('report', 'draft') AND EXISTS (SELECT 1 FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = listed.organization_id AND screenshot.round_id = listed.id)) AS has_screenshots"
+            .' (SELECT COUNT(*) FROM rvw_screenshot AS counted WHERE counted.organization_id = listed.organization_id AND counted.round_id = listed.id'
+            .' AND '.self::latestTrySql('counted').') AS screenshot_count'
             .' FROM ('
             .'SELECT round.organization_id, round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state,'
             .' ROW_NUMBER() OVER (PARTITION BY (round.number >= 1) ORDER BY round.number DESC) AS newest_rank,'
@@ -469,11 +477,16 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         $roundIdsWithScreenshots = [];
         $unsharedDraftIds = [];
         foreach ($roundRows as $roundRow) {
-            if (self::boolean($roundRow['has_screenshots'], 'has_screenshots')) {
-                $roundIdsWithScreenshots[] = self::text($roundRow['id'], 'id');
+            $roundId = self::text($roundRow['id'], 'id');
+            $kind = self::text($roundRow['kind'], 'kind');
+            $isUnsharedDraft = null === $roundRow['shared_at'];
+            // A checklist or review round is a row on the page and loads no screenshot or pin.
+            $loadsScreenshots = 'report' === $kind || (RoundView::DRAFT === $kind && ($isUnsharedDraft || $loadsSharedDraftScreenshots));
+            if ($loadsScreenshots && self::integer($roundRow['screenshot_count'], 'screenshot_count') > 0) {
+                $roundIdsWithScreenshots[] = $roundId;
             }
-            if (null === $roundRow['shared_at']) {
-                $unsharedDraftIds[] = self::text($roundRow['id'], 'id');
+            if ($isUnsharedDraft) {
+                $unsharedDraftIds[] = $roundId;
             }
             if ((self::integerOrNull($roundRow['number'], 'number') ?? 0) >= 1) {
                 $olderRoundsNotShown = max(0, self::integer($roundRow['group_size'], 'group_size') - self::MAX_NUMBERED_ROUNDS);
@@ -495,6 +508,7 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
                 null === $sharedAt ? null : new \DateTimeImmutable($sharedAt),
                 self::text($roundRow['state'], 'state'),
                 $screenshotsByRound[$roundId] ?? [],
+                self::integer($roundRow['screenshot_count'], 'screenshot_count'),
             );
         }, $roundRows);
 

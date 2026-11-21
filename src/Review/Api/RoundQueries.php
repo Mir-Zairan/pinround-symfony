@@ -29,6 +29,9 @@ interface RoundQueries
      * A shared round comes with only the latest try of each screenshot, to everyone, its owner included (ADR-0048): the
      * earlier tries are the owner's, read through draftOf. The viewer's own unshared draft comes with every try.
      *
+     * Every round comes with its screenshotCount, the latest try of each screenshot it holds, counted in the rounds
+     * query, also for a checklist or review round, whose screenshots are not loaded.
+     *
      * Round 0, the viewer's own unshared draft and the newest MAX_NUMBERED_ROUNDS numbered rounds from Round 1 up are
      * loaded; the count of the older ones is in the answer. The cap is in the rounds query, so a ticket with a
      * thousand rounds still costs the same four queries.
