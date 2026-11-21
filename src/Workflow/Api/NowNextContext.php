@@ -19,9 +19,9 @@ final readonly class NowNextContext
      * @param TeamFacts             $team               for the reviewer and tester the team would pick when the ticket
      *                                                  has none yet
      * @param bool                  $isReviewBeforeTest the team's rule review_before_test
-     * @param UserId|null           $viewerId           the person looking; their own items read "you". No page passes
-     *                                                  it yet: the lists keep "you" in their own rows, and the ticket
-     *                                                  page names everyone by first name
+     * @param UserId|null           $viewerId           the person looking; their own items read "you". My reports
+     *                                                  passes it for its Now line; the ticket page passes none and names
+     *                                                  everyone by first name
      * @param UserId|null           $askerId            who asked the open question; null while none is open
      */
     public function __construct(

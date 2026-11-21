@@ -20,6 +20,9 @@ use App\Web\UI\MyReports\ReportCards;
 use App\Web\UI\MyReports\ReportStage;
 use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\StepQueries;
+use App\Workflow\Application\Turn\PlainNowNext;
+use App\Workflow\Application\Turn\ReviewerChoice;
+use App\Workflow\Application\Turn\TesterChoice;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Routing\Generator\UrlGenerator;
@@ -43,6 +46,9 @@ final class ReportCardsTest extends TestCase
     private const string WAITING_STEP = '0197a3c0-0000-7000-8000-0000000f1c03';
     private const string CHECKING_STEP = '0197a3c0-0000-7000-8000-0000000f1c04';
     private const string DONE_STEP = '0197a3c0-0000-7000-8000-0000000f1c05';
+    private const string PICKING_STEP = '0197a3c0-0000-7000-8000-0000000f1c06';
+    private const string CODE_REVIEW_STEP = '0197a3c0-0000-7000-8000-0000000f1c07';
+    private const string DESIGN_CHECK_STEP = '0197a3c0-0000-7000-8000-0000000f1c08';
     private const string ANOTHER_ORGANIZATIONS_STEP = '0197a3c0-0000-7000-8000-0000000f1c99';
 
     /** @var list<list<string>> the user ids of each displayNamesOf call */
@@ -87,12 +93,54 @@ final class ReportCardsTest extends TestCase
                 ['SHOP-3', 'Ticket 3', '/t/SHOP-3', 'no change for 17 days', true, ReportStage::Building, true, null, 'Waiting on Customer', false],
                 ['SHOP-4', 'Ticket 4', '/t/SHOP-4', 'changed recently', false, ReportStage::Done, false, null, 'Done', false],
                 ['SHOP-5', 'Ticket 5', '/t/SHOP-5', 'updated 1 Nov', false, ReportStage::Checking, false, null, 'Someone tests it', false],
-                ['SHOP-6', 'Ticket 6', '/t/SHOP-6', 'changed recently', false, ReportStage::Reported, true, 'Omar Haddad', 'Omar answers a question', false],
+                ['SHOP-6', 'Ticket 6', '/t/SHOP-6', 'changed recently', false, ReportStage::Reported, true, 'Omar Haddad', 'Omar answers the question', false],
             ],
             array_values(array_map(static fn (ReportCard $card): array => [
                 $card->key, $card->title, $card->url, $card->sideText, $card->isStuck, $card->stage, $card->isWaiting, $card->avatarName, $card->nowText, $card->isAnswerOffered,
             ], $cards)),
         );
+    }
+
+    /**
+     * The same turn kind reads differently by step, as on the ticket page: a build turn in Backlog is planning, in To do
+     * starting. SHOP-8 has no assignee and nobody's turn.
+     */
+    #[Test]
+    public function theNowLineOfATurnPersonIsTheTicketPagesSentenceForTheStep(): void
+    {
+        $reports = [
+            self::report(1, self::TO_DO_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'build']),
+            self::report(2, self::PICKING_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'assign']),
+            self::report(3, self::PICKING_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'build']),
+            self::report(4, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'build']),
+            self::report(5, self::CODE_REVIEW_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'review']),
+            self::report(6, self::CHECKING_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'test']),
+            self::report(7, self::DESIGN_CHECK_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'build']),
+            self::report(8, self::TO_DO_STEP, '2026-11-05 09:00:00'),
+            self::report(9, self::WAITING_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'decide']),
+        ];
+
+        $cards = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $reports, new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(
+            [
+                'Omar plans it', 'Omar picks a developer', 'Omar starts building', 'Omar builds it', 'Omar reviews the code', 'You test it',
+                'Design check · Omar', 'No one needs to act now', 'Omar decides if it goes on',
+            ],
+            array_values(array_map(static fn (ReportCard $card): string => $card->nowText, $cards)),
+        );
+    }
+
+    #[Test]
+    public function anOpenReportsTurnKindThatIsNoNeedsYouKindIsRefusedAndADoneOnesIsNotRead(): void
+    {
+        $done = self::report(1, self::DONE_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'nap'], closedAt: '2026-11-05 09:00:00');
+        $doneCards = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [$done], new \DateTimeImmutable(self::NOW));
+        self::assertSame('Done', $doneCards[self::ticketIdOf(1)]->nowText);
+
+        $this->expectException(\ValueError::class);
+
+        $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [self::report(2, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::OMAR, 'nap'])], new \DateTimeImmutable(self::NOW));
     }
 
     #[Test]
@@ -139,7 +187,7 @@ final class ReportCardsTest extends TestCase
             [
                 ['Omar Haddad', 'Omar asks: “Which order? The one from May?”'],
                 [null, 'Someone asks: “Which browser?”'],
-                ['Omar Haddad', 'Omar answers a question'],
+                ['Omar Haddad', 'Omar answers the question'],
                 [null, 'Done'],
             ],
             array_values(array_map(static fn (ReportCard $card): array => [$card->avatarName, $card->nowText], $cards)),
@@ -211,7 +259,7 @@ final class ReportCardsTest extends TestCase
         $routes = new RouteCollection();
         $routes->add(HomeController::TICKET_ROUTE, new Route('/t/{key}'));
 
-        return new ReportCards($this->memberNames(), $this->steps(), $this->openQuestions(), $this->pinProgress(), new UrlGenerator($routes, new RequestContext()));
+        return new ReportCards($this->memberNames(), $this->steps(), $this->openQuestions(), $this->pinProgress(), new PlainNowNext(new ReviewerChoice(), new TesterChoice()), new UrlGenerator($routes, new RequestContext()));
     }
 
     /**
@@ -279,11 +327,14 @@ final class ReportCardsTest extends TestCase
                 ($this->recordListing)();
 
                 return [
-                    new ListedStepView(ReportCardsTest::toDoStep(), 'Backlog', 'todo', 'To do', null, false),
-                    new ListedStepView(ReportCardsTest::doingStep(), 'In progress', 'doing', 'Doing', null, false),
-                    new ListedStepView(ReportCardsTest::waitingStep(), 'On hold', 'wait', 'Waiting', null, false),
-                    new ListedStepView(strtoupper(ReportCardsTest::checkingStep()), 'In test', 'check', 'Checking', null, false),
-                    new ListedStepView(ReportCardsTest::doneStep(), 'Done', 'done', 'Done', null, false),
+                    new ListedStepView(ReportCardsTest::toDoStep(), 'Backlog', 'todo', 'To do', null, false, 'backlog'),
+                    new ListedStepView(ReportCardsTest::pickingStep(), 'To do', 'todo', 'To do', null, false, 'todo'),
+                    new ListedStepView(ReportCardsTest::doingStep(), 'In progress', 'doing', 'Doing', null, false, 'progress'),
+                    new ListedStepView(ReportCardsTest::waitingStep(), 'On hold', 'wait', 'Waiting', null, false, 'hold'),
+                    new ListedStepView(ReportCardsTest::codeReviewStep(), 'Code review', 'check', 'Checking', null, false, 'review'),
+                    new ListedStepView(strtoupper(ReportCardsTest::checkingStep()), 'In test', 'check', 'Checking', null, false, 'test'),
+                    new ListedStepView(ReportCardsTest::designCheckStep(), 'Design check', 'check', 'Checking', null, false, null),
+                    new ListedStepView(ReportCardsTest::doneStep(), 'Done', 'done', 'Done', null, false, 'done'),
                 ];
             }
 
@@ -427,6 +478,21 @@ final class ReportCardsTest extends TestCase
     public static function doneStep(): string
     {
         return self::DONE_STEP;
+    }
+
+    public static function pickingStep(): string
+    {
+        return self::PICKING_STEP;
+    }
+
+    public static function codeReviewStep(): string
+    {
+        return self::CODE_REVIEW_STEP;
+    }
+
+    public static function designCheckStep(): string
+    {
+        return self::DESIGN_CHECK_STEP;
     }
 
     /**

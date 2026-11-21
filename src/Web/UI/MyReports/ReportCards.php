@@ -15,16 +15,22 @@ use App\Ticketing\Api\OpenQuestionQueries;
 use App\Ticketing\Api\PinProgress;
 use App\Ticketing\Api\PinProgressQueries;
 use App\Web\UI\Controller\HomeController;
+use App\Workflow\Api\ListedStepView;
 use App\Workflow\Api\NeedsYouKind;
+use App\Workflow\Api\NowNext;
 use App\Workflow\Api\NowNextContext;
 use App\Workflow\Api\StepQueries;
+use App\Workflow\Api\TeamFacts;
+use App\Workflow\Api\TicketState;
+use App\Workflow\Api\Turn;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 /**
  * The cards of one page of My reports. Its queries do not grow with the page: the open questions to the viewer of the
  * Needs you reports in one query (none when there is no such report), the turn people's and askers' names in one batch
- * (two queries, none when there is nobody to name), the pin progress of the page in one query, and the steps' groups
- * from the organization's cached steps (at most one query). Holds no state, so it is safe in worker mode.
+ * (two queries, none when there is nobody to name), the pin progress of the page in one query, and the steps' groups,
+ * names and core codes from the organization's cached steps (at most one query). The Now line of a turn person is the
+ * ticket page's sentence (NowNext), worded from those with no query. Holds no state, so it is safe in worker mode.
  */
 final readonly class ReportCards
 {
@@ -33,6 +39,7 @@ final readonly class ReportCards
         private StepQueries $stepQueries,
         private OpenQuestionQueries $openQuestionQueries,
         private PinProgressQueries $pinProgressQueries,
+        private NowNext $nowNext,
         private UrlGeneratorInterface $urlGenerator,
     ) {
     }
@@ -46,7 +53,9 @@ final readonly class ReportCards
      *
      * @return array<string, ReportCard> by ticket id string
      *
-     * @throws \LogicException when a report's step is not a step of the organization
+     * @throws \LogicException           when a report's step is not a step of the organization
+     * @throws \ValueError               when an open report's turn kind is not a NeedsYouKind value
+     * @throws \InvalidArgumentException when a step's core code is not one of the core steps
      */
     public function cardsOf(OrganizationId $organizationId, UserId $viewerId, array $reports, \DateTimeImmutable $now): array
     {
@@ -73,9 +82,9 @@ final readonly class ReportCards
         }
         $namesByUserId = $this->memberNameQueries->displayNamesOf($organizationId, array_values($userIdsToName));
         $pinProgressByTicketId = $this->pinProgressQueries->pinProgressOf(array_map(static fn (MyReport $report): TicketId => $report->ticketId, $reports));
-        $groupCodesByStepId = [];
+        $stepsById = [];
         foreach ($this->stepQueries->listedSteps() as $step) {
-            $groupCodesByStepId[strtolower($step->id)] = $step->groupCode;
+            $stepsById[strtolower($step->id)] = $step;
         }
 
         $cards = [];
@@ -86,7 +95,7 @@ final readonly class ReportCards
                 $groupsByTicketId[$ticketId],
                 $viewerId,
                 $namesByUserId,
-                $groupCodesByStepId,
+                $stepsById,
                 $questionsByTicketId[$ticketId] ?? null,
                 $pinProgressByTicketId[$ticketId] ?? null,
                 $now,
@@ -97,14 +106,16 @@ final readonly class ReportCards
     }
 
     /**
-     * @param array<string, string> $namesByUserId
-     * @param array<string, string> $groupCodesByStepId ListedStepView::$groupCode by lowercase step id
-     * @param OpenQuestion|null     $question           the open question to the viewer, read for a Needs you report only
+     * @param array<string, string>         $namesByUserId
+     * @param array<string, ListedStepView> $stepsById     by lowercase step id
+     * @param OpenQuestion|null             $question      the open question to the viewer, read for a Needs you report
+     *                                                     only
      */
-    private function cardOf(MyReport $report, ReportGroup $group, UserId $viewerId, array $namesByUserId, array $groupCodesByStepId, ?OpenQuestion $question, ?PinProgress $pinProgress, \DateTimeImmutable $now): ReportCard
+    private function cardOf(MyReport $report, ReportGroup $group, UserId $viewerId, array $namesByUserId, array $stepsById, ?OpenQuestion $question, ?PinProgress $pinProgress, \DateTimeImmutable $now): ReportCard
     {
-        $stepGroup = $groupCodesByStepId[strtolower($report->stepId)]
+        $step = $stepsById[strtolower($report->stepId)]
             ?? throw new \LogicException(\sprintf('The step of the report %s is not a step of the organization.', $report->key));
+        $stepGroup = $step->groupCode;
         $isDone = ReportGroup::Done === $group;
         $turnPersonName = $isDone || null === $report->turnUserId ? null : ($namesByUserId[$report->turnUserId->toString()] ?? null);
         $askerName = null === $question ? null : ($namesByUserId[$question->askerId->toString()] ?? null);
@@ -121,9 +132,32 @@ final readonly class ReportCards
             $isDone ? ReportStage::Done : ReportStage::ofStepGroup($stepGroup),
             !$isDone && ('wait' === $stepGroup || NeedsYouKind::Answer->value === $report->turnKind),
             $avatarName,
-            ReportCardText::nowTextOf($report, $group, $viewerId, null === $turnPersonName ? null : NowNextContext::firstNameFrom($turnPersonName), $questionLine),
+            ReportCardText::nowTextOf($report, $group, $isDone ? null : $this->turnPersonNowTextOf($report, $step, $viewerId, $namesByUserId), $questionLine),
             ReportGroup::NeedsYou === $group,
             null === $pinProgress ? null : ReportCardText::pinProgressTextOf($pinProgress),
+        );
+    }
+
+    /**
+     * The ticket page's Now sentence (SavedTicketPageTurns) from the saved turn and the step's core code, so a lead's
+     * build turn in Backlog reads "Lena plans it" on both. The viewer reads "You". Only Next reads the team facts and the
+     * review rule, so neither is read for it. The asker of an open question to someone else is not read, so that
+     * sentence says "the question" where the page names the asker.
+     *
+     * @param array<string, string> $namesByUserId
+     *
+     * @return string|null null when no person holds the turn
+     */
+    private function turnPersonNowTextOf(MyReport $report, ListedStepView $step, UserId $viewerId, array $namesByUserId): ?string
+    {
+        if (null === $report->turnUserId || null === $report->turnKind) {
+            return null;
+        }
+
+        return $this->nowNext->now(
+            new TicketState($report->stepId, $step->coreCode, $step->groupCode, null),
+            new Turn($report->turnUserId, null, NeedsYouKind::from($report->turnKind)),
+            new NowNextContext($step->name, $namesByUserId, new TeamFacts($viewerId, ''), false, $viewerId),
         );
     }
 }

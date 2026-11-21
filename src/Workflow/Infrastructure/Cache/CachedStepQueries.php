@@ -40,7 +40,9 @@ final readonly class CachedStepQueries implements StepQueries
 
     public function listedSteps(): array
     {
-        return $this->workflowCache->rememberForOrganization('listed-steps', fn (): array => $this->stepQueries->listedSteps());
+        // The version in the entry's name changes with ListedStepView's fields: an entry stored before would unserialize
+        // without the new field, which then cannot be read.
+        return $this->workflowCache->rememberForOrganization('listed-steps.v2', fn (): array => $this->stepQueries->listedSteps());
     }
 
     public function groupOf(string $stepId): ?string

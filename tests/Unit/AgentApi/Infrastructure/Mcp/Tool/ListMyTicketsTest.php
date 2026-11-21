@@ -247,11 +247,11 @@ final class ListMyTicketsTest extends TestCase
     public static function listedSteps(): array
     {
         return [
-            new ListedStepView(self::NEEDS_INPUT, 'Needs input', 'wait', 'Waiting', null, false),
-            new ListedStepView(self::DESIGN_CHECK, 'Design check', 'check', 'Checking', null, false),
-            new ListedStepView(self::IN_PROGRESS, 'In progress', 'doing', 'Doing', null, false),
-            new ListedStepView(self::REMOVED_STEP, 'Old step', 'doing', 'Doing', null, true),
-            new ListedStepView(self::BACKLOG, 'Backlog', 'todo', 'To do', null, false),
+            new ListedStepView(self::NEEDS_INPUT, 'Needs input', 'wait', 'Waiting', null, false, 'input'),
+            new ListedStepView(self::DESIGN_CHECK, 'Design check', 'check', 'Checking', null, false, null),
+            new ListedStepView(self::IN_PROGRESS, 'In progress', 'doing', 'Doing', null, false, 'progress'),
+            new ListedStepView(self::REMOVED_STEP, 'Old step', 'doing', 'Doing', null, true, null),
+            new ListedStepView(self::BACKLOG, 'Backlog', 'todo', 'To do', null, false, 'backlog'),
         ];
     }
 
