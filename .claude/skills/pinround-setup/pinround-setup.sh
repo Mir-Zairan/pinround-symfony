@@ -8,8 +8,11 @@
 #   stack                 start the stack if it is not running, make sure DEMO_PASSWORD is set, load the demo people
 #   trust-ca              copy the local certificate authority to ~/.config/pinround/caddy-root.crt and test it
 #   extension <id>        allow a Chrome extension id in the app and in storage, restart, and check both
-#   mcp-command <folder>  print the lines that add pinround to Claude Code in that folder (the token is typed, never shown)
-#   mcp-status <folder>   for every Claude Code profile here, say whether it has pinround for that folder and if its token works
+#   mcp-command <folder> [sign-in]
+#                         print the lines that add pinround to Claude Code in that folder: with a token (typed, never
+#                         shown), or with sign-in, no token (Claude Code signs in on pinround's consent page, ADR-0050)
+#   mcp-status <folder>   for every Claude Code profile here, say whether it has pinround for that folder and if its token
+#                         works; an entry with no token signs in, which only /mcp in Claude Code can check
 #   ai-key <provider>     ask for a huggingface or anthropic key (typed, never shown), test it, save it and restart
 #                         (run it in your own terminal: it reads the key from the keyboard)
 #   ai-status             say which cloud AI keys the app has and test them, and whether Ollama here is ready for pinround
@@ -202,8 +205,17 @@ cmd_extension() {
 }
 
 cmd_mcp_command() {
-    local folder=${1:-}
+    local folder=${1:-} mode=${2:-token}
     [[ -d $folder ]] || fail "no such folder: ${folder:-<empty>}"
+    [[ $mode == token || $mode == sign-in ]] || fail "unknown way to connect: $mode (leave it out for a token, or say sign-in)"
+    if [[ $mode == sign-in ]]; then
+        printf '# Run in the terminal where you start Claude Code. If you start it with CLAUDE_CONFIG_DIR set, set it here the same way first.\n'
+        printf 'cd %q\n' "$(cd "$folder" && pwd)"
+        printf 'claude mcp remove pinround -s local 2>/dev/null\n'
+        printf 'claude mcp add --transport http pinround %s/mcp\n' "$(base_url)"
+        printf '# Then start Claude Code here, type /mcp, pick pinround and authenticate.\n'
+        return 0
+    fi
     # `read -rs` keeps the token off the screen, out of the shell history and out of the command line.
     printf '# Run in the terminal where you start Claude Code. If you start it with CLAUDE_CONFIG_DIR set, set it here the same way first.\n'
     printf 'cd %q\n' "$(cd "$folder" && pwd)"
@@ -255,7 +267,7 @@ PY
         return 1
     fi
     ok "pinround is set at scope ${found% *}, url ${found##* }"
-    [[ -s $token_file ]] || { missing 'the entry has no Authorization header' "add it again: $0 mcp-command $folder"; return 0; }
+    [[ -s $token_file ]] || { ok 'no token: it signs in with OAuth; check with /mcp in Claude Code that pinround is connected'; return 0; }
     status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --cacert "$ca_file" \
         -H "@$token_file" "$(base_url)/api/v1/me/tickets" 2>/dev/null || true)
     case $status in
@@ -450,7 +462,7 @@ case ${1:-} in
     stack) cmd_stack ;;
     trust-ca) cmd_trust_ca ;;
     extension) cmd_extension "${2:-}" ;;
-    mcp-command) cmd_mcp_command "${2:-}" ;;
+    mcp-command) cmd_mcp_command "${2:-}" "${3:-}" ;;
     mcp-status) cmd_mcp_status "${2:-}" ;;
     ai-key) cmd_ai_key "${2:-}" ;;
     ai-status) cmd_ai_status ;;
