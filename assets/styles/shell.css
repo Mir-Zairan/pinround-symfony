@@ -4,6 +4,19 @@
   flex-direction: column;
 }
 
+/* ADR-0049's dev-only demo switch. In the page's flow, not fixed, so it never covers the sticky header or the page. */
+.demo-mode-banner {
+  margin: 0;
+  padding: var(--space-8) var(--space-16);
+  background: var(--waiting-container);
+  color: var(--on-waiting-container);
+  border-bottom: 1px solid var(--waiting);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .site-header {
   position: sticky;
   top: 0;

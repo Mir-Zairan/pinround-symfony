@@ -3,7 +3,7 @@
 How to connect Claude Code to pinround, so it can read your round notes, add screenshots and set verdicts in your own draft round.
 
 ## Index
-- [What you need](#what-you-need) — an account with two-step login, Claude Code, the app's address
+- [What you need](#what-you-need) — an account with two-step login (or the dev-only demo switch), Claude Code, the app's address
 - [1. Make a token](#1-make-a-token) — the API tokens page
 - [2. Add pinround to Claude Code](#2-add-pinround-to-claude-code) — the `claude mcp add` line
 - [3. Check that it works](#3-check-that-it-works) — `whoami` and `list_my_tickets`
@@ -20,6 +20,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 ## What you need
 - A pinround account in your organization.
 - Two-step login turned on for your account. Without it, **Make token** sends you to the two-step login setup page first.
+  - On a local demo in dev with `PINROUND_DEMO_SKIP_2FA=1`, you can skip two-step login, and every page says "Demo mode: two-step login is skipped." A token still needs a password login from the last 10 minutes, so pinround may ask for your password first ([ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md)).
 - Claude Code installed on your computer.
 - The address of your pinround app, for example `https://pinround.acme-foods.example`. Use the address you open in the browser. pinround answers `/mcp` only on its own public address; any other host name gets "400 Bad Request".
 - On the local dev stack (`https://localhost`): Node must trust Caddy's local certificate, or `/mcp` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`. Copy it with `.claude/skills/pinround-setup/pinround-setup.sh trust-ca` and start Claude Code with `NODE_EXTRA_CA_CERTS=~/.config/pinround/caddy-root.crt`. The `/pinround-setup` skill does all of this guide for you.
