@@ -14,7 +14,9 @@ use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
 use App\Media\Api\SignedUrls;
 use App\Review\Api\ChecklistQueries;
+use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundQueries;
+use App\Review\Domain\Screenshot;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\SharedKernel\Domain\TicketId;
@@ -97,6 +99,30 @@ final class FixMyRoundNotesPromptTest extends TestCase
         ] as $instruction) {
             self::assertStringContainsString($instruction, $flowingText);
         }
+    }
+
+    /**
+     * The file is plain text, so it types the limits by hand; each must be the one the tools enforce.
+     */
+    #[Test]
+    public function theLimitsTheTextStatesAreTheOnesTheToolsEnforce(): void
+    {
+        $flowingText = (string) preg_replace('/\s+/', ' ', (string) file_get_contents(self::PROMPT_FILE));
+
+        foreach ([
+            \sprintf('a title: what the picture is of, at most %s characters;', number_format(RoundCommands::MAX_TITLE_LENGTH)),
+            \sprintf('in plain words, at most %s characters;', number_format(RoundCommands::MAX_SUMMARY_LENGTH)),
+            \sprintf('a note of at most %s characters that says what changed.', number_format(RoundCommands::MAX_PIN_NOTE_LENGTH)),
+            \sprintf('A screenshot holds at most %d tries.', Screenshot::MAX_TRIES),
+        ] as $statedLimit) {
+            self::assertStringContainsString($statedLimit, $flowingText);
+        }
+        preg_match_all('/at most ([0-9][0-9,]*)/', $flowingText, $statedNumbers);
+        self::assertSame(
+            [number_format(RoundCommands::MAX_TITLE_LENGTH), number_format(RoundCommands::MAX_SUMMARY_LENGTH), number_format(RoundCommands::MAX_PIN_NOTE_LENGTH), (string) Screenshot::MAX_TRIES],
+            $statedNumbers[1],
+            'The text states a limit this test does not check.',
+        );
     }
 
     #[Test]

@@ -10,6 +10,7 @@ use App\Insight\Api\MyReportsPage;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
 use App\Insight\Api\TurnGroupCursor;
+use App\Insight\Api\ViewersTurns;
 use App\Insight\Api\WhoseTurnPage;
 use App\Insight\Application\MyReports\MyReportsRows;
 use App\Ticketing\Api\ListFilter;
@@ -58,6 +59,15 @@ final readonly class HomeQueriesService implements HomeQueries
         }
 
         return new WhoseTurnPage([...$viewersGroups, ...$groups], $read['ticketCount'], $nextCursor, $read['isSearchCapped']);
+    }
+
+    public function viewersTurns(TicketViewer $viewer, int $limit): ViewersTurns
+    {
+        if ($limit < 1 || $limit > self::SHOWN_TICKETS_OF_THE_OPENED_GROUP) {
+            throw new \InvalidArgumentException(\sprintf('The viewer\'s turns are read 1 to %d at a time.', self::SHOWN_TICKETS_OF_THE_OPENED_GROUP));
+        }
+
+        return $this->whoseTurnRows->viewersTurnsOf($viewer, $limit);
     }
 
     public function myReports(TicketViewer $viewer, ?MyReportsCursor $after): MyReportsPage

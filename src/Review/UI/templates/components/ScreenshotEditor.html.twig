@@ -3,6 +3,7 @@
     posts nothing, as an unticked box did. -#}
 <div{{ attributes.defaults({class: 'screenshot-editor', id: this.fieldId}) }}
     data-controller="screenshot-editor"
+    data-screenshot-editor-note-max-value="{{ this.noteMaxLength }}"
     data-action="input->screenshot-editor#describePin">
     {% if this.items is empty and this.canAdd %}
         <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\ScreenshotEditor::EMPTY_MESSAGE')">
@@ -42,7 +43,7 @@
                                     {% for pin in item.picture.pins %}
                                         <li class="pin-list__item" value="{{ pin.number }}" data-pin-number="{{ pin.number }}">
                                             <span class="pin-list__number">{{ pin.number }}</span>
-                                            <textarea class="pin-list__note" name="{{ item.fieldNames.pinNoteNameOf(loop.index0) }}" rows="2" maxlength="{{ this.noteMaxLength }}"
+                                            <textarea class="pin-list__note" name="{{ item.fieldNames.pinNoteNameOf(loop.index0) }}" rows="2"
                                                 aria-label="Note for pin {{ pin.number }}" placeholder="{{ this.notePlaceholder }}"
                                                 data-screenshot-editor-pin-note>{{ pin.note }}</textarea>
                                         </li>

@@ -90,7 +90,7 @@ final class ReportCardsTest extends TestCase
                 ['SHOP-6', 'Ticket 6', '/t/SHOP-6', 'changed recently', false, ReportStage::Reported, true, 'Omar Haddad', 'Omar answers a question', false],
             ],
             array_values(array_map(static fn (ReportCard $card): array => [
-                $card->key, $card->title, $card->url, $card->sideText, $card->isStuck, $card->stage, $card->isWaiting, $card->turnPersonName, $card->nowText, $card->isAnswerOffered,
+                $card->key, $card->title, $card->url, $card->sideText, $card->isStuck, $card->stage, $card->isWaiting, $card->avatarName, $card->nowText, $card->isAnswerOffered,
             ], $cards)),
         );
     }
@@ -142,7 +142,7 @@ final class ReportCardsTest extends TestCase
                 ['Omar Haddad', 'Omar answers a question'],
                 [null, 'Done'],
             ],
-            array_values(array_map(static fn (ReportCard $card): array => [$card->turnPersonName, $card->nowText], $cards)),
+            array_values(array_map(static fn (ReportCard $card): array => [$card->avatarName, $card->nowText], $cards)),
         );
         self::assertSame([[self::MIA, [self::ticketIdOf(1), self::ticketIdOf(2)]]], $this->questionLookups);
         self::assertSame([[self::MIA, self::OMAR, self::LENA]], $this->nameLookups, 'the askers are named in the turn people\'s batch');
@@ -157,7 +157,7 @@ final class ReportCardsTest extends TestCase
 
         $card = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), [$report], new \DateTimeImmutable(self::NOW))[self::ticketIdOf(1)];
 
-        self::assertSame(['Mia Lund', 'A question waits for your answer'], [$card->turnPersonName, $card->nowText]);
+        self::assertSame(['Mia Lund', 'A question waits for your answer'], [$card->avatarName, $card->nowText]);
     }
 
     #[Test]

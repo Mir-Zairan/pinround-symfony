@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Insight\Application;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
 use App\Insight\Api\TurnGroupCursor;
+use App\Insight\Api\ViewersTurns;
 use App\Insight\Application\WhoseTurnRows;
 
 /**
@@ -18,6 +19,9 @@ final class FixedWhoseTurnRows implements WhoseTurnRows
 {
     /** @var list<array{?string, ?string, ?TurnGroupCursor, int, ?string}> the project id, opened group, cursor, limit and search text of each call */
     public array $calls = [];
+
+    /** @var list<int> the limit of each viewersTurnsOf() call */
+    public array $viewersTurnsLimits = [];
 
     /**
      * @param list<TurnGroup> $groups
@@ -40,5 +44,21 @@ final class FixedWhoseTurnRows implements WhoseTurnRows
         }
 
         return ['groups' => $groups, 'ticketCount' => $this->ticketCount, 'isSearchCapped' => $this->isSearchCapped];
+    }
+
+    /**
+     * The viewer's group's tickets cut to the limit and its count, as the database keeps the oldest waits; none when the
+     * viewer has no group.
+     */
+    public function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns
+    {
+        $this->viewersTurnsLimits[] = $limit;
+        foreach ($this->groups as $group) {
+            if (null !== $group->turnUserId && $group->turnUserId->equals($viewer->viewerId)) {
+                return new ViewersTurns(\array_slice($group->tickets, 0, $limit), $group->ticketCount);
+            }
+        }
+
+        return new ViewersTurns([], 0);
     }
 }

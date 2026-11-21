@@ -23,7 +23,7 @@
                 </div>
                 <twig:ProgressDots :labels="stageLabels" :current="card.stage.value" :isWaiting="card.isWaiting" class="my-reports__dots" />
                 <div class="my-reports__bottom">
-                    {% if card.turnPersonName is not null %}<twig:Avatar name="{{ card.turnPersonName }}" class="my-reports__avatar" />{% endif %}
+                    {% if card.avatarName is not null %}<twig:Avatar name="{{ card.avatarName }}" class="my-reports__avatar" />{% endif %}
                     <p class="my-reports__now">{{ card.nowText }}</p>
                     {% if card.pinProgressText is not null %}<span class="my-reports__pins">{{ card.pinProgressText }}</span>{% endif %}
                     {% if card.isAnswerOffered %}

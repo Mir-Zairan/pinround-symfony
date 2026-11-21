@@ -7,6 +7,7 @@ namespace App\Insight\Application;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
 use App\Insight\Api\TurnGroupCursor;
+use App\Insight\Api\ViewersTurns;
 
 /**
  * The whose-turn groups as the database returns them, for HomeQueriesService, which checks the input, orders them and
@@ -40,4 +41,16 @@ interface WhoseTurnRows
      *                         than the tenant, before any query
      */
     public function groupedRowsOf(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, int $otherGroupLimit, ?string $searchText = null): array;
+
+    /**
+     * One query on the viewer's own turn rows only; the count and tickets hold only tickets the viewer may see.
+     *
+     * @param int $limit at most this many tickets, checked by the caller
+     *
+     * @return ViewersTurns the oldest wait first, then the lowest ticket id, as groupedRowsOf() orders a group's tickets
+     *
+     * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
+     *                         than the tenant, before any query
+     */
+    public function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns;
 }

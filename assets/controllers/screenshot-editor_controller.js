@@ -1,5 +1,7 @@
 import { Controller } from '@hotwired/stimulus';
 import { describeMarker, findMarker } from '../review/pin_markup.js';
+import { cutNoteField, limitInsertion } from '../review/pin_note_limit.js';
+import { noteLength } from '../review/pin_position.js';
 
 // Shows one screenshot of a ScreenshotEditor at a time: its thumbnails are tabs (arrow keys, Home and End), and every
 // panel stays in the form, so the fields of hidden ones still post. Remove and Keep it turn a screenshot's remove field
@@ -7,6 +9,16 @@ import { describeMarker, findMarker } from '../review/pin_markup.js';
 // (detail.index) for the page, which removes a screenshot that has no remove field itself.
 export default class extends Controller {
   static targets = ['tab', 'panel', 'tabState', 'removeField', 'status'];
+  static values = { noteMax: { type: Number, default: 1000 } };
+
+  connect() {
+    this.isLimitShown = false;
+    this.element.addEventListener('beforeinput', this.limitDraftPinNote);
+  }
+
+  disconnect() {
+    this.element.removeEventListener('beforeinput', this.limitDraftPinNote);
+  }
 
   show(event) {
     this.select(this.tabTargets.indexOf(event.currentTarget));
@@ -60,10 +72,36 @@ export default class extends Controller {
     this.panelTargets[index].querySelector('.screenshot-editor__remove')?.focus();
   }
 
+  // A draft pin's note has no maxlength: browsers count UTF-16 units, the server counts code points. The notes of a
+  // pin-placer are its own to limit.
+  limitDraftPinNote = (event) => {
+    if (event.defaultPrevented || !event.target.closest?.('[data-screenshot-editor-pin-note]')) {
+      return;
+    }
+    const field = limitInsertion(event, this.noteMaxValue);
+    if (field) {
+      this.describePinOf(field);
+    }
+  };
+
   // The pins of a draft stay put, so no pin-placer keeps their markers in step with their notes; this does.
   describePin(event) {
     const field = event.target.closest('[data-screenshot-editor-pin-note]');
-    const layer = field?.closest('[role="tabpanel"]')?.querySelector('.pin-layer');
+    if (!field) {
+      return;
+    }
+    // Fallback for input that beforeinput cannot refuse (IME composition, browsers without it): cut the end, keep the caret.
+    cutNoteField(field, this.noteMaxValue);
+    this.describePinOf(field);
+  }
+
+  describePinOf(field) {
+    const isFull = noteLength(field.value) >= this.noteMaxValue;
+    if (isFull || this.isLimitShown) {
+      this.statusTarget.textContent = isFull ? `A note holds at most ${this.noteMaxValue.toLocaleString('en')} characters. Anything more is cut.` : '';
+      this.isLimitShown = isFull;
+    }
+    const layer = field.closest('[role="tabpanel"]')?.querySelector('.pin-layer');
     if (!layer) {
       return;
     }

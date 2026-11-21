@@ -42,6 +42,19 @@ interface HomeQueries
     public function whoseTurn(TicketViewer $viewer, ?string $projectId, ?string $openedGroup, ?TurnGroupCursor $after, ?string $searchText = null): WhoseTurnPage;
 
     /**
+     * The tickets of the viewer's own card of whoseTurn(), cut to $limit: the same tickets, count and order (the oldest
+     * wait first, then the lowest ticket id), without ranking the rest of the organization. One query that reads only
+     * the viewer's turn rows, through ins_ticket_turn_turn_user_id_base_score_idx.
+     *
+     * @param int $limit 1 to SHOWN_TICKETS_OF_THE_OPENED_GROUP
+     *
+     * @throws \InvalidArgumentException when the limit is outside 1 to SHOWN_TICKETS_OF_THE_OPENED_GROUP, before any query
+     * @throws \LogicException           when no transaction is open, no tenant is set, or the viewer is of another
+     *                                   organization than the tenant, before any query
+     */
+    public function viewersTurns(TicketViewer $viewer, int $limit): ViewersTurns;
+
+    /**
      * One page of the tickets the viewer reported, open and done, only those the viewer may see (ADR-0013; a reporter
      * always may, team-only tickets included): MY_REPORTS_PER_PAGE at most, newest first, then the highest ticket id,
      * each with its turn row while it has one. A next page goes on by keyset after its cursor. One query on Ticketing's

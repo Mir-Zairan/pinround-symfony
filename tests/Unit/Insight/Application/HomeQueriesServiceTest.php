@@ -272,6 +272,43 @@ final class HomeQueriesServiceTest extends TestCase
         self::assertSame([[null, str_repeat('é', 100), null, 21, null]], $rows->calls);
     }
 
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function viewersTurnsLimitsOutsideTheRange(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-1];
+        yield 'one past the opened group' => [101];
+    }
+
+    #[Test]
+    #[DataProvider('viewersTurnsLimitsOutsideTheRange')]
+    public function aViewersTurnsLimitOutsideOneToOneHundredIsRefusedBeforeAnyRead(int $limit): void
+    {
+        $rows = new FixedWhoseTurnRows([self::personGroup(self::LENA, '2027-03-05 07:00:00')]);
+
+        try {
+            new HomeQueriesService($rows, new FixedMyReportsRows())->viewersTurns(self::lena(), $limit);
+            self::fail('The limit must be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('The viewer\'s turns are read 1 to 100 at a time.', $exception->getMessage());
+        }
+        self::assertSame([], $rows->viewersTurnsLimits, 'No rows were read before the refusal.');
+    }
+
+    #[Test]
+    public function viewersTurnsAtTheEdgesOfTheRangeAreReadWithThatLimit(): void
+    {
+        $rows = new FixedWhoseTurnRows([]);
+        $service = new HomeQueriesService($rows, new FixedMyReportsRows());
+
+        $service->viewersTurns(self::lena(), 1);
+        $service->viewersTurns(self::lena(), 100);
+
+        self::assertSame([1, 100], $rows->viewersTurnsLimits);
+    }
+
     private static function personGroup(string $userId, string $oldestWaitingSince): TurnGroup
     {
         return new TurnGroup(new UserId($userId), null, 1, new \DateTimeImmutable($oldestWaitingSince.' UTC'), []);

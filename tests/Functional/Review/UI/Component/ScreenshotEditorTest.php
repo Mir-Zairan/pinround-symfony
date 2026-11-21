@@ -82,7 +82,8 @@ final class ScreenshotEditorTest extends KernelTestCase
         self::assertSame('', $remove->attr('disabled'), 'A kept screenshot posts no remove field, as the unticked box did.');
         self::assertSame('120', $fourth->filter('input[name="screenshots[3][title]"]')->attr('maxlength'));
         self::assertSame('600', $fourth->filter('textarea[name="screenshots[3][summary]"]')->attr('maxlength'));
-        self::assertSame('1000', $fourth->filter('textarea[name="screenshots[3][pins][1]"]')->attr('maxlength'));
+        self::assertNull($fourth->filter('textarea[name="screenshots[3][pins][1]"]')->attr('maxlength'), 'The browser counts UTF-16 units, the server code points; the controller cuts.');
+        self::assertSame('1000', $editor->filter('[data-controller="screenshot-editor"]')->attr('data-screenshot-editor-note-max-value'));
         self::assertSame(['Picture title · optional', 'What this picture shows · optional'], $fourth->filter('label')->each(static fn (Crawler $label): string => $label->text()));
         self::assertSame('draft-shot-4-title', $fourth->filter('label')->eq(0)->attr('for'));
         self::assertCount(1, $fourth->filter('input#draft-shot-4-title'));
