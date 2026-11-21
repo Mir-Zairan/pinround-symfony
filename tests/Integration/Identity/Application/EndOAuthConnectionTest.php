@@ -162,7 +162,7 @@ final class EndOAuthConnectionTest extends KernelTestCase
     public function anotherPersonWhoIsNoAdminOrNobodyIsRefusedAndTheConnectionStaysLive(): void
     {
         $rowsBefore = $this->tokenRows();
-        foreach (['Mia' => fn () => $this->logIn(self::MIA, 'Mia', withCodeProof: true), 'nobody' => fn () => $this->logOut()] as $who => $logIn) {
+        foreach (['Mia' => fn () => $this->logIn(self::MIA, 'Mia', withCodeProof: true), 'nobody' => $this->logOut(...)] as $who => $logIn) {
             $logIn();
             try {
                 $this->transactions()->committedAs(self::ACME_FOODS, fn (): bool => $this->useCases()->endOAuthConnection()(self::CONNECTION, $this->at('+0 seconds')));

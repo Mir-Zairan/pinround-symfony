@@ -107,8 +107,8 @@ final class OAuthConnectionVoterTest extends TestCase
     private function voter(): OAuthConnectionVoter
     {
         $twoStepLogins = self::createStub(TwoStepLogins::class);
-        $adminAreaOfSaraAtAcme = new class(self::SARA, self::ACME_FOODS) implements VoterInterface {
-            public function __construct(private readonly string $adminId, private readonly string $organizationId)
+        $adminAreaOfSaraAtAcme = new readonly class(self::SARA, self::ACME_FOODS) implements VoterInterface {
+            public function __construct(private string $adminId, private string $organizationId)
             {
             }
 
