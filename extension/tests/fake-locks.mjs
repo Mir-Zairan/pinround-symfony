@@ -7,6 +7,8 @@ const NOT_MODELLED = 'The fake locks model request(name, callback) only: an excl
 export function fakeLocks() {
     const tails = new Map();
     const granted = [];
+    const waitingForRequests = [];
+    let requestCount = 0;
 
     return {
         request(name, ...rest) {
@@ -14,6 +16,8 @@ export function fakeLocks() {
             if ('string' !== typeof name || 'function' !== typeof callback || rest.length > 1) {
                 throw new TypeError(NOT_MODELLED);
             }
+            requestCount += 1;
+            waitingForRequests.filter((waiting) => waiting.count <= requestCount).forEach((waiting) => waiting.resolve());
             const before = tails.get(name) ?? Promise.resolve();
             const held = before.then(() => {
                 granted.push(name);
@@ -26,5 +30,15 @@ export function fakeLocks() {
         },
         /** The names of the locks granted so far, in the order granted. */
         granted,
+        /** Settles once `count` requests were made in all, so a test knows a second holder is waiting. */
+        requested(count) {
+            return new Promise((resolve) => {
+                if (requestCount >= count) {
+                    resolve();
+                } else {
+                    waitingForRequests.push({ count, resolve });
+                }
+            });
+        },
     };
 }

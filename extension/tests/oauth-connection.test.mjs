@@ -7,7 +7,7 @@ import {
     CLIENT_KEY, CLIENT_NAME, ConnectRefused, DENIED, NOT_CONNECTED, NOT_OAUTH_SERVER, SCOPES, TOKEN_REFRESH_LOCK, pinroundApiOf, pkceChallengeOf, renewAccessToken, tokenRefreshLocksOf,
 } from '../src/shared/oauth-connection.js';
 import { loadSettings, saveConnection } from '../src/shared/settings.js';
-import { CONNECTED, CONNECTION_SIGNED_OUT_LOCALLY, SIGNED_OUT, connectToPinround, signOut } from '../src/options/pairing.js';
+import { CONNECTED, CONNECTION_SIGNED_OUT_LOCALLY, SIGNED_OUT, connectToPinround, pair, signOut } from '../src/options/pairing.js';
 import { FAKE_EXTENSION_ID, fakeBrowser } from './fake-browser.mjs';
 import { fakeLocks } from './fake-locks.mjs';
 
@@ -341,6 +341,87 @@ test('a renewal pinround did not answer lets the next one have the lock', async 
         await assert.rejects(renewAccessToken('access-1-secret', browserApi.storage.local, async () => { throw new TypeError('Failed to fetch'); }, locks), new ApiError(NOT_REACHED, 0));
         assert.equal(await renewAccessToken('access-1-secret', browserApi.storage.local, server.fetchFn, locks), 'access-2-secret');
     }
+});
+
+/**
+ * The server's fetch, but a refresh's answer is held after pinround issued the new pair until `release()`: a renewal
+ * under way, whose new tokens pinround already rotated to.
+ */
+function refreshHeldByNetwork(server) {
+    let markReached;
+    let release;
+    const reached = new Promise((resolve) => {
+        markReached = resolve;
+    });
+    const released = new Promise((resolve) => {
+        release = resolve;
+    });
+    const fetchFn = async (url, init) => {
+        const answer = await server.fetchFn(url, init);
+        if ('/oauth/token' === new URL(url).pathname && 'refresh_token' === new URLSearchParams(init.body).get('grant_type')) {
+            markReached();
+            await released;
+        }
+
+        return answer;
+    };
+
+    return { fetchFn, reached, release };
+}
+
+// A save that skips the lock never makes the second request, so the time limit turns that wait into a failure.
+test('Sign out during a renewal waits for it, revokes the renewed tokens and keeps them gone, and no refresh follows', { timeout: 5000 }, async () => {
+    const server = fakeOAuthServer();
+    const browserApi = await connectedBrowser(server);
+    const before = await loadSettings(browserApi.storage.local);
+    server.liveAccessTokens.delete('access-1-secret');
+    const locks = fakeLocks();
+    const network = refreshHeldByNetwork(server);
+
+    const popupCall = pinroundApiOf(before, browserApi.storage.local, network.fetchFn, locks).call('GET', '/api/v1/me/tickets');
+    await network.reached;
+    const signedOut = signOut(browserApi.storage, server.fetchFn, locks);
+    await locks.requested(2);
+    network.release();
+
+    assert.deepEqual(await popupCall, { tickets: [] });
+    assert.equal(await signedOut, SIGNED_OUT);
+    assert.equal(await loadSettings(browserApi.storage.local), null);
+    assert.deepEqual(server.revoked.map((revocation) => revocation.token), ['refresh-2-secret', 'access-2-secret']);
+    assert.equal(server.liveAccessTokens.has('access-2-secret'), false);
+
+    await assert.rejects(pinroundApiOf(before, browserApi.storage.local, server.fetchFn, locks).call('GET', '/api/v1/me/tickets'), new ApiError(CONNECT_AGAIN, 401));
+    assert.deepEqual(server.refreshesAsked, ['refresh-1-secret']);
+    assert.equal(await loadSettings(browserApi.storage.local), null);
+});
+
+test('a Connect or a pasted token saved during a renewal is not overwritten by the renewed tokens', { timeout: 5000 }, async () => {
+    const pastedToken = 'pr_abcdefghijklmnopqrstuvwxyz012345';
+    const saveDuringRenewal = {
+        Connect: async (browserApi, server, locks) => connectToPinround(ORIGIN, browserApi, { fetchFn: server.fetchFn, locks }),
+        'a pasted token': async (browserApi, server, locks) => pair(ORIGIN, pastedToken, browserApi.storage, async (url, init) => (`Bearer ${pastedToken}` === init.headers.Authorization ? { ok: true, status: 200, json: async () => ({ tickets: [] }) } : server.fetchFn(url, init)), locks),
+    };
+    const kept = {};
+    for (const [way, save] of Object.entries(saveDuringRenewal)) {
+        const server = fakeOAuthServer();
+        const browserApi = await connectedBrowser(server);
+        const before = await loadSettings(browserApi.storage.local);
+        server.liveAccessTokens.delete('access-1-secret');
+        const locks = fakeLocks();
+        const network = refreshHeldByNetwork(server);
+
+        const renewal = renewAccessToken('access-1-secret', browserApi.storage.local, network.fetchFn, locks);
+        await network.reached;
+        const saved = save(browserApi, server, locks);
+        await locks.requested(2);
+        network.release();
+
+        assert.equal(await renewal, 'access-2-secret');
+        assert.equal(await saved, CONNECTED);
+        kept[way] = (await loadSettings(browserApi.storage.local)).token;
+        assert.notEqual(kept[way], before.token);
+    }
+    assert.deepEqual(kept, { Connect: 'access-3-secret', 'a pasted token': pastedToken });
 });
 
 test('the renewal lock is navigator.locks, which pages and the service worker share, when the browser has it', () => {
