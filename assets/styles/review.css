@@ -555,7 +555,9 @@ textarea.screenshot-report__input {
 }
 
 /* Round 0's picture as a thumbnail, with its pin list beside it while the column has room, so a ticket with five rounds
-   fits one screen (P14.T7). 480px is the width of the stored thumb variant (media-pipeline.md). */
+   fits one screen (P14.T7). 480px is the width of the stored thumb variant it loads (media-pipeline.md). The height
+   cap is RoundCards::THUMBNAIL_MAX_HEIGHT, drawn through the img's width and height so the aspect ratio, and with it
+   the pins, holds before the picture loads. */
 .round-card__screenshot--thumbnail {
   --round-thumbnail-width: 480px;
 

@@ -86,13 +86,29 @@ final class SignedVariantUrlsTest extends TestCase
     }
 
     #[Test]
-    public function aReadyThumbGetsAUrlOfItsThumbAndNoSizeAsOnlyTheViewsIsKept(): void
+    public function aReadyThumbGetsAUrlOfItsThumbAndTheViewsSizeScaledDownToTheThumbsWidth(): void
     {
         $image = $this->forVariants([self::READY], 'thumb')[self::READY] ?? null;
 
         self::assertNotNull($image);
         self::assertSame('/pinround/media/'.self::READY.'/thumb.webp', parse_url((string) $image->url, \PHP_URL_PATH));
-        self::assertSame([MediaImageStatus::Ready, null, null], [$image->status, $image->width, $image->height]);
+        self::assertSame([MediaImageStatus::Ready, 480, 300], [$image->status, $image->width, $image->height]);
+    }
+
+    #[Test]
+    public function aThumbOfAViewOnePixelHighIsStillOnePixelHigh(): void
+    {
+        $sliver = '0197a3c0-0000-7000-8000-0000000f5117';
+        $this->transactions->run(function () use ($sliver): void {
+            $mediaObject = self::uploaded(self::ACME_FOODS, $sliver);
+            $mediaObject->markReady(self::PICTURE_HASH, 1920, 1, ['view' => self::viewKeyOf($sliver), 'thumb' => 'media/'.$sliver.'/thumb.webp']);
+            $this->mediaObjects->add($mediaObject);
+        });
+
+        $image = $this->forVariants([$sliver], 'thumb')[$sliver] ?? null;
+
+        self::assertNotNull($image);
+        self::assertSame([480, 1], [$image->width, $image->height]);
     }
 
     #[Test]
@@ -226,7 +242,7 @@ final class SignedVariantUrlsTest extends TestCase
     }
 
     #[Test]
-    public function aReadyPictureWithoutTheVariantAskedForIsAnErrorNotAnEmptyAnswer(): void
+    public function aReadyPictureWithoutAThumbAnswersItsViewWithTheViewsSize(): void
     {
         $withoutThumb = '0197a3c0-0000-7000-8000-0000000f5116';
         $this->transactions->run(function () use ($withoutThumb): void {
@@ -235,10 +251,27 @@ final class SignedVariantUrlsTest extends TestCase
             $this->mediaObjects->add($mediaObject);
         });
 
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessageIsOrContains('The ready media object '.$withoutThumb.' has no thumb variant stored.');
+        $image = $this->forVariants([$withoutThumb], 'thumb')[$withoutThumb] ?? null;
 
-        $this->forVariants([$withoutThumb], 'thumb');
+        self::assertNotNull($image);
+        self::assertSame('/pinround/'.self::viewKeyOf($withoutThumb), parse_url((string) $image->url, \PHP_URL_PATH));
+        self::assertSame([MediaImageStatus::Ready, 640, 400], [$image->status, $image->width, $image->height]);
+    }
+
+    #[Test]
+    public function aReadyPictureWithoutAViewIsAnErrorNotAnEmptyAnswer(): void
+    {
+        $withoutView = '0197a3c0-0000-7000-8000-0000000f5118';
+        $this->transactions->run(function () use ($withoutView): void {
+            $mediaObject = self::uploaded(self::ACME_FOODS, $withoutView);
+            $mediaObject->markReady(self::PICTURE_HASH, 640, 400, ['thumb' => 'media/'.$withoutView.'/thumb.webp']);
+            $this->mediaObjects->add($mediaObject);
+        });
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessageIsOrContains('The ready media object '.$withoutView.' has no view variant stored.');
+
+        $this->forVariants([$withoutView], 'view');
     }
 
     /**

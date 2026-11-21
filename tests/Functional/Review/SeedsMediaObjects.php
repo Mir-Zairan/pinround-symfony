@@ -15,19 +15,26 @@ trait SeedsMediaObjects
 {
     /**
      * @param 'ready'|'pending'|'rejected' $status
+     * @param int                          $viewWidth  of a ready picture's view, in pixels
+     * @param int                          $viewHeight of a ready picture's view, in pixels
+     * @param bool                         $hasThumb   false for a ready picture stored with its view only
      *
      * @return string the media id
      */
-    private function addMedia(string $status, string $uploader = 'Mia'): string
+    private function addMedia(string $status, string $uploader = 'Mia', int $viewWidth = 1280, int $viewHeight = 800, bool $hasThumb = true): string
     {
         $mediaId = Uuid::v7()->toRfc4122();
+        $variants = ['view' => 'media/'.$mediaId.'/view.webp'];
+        if ($hasThumb) {
+            $variants['thumb'] = 'media/'.$mediaId.'/thumb.webp';
+        }
         $parameters = [
             $this->acmeFoods->toString(), $mediaId, 'uploads/'.$mediaId, $this->people[$uploader]->id()->toString(), $status,
             'rejected' === $status ? 'The file is not a picture.' : null,
             'ready' === $status ? hash('sha256', $mediaId) : null,
-            'ready' === $status ? 1280 : null,
-            'ready' === $status ? 800 : null,
-            'ready' === $status ? json_encode(['view' => 'media/'.$mediaId.'/view.webp', 'thumb' => 'media/'.$mediaId.'/thumb.webp'], \JSON_THROW_ON_ERROR) : null,
+            'ready' === $status ? $viewWidth : null,
+            'ready' === $status ? $viewHeight : null,
+            'ready' === $status ? json_encode($variants, \JSON_THROW_ON_ERROR) : null,
         ];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO med_object (organization_id, id, storage_key, mime, bytes, uploaded_by, created_at, status, reject_reason, sha256, width, height, variants)

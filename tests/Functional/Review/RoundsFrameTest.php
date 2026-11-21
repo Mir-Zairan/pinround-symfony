@@ -132,7 +132,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertStringNotContainsString('<b>total</b>', (string) $this->client->getResponse()->getContent(), 'A title is text, never markup.');
         $order = $card->filter('figure.screenshot')->children()->each(static fn (Crawler $child): string => (string) $child->attr('class'));
         self::assertSame(['screenshot__text', 'screenshot__frame'], $order, 'The text comes above the picture.');
-        self::assertStringContainsString('/media/'.$readyMedia.'/view.webp', (string) $card->filter('img.screenshot__image')->attr('src'));
+        self::assertStringContainsString('/media/'.$readyMedia.'/thumb.webp', (string) $card->filter('img.screenshot__image')->attr('src'));
         self::assertSame(
             ['Pin 1: The total is off', 'Pin 2: Pay button is hidden'],
             $card->filter('button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('aria-label')),
@@ -169,6 +169,75 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(1, $draftCard->filter('figure.screenshot'), 'The draft shows its picture.');
         self::assertCount(0, $draftCard->filter('.round-card__screenshot--thumbnail'));
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail'));
+    }
+
+    /**
+     * P14.T7f: Round 0 loads the 480 px thumb, drawn at the thumb's size (1280 × 800 scaled to 480 × 300), while the
+     * owner's draft keeps the 1920 px view its pins are placed on.
+     */
+    #[Test]
+    public function roundZerosPictureLoadsItsThumbAndTheOwnersDraftItsView(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $reportMedia = $this->addMedia('ready');
+        $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), $reportMedia, 0, 'Report shot', null);
+        $draftMedia = $this->addMedia('ready');
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($draft, $draftMedia, 0, 'Draft shot', null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $reportPicture = $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail img.screenshot__image');
+        self::assertCount(1, $reportPicture);
+        self::assertSame('/pinround/media/'.$reportMedia.'/thumb.webp', parse_url((string) $reportPicture->attr('src'), \PHP_URL_PATH));
+        self::assertSame(['480', '300'], [$reportPicture->attr('width'), $reportPicture->attr('height')]);
+        $draftPictures = $page->filter(self::ROUNDS.' article#round-'.$draft.' img.screenshot__image')->each(static fn (Crawler $image): string => (string) parse_url((string) $image->attr('src'), \PHP_URL_PATH));
+        self::assertNotEmpty($draftPictures);
+        self::assertSame(['/pinround/media/'.$draftMedia.'/view.webp'], array_values(array_unique($draftPictures)));
+    }
+
+    /**
+     * A tall phone shot (1170 × 2532, its thumb 480 × 1039) is drawn at most RoundCards::THUMBNAIL_MAX_HEIGHT (360 px)
+     * high with its aspect ratio kept, so the pins, placed in percent of the picture, stay on their spots.
+     */
+    #[Test]
+    public function aTallPhoneShotInRoundZeroIsDrawnNoHigherThanTheCapWithItsAspectRatioKept(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addPin($this->addScreenshot($report, $this->addMedia('ready', viewWidth: 1170, viewHeight: 2532), 0, 'Phone shot', null), 1, '25.00', '90.00', 'Footer link', 'Mia');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $picture = $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail img.screenshot__image');
+        self::assertCount(1, $picture);
+        self::assertSame(['166', '360'], [$picture->attr('width'), $picture->attr('height')], '480 × 1039 scaled to 360 high is 166.3 wide.');
+        self::assertSame(['Pin 1: Footer link'], $page->filter(self::ROUNDS.' button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('aria-label')));
+    }
+
+    /**
+     * A picture stored with no thumb shows its view in Round 0, as before thumbs were used, never a broken picture.
+     */
+    #[Test]
+    public function aRoundZeroPictureStoredWithNoThumbShowsItsView(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $media = $this->addMedia('ready', viewWidth: 960, viewHeight: 240, hasThumb: false);
+        $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), $media, 0, 'Old shot', null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $picture = $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail img.screenshot__image');
+        self::assertCount(1, $picture);
+        self::assertSame('/pinround/media/'.$media.'/view.webp', parse_url((string) $picture->attr('src'), \PHP_URL_PATH));
+        self::assertSame(['960', '240'], [$picture->attr('width'), $picture->attr('height')]);
+        self::assertCount(0, $page->filter(self::ROUNDS.' .screenshot__placeholder'));
     }
 
     #[Test]
@@ -594,10 +663,11 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     /**
-     * The section's own reads do not grow with the rounds: one report with one picture and pin and one findings round
-     * with one item, then the same ticket with those, 5 more rounds by different people with 3 pictures each, three of
-     * them findings rounds with an item per pin, and the viewer's draft read the same number of queries. The findings
-     * round of the first read is there because a shared draft adds the items query and the ticket's facts, once.
+     * The section's own reads do not grow with the rounds: one report with one picture and pin, one findings round
+     * with one item and the viewer's draft, then the same ticket with those and 5 more rounds by different people with
+     * 3 pictures each, three of them findings rounds with an item per pin, read the same number of queries. The
+     * findings round of the first read is there because a shared draft adds the items query and the ticket's facts,
+     * once; the viewer's draft because its views are signed apart from the report's thumbs, once.
      */
     #[Test]
     public function theSectionReadsTheSameNumberOfQueriesWhateverTheNumberOfRounds(): void
@@ -607,9 +677,10 @@ final class RoundsFrameTest extends WebTestCase
         $this->addPin($this->addScreenshot($report, $this->addMedia('ready'), 0, 'First', null), 1, '10.00', '10.00', 'A note', 'Mia');
         $findings = $this->addRound($ticketId, 6, 'draft', 'Mia', self::SHARED_AT);
         $this->addCheckItem($findings, $this->addPin($this->addScreenshot($findings, $this->addMedia('ready'), 0, null, null), 1, '10.00', '10.00', 'A finding', 'Mia'), 'open');
+        $this->addScreenshot($this->addRound($ticketId, null, 'draft', 'Omar', null), $this->addMedia('pending'), 0, null, null);
         $this->logIn($this->client, $this->people['Omar']);
         $this->queryCountOf(self::ROUNDS_PAGE);
-        $twoRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
+        $threeRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
         self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
 
         foreach (['Lena', 'Omar', 'Raj', 'Sara', 'Mia'] as $number => $owner) {
@@ -623,8 +694,6 @@ final class RoundsFrameTest extends WebTestCase
                 }
             }
         }
-        $own = $this->addRound($ticketId, null, 'draft', 'Omar', null);
-        $this->addScreenshot($own, $this->addMedia('pending'), 0, null, null);
         $manyRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
         self::assertCount(8, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
@@ -632,7 +701,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(2, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'), "The report's and the own draft's: rows show none.");
         self::assertCount(4, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
         self::assertCount(10, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row button'), 'Omar may mark each finding fixed.');
-        self::assertSame($twoRoundsQueryCount, $manyRoundsQueryCount);
+        self::assertSame($threeRoundsQueryCount, $manyRoundsQueryCount);
     }
 
     #[Test]
