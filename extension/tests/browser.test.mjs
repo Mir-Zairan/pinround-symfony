@@ -21,7 +21,7 @@ test('the fake offers exactly what the adapter offers, so a test cannot use a ca
     assert.deepEqual(shapeOf(browser), {
         storage: { local: { get: 'function', set: 'function', remove: 'function' }, session: { get: 'function', set: 'function', remove: 'function' } },
         tabs: { query: 'function', captureVisibleTab: 'function', create: 'function', get: 'function', update: 'function' },
-        runtime: { openOptionsPage: 'function' },
+        runtime: { openOptionsPage: 'function', onMessage: { addListener: 'function' } },
         scripting: { executeScript: 'function' },
     });
 });
@@ -71,11 +71,12 @@ test('the adapter hands each call to the chrome API with its arguments and answe
     ]);
 });
 
-test('no extension source but the adapter names the chrome API', () => {
+test('no extension source but the adapter, and the overlay the page runs, names the chrome API', () => {
     const sources = readdirSync(SOURCE, { recursive: true }).filter((file) => file.endsWith('.js'));
     assert.ok(sources.length > 1, 'The source folder has the adapter and the code that uses it.');
 
     const callers = sources.filter((file) => /\bchrome\s*[.[]/.test(readFileSync(new URL(file, SOURCE), 'utf8')));
 
-    assert.deepEqual(callers, ['shared/browser.js']);
+    // overlay.js is injected as a classic script, which cannot import the adapter; tests/fake-page.mjs gives it chrome.
+    assert.deepEqual(callers.toSorted(), ['overlay/overlay.js', 'shared/browser.js']);
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CANNOT_PIN_PAGE, OVERLAY_FILES, activeTabId, capturePinnedTab, closePinOverlay, openPinOverlay } from '../src/capture/page-pins.js';
+import { CANNOT_DOCK_PAGE, CANNOT_PIN_PAGE, OVERLAY_FILES, activeTabId, capturePinnedTab, closePinOverlay, openPageDock, openPinOverlay } from '../src/capture/page-pins.js';
 import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, fakeBrowser } from './fake-browser.mjs';
 
 const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true };
@@ -50,13 +50,30 @@ async function seedOverlay(browser, answer, { throwsOnHide = false } = {}) {
 
 const overlayCallsOf = (browser) => resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => globalThis.overlayCalls ?? [] });
 
-test('"Pin this page" injects the pin rules, then the overlay, into the active tab', async () => {
+test('"Pin this page" injects the pin and dock rules, then the overlay, into the active tab, and starts pinning', async () => {
     const browser = shopBrowser();
+    await seedOverlay(browser, []);
+    await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => { globalThis.pinroundOverlay.startPinning = () => globalThis.overlayCalls.push('startPinning'); } });
 
     await openPinOverlay(browser, await activeTabId(browser));
 
-    assert.deepEqual(OVERLAY_FILES, ['src/overlay/pin-rules.js', 'src/overlay/overlay.js']);
-    assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: ['src/overlay/pin-rules.js', 'src/overlay/overlay.js'] }]);
+    assert.deepEqual(OVERLAY_FILES, ['src/overlay/pin-rules.js', 'src/overlay/dock.js', 'src/overlay/overlay.js']);
+    assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: OVERLAY_FILES }]);
+    assert.deepEqual(await overlayCallsOf(browser), ['startPinning']);
+});
+
+test('the popup\'s "Open the dock" injects the same files and opens the dock, and a page out of reach says so', async () => {
+    const browser = shopBrowser();
+    await seedOverlay(browser, []);
+    await browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => { globalThis.pinroundOverlay.openDock = () => globalThis.overlayCalls.push('openDock'); } });
+
+    await openPageDock(browser, SHOP_PAGE.id);
+
+    assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: OVERLAY_FILES }]);
+    assert.deepEqual(await overlayCallsOf(browser), ['openDock']);
+    const settings = fakeBrowser({ tabs: [SETTINGS_PAGE], hostOrigins: [ALL_URLS] });
+    await assert.rejects(openPageDock(settings, SETTINGS_PAGE.id), { message: CANNOT_DOCK_PAGE });
+    assert.equal(CANNOT_DOCK_PAGE, 'The dock cannot open on this page. Open a web page and try again.');
 });
 
 test('a page out of reach cannot be pinned, with a plain message; any other refusal keeps Chrome\'s', async () => {

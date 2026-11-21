@@ -8,13 +8,18 @@
 // The page still sees every key typed into a note: its capture-phase keydown and beforeinput listeners on window and
 // document run before the shadow root, so a page can log a note as it is typed. Only a note editor in an iframe of the
 // extension's own origin would hide the keys.
+// The same root holds the dock (dock.js) once openDock() is called: one host, one closed root. Pinning is a mode: the
+// tinted surface that takes clicks shows only while it is on; the pins stay on the page between modes. With the dock
+// open, Escape and a saved capture drop the pins and end pinning but keep the dock; without it they remove the host.
+// Injecting this file only defines globalThis.pinroundOverlay: the extension then calls startPinning() or openDock().
 (() => {
     if (undefined !== globalThis.pinroundOverlay) {
-        globalThis.pinroundOverlay.show();
-
         return;
     }
     const rules = globalThis.pinroundPinRules;
+    const dockRules = globalThis.pinroundDock;
+    // TODO(P14.T19 task 35b): Play opens the scenario player in the dock; until then it says where scenarios play.
+    const PLAY_FROM_POPUP = 'Play scenarios from the extension\'s popup for now.';
     const ARROW_STEPS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     const SHIFT_STEP_PERCENT = 10;
     // Stopped at the shadow root, so the page's listeners on the way up never hear a key or click meant for a pin; its
@@ -37,9 +42,11 @@
             z-index: 2147483647 !important;
             display: block !important;
             touch-action: none !important;
+            pointer-events: none !important;
         }
         * { box-sizing: border-box; font: 14px/1.4 system-ui, sans-serif; }
-        .surface { position: absolute; inset: 0; background: rgb(22 29 27 / 8%); cursor: crosshair; outline: none; }
+        .surface { position: absolute; inset: 0; background: rgb(22 29 27 / 8%); cursor: crosshair; outline: none; pointer-events: auto; }
+        .surface[hidden] { display: none; }
         .surface:focus-visible { box-shadow: inset 0 0 0 3px #2f6fd6; }
         .crosshair { display: none; position: absolute; width: 24px; height: 24px; transform: translate(-50%, -50%); pointer-events: none; }
         .surface:focus .crosshair { display: block; }
@@ -108,6 +115,7 @@
             color: #161d1b;
             box-shadow: 0 0 0 1px #161d1b, 0 4px 12px rgb(0 0 0 / 30%);
             transform: translate(var(--shift-x), var(--shift-y));
+            pointer-events: auto;
         }
         .note-editor[hidden] { display: none; }
         .note-editor--left { --shift-x: calc(-100% - 20px); }
@@ -211,7 +219,7 @@
     sheet.replaceSync(STYLES);
     shadow.adoptedStyleSheets = [sheet];
 
-    const surface = make('div', 'surface', { tabIndex: 0 });
+    const surface = make('div', 'surface', { tabIndex: 0, hidden: true });
     surface.setAttribute('role', 'application');
     surface.setAttribute('aria-label', 'Pin overlay');
     surface.setAttribute('aria-describedby', 'pinround-keyboard-help');
@@ -242,9 +250,20 @@
     const crosshairAt = { x_pct: 50, y_pct: 50 };
     /** @type {null|{pin: object, returnFocusTo: HTMLElement}} */
     let editing = null;
+    let isPinning = false;
+    /** Whether pinning was on when hideForCapture took the host out, for show() to put it back as it was. */
+    let wasPinningBeforeCapture = false;
+    /** @type {null|ReturnType<typeof dockRules.mountDock>} */
+    let dock = null;
+    let isAsking = false;
 
     const say = (message) => {
         status.textContent = message;
+    };
+    const attachHost = () => {
+        if (!host.isConnected) {
+            document.documentElement.append(host);
+        }
     };
 
     function labelPins() {
@@ -255,7 +274,7 @@
             pin.bubble.textContent = note;
             pin.bubble.hidden = '' === note;
         });
-        hint.hidden = pins.length > 0;
+        hint.hidden = !isPinning || pins.length > 0;
         if (null !== editing) {
             editorCaption.textContent = `Note for pin ${pins.indexOf(editing.pin) + 1}`;
         }
@@ -322,9 +341,102 @@
         openEditor(pin, returnFocusTo);
     }
 
+    function startPinning() {
+        attachHost();
+        isPinning = true;
+        surface.hidden = false;
+        dock?.setPinning(true);
+        labelPins();
+        surface.focus();
+    }
+
+    function stopPinning(hadFocus = null !== shadow.activeElement) {
+        isPinning = false;
+        surface.hidden = true;
+        dock?.setPinning(false);
+        labelPins();
+        if (hadFocus) {
+            dock?.focusPinButton();
+        }
+    }
+
+    /** Drops every pin; with the dock open it stays on the page and pinning ends, else the overlay goes. */
     function close() {
-        host.remove();
-        delete globalThis.pinroundOverlay;
+        if (null === dock) {
+            host.remove();
+            delete globalThis.pinroundOverlay;
+
+            return;
+        }
+        const hadFocus = null !== shadow.activeElement;
+        if (null !== editing) {
+            closeEditor();
+        }
+        for (const pin of pins.splice(0)) {
+            pin.button.remove();
+        }
+        say('');
+        stopPinning(hadFocus);
+    }
+
+    /**
+     * Asks the extension's service worker (src/background/) to act for the dock, and shows its answer there. One
+     * request at a time: a key pressed while one runs is ignored, as the disabled buttons are.
+     */
+    async function askExtension(action, value) {
+        if (isAsking) {
+            return;
+        }
+        isAsking = true;
+        dock.setBusy(true);
+        try {
+            dock.showAnswer(await chrome.runtime.sendMessage({ pinroundDock: action, value }));
+        } catch {
+            dock.say(dockRules.TEXTS.notAnswered, true);
+        } finally {
+            isAsking = false;
+            dock.setBusy(false);
+        }
+    }
+
+    function runDockAction(action, value) {
+        if ('pin' === action) {
+            if (isPinning) {
+                stopPinning();
+            } else {
+                startPinning();
+            }
+        } else if ('shrink' === action) {
+            dock.toggleShrunk();
+        } else if ('play' === action) {
+            dock.say(PLAY_FROM_POPUP);
+        } else {
+            askExtension(action, value);
+        }
+    }
+
+    function openDock() {
+        attachHost();
+        if (null !== dock) {
+            return dock.ready;
+        }
+        dock = dockRules.mountDock(shadow, {
+            storage: chrome.storage.local,
+            siteHost: location.host,
+            viewport: { width: () => innerWidth, height: () => innerHeight },
+            onAction: runDockAction,
+        });
+        dock.setPinning(isPinning);
+        // Keys typed outside the overlay; the shadow root's own keydown listener below takes the ones inside it.
+        document.addEventListener('keydown', onlyTrusted((event) => {
+            const action = dockRules.actionOfKey(event);
+            if (null !== action && host.isConnected && host !== event.target) {
+                runDockAction(action);
+            }
+        }));
+        askExtension('state');
+
+        return dock.ready;
     }
 
     // rAF never fires in a hidden tab, so a capture there does not wait for ever.
@@ -337,7 +449,7 @@
     });
 
     // The focusable parts in Tab order, the order they have in the shadow root.
-    const focusOrder = () => [surface, ...pins.map((pin) => pin.button), ...(editor.hidden ? [] : [noteField, saveNoteButton])];
+    const focusOrder = () => [surface, ...pins.map((pin) => pin.button), ...(editor.hidden ? [] : [noteField, saveNoteButton]), ...(null === dock ? [] : dock.focusables())];
 
     // Tab and Shift+Tab wrap inside the overlay, so focus never reaches the page's own controls under the tint.
     function keepFocusInside(event) {
@@ -421,24 +533,29 @@
     saveNoteButton.addEventListener('click', onlyTrusted(closeEditor));
     editor.addEventListener('submit', (event) => event.preventDefault());
     shadow.addEventListener('keydown', onlyTrusted((event) => {
+        const dockAction = null === dock ? null : dockRules.actionOfKey(event);
         if ('Tab' === event.key) {
-            keepFocusInside(event);
-        } else if (SCROLL_KEYS.has(event.key) && noteField !== event.target && !(' ' === event.key && 'BUTTON' === event.target.tagName)) {
-            event.preventDefault();
-        } else if ('Escape' === event.key) {
-            event.preventDefault();
-            if (null !== editing && editor.contains(event.target)) {
-                closeEditor();
-            } else {
-                close();
+            if (isPinning) {
+                keepFocusInside(event);
             }
+        } else if (null !== dockAction) {
+            event.preventDefault();
+            runDockAction(dockAction);
+        } else if (isPinning && SCROLL_KEYS.has(event.key) && noteField !== event.target && 'SELECT' !== event.target.tagName && !(' ' === event.key && 'BUTTON' === event.target.tagName)) {
+            event.preventDefault();
+        } else if ('Escape' === event.key && null !== editing && editor.contains(event.target)) {
+            event.preventDefault();
+            closeEditor();
+        } else if ('Escape' === event.key && isPinning) {
+            event.preventDefault();
+            close();
         }
     }));
     // On the host: Chrome makes a wheel cancelable only over an element with a blocking listener, and a shadow root is
     // no element. The host's listener sees the host as the target, so the note field is found by the pointer over it.
     // Ctrl+wheel is the browser's zoom, which keeps every pin in place, since a pin is a percent of the viewport.
     host.addEventListener('wheel', onlyTrusted((event) => {
-        if (event.ctrlKey) {
+        if (event.ctrlKey || !isPinning) {
             return;
         }
         event.preventDefault();
@@ -451,16 +568,21 @@
     }
 
     globalThis.pinroundOverlay = {
-        /** Puts the overlay back in the page, if it is out, and focus on its surface, where a keyboard user starts. */
+        /** Turns pinning on, with the overlay in the page and focus on its surface, where a keyboard user starts. */
+        startPinning,
+        /** Opens the dock in the overlay's root, as the site last placed it; resolves once it is placed. */
+        openDock,
+        /** Puts the overlay back after hideForCapture, with focus on the surface if pinning was on. */
         show() {
-            if (!host.isConnected) {
-                document.documentElement.append(host);
+            attachHost();
+            if (wasPinningBeforeCapture) {
+                surface.focus();
             }
-            surface.focus();
         },
         /** Takes the overlay out of the page until show(), and answers the pins once the page is painted without it. */
         async hideForCapture() {
             const answer = pins.map(({ x_pct, y_pct, note }) => ({ x_pct, y_pct, note }));
+            wasPinningBeforeCapture = isPinning;
             host.remove();
             await afterNextPaint();
 
@@ -469,5 +591,5 @@
         close,
     };
     placeAt(crosshair, crosshairAt);
-    globalThis.pinroundOverlay.show();
+    labelPins();
 })();

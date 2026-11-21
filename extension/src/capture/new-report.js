@@ -21,7 +21,9 @@ export const REPORT_FULL = 'A report holds at most 10 screenshots. Press Done, t
 export const REPORT_GONE = 'Your report draft is gone from pinround, so the screenshot was not added. Choose where to put it.';
 export const OLD_CAPTURES_DROPPED = 'Screenshots captured with an earlier version of the extension were not made into a report. Capture them again.';
 export const CAPTURE_TOO_LONG = 'The pins and texts of this capture are too long to send. Shorten the notes.';
-export const PENDING_FOR_OTHER_PINROUND = 'The screenshot waiting to be sent was for another pinround address, so it was dropped with its report. Capture it again.';
+export const REPORT_OPENED = 'Report draft opened in pinround. Check it there and press Send.';
+export const REPORT_KEPT_IN_PINROUND = 'Your report draft is saved in pinround. Open it there, check it and press Send.';
+export const PENDING_FOR_OTHER_PINROUND ='The screenshot waiting to be sent was for another pinround address, so it was dropped with its report. Capture it again.';
 
 /**
  * @typedef {{idempotencyKey: string, path: string, bodyJson: string, origin: string}} PendingCapture a POST sent, or
