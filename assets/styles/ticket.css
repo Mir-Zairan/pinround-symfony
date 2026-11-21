@@ -188,7 +188,7 @@
  * column, the box above the rest of the aside. The rounds row is 1fr so the aside, which spans it, sizes only that row
  * and never pushes the Rounds down; the main column spans the box's row and the next. The empty box wrapper is a block
  * here, so its row stays 0px tall rather than taking half the main column's height. Rows have no gap, so the absent box
- * leaves none: the box and the Rounds carry their own space.
+ * leaves none: the box and the main column carry their own space.
  */
 @container ticket (min-width: 892px) {
   .ticket__columns {
@@ -203,8 +203,11 @@
     gap: 0 var(--space-32);
   }
 
+  /* The space above the Rounds sits under the main column, not on the Rounds, so a box taller than the main column
+     absorbs it rather than adding to it, and the Rounds then start level with the aside. */
   .ticket__main {
     grid-area: main;
+    margin-bottom: var(--space-28);
   }
 
   .ticket__next-step {
@@ -218,7 +221,6 @@
 
   .ticket__rounds {
     grid-area: rounds;
-    margin-top: var(--space-28);
   }
 
   .ticket__aside {
