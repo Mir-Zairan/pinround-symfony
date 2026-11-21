@@ -6,12 +6,12 @@ import { PinroundApi } from '../shared/api.js';
 import { browser } from '../shared/browser.js';
 import { loadSettings } from '../shared/settings.js';
 import { captureTexts } from '../capture/capture.js';
-import { NEW_NOTEBOOK, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, notebookChoice, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
+import { CHOOSE_TARGET_FIRST, NEW_NOTEBOOK, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, notebookChoice, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
 import { NEW_SCREENSHOT, captureToTarget, newReportSavedMessage } from '../capture/capture-to-target.js';
-import { OLD_CAPTURES_DROPPED, clearNewReport, dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture } from '../capture/new-report.js';
+import { OLD_CAPTURES_DROPPED, REPORT_KEPT_IN_PINROUND, REPORT_OPENED, clearNewReport, dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture } from '../capture/new-report.js';
 import { captureToNotebook, makeNotebook } from '../capture/notebook-capture.js';
 import { activePageContext } from '../capture/page-context.js';
-import { activeTabId, openPinOverlay } from '../capture/page-pins.js';
+import { activeTabId, openPageDock, openPinOverlay } from '../capture/page-pins.js';
 import { StepRefusal } from '../player/step-runner.js';
 import { fillReportInputs, showTargetFields } from './report-captures.js';
 import { RetakePicker } from './retake-picker.js';
@@ -59,7 +59,7 @@ function fillPicker(choices, chosenValue) {
 function chosenTarget() {
     const target = offeredTargets.get(element('target').value);
     if (undefined === target) {
-        throw new Error(NEW_NOTEBOOK === element('target').value ? 'Make the notebook first.' : 'Choose where to put the screenshot first.');
+        throw new Error(NEW_NOTEBOOK === element('target').value ? 'Make the notebook first.' : CHOOSE_TARGET_FIRST);
     }
 
     return target;
@@ -124,6 +124,11 @@ async function pinPage() {
     showStatus('Click the page to drop a pin. Then capture the page here.');
 }
 
+async function openDock() {
+    await openPageDock(browser, await activeTabId(browser));
+    showStatus('The dock is on the page. Pin, capture and save your draft from there.');
+}
+
 async function capture(api) {
     const target = chosenTarget();
     const texts = captureTexts(element('shot-title').value, element('shot-summary').value);
@@ -174,7 +179,7 @@ async function finishReport(origin) {
     const isOpened = await finishNewReport(extensionSession, browser, origin);
     fillReportInputs(element, await loadNewReport(extensionSession));
     await showFields();
-    showStatus(isOpened ? 'Report draft opened in pinround. Check it there and press Send.' : 'Your report draft is saved in pinround. Open it there, check it and press Send.');
+    showStatus(isOpened ? REPORT_OPENED : REPORT_KEPT_IN_PINROUND);
 }
 
 async function startOver() {
@@ -276,6 +281,7 @@ async function start() {
         }
     });
     element('pin-page').addEventListener('click', () => run(pinPage));
+    element('open-dock').addEventListener('click', () => run(openDock));
     element('capture-form').addEventListener('submit', (event) => {
         event.preventDefault();
         run(() => capture(api));

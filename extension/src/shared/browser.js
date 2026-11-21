@@ -19,6 +19,9 @@ export const browser = {
         get: (tabId) => chrome.tabs.get(tabId),
         update: (tabId, properties) => chrome.tabs.update(tabId, properties),
     },
-    runtime: { openOptionsPage: () => chrome.runtime.openOptionsPage() },
+    runtime: {
+        openOptionsPage: () => chrome.runtime.openOptionsPage(),
+        onMessage: { addListener: (listener) => chrome.runtime.onMessage.addListener(listener) },
+    },
     scripting: { executeScript: (injection) => chrome.scripting.executeScript(injection) },
 };

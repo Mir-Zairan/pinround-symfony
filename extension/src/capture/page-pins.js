@@ -4,10 +4,11 @@
 import { checkedPins } from '../overlay/pins.js';
 import { pngOf } from './capture.js';
 
-/** pin-rules.js first: overlay.js reads the rules it leaves on the global. Paths are from the extension's root. */
-export const OVERLAY_FILES = ['src/overlay/pin-rules.js', 'src/overlay/overlay.js'];
+/** The rules first: overlay.js reads what pin-rules.js and dock.js leave on the global. Paths are from the extension's root. */
+export const OVERLAY_FILES = ['src/overlay/pin-rules.js', 'src/overlay/dock.js', 'src/overlay/overlay.js'];
 
 export const CANNOT_PIN_PAGE = 'This page cannot be pinned. Open a web page and try again.';
+export const CANNOT_DOCK_PAGE = 'The dock cannot open on this page. Open a web page and try again.';
 
 /** @returns {Promise<number>} the id of the tab the popup was opened on */
 export async function activeTabId(browser) {
@@ -19,12 +20,22 @@ export async function activeTabId(browser) {
     return tab.id;
 }
 
-/** Draws the overlay on the tab, or shows the one already there with its pins. */
+/** Draws the overlay on the tab, or shows the one already there with its pins, and turns pinning on. */
 export async function openPinOverlay(browser, tabId) {
+    await callOverlay(browser, tabId, () => globalThis.pinroundOverlay?.startPinning(), CANNOT_PIN_PAGE);
+}
+
+/** Opens the dock on the tab, in the overlay's root; pins already on the page stay. */
+export async function openPageDock(browser, tabId) {
+    await callOverlay(browser, tabId, () => globalThis.pinroundOverlay?.openDock(), CANNOT_DOCK_PAGE);
+}
+
+async function callOverlay(browser, tabId, func, outOfReachMessage) {
     try {
         await browser.scripting.executeScript({ target: { tabId }, files: OVERLAY_FILES });
+        await browser.scripting.executeScript({ target: { tabId }, func });
     } catch (error) {
-        throw isOutOfReach(error) ? new Error(CANNOT_PIN_PAGE) : error;
+        throw isOutOfReach(error) ? new Error(outOfReachMessage) : error;
     }
 }
 

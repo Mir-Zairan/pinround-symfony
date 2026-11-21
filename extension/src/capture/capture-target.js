@@ -6,6 +6,7 @@ import { shownText, unwrappedText } from './untrusted-text.js';
 export const CAPTURE_TARGET_KEY = 'pinroundCaptureTarget';
 export const NEW_REPORT = 'new-report';
 export const NEW_NOTEBOOK = 'new-notebook';
+export const CHOOSE_TARGET_FIRST = 'Choose where to put the screenshot first.';
 // list_my_tickets answers at most 50; list_my_notebooks at most 20 a page.
 export const TICKETS_LIMIT = 50;
 const NOTEBOOKS_PAGE_SIZE = 20;

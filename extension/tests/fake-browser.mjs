@@ -196,6 +196,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
     const activeTabGrants = new Set();
     const pageDocuments = new Map();
     const injectedFiles = [];
+    const messageListeners = [];
     let nextTabId = Math.max(0, ...openTabs.map((tab) => tab.id)) + 1;
     let documentsLoaded = 0;
     let optionsPageOpenings = 0;
@@ -322,6 +323,11 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             async openOptionsPage() {
                 optionsPageOpenings += 1;
             },
+            onMessage: {
+                addListener(listener) {
+                    messageListeners.push(listener);
+                },
+            },
         },
         scripting: {
             executeScript({ target, func, args = [], files }) {
@@ -384,6 +390,8 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
         },
         tabUrl: (tabId) => tabOf(tabId)?.url,
         injectedFiles,
+        /** The listeners added with runtime.onMessage.addListener, in order; a test calls them as Chrome would. */
+        messageListeners,
         get optionsPageOpenings() {
             return optionsPageOpenings;
         },
