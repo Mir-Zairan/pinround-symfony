@@ -12,12 +12,12 @@ use App\SharedKernel\Domain\UserId;
 /**
  * Each person's current organizations, given up front, in id order as NamedMemberOrganizations gives them.
  */
-final class FixedMemberOrganizations implements MemberOrganizations
+final readonly class FixedMemberOrganizations implements MemberOrganizations
 {
     /**
      * @param array<string, list<MemberOrganization>> $organizationsByUserId
      */
-    public function __construct(private readonly array $organizationsByUserId)
+    public function __construct(private array $organizationsByUserId)
     {
     }
 

@@ -80,7 +80,7 @@ final class OAuthRefreshTokenTest extends TestCase
     public function noScopeIsRefused(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('A refresh token grants at least one scope.');
+        $this->expectExceptionMessageIsOrContains('A refresh token grants at least one scope.');
 
         self::issue([]);
     }

@@ -9,7 +9,7 @@ namespace App\Identity\Domain;
  * public clients: no secret, so every grant needs PKCE with S256. Global, like the user: a client registers before
  * anyone logs in and serves people of any organization; the organization is picked per grant on the consent page.
  */
-final class OAuthClient
+final readonly class OAuthClient
 {
     public const string TOKEN_ENDPOINT_AUTH_METHOD = 'none';
     public const string RESPONSE_TYPE = 'code';
@@ -23,11 +23,11 @@ final class OAuthClient
      * @param list<string> $grantTypes
      */
     private function __construct(
-        private readonly string $clientId,
-        private readonly ?string $clientName,
-        private readonly array $redirectUris,
-        private readonly array $grantTypes,
-        private readonly \DateTimeImmutable $createdAt,
+        private string $clientId,
+        private ?string $clientName,
+        private array $redirectUris,
+        private array $grantTypes,
+        private \DateTimeImmutable $createdAt,
     ) {
     }
 
@@ -97,7 +97,7 @@ final class OAuthClient
      */
     public function grantTypes(): array
     {
-        return array_map(static fn (string $grantType): OAuthGrantType => OAuthGrantType::from($grantType), $this->grantTypes);
+        return array_map(OAuthGrantType::from(...), $this->grantTypes);
     }
 
     public function createdAt(): \DateTimeImmutable

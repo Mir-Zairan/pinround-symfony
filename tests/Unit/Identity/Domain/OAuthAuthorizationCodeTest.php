@@ -108,7 +108,7 @@ final class OAuthAuthorizationCodeTest extends TestCase
     public function aChallengeOutsideTheShapeIsRefused(string $challenge): void
     {
         $this->expectException(InvalidOAuthAuthorizationCode::class);
-        $this->expectExceptionMessage('A code_challenge is 43 to 128 characters of A-Z, a-z, 0-9, ".", "_", "~" and "-".');
+        $this->expectExceptionMessageIsOrContains('A code_challenge is 43 to 128 characters of A-Z, a-z, 0-9, ".", "_", "~" and "-".');
 
         self::issue(codeChallenge: $challenge);
     }
@@ -139,7 +139,7 @@ final class OAuthAuthorizationCodeTest extends TestCase
     public function aMethodOtherThanS256IsRefused(string $method): void
     {
         $this->expectException(InvalidOAuthAuthorizationCode::class);
-        $this->expectExceptionMessage('The code_challenge_method is S256.');
+        $this->expectExceptionMessageIsOrContains('The code_challenge_method is S256.');
 
         self::issue(codeChallengeMethod: $method);
     }
@@ -160,7 +160,7 @@ final class OAuthAuthorizationCodeTest extends TestCase
     public function aLifeOutsideOneToSixtySecondsIsRefused(int $lifetimeSeconds): void
     {
         $this->expectException(InvalidOAuthAuthorizationCode::class);
-        $this->expectExceptionMessage('A code lasts from 1 to 60 seconds.');
+        $this->expectExceptionMessageIsOrContains('A code lasts from 1 to 60 seconds.');
 
         self::issue(lifetimeSeconds: $lifetimeSeconds);
     }
@@ -169,7 +169,7 @@ final class OAuthAuthorizationCodeTest extends TestCase
     public function noScopeIsRefused(): void
     {
         $this->expectException(InvalidOAuthAuthorizationCode::class);
-        $this->expectExceptionMessage('A code grants at least one scope.');
+        $this->expectExceptionMessageIsOrContains('A code grants at least one scope.');
 
         self::issue(scopes: []);
     }
@@ -178,7 +178,7 @@ final class OAuthAuthorizationCodeTest extends TestCase
     public function aRedirectUriBreakingItsRuleIsRefusedWithThatRule(): void
     {
         $this->expectException(InvalidOAuthAuthorizationCode::class);
-        $this->expectExceptionMessage('A redirect URI has no fragment (#).');
+        $this->expectExceptionMessageIsOrContains('A redirect URI has no fragment (#).');
 
         self::issue(redirectUri: self::CALLBACK.'#here');
     }

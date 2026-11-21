@@ -75,7 +75,7 @@ final class KernelTest extends TestCase
         unset($_ENV[self::DEMO_SWITCH]);
         $_SERVER[self::DEMO_SWITCH] = 'true';
 
-        $this->expectExceptionMessage(Kernel::DEMO_SWITCH_OUTSIDE_DEV);
+        $this->expectExceptionMessageIsOrContains(Kernel::DEMO_SWITCH_OUTSIDE_DEV);
 
         new Kernel('prod', false);
     }

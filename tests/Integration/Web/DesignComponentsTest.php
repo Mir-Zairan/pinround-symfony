@@ -194,7 +194,7 @@ final class DesignComponentsTest extends KernelTestCase
         self::assertMatchesRegularExpression('/^\s*display:\s*inline-flex;$/m', $linkRule[1]);
         self::assertMatchesRegularExpression('/^\s*align-items:\s*center;$/m', $linkRule[1]);
         self::assertMatchesRegularExpression('/^\s*text-decoration:\s*none;$/m', $linkRule[1]);
-        self::assertSame(1, preg_match('/^\.seg\[aria-pressed="true"\],\n\.seg\[aria-current="page"\] \{(.*?)^\}/ms', $css, $currentRule), 'the current link must share the pressed rule');
+        self::assertSame(1, preg_match('/^\.seg\[aria-pressed="true"\],\n\.seg\[aria-current="page"\](?:,\n[^{\n]+)* \{(.*?)^\}/ms', $css, $currentRule), 'the current link must share the pressed rule');
         self::assertMatchesRegularExpression('/^\s*background:\s*var\(--secondary-container\);$/m', $currentRule[1]);
         self::assertMatchesRegularExpression('/^\s*color:\s*var\(--on-secondary-container\);$/m', $currentRule[1]);
     }

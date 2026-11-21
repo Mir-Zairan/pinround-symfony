@@ -21,23 +21,29 @@ function showPaired(settings) {
     element('paired-to').textContent = null === settings ? '' : `Connected to ${settings.origin}.`;
 }
 
-async function connectWith(connectOrPair) {
+// Both forms' buttons stay disabled until the first one ends, so a second click opens no second sign-in window.
+async function connectWith(connectOrPair, pendingMessage) {
+    const submitButtons = document.querySelectorAll('#connect-form button[type="submit"], #pair-form button[type="submit"]');
+    submitButtons.forEach((button) => { button.disabled = true; });
+    showStatus(pendingMessage);
     try {
         showStatus(await connectOrPair());
         element('token').value = '';
         showPaired(await loadSettings());
     } catch (error) {
         showStatus(error instanceof SettingsError || error instanceof ApiError || error instanceof ConnectRefused ? error.message : 'Could not connect.', true);
+    } finally {
+        submitButtons.forEach((button) => { button.disabled = false; });
     }
 }
 
 element('connect-form').addEventListener('submit', (event) => {
     event.preventDefault();
-    connectWith(() => connectToPinround(element('origin').value));
+    connectWith(() => connectToPinround(element('origin').value), 'Opening pinround…');
 });
 element('pair-form').addEventListener('submit', (event) => {
     event.preventDefault();
-    connectWith(() => pair(element('origin').value, element('token').value));
+    connectWith(() => pair(element('origin').value, element('token').value), 'Checking the token…');
 });
 element('sign-out').addEventListener('click', async () => {
     showStatus(await signOut());

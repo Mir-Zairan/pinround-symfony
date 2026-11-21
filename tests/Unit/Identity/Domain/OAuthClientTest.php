@@ -80,7 +80,7 @@ final class OAuthClientTest extends TestCase
     public function aNameThatIsNotOneShortLineOfPlainTextIsRefused(string $clientName, string $rule): void
     {
         $this->expectException(InvalidOAuthClientMetadata::class);
-        $this->expectExceptionMessage($rule);
+        $this->expectExceptionMessageIsOrContains($rule);
 
         self::register($clientName);
     }
@@ -89,7 +89,7 @@ final class OAuthClientTest extends TestCase
     public function noRedirectUriIsRefused(): void
     {
         $this->expectException(InvalidOAuthRedirectUri::class);
-        $this->expectExceptionMessage('Give at least one redirect URI.');
+        $this->expectExceptionMessageIsOrContains('Give at least one redirect URI.');
 
         OAuthClient::register(null, [], [OAuthGrantType::AuthorizationCode], new \DateTimeImmutable(self::REGISTERED_AT));
     }
@@ -106,7 +106,7 @@ final class OAuthClientTest extends TestCase
     public function sixRedirectUrisAreRefused(): void
     {
         $this->expectException(InvalidOAuthRedirectUri::class);
-        $this->expectExceptionMessage('A client has at most 5 redirect URIs.');
+        $this->expectExceptionMessageIsOrContains('A client has at most 5 redirect URIs.');
 
         self::registerWith(self::callbacks(6));
     }
@@ -125,7 +125,7 @@ final class OAuthClientTest extends TestCase
     public function aRedirectUriThatBreaksTheRuleIsRefused(): void
     {
         $this->expectException(InvalidOAuthRedirectUri::class);
-        $this->expectExceptionMessage('An http redirect URI points to this computer: localhost, 127.0.0.1 or [::1]. Use https otherwise.');
+        $this->expectExceptionMessageIsOrContains('An http redirect URI points to this computer: localhost, 127.0.0.1 or [::1]. Use https otherwise.');
 
         self::registerWith([self::CALLBACK, 'http://claude.example/cb']);
     }
@@ -147,7 +147,7 @@ final class OAuthClientTest extends TestCase
     public function aClientWithoutTheAuthorizationCodeGrantIsRefused(array $grantTypes): void
     {
         $this->expectException(InvalidOAuthClientMetadata::class);
-        $this->expectExceptionMessage('A client uses the authorization_code grant.');
+        $this->expectExceptionMessageIsOrContains('A client uses the authorization_code grant.');
 
         OAuthClient::register(null, [self::CALLBACK], $grantTypes, new \DateTimeImmutable(self::REGISTERED_AT));
     }
