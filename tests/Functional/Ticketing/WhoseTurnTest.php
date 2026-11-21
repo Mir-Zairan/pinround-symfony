@@ -28,6 +28,7 @@ use Zenstruck\Foundry\Test\Factories;
  */
 final class WhoseTurnTest extends WebTestCase
 {
+    use AssertsFiltersPanelMarkup;
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
@@ -782,6 +783,17 @@ final class WhoseTurnTest extends WebTestCase
         );
         self::assertSame('true', $page->filter('.project-rail__item[data-rail-project="SHOP"]')->attr('aria-current'));
         self::assertSame('Turbo-Frame', $this->client->getResponse()->headers->get('Vary'));
+    }
+
+    #[Test]
+    public function theRailAndTheToolbarSitInAFiltersPanelBeforeTheHeadingThatStartsClosedByAClass(): void
+    {
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TURN);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFiltersPanelComesFirstAndStartsClosedByAClass($page);
     }
 
     /**

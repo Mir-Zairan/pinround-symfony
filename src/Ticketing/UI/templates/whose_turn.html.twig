@@ -9,19 +9,18 @@
 {% block main %}
     <div class="tickets-page" {{ stimulus_controller('ticket-list') }}
         data-action="ticket-filters:changed->ticket-list#show turbo:frame-load->ticket-list#announce">
-        {#- First, as on the list page: a phone shows it above the Filters button. -#}
+        {% embed '@Ticketing/_filters_panel.html.twig' %}
+            {% block filters %}
+                <twig:TicketFilters :isWhoseTurnView="true" project="{{ filters.project }}" projectId="{{ filters.projectId }}" :showsDone="filters.showsDone" q="{{ filters.q }}" team="{{ filters.team }}" pickedTeam="{{ filters.pickedTeam }}" />
+            {% endblock %}
+        {% endembed %}
+
         <header class="tickets__header">
             <h1 class="tickets__title">{{ heading }}</h1>
             {# Outside the frame, so it stays in the page and screen readers hear each new count; ticket-list copies it from the loaded frame. #}
             <p class="tickets__total" role="status" {{ stimulus_target('ticket-list', 'total') }}>{{ totalLine }}</p>
             <twig:SegmentedControl label="View" :links="[{label: 'List', href: path('ticketing_tickets', viewQuery), isCurrent: false}, {label: 'Whose turn?', href: path('ticketing_whose_turn', viewQuery), isCurrent: true}]" />
         </header>
-
-        {% embed '@Ticketing/_filters_panel.html.twig' %}
-            {% block filters %}
-                <twig:TicketFilters :isWhoseTurnView="true" project="{{ filters.project }}" projectId="{{ filters.projectId }}" :showsDone="filters.showsDone" q="{{ filters.q }}" team="{{ filters.team }}" pickedTeam="{{ filters.pickedTeam }}" />
-            {% endblock %}
-        {% endembed %}
 
         {# TicketFilters sends this view's new URL after each change; ticket-list loads it into this frame and the rail's. #}
         {{ include('@Ticketing/_whose_turn_frame.html.twig') }}

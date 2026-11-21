@@ -1,8 +1,8 @@
 /* The tickets list (src/Ticketing/UI/templates/list.html.twig): one section per step, in group order. */
 
 /* The page: the project rail on the left, the toolbar, heading and list beside it; on a narrow screen the rail goes on
-   top. The heading comes first in the markup for a phone (below), so these areas put it back under the toolbar; the last
-   row takes what a long rail adds, so the heading stays under the toolbar. */
+   top. The markup holds them in this order, so Tab follows what the page shows; the last row takes what a long rail
+   adds, so the heading stays under the toolbar. */
 .tickets-page {
   display: grid;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
@@ -135,14 +135,40 @@
   }
 }
 
-/* A phone (P14.T16): the heading, then a Filters button that shows the rail and the toolbar, then the list, so the
-   first ticket shows without scrolling. */
+/* A phone (P14.T16): the heading and the count, then a Filters button that shows the rail and the toolbar, then the
+   List / Whose turn? switch and the list, so the first ticket shows without scrolling. The Filters button comes before
+   the header in the markup, so the switch moves under it too and Tab still follows what the page shows. The header's
+   own 6px gap becomes the rows' gap; the margins add the rest. */
 @media (max-width: 599.98px) {
   .tickets-page {
     grid-template-areas:
-      "header"
+      "title"
+      "total"
       "filters"
+      "view"
       "list";
+    row-gap: var(--space-6);
+  }
+
+  /* Two classes, so the header's own flex rule further down does not win. */
+  .tickets-page > .tickets__header {
+    display: contents;
+  }
+
+  .tickets__title {
+    grid-area: title;
+  }
+
+  .tickets__total {
+    grid-area: total;
+  }
+
+  .tickets__header > .seg-group {
+    grid-area: view;
+  }
+
+  .tickets__list-frame {
+    margin-top: var(--space-16);
   }
 
   .tickets__filters {
@@ -151,6 +177,7 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-12);
+    margin-block: var(--space-6);
   }
 
   .tickets__filters > .tickets__filters-button {

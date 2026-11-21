@@ -113,6 +113,16 @@ function chipState(page: Page): Locator {
   return page.locator('.local-ai__chip [data-states]:not([hidden])');
 }
 
+/** The "AI" a phone shows on the chip in place of the dot and the state line. */
+function chipMark(page: Page): Locator {
+  return page.locator('.local-ai__chip .local-ai__mark');
+}
+
+/** The sign after the mark's "AI", as CSS gives it, quotes included. */
+async function chipSign(page: Page): Promise<string> {
+  return chipMark(page).evaluate((mark) => getComputedStyle(mark, '::after').content);
+}
+
 function statusLine(sheet: Locator): Locator {
   return sheet.getByRole('status');
 }
@@ -417,12 +427,58 @@ test.describe('a person whose organization runs AI on laptops', () => {
       await expect(chipState(page)).toBeVisible();
 
       expect(await sidewaysOverflowPx(page), 'with the chip in the header').toBeLessThanOrEqual(0);
+      // The chip wraps the header to a second row here; a focused item must still clear it (base.css, WCAG 2.4.11).
+      const headerHeightPx = (await page.locator('.site-header').boundingBox())!.height;
+      const scrollPaddingTopPx = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop));
+      expect(scrollPaddingTopPx).toBeGreaterThan(0);
+      expect(headerHeightPx, 'the header with the chip').toBeLessThanOrEqual(scrollPaddingTopPx);
 
       const sheet = await openSheet(page);
       await checkAgain(sheet);
       await expect(modelChoices(sheet)).toHaveCount(2);
       expect(await sidewaysOverflowPx(page), 'with the ready sheet open').toBeLessThanOrEqual(0);
     });
+
+    test('the chip shows "AI" and a sign of each state, so its colour is not the only signal', async ({ page }) => {
+      const heldRequests: Route[] = [];
+      await page.route(OLLAMA_TAGS_URL, (route) => {
+        heldRequests.push(route);
+      });
+      await openHome(page);
+
+      await expect(chipMark(page)).toBeVisible();
+      await expect(chipMark(page)).toHaveText('AI');
+      await expect(page.locator('.local-ai__chip .local-ai__dot')).toBeHidden();
+      // The mark is aria-hidden: the button's name stays the full state line.
+      await expect(page.getByRole('banner').getByRole('button', { name: 'Local AI: not checked', exact: true })).toBeVisible();
+      expect(await chipSign(page), 'not checked').toBe('"?"');
+
+      const sheet = await openSheet(page);
+      // From here no timer runs, so the held check cannot time out into "not found".
+      await page.clock.pauseAt(new Date(FROZEN_AT.getTime() + 60_000));
+      await checkAgain(sheet);
+      await expect.poll(() => heldRequests.length).toBe(1);
+      await expect(chipState(page)).toHaveText('Local AI: checking…');
+      expect(await chipSign(page), 'checking').toBe('"…"');
+
+      await answerWithModels(heldRequests[0], page, [PHI4_MINI, QWEN3_4B]);
+      await expect(chipState(page)).toHaveText('Local AI: ready');
+      expect(await chipSign(page), 'ready').toBe('"✓"');
+
+      await checkAgain(sheet);
+      await expect.poll(() => heldRequests.length).toBe(2);
+      await answerWithModels(heldRequests[1], page, []);
+      await expect(chipState(page)).toHaveText('Local AI: not found');
+      expect(await chipSign(page), 'not found').toBe('"!"');
+    });
+  });
+
+  test('from 600 px the chip shows its dot and its state line, not the phone\'s "AI" mark', async ({ page }) => {
+    await openHome(page);
+
+    await expect(page.locator('.local-ai__chip .local-ai__dot')).toBeVisible();
+    await expect(chipMark(page)).toBeHidden();
+    await expect(chipState(page)).toHaveText('Local AI: not checked');
   });
 });
 

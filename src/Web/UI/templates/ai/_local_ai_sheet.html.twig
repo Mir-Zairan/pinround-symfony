@@ -13,6 +13,8 @@
         <twig:block name="trigger">
             <button type="button" class="chip local-ai__chip" aria-haspopup="dialog" data-action="dialog#open">
                 <span class="local-ai__dot" aria-hidden="true"></span>
+                {# Below 600px only, where the state line is visually hidden: "AI" and a sign per state, so colour is not the only signal. #}
+                <span class="local-ai__mark" aria-hidden="true">AI</span>
                 <span data-states="not-checked" {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: not checked</span>
                 <span data-states="checking" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: checking…</span>
                 <span data-states="ready" hidden {{ stimulus_target('local-ai', 'stateLine') }}>Local AI: ready</span>

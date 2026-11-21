@@ -20,6 +20,7 @@ use App\Tests\Integration\Ticketing\ShopTeamRows;
 use App\Tests\Integration\Ticketing\TicketRows;
 use App\Ticketing\Api\TicketVisibility;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
@@ -194,6 +195,31 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
     public function aRoundWithNoHandOffRoundBeforeItHasNone(string $ticketId, int $number): void
     {
         self::assertNull($this->previousHandOffRoundFor($ticketId, self::teamMember(self::MIA), $number));
+    }
+
+    /**
+     * The read's "deleted_at IS NULL" has no row to meet: a deleted draft keeps no number (rvw_round_deleted_check), so
+     * none can stand between the other ticket's checklist Round 1 and its draft Round 3. Should the schema ever take one,
+     * this fails and asks for the read to be tested against it.
+     */
+    #[Test]
+    public function noDeletedSharedDraftCanStandBetweenTwoRoundsSoTheRoundBeforeStaysAsItWas(): void
+    {
+        $deletedSharedDraft = ['rvw_round', [
+            'organization_id' => self::ACME_FOODS, 'id' => '0197a3c0-0000-7000-8000-00000030a04a', 'ticket_id' => self::OTHER_TICKET,
+            'number' => 2, 'kind' => 'draft', 'owner_id' => self::OMAR, 'shared_at' => self::SHARED_AT, 'state' => 'closed',
+            'version' => 1, 'created_at' => self::CREATED_AT, 'deleted_at' => '2027-03-17 09:00:00+00',
+        ]];
+
+        try {
+            new RoundRows(self::migrator(), self::tenantContext())->addAllOf(self::ACME_FOODS, [$deletedSharedDraft]);
+            self::fail('The schema took a deleted shared draft; test previousHandOffRoundOf with one between two rounds.');
+        } catch (DriverException $refusal) {
+            self::assertSame('23514', $refusal->getSQLState(), 'A CHECK refuses it.');
+            self::assertStringContainsString('rvw_round_deleted_check', $refusal->getMessage());
+        }
+
+        self::assertNull($this->previousHandOffRoundFor(self::OTHER_TICKET, self::teamMember(self::MIA), 3));
     }
 
     /**

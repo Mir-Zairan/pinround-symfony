@@ -12,13 +12,49 @@
   cursor: pointer;
 }
 
-/* Below 600px the header is one row (shell.css), so the chip shows its dot alone; its state line stays its name. */
+.local-ai__mark {
+  display: none;
+}
+
+/* Below 600px the header is one row (shell.css), so the chip keeps the 40px of an icon button and shows "AI" and a
+   sign of its state in place of the dot and the line: ? not checked, … checking, ✓ ready, ! no model or not found. Its
+   state line stays its name; the mark is aria-hidden, so the sign is never read out. */
 @media (max-width: 599.98px) {
   .local-ai__chip {
     position: relative;
     justify-content: center;
     width: 40px;
     padding: 0;
+  }
+
+  .local-ai__dot {
+    display: none;
+  }
+
+  .local-ai__mark {
+    display: inline;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .local-ai__mark::after {
+    content: "?";
+    margin-left: 1px;
+  }
+
+  .local-ai[data-state="checking"] .local-ai__mark::after {
+    content: "…";
+  }
+
+  .local-ai[data-state="ready"] .local-ai__mark::after {
+    content: "✓";
+    color: var(--passed);
+  }
+
+  .local-ai[data-state="no-model"] .local-ai__mark::after,
+  .local-ai[data-state="not-found"] .local-ai__mark::after {
+    content: "!";
+    color: var(--error);
   }
 
   .local-ai__chip [data-states] {
