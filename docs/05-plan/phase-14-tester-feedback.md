@@ -61,7 +61,7 @@ The product owner added on 2026-11-21 ([ADR-0048](../03-adr/0048-tries-in-a-draf
 
 ## Requirements covered
 Changes FR-RND-05 (a round page for every round kind), FR-RND-08 (full screen everywhere), FR-RND-12 (share rules), FR-RND-14 (round rows and round bar), FR-RND-16 (context filled in), FR-MCP-05 and FR-MCP-12 (title and summary required), FR-INT-01 (recipient on Send of a report draft), FR-HOME-01 (plain list until P07), FR-MINE-01.
-Adds FR-RND-19 (tries), FR-RND-20 (one open round per ticket), FR-MCP-15 (server instructions), FR-MCP-16 (prompt `fix_my_round_notes`) and the dock and connect requirements in the extension section; each task that builds one writes its text.
+Adds FR-RND-19 (tries), FR-RND-20 (one open round per ticket), FR-MCP-15 (server instructions), FR-MCP-16 (prompt `fix_my_round_notes`), FR-RND-21 (one-click connect) and the dock and connect requirements in the extension section; each task that builds one writes its text.
 NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 
 ## Design notes
@@ -157,8 +157,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   4. `add_screenshot` and `POST /api/v1/…/screenshots` take an optional `retake_of`; the extension's "My draft round" target offers "Retake of screenshot N".
   5. Cap: 5 tries per screenshot.
 - **Acceptance:**
-  - [ ] A retake with `retake_of` shows as try 2 of the same screenshot; the try-1 pins stay on try 1.
-  - [ ] After share, the shared round has one screenshot per chain, the latest try; its "before" is the earlier round's "after".
+  - [x] A retake with `retake_of` shows as try 2 of the same screenshot; the try-1 pins stay on try 1. (`tests/Functional/Review/DraftScreenshotRetakeTest::aRetakeAddedWithRetakeOfShowsAsTryTwoOfTheSameScreenshotAndTheFirstTryKeepsItsPins`; `draft-tries.spec.ts` › "Omar switches from try 2 to try 1, marks its pin fixed, and switches back")
+  - [x] After share, the shared round has one screenshot per chain, the latest try; its "before" is the earlier round's "after". (`DraftScreenshotRetakeTest::theSharedRoundShowsOneScreenshotPerChainTheLatestTry` and `::theNextSharedRoundComparesEachScreenshotWithTheSameNumberedLatestTryOfTheRoundBefore`; `Integration/Review/Queries/DbalRoundQueriesPreviousHandOffRoundTest`)
   - [x] A sixth try is refused with the cap message, and nothing is stored. (`tests/Functional/AgentApi/Tool/AddScreenshotTest::theFifthTryIsAddedAndASixthIsRefusedWithTheCapsReasonAndNothingIsWritten`: the sixth `add_screenshot` is refused with `ScreenshotTriesFull::REASON`, the stored rows and the five-try chain unchanged; `tests/Functional/AgentApi/Rest/RestApiTest::aFifthTryIsAddedAndASixthIsRefusedWith422AndNothingChanges`: 422 with the same reason, the round's rows unchanged)
   - [x] `retake_of` pointing at another round, another person's draft or another organization answers 404. (`AddScreenshotTest::aRetakeOfNoScreenshotOfTheOwnersDraftIsNotFoundAndNothingIsWritten` and `RestApiTest::aDraftScreenshotRetakingNoScreenshotOfTheCallersDraftIsNotFoundAndNothingChanges`: a screenshot of Omar's shared round, of Mia's draft and of a Beta Bakery draft, an unknown, a malformed and a trailing-newline id are each not found, with nothing written)
 - **Tests:** domain, migration, repository and isolation tests; MCP contract test; Playwright for the switch.
@@ -173,8 +173,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. A round bar sits at the top of the ticket page while a shared round is open: "Round N is open · Ready for <name> · Open round".
   4. On phone, "Your next step" sits above the Rounds section.
 - **Acceptance:**
-  - [ ] SHOP-42 with five rounds is under 1,400 px tall at 1440×900 (Playwright).
-  - [ ] The round bar shows only while a round is open, and links to it.
+  - [x] SHOP-42 with five rounds is under 1,400 px tall at 1440×900 (Playwright). (`ticket-rounds-height.spec.ts` › "a SHOP ticket with five rounds is under 1,400 px tall at 1440x900, with the later rounds as rows")
+  - [x] The round bar shows only while a round is open, and links to it. (`tests/Functional/Review/RoundBarTest::anOpenReviewRoundShowsTheBarWithWhoseTurnItIsAndALinkToTheRound` and `::noRoundIsOpenSoTheFrameIsEmpty`)
   - [x] Omar's private draft row is not visible to Lena, Mia or Sara (leak suite). (`tests/Functional/Review/RoundsFrameTest::omarsPrivateDraftShowsToOmarAndToNoOneElse`: Omar sees his draft; for Lena, Mia and Sara neither its id, its screenshot text nor "only you can see this" is in the response)
 - **Prototype check:** `Main › Ticket › Rounds`.
 - **Size:** M
@@ -187,8 +187,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. The header's "Ready for" agrees with the ticket's turn.
   4. The breadcrumb link uses the app's link style.
 - **Acceptance:**
-  - [ ] A shared draft with 3 screenshots shows screenshot 1 of 3; next and the arrow key show 2; the thumbnail strip jumps (Playwright).
-  - [ ] Full screen opens from the round page and from Round 0, and Escape closes it.
+  - [x] A shared draft with 3 screenshots shows screenshot 1 of 3; next and the arrow key show 2; the thumbnail strip jumps (Playwright). (`round-page.spec.ts` › "Mia opens Omar's shared draft at 1 of 3, the right arrow shows 2 of 3, and the strip jumps to 3")
+  - [x] Full screen opens from the round page and from Round 0, and Escape closes it. (`focus-review.spec.ts` › "Full screen opens from a shared draft, from Round 0 and from Round 0 on the ticket page; Escape goes back to each, focus on its link")
   - [x] The page reads the round in a fixed number of queries, whatever the screenshot count (query-count test). (`tests/Functional/Review/RoundPageScreenshotsTest::aSharedDraftsPageReadsTheSameNumberOfQueriesWhateverTheNumberOfScreenshotsAndPins`: the same count for 2 and 6 screenshots)
 - **Prototype check:** `Review` and `Focus`.
 - **Size:** L
@@ -200,8 +200,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   2. The chosen person goes through the same check rules as the form.
   3. Update phase-06's note "no assignee" and FR-INT-01.
 - **Acceptance:**
-  - [ ] Send with a named developer makes the ticket with that assignee; with "The team" it has none and the lead plans it.
-  - [ ] Picking a person outside the project's team is refused with the reason, and no ticket is made.
+  - [x] Send with a named developer makes the ticket with that assignee; with "The team" it has none and the lead plans it. (`tests/Functional/Review/ReportDraft/ReportDraftGiveItToTest::sendWithANamedDeveloperMakesThemTheAssigneeInToDo` and `::sendWithTheTeamLeavesItUnassignedInBacklogForTheLead`)
+  - [x] Picking a person outside the project's team is refused with the reason, and no ticket is made. (`ReportDraftGiveItToTest::sendToAPersonGiveItToDoesNotOfferIsRefusedAndChangesNothing` and `::aSenderInNoTeamOfTheProjectCannotNameAPersonInIt`: 422 with `ReportGiveTo::NOT_OFFERED`, the draft row and the ticket keys unchanged)
 - **Size:** S
 
 ### P14.T10 — One screenshot at a time while reporting
@@ -212,7 +212,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. "More detail" starts at 5 lines.
   4. Use the design-system components, not login or security classes.
 - **Acceptance:**
-  - [ ] With 4 screenshots, one shows at a time; switching keeps every pin and note (Playwright).
+  - [x] With 4 screenshots, one shows at a time; switching keeps every pin and note (Playwright). (`report-draft-editor.spec.ts` › "a draft with four screenshots shows one at a time, and a thumbnail shows its own" and "switching by thumbnail keeps each screenshot's pins and typed notes")
   - [x] The form posts the same data as before (functional test unchanged or extended). (`tests/Functional/Review/ReportDraft/ReportDraftScreenshotEditorTest::savingTheFormUntouchedKeepsEveryScreenshotPinAndNote` and `::aSaveWithFourScreenshotsStoresEachTypedNoteAndDropsTheRemovedOne`)
 - **Prototype check:** `Main › Report a problem`.
 - **Size:** M
@@ -279,8 +279,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   2. Tickets: heading first, then a "Filters" button that opens the rail and chips.
   3. Ticket page: covered by T7 step 4.
 - **Acceptance:**
-  - [ ] At 390×844 the header is at most 64 px tall, and the first ticket shows without scrolling (Playwright).
-  - [ ] The menu button is reachable and works with the keyboard, and focus returns on close.
+  - [x] At 390×844 the header is at most 64 px tall, and the first ticket shows without scrolling (Playwright). (`phone-layout.spec.ts` › "at 390x844 the header is one row of at most 64px and the first ticket shows without scrolling")
+  - [x] The menu button is reachable and works with the keyboard, and focus returns on close. (`phone-layout.spec.ts` › "Tab reaches the menu button, Enter opens the menu with focus inside, Escape closes it back onto the button", "Space opens the menu and, back on the button, Space closes it")
 - **Size:** M
 
 ### P14.T17 — Polish pass across pages
@@ -295,8 +295,8 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   7. Team page: "People 2 waiting on them" says what it counts, and matches the numbers.
   8. The logo lines up with the page content.
 - **Acceptance:**
-  - [ ] Each step has a before and after screenshot in the task's hand-off note.
-  - [ ] The accessibility check (axe) passes on every changed page.
+  - [x] Each step has a before and after screenshot in the task's hand-off note. (the T17 hand-off lines of 2026-11-21; step 3's empty My notebooks has an after shot only)
+  - [x] The accessibility check (axe) passes on every changed page. (`polish-pages.spec.ts`, `profile.spec.ts`, `security.spec.ts`, `tokens-page.spec.ts`, `team-page.spec.ts`, `admin-people.spec.ts`, `shell.spec.ts`)
 - **Size:** M
 
 ### P14.T18 — Demo switch for two-step login
@@ -307,9 +307,9 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. A banner on every page while it is on: "Demo mode: two-step login is skipped."
   4. `.env` explains it; the `pinround-setup` skill asks whether to turn it on.
 - **Acceptance:**
-  - [ ] With the switch on in dev, Sara opens admin pages and makes a token without two-step login.
-  - [ ] With the switch on and `APP_ENV=prod`, boot fails with the message.
-  - [ ] With it off, every existing two-step test still passes.
+  - [x] With the switch on in dev, Sara opens admin pages and makes a token without two-step login. (`tests/Functional/Identity/DemoModeTest::withTheSwitchOnInDevSaraOpensAdminPagesAndMakesATokenWithoutTwoStepLogin`)
+  - [x] With the switch on and `APP_ENV=prod`, boot fails with the message. (`tests/Unit/KernelTest::theSwitchOnOutsideDevStopsTheBootWithAPlainMessage`)
+  - [x] With it off, every existing two-step test still passes. (`DemoModeTest::withTheSwitchOffThereIsNoBannerAndAdminPagesAndTokensStillNeedTwoStepLogin`; Unit and Functional Identity 660 OK in main)
 - **Depends on:** ADR-0049 accepted.
 - **Size:** S
 
@@ -322,9 +322,9 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   4. The popup stays for setup and for opening the dock.
   5. Keys are ignored while typing in the page's own fields.
 - **Acceptance:**
-  - [ ] A tester pins, removes a pin, captures twice and saves one draft without opening the popup again (Playwright, `chromium-extension`).
-  - [ ] A scenario keeps running after a click on the page.
-  - [ ] The page cannot read pins or notes through the DOM (existing overlay tests extended).
+  - [x] A tester pins, removes a pin, captures twice and saves one draft without opening the popup again (Playwright, `chromium-extension`). (`extension-dock.spec.ts` › "a tester pins, removes a pin, captures twice and saves one report draft from the dock without opening the popup again")
+  - [x] A scenario keeps running after a click on the page. (`extension-dock.spec.ts` › "a scenario started with Play keeps its step card after a click on the page, and goes on from the dock")
+  - [x] The page cannot read pins or notes through the DOM (existing overlay tests extended). (`extension-dock.spec.ts` › "the page finds no dock, step card, pin or note through its DOM, and a click on them shows it only the overlay's host"; `extension-overlay.spec.ts` › "the page's own script can neither reach the overlay nor drop, change or remove a pin with events it makes")
 - **Prototype check:** dock prototype, version 2.
 - **Size:** L
 
@@ -336,14 +336,14 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. Claude Code and the Claude connector: document the steps; note that a Claude connector reaches pinround from Anthropic's servers, so it needs a public HTTPS address (not `https://localhost`).
   4. Personal tokens keep working.
 - **Acceptance:**
-  - [ ] The extension connects without a pasted token, and its calls use the issued token (Playwright).
-  - [ ] A code is single use; a wrong PKCE verifier and a reused code are refused, and no token is issued.
-  - [ ] Tokens never appear in logs (log test).
-  - [ ] A changed or unregistered redirect URI is refused at authorize with no redirect and no code, and a token request with another `redirect_uri` gets no token.
+  - [x] The extension connects without a pasted token, and its calls use the issued token (Playwright). (`extension-connect.spec.ts` › "Connect on the options page allows the extension on the consent page, its calls carry the issued token, and Sign out revokes it")
+  - [x] A code is single use; a wrong PKCE verifier and a reused code are refused, and no token is issued. (`tests/Functional/Identity/OAuthTokenTest::aCodeTradedWithTheWrongVerifierRedirectUriOrClientIsRefusedIssuesNothingAndIsUsedUp`, `::aCodeThatComesBackAfterARefusedTradeIsRefusedAndIssuesNothing`, `::aCodeThatComesBackIsRefusedAndStopsTheTokensIssuedWithIt`)
+  - [x] Tokens never appear in logs (log test). (`OAuthTokenLogLeakTest::tradingRefreshingUsingAndRevokingTokensLogsNoCodeVerifierOrToken`, `OAuthConsentLogLeakTest::anAuthorizeLogsNeitherTheCodeNorTheStateNorTheChallenge`)
+  - [x] A changed or unregistered redirect URI is refused at authorize with no redirect and no code, and a token request with another `redirect_uri` gets no token. (`OAuthConsentTest::anUnknownClientOrAChangedOrUnregisteredRedirectUriGetsAnErrorPageWithNoRedirectAndNoCode`, `::anAllowPostedWithAChangedRedirectUriGetsAnErrorPageAndNoCode`; `OAuthTokenTest::aCodeTradedWithTheWrongVerifierRedirectUriOrClientIsRefusedIssuesNothingAndIsUsedUp`)
   - [ ] A token issued for Acme Foods answers not found for another organization, and its access and refresh tokens are refused once the person leaves Acme Foods.
-  - [ ] A consent posted with another organization's id gets 404, and no code is issued.
-  - [ ] An Allow POST with a missing or wrong CSRF token gets 422, and no code is issued.
-  - [ ] Consent without a recent two-step login sends the person to "Confirm it's you", and no code is issued; the database holds no usable code or token (only hashes).
+  - [x] A consent posted with another organization's id gets 404, and no code is issued. (`OAuthConsentTest::anAllowForAnOrganizationThePersonIsNotInIsNotFoundAndIssuesNoCode`)
+  - [x] An Allow POST with a missing or wrong CSRF token gets 422, and no code is issued. (`OAuthConsentTest::aPostWithoutAValidCsrfTokenShowsThePageAgainWith422AndIssuesNoCode`)
+  - [x] Consent without a recent two-step login sends the person to "Confirm it's you", and no code is issued; the database holds no usable code or token (only hashes). (`OAuthConsentTest::withoutARecentTwoStepProofThePageAndItsAllowSendToConfirmItsYouAndIssueNoCode` and `::allowIssuesOneCodeOfThePickedOrganizationAndSendsItWithTheStateToTheRedirectUriStoringOnlyItsHash`; `Integration/Identity/Infrastructure/Doctrine/DoctrineOAuthRefreshTokensTest::anAddedTokenIsSavedWithItsHashOnlyAndLivesThirtyDays`, `DoctrineApiTokensTest::theRowHoldsThePepperedHashAndNeverThePlainToken`)
 - **Depends on:** ADR-0050 accepted.
 - **Size:** L
 
@@ -400,3 +400,25 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (T7): to fit five rounds under 1,400 px at 1440x900, Round 0's picture is at most 200 px high with its title beside it, round rows are shorter, and the thread composer stays one line until focused (estimate ~1,344 px, waiting on ticket-rounds-height.spec.ts).
 - 2026-11-21: the ticket page markup runs main column, Your next step, Rounds, aside, so keyboard focus follows what people see; wide screens place them with grid areas (resolves the focus-order caveat above).
 - 2026-11-21 (T4 done): the product owner accepted ADR-0049 and ADR-0050 on 2026-11-21 and answered their open points: no audit field records a skipped two-step login (0049); consent asks for the same recent password and two-step login as token creation, clients self-register as public PKCE clients, and codes and tokens are stored only as HMAC-SHA256 hashes (0050). T20's step 1 and a new criterion carry these; ADR-0012 and ADR-0021 say they are superseded in part. T18 and T20 may start.
+- 2026-11-21 (T6–T10 proofs): the open T6–T10 boxes are ticked on the tests named in each. Playwright ran in main against the dev stack after a dev cache clear and an app and worker restart: draft-tries, ticket-rounds-height, round-page, focus-review, screenshot-editor and report-draft-editor, 31 passed. draft-tries failed once on "The page was open too long" (CSRF timeout right after the restart) and passed on a re-run. The two lines above that say draft-tries, round-page and ticket-rounds-height still have to run are closed by this.
+- 2026-11-21 (T6, Before and After): a shared draft round gets its Before at page load, from the hand-off round shared just before it (`RoundPages::previousHandOffRoundOf`, `DbalRoundQueries`); no migration, no new write. Full screen shows the same Before (After/Before switch and alt text, no caption). Proof: `DraftScreenshotRetakeTest::theNextSharedRoundComparesEachScreenshotWithTheSameNumberedLatestTryOfTheRoundBefore`, `DbalRoundQueriesPreviousHandOffRoundTest`.
+- 2026-11-21 (T6, product owner's call): Before is paired by screenshot number, not by chain. If Omar adds a new screen as Screenshot 1, it gets the earlier Screenshot 1 as its Before. A true link across rounds needs a new column.
+- 2026-11-21 (T7, product owner's call): `rvw_round_deleted_check` forces a deleted draft to stay unshared, so `deleted_at IS NULL` in `DbalRoundQueries` (about line 177) can never matter. The test now asserts the CHECK refuses such a row (23514). Keep the predicate as a guard or drop it.
+- 2026-11-21 (T16): below 600 px the header is one row with a Menu button (`main_menu_controller.js`); Tickets and Whose turn? show the heading, then a Filters button. Proof: `phone-layout.spec.ts` (green in main). Left as is: at 360 px with the Local AI chip the header wraps to two rows; with JavaScript off the phone menu and Filters cannot open; the logo word is hidden below 600 px, where the prototype shows it; on a phone the List / Whose turn? switch sits under the Filters button.
+- 2026-11-21 (T17 steps 1–2): step 1 74f61156, shots [profile](screenshots/p14-t17/step1-profile-before.png) → [after](screenshots/p14-t17/step1-profile-after.png), [profile phone](screenshots/p14-t17/step1-profile-phone-before.png) → [after](screenshots/p14-t17/step1-profile-phone-after.png), [new ticket](screenshots/p14-t17/step1-new-ticket-before.png) → [after](screenshots/p14-t17/step1-new-ticket-after.png), [new ticket phone](screenshots/p14-t17/step1-new-ticket-phone-before.png) → [after](screenshots/p14-t17/step1-new-ticket-phone-after.png), [tokens](screenshots/p14-t17/step1-tokens-before.png) → [after](screenshots/p14-t17/step1-tokens-after.png). Step 2 6685a7e8, shots [team](screenshots/p14-t17/step2-team-before.png) → [after](screenshots/p14-t17/step2-team-after.png), [team phone](screenshots/p14-t17/step2-team-phone-before.png) → [after](screenshots/p14-t17/step2-team-phone-after.png). Axe: `polish-pages.spec.ts` (new ticket, light and dark), `profile.spec.ts`, `tokens-page.spec.ts`, `team-page.spec.ts`. A new Danger button style (`.btn-danger`) is in the gallery.
+- 2026-11-21 (T17 steps 3–4): step 3 89b05928, shots [report drafts](screenshots/p14-t17/step3-report-drafts-before.png) → [after](screenshots/p14-t17/step3-report-drafts-after.png), [notebooks](screenshots/p14-t17/step3-notebooks-before.png) → [after](screenshots/p14-t17/step3-notebooks-after.png), [Report a problem](screenshots/p14-t17/step3-report-before.png) → [after](screenshots/p14-t17/step3-report-after.png), and [empty notebooks, after only](screenshots/p14-t17/step3-notebooks-empty-after.png) (Omar has a notebook, so no before). Step 4 b7a69613, shots [Admin › AI](screenshots/p14-t17/step4-admin-ai-before.png) → [after](screenshots/p14-t17/step4-admin-ai-after.png), [phone](screenshots/p14-t17/step4-admin-ai-phone-before.png) → [after](screenshots/p14-t17/step4-admin-ai-phone-after.png). Axe: `polish-pages.spec.ts` (Report a problem, empty drafts, empty notebooks), `admin-people.spec.ts` (Admin › AI, light and dark).
+- 2026-11-21 (T17 steps 5–6): step 5 4851aa92, shots [new ticket](screenshots/p14-t17/step5-new-ticket-before.png) → [after](screenshots/p14-t17/step5-new-ticket-after.png), [phone](screenshots/p14-t17/step5-new-ticket-phone-before.png) → [after](screenshots/p14-t17/step5-new-ticket-phone-after.png); axe in `polish-pages.spec.ts`. Step 6 f4e14082 (rail look changed in 5ed9392f, after shots re-shot), shots [profile](screenshots/p14-t17/step6-profile-before.png) → [after](screenshots/p14-t17/step6-profile-after.png), [profile phone](screenshots/p14-t17/step6-profile-phone-before.png) → [after](screenshots/p14-t17/step6-profile-phone-after.png), [security](screenshots/p14-t17/step6-security-before.png) → [after](screenshots/p14-t17/step6-security-after.png), [tokens](screenshots/p14-t17/step6-tokens-before.png) → [after](screenshots/p14-t17/step6-tokens-after.png); axe in `profile.spec.ts`, `security.spec.ts`, `tokens-page.spec.ts`. Product owner's call: Project and Give it to stay drop-downs on New ticket, as they span every team's projects; Cancel goes to Home, as on Report a problem.
+- 2026-11-21 (T17 steps 7–8): step 7 be38c91b, shots [team](screenshots/p14-t17/step7-team-before.png) → [after](screenshots/p14-t17/step7-team-after.png), [phone](screenshots/p14-t17/step7-team-phone-before.png) → [after](screenshots/p14-t17/step7-team-phone-after.png); axe in `team-page.spec.ts`. Step 8 8ff92ba3, shots [Home](screenshots/p14-t17/step8-home-before.png) → [after](screenshots/p14-t17/step8-home-after.png), [Home phone](screenshots/p14-t17/step8-home-phone-before.png) → [after](screenshots/p14-t17/step8-home-phone-after.png), [Tickets](screenshots/p14-t17/step8-tickets-before.png) → [after](screenshots/p14-t17/step8-tickets-after.png); axe and logo alignment in `shell.spec.ts` at 1440, 1280, 390 and 360 px.
+- 2026-11-21 (T17, product owner's call): the prototype's team heading "People N waiting on them" became "People N, X open tickets waiting on them", because the old one counted people but read like tickets (requirement wins).
+- 2026-11-21 (T18): `PINROUND_DEMO_SKIP_2FA` is read only in `RecentAuth`, and only in dev; the kernel refuses to boot with it on elsewhere; the banner is in `base.html.twig`; `.env`, [config.md](../operations/config.md) and `pinround-setup demo-mode on|off` explain it. With the switch on, a token still needs a password login under 10 minutes old (ADR-0049). Proof: `DemoModeTest`, `KernelTest`.
+- 2026-11-21 (T19): the dock lives in the overlay's one closed shadow root. Its Save draft is for a new report only; a draft round or a notebook keeps one save per capture. The `extension-dock.spec.ts` journey runs against a stand-in for pinround's API (`answerPinroundApi`); the real endpoints have their own functional tests. Proof: `extension-dock.spec.ts`, `extension-overlay.spec.ts`, all extension specs 83 passed in main.
+- 2026-11-21 (T19, product owner's call): the dock adds a background service worker to capture (`captureVisibleTab` does not work in a content script); the frame said no service worker. No new permission.
+- 2026-11-21 (T19, product owner's call): after a page reload or a cross-origin `start_url` the dock does not reopen by itself (activeTab only, no host permission). The run is kept; the tester reopens the dock from the popup. A click inside the page keeps it running.
+- 2026-11-21 (leavers): `resolve_api_token` finds a token only while its person still has an `org_membership` row in its organization (`Version20261121193200`), so a leaver's personal and OAuth tokens get `TokenAuthenticator`'s 401 and keep their rows (`ResolveApiTokenTest`, ADR-0050 note).
+- 2026-11-21 (leavers, product owner's call): a leaver now gets the generic "Send a valid personal access token" refusal; `EnterChosenOrganization`'s "You are no longer a member" message shows only when the membership ends between the two reads.
+- 2026-11-21 (T20): OAuth 2.1 in Identity: client registration (`/oauth/register`, public PKCE clients, rate-limited), discovery for `/mcp`, consent at `/oauth/authorize`, codes of 60 seconds, access tokens of 1 hour as `idn_api_token` rows, refresh rotation with reuse detection, revoke; OAuth endpoints answer the `EXTENSION_ORIGINS` origin through CORS; the consent page's `form-action` allows exactly the registered redirect origin. The extension connects on its options page; pasting a token stays under "Use a personal access token instead". Proof: the tests named in each T20 criterion.
+- 2026-11-21 (T20, owed proof): the criterion "A token issued for Acme Foods answers not found for another organization, and its access and refresh tokens are refused once the person leaves" stays open. The leaver half is proven (`OAuthTokenTest::afterThePersonLeavesTheOrganizationNeitherTheAccessNorTheRefreshTokenWorks`). Still owed: a functional test where an OAuth access token issued for Acme Foods asks `/api/v1` or `/mcp` for a Beta Bakery ticket or round and gets not found, with nothing changed. Today only the token probe shows it sees its own organization (`OAuthTokenTest::aCodeFromTheConsentPageIsTradedForAnAccessTokenThatWorksAsThePersonInThePickedOrganization`).
+- 2026-11-21 (T20, product owner's call): OAuth tokens sit in `chrome.storage.local`, as the pasted token did. The page cannot read them; the extension's own injected scripts could.
+- 2026-11-21 (T20, product owner's call): the consent page and its 422 page read organization names one transaction per organization (`OrganizationNames::namesOf`). One read would need a new cross-tenant `SECURITY DEFINER` resolver (migration and security review).
+- 2026-11-21 (T20, product owner's call): the extension shows the server's text for every refused refresh; a refusal for too many tokens is not told apart from other `invalid_grant` answers, and the extension still forgets its tokens.
+- 2026-11-21 (T20, open): pinround has no page to see or end an OAuth connection (OAuth tokens are left out of the API token lists); the guide says so. A `http://[::1]` redirect cannot finish Connect. A 429 from `/oauth/token` is untested (limit 300 per IP).
