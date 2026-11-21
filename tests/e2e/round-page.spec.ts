@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
@@ -59,7 +59,7 @@ test.describe('The round page of a shared draft', () => {
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
     // networkidle: the arrow keys need the screenshot-pager controller, which connects after the importmap modules load.
     await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
-    const strip = page.getByRole('navigation', { name: 'Screenshots' });
+    const strip = page.getByRole('navigation', { name: 'Screenshots', exact: true });
     const position = page.locator('.screenshot-pager__position');
     await expect(position).toHaveText('1 of 3');
     await expect(strip.getByRole('link')).toHaveCount(3);
@@ -84,6 +84,10 @@ test.describe('The round page of a shared draft', () => {
 // The move-on buttons (P14.T8, ADR-0048): the person whose turn it is gives the open round's verdict from its page, a
 // plain form post that lands on the ticket with the round closed. Who sees the buttons and what a refused post changes
 // is proven in tests/Functional/Review/RoundPageMoveOnButtonsTest.php.
+//
+// SHOP reviews code before testing, so In progress offers "Send to code review", not "Send to testing". A round shared
+// on the way to code review is ready for Lena, and her "Approve code" closes it (ADR-0048), so Omar shares his draft
+// only once the ticket is in Testing: the open round is then ready for Mia, whose turn it is.
 test.describe('The move-on buttons of an open round', () => {
   test('Mia presses Needs changes on Omar\'s shared round and lands on the ticket with the round closed', async ({ browser }) => {
     test.setTimeout(120_000);
@@ -92,12 +96,22 @@ test.describe('The move-on buttons of an open round', () => {
     await omar.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     await nextStepVerb(omar.page, 'Start work').click();
     await expect(omar.page.locator('#ticket-state')).toContainText('In progress');
-    // Seeded after Start work, so only the hand-off to Testing asks to share it.
+    await nextStepVerb(omar.page, 'Send to code review').click();
+    await expect(omar.page.locator(TOAST_REGION)).toContainText(/Sent to code review\. Lena.s turn now\./);
+
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await lena.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await nextStepVerb(lena.page, 'Approve code').click();
+    await expect(lena.page.locator(TOAST_REGION)).toContainText(/Code approved\. Mia.s turn to test\./);
+    await lena.context.close();
+
+    // Seeded once the ticket is in Testing, so no hand-off above asked to share it.
     seedDraftWithPicture(key);
     await omar.page.reload({ waitUntil: 'networkidle' });
-    await nextStepVerb(omar.page, 'Send to testing').click();
-    await omar.page.getByRole('dialog', { name: 'Share your draft round?' }).getByRole('button', { name: 'Share and move to Testing' }).click();
-    await expect(omar.page.locator(TOAST_REGION)).toContainText(/Sent to testing\. Mia.s turn now\./);
+    await omar.page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
+    await omar.page.locator('article.round-card--private').getByRole('button', { name: 'Share with the team now' }).click();
+    const sharedRow = omar.page.locator('turbo-frame#ticket-rounds article.round-card--row');
+    await expect(sharedRow.getByRole('heading', { name: /^Round 1 · self-check by Omar · open · 1 screenshot$/, level: 3 })).toBeVisible();
     await omar.context.close();
 
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);

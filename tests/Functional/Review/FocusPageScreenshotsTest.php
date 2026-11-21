@@ -8,6 +8,7 @@ use App\Identity\Domain\User;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\Controller\RoundController;
 use App\Review\UI\RoundPage\RoundPages;
+use App\Review\UI\RoundPage\ScreenshotPager;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
@@ -120,6 +121,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
             'Two pins wrap to each other, on the same screenshot, with no side to switch.',
         );
         self::assertCount(0, $page->filter('.focus-bar form'), 'A round without areas takes no verdict here.');
+        self::assertSame(ScreenshotPager::NAV_LABEL, $page->filter('nav.focus-review__pager')->attr('aria-label'));
         $back = $page->filter('.focus-review__pager .focus-review__back');
         self::assertSame('true', $back->attr('aria-disabled'), 'There is no screenshot before the first.');
         self::assertNull($back->attr('href'));

@@ -35,7 +35,7 @@
             {% endif %}
             {% if page.pager is not null %}
                 {% set pager = page.pager %}
-                <nav class="focus-review__pager" aria-label="Move between screenshots">
+                <nav class="focus-review__pager" aria-label="{{ constant('App\\Review\\UI\\RoundPage\\ScreenshotPager::NAV_LABEL') }}">
                     <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, focusPath|merge(pager.backParameters ?? {})|merge(returnParameters)) }}" :disabled="pager.backParameters is null" class="focus-review__back" rel="prev"><span aria-hidden="true">&lt;</span> Back</twig:Button>
                     <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, focusPath|merge(pager.nextParameters ?? {})|merge(returnParameters)) }}" :disabled="pager.nextParameters is null" class="focus-review__next" rel="next">Next <span aria-hidden="true">&gt;</span></twig:Button>
                 </nav>

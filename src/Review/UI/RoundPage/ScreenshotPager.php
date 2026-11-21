@@ -13,6 +13,12 @@ use App\Review\UI\Controller\RoundController;
 final readonly class ScreenshotPager
 {
     /**
+     * The pager nav's accessible name: it shares the round page with the strip, named "Screenshots" or "Screen areas",
+     * so it must not contain either word (WCAG 2.2 names each nav uniquely; Playwright matches names by substring).
+     */
+    public const string NAV_LABEL = 'Back and next';
+
+    /**
      * @param int                     $shownNumber    from 1
      * @param array<string, int>|null $backParameters the query of the screenshot before; null on the first
      * @param array<string, int>|null $nextParameters the query of the screenshot after; null on the last

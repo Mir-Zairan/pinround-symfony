@@ -683,7 +683,7 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach ([self::MIA_DRAFT_NOTE, 'Second pin note', 'Total doubled', self::MIA_DRAFT_SUMMARY] as $moved) {
             self::assertStringContainsString($moved, $content, 'The report draft page shows what moved.');
         }
-        $images = $page->filter('.report-draft__picture img.screenshot__image')->each(static fn (Crawler $image): string => (string) $image->attr('src'));
+        $images = $page->filter('.screenshot-editor__panel img.screenshot__image')->each(static fn (Crawler $image): string => (string) $image->attr('src'));
         self::assertCount(2, $images, 'Both pictures show, none as a placeholder.');
         self::assertStringContainsString('media/'.$firstPicture.'/view.webp', $images[0]);
         self::assertStringContainsString('media/'.$secondPicture.'/view.webp', $images[1]);

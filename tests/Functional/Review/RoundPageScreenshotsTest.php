@@ -8,6 +8,7 @@ use App\Identity\Domain\User;
 use App\Review\Api\RoundQueries;
 use App\Review\UI\Controller\RoundController;
 use App\Review\UI\RoundPage\RoundPages;
+use App\Review\UI\RoundPage\ScreenshotPager;
 use App\Tests\Functional\Identity\LogsInUsers;
 use App\Tests\Functional\Web\CreatesAcmeFoodsTeams;
 use App\Tests\Functional\Web\CreatesTeams;
@@ -105,6 +106,8 @@ final class RoundPageScreenshotsTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('1 of 3', $page->filter('.screenshot-pager__position')->text());
         self::assertSame('Screenshots', $page->filter('nav.screenshot-strip')->attr('aria-label'));
+        self::assertSame(ScreenshotPager::NAV_LABEL, $page->filter('nav.screenshot-pager')->attr('aria-label'));
+        self::assertNoNavNameContainsAnother($page);
         self::assertSame(
             ['Screenshot 1 2 pins', 'Screenshot 2 0 pins', 'Screenshot 3 1 pin'],
             self::thumbTextsOf($page),
@@ -303,6 +306,8 @@ final class RoundPageScreenshotsTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('2 of 2', $page->filter('.screenshot-pager__position')->text());
+        self::assertSame(RoundPages::AREAS_STRIP_LABEL, $page->filter('nav.screenshot-strip')->attr('aria-label'));
+        self::assertNoNavNameContainsAnother($page);
         self::assertCount(0, $page->filter('.round-compare-control, .round-compare__side--before'));
         self::assertSame(['After · round 1'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
         self::assertSame(['Checkout after'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
@@ -356,6 +361,25 @@ final class RoundPageScreenshotsTest extends WebTestCase
     {
         foreach ([self::OMARS_PRIVATE_TITLE, self::LENAS_PRIVATE_TITLE, self::EARLIER_TRY_TITLE] as $leak) {
             self::assertStringNotContainsString($leak, $content);
+        }
+    }
+
+    /**
+     * Each nav is named uniquely (WCAG 2.2), and no name holds another, which a role query matching by substring, as
+     * Playwright's does, would read as both.
+     */
+    private static function assertNoNavNameContainsAnother(Crawler $page): void
+    {
+        self::assertCount(1, $page->filter('nav.screenshot-strip'));
+        self::assertCount(1, $page->filter('nav.screenshot-pager'));
+        $names = $page->filter('nav')->each(static fn (Crawler $nav): string => mb_strtolower((string) $nav->attr('aria-label')));
+        foreach ($names as $index => $name) {
+            self::assertNotSame('', $name, 'Every nav has a name.');
+            foreach ($names as $otherIndex => $other) {
+                if ($index !== $otherIndex) {
+                    self::assertStringNotContainsString($name, $other);
+                }
+            }
         }
     }
 
