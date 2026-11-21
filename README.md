@@ -4,6 +4,25 @@
 
 AI builds in minutes what used to take days. The person who has to check it first, often the developer who asked for it, cannot test that much by hand. pinround is a web app where AI shows what it built as screenshots on a ticket. People pin and note what is wrong on them, AI reads the notes, fixes the code and adds the next try, and everyone sees Before and After. Developers check their own work before handing it over, testers add the edge cases they find as the next round, and every ticket says whose turn it is.
 
+## Index
+- [Why pinround](#why-pinround): what each ticket shows, and for whom
+- [How it works](#how-it-works): the five steps from screenshot to verdict
+- [Built with](#built-with): Symfony AI, MCP, Symfony 8.1, PostgreSQL, the extension
+- [See it in action on the demo shop](#see-it-in-action-on-the-demo-shop): setup with or without Claude Code, demo people
+- [Try the loop](#try-the-loop): report, fix, hand over and test one bug
+- [What pinround does today](#what-pinround-does-today): the features built so far
+- [Coming next](#coming-next): the next phases
+- [Good to know](#good-to-know): sample data, start and stop, guides
+- [Working on pinround](#working-on-pinround): where to start in the repo
+- [License](#license): MIT
+
+## Why pinround
+Every fix and every feature has its own ticket, and the ticket shows what was built for it.
+- **See what was built.** The screenshots of this fix or feature sit on its ticket, Before and After, with pins on what is still wrong.
+- **Know what to check.** Each round shows the reviewer and the tester which screenshots to look at, and they mark each one.
+- **See what AI did.** If you build with AI, you see its work as pictures, not only as code, so you can tell quickly whether it is what you asked for.
+- **Everyone sees the same rounds.** pinround is a ticketing app: the developer, reviewer, tester, lead and manager all see the rounds and whose turn it is.
+
 ## How it works
 1. **AI shows what it built.** While Claude Code builds or fixes, it takes screenshots and uploads them to the ticket in pinround, into your private draft round. Testers' captures from the browser extension land there too.
 2. **You pin what is wrong.** Put numbered pins on a screenshot, each with a note, and mark it **Looks right** or **Not right yet**.
@@ -96,4 +115,7 @@ Put the bugs back with `git restore demo-shop/src`.
 - **Guides:** [Claude Code](docs/guides/claude-code.md) · [Reporting with Claude Code](docs/guides/reporting-with-claude-code.md) · [Browser extension](docs/guides/browser-extension.md)
 
 ## Working on pinround
-Not open to outside contributions yet. Read [CLAUDE.md](CLAUDE.md) first. Docs start at [docs/README.md](docs/README.md), the build plan is in [docs/05-plan](docs/05-plan). `make test` runs the tests, `make qa` every quality gate. Never put real company, customer or people data here; use Acme Foods, project SHOP, Lena, Omar, Mia, Raj and Sara.
+Read [CLAUDE.md](CLAUDE.md) first. Docs start at [docs/README.md](docs/README.md), the build plan is in [docs/05-plan](docs/05-plan). `make test` runs the tests, `make qa` every quality gate. Never put real company, customer or people data here; use Acme Foods, project SHOP, Lena, Omar, Mia, Raj and Sara.
+
+## License
+pinround, the demo shop and the extension are released under the [MIT License](LICENSE). The Atkinson Hyperlegible fonts in `assets/fonts/` keep their own [SIL Open Font License](assets/fonts/OFL.txt).

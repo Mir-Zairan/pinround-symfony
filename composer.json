@@ -1,7 +1,7 @@
 {
     "name": "pinround/pinround",
     "type": "project",
-    "license": "proprietary",
+    "license": "MIT",
     "description": "pinround",
     "minimum-stability": "stable",
     "prefer-stable": true,
