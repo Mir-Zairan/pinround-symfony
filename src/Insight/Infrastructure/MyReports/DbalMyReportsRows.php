@@ -25,7 +25,7 @@ final readonly class DbalMyReportsRows implements MyReportsRows
 {
     private const string TICKET_ALIAS = 'ticket';
     /** The turn kind of an open question, which waits on the asked person (ADR-0015, turn rule 1). */
-    private const string ANSWER_KIND = 'answer';
+    public const string ANSWER_KIND = 'answer';
 
     public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {

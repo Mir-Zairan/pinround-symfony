@@ -64,7 +64,9 @@
                                 </div>
                             </div>
                         {% elseif item.isPageBuilt %}
-                            <a class="nav" href="{{ item.url }}"{% if item.isCurrent %} aria-current="page"{% endif %}>{{ item.label }}</a>
+                            <a class="nav" href="{{ item.url }}"{% if item.isCurrent %} aria-current="page"{% endif %}>{{ item.label }}
+                                {%- if item.badgeCount > 0 %} <span class="nav__badge"><span class="visually-hidden">, </span>{{ item.badgeCount|number_format }}<span class="visually-hidden"> {{ item.badgeCount == 1 ? 'needs' : 'need' }} your answer</span></span>{% endif -%}
+                            </a>
                         {% else %}
                             <span class="nav nav--not-built">{{ item.label }}<span class="visually-hidden"> (not built yet)</span></span>
                         {% endif %}

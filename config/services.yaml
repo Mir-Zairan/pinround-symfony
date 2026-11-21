@@ -234,6 +234,7 @@ services:
     App\Insight\Api\MyTicketQueries: '@App\Insight\Infrastructure\Doctrine\DbalMyTicketQueries'
     App\Insight\Application\WhoseTurnRows: '@App\Insight\Infrastructure\Doctrine\DbalWhoseTurnRows'
     App\Insight\Application\MyReports\MyReportsRows: '@App\Insight\Infrastructure\MyReports\DbalMyReportsRows'
+    App\Insight\Api\MyReportsCounts: '@App\Insight\Infrastructure\MyReports\DbalMyReportsCounts'
     # Server-side AI goes through Symfony AI (ADR-0018); the test env binds FakeProvider below.
     App\Assist\Application\AiProvider: '@App\Assist\Infrastructure\Platform\SymfonyAiProvider'
     # The one door to server-side AI; nothing else calls AiProvider.

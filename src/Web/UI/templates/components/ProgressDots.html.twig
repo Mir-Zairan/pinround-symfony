@@ -1,0 +1,10 @@
+{#- One image to assistive tech, named by its summary; the dots and labels inside are its picture. -#}
+<div{{ attributes.defaults({class: 'progress-dots', role: 'img', 'aria-label': this.summary}) }}>
+    {%- for dot in this.dots %}
+        <span class="progress-dots__stage progress-dots__stage--{{ dot.state }}{% if dot.state == 'current' and this.isWaiting %} progress-dots__stage--waiting{% endif %}">
+            <span class="progress-dots__dot"></span>
+            <span class="progress-dots__label">{{ dot.label }}</span>
+        </span>
+        {%- if dot.hasLineAfter %}<span class="progress-dots__line{% if dot.state == 'passed' %} progress-dots__line--passed{% endif %}"></span>{% endif %}
+    {%- endfor %}
+</div>

@@ -20,6 +20,7 @@ final readonly class MenuItem
         private ?string $url,
         private bool $isCurrent,
         private array $children,
+        private int $badgeCount = 0,
     ) {
     }
 
@@ -39,6 +40,30 @@ final readonly class MenuItem
     public static function group(string $label, array $children): self
     {
         return new self($label, null, [], null, array_any($children, static fn (MenuItem $child): bool => $child->isCurrent()), $children);
+    }
+
+    /**
+     * The same item with a count tag beside its label, such as My reports' questions that wait on the person.
+     *
+     * @param int $badgeCount 0 for no tag
+     *
+     * @throws \InvalidArgumentException when the count is below 0
+     */
+    public function withBadgeCount(int $badgeCount): self
+    {
+        if ($badgeCount < 0) {
+            throw new \InvalidArgumentException('A menu item\'s count tag is 0 or more.');
+        }
+
+        return new self($this->label, $this->routeName, $this->routeParameters, $this->url, $this->isCurrent, $this->children, $badgeCount);
+    }
+
+    /**
+     * @return int 0 when the item shows no count tag
+     */
+    public function badgeCount(): int
+    {
+        return $this->badgeCount;
     }
 
     public function label(): string
