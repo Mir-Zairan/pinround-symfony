@@ -15,7 +15,7 @@ use Symfony\Contracts\Service\ResetInterface;
 final class CspConnectSources implements ResetInterface
 {
     // A plain origin only: no wildcard, path, second source or "; directive" can reach the header.
-    private const string ORIGIN_PATTERN = '#^https?://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?\z#';
+    public const string ORIGIN_PATTERN = '#^https?://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?\z#';
 
     /** @var list<string> */
     private array $origins = [];

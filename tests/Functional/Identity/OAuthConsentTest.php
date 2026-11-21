@@ -402,6 +402,76 @@ final class OAuthConsentTest extends WebTestCase
     }
 
     /**
+     * Browsers check a posted form's redirect against the page's form-action, so with 'self' alone Allow and Deny would
+     * never reach the app. The consent page adds the redirect URI's origin and nothing else; a loopback keeps the port
+     * the request named, as the answer goes there.
+     */
+    #[Test]
+    public function theConsentPageLetsItsFormRedirectOnlyToTheOriginOfTheRedirectUri(): void
+    {
+        [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+        $extensionCallback = 'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/';
+        $extensionClientId = $this->registerClient($this->client, 'pinround for Chrome', [$extensionCallback]);
+        $cases = [
+            'https' => [$this->authorizePath(), 'https://claude.example'],
+            'loopback with a port' => [$this->authorizePath(['redirect_uri' => 'http://127.0.0.1:53127/callback']), 'http://127.0.0.1:53127'],
+            'the extension' => [$this->authorizePath(['client_id' => $extensionClientId, 'redirect_uri' => $extensionCallback]), 'https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org'],
+        ];
+        $this->client->request('GET', '/me/security');
+        self::assertResponseStatusCodeSame(200);
+        $otherPageDirectives = $this->cspDirectives();
+        self::assertSame("form-action 'self'", $otherPageDirectives['form-action'] ?? null);
+
+        foreach ($cases as $case => [$authorizePath, $origin]) {
+            $this->client->request('GET', $authorizePath);
+
+            self::assertResponseStatusCodeSame(200, $case);
+            $consentDirectives = $this->cspDirectives();
+            self::assertSame("form-action 'self' ".$origin, $consentDirectives['form-action'] ?? null, $case);
+            $withoutNoncesOrFormAction = ['script-src' => true, 'style-src' => true, 'form-action' => true];
+            self::assertSame(array_diff_key($otherPageDirectives, $withoutNoncesOrFormAction), array_diff_key($consentDirectives, $withoutNoncesOrFormAction), $case);
+        }
+
+        $fields = $this->consentForm($this->authorizePath(), 'Allow')->getPhpValues();
+        $this->client->request('POST', '/oauth/authorize', ['_csrf_token' => 'forged', 'organization_id' => $acmeFoods->toString()] + $fields);
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame("form-action 'self' https://claude.example", $this->cspDirectives()['form-action'] ?? null);
+        self::assertSame(0, $this->storedCodeCount());
+    }
+
+    /**
+     * The error pages have no form to send anywhere; the way back is a link, which form-action does not govern.
+     */
+    #[Test]
+    public function anErrorPageKeepsFormActionSelfAlone(): void
+    {
+        [$omar] = $this->omarAndHisOrganizations();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+
+        foreach (['an unregistered redirect URI' => ['redirect_uri' => 'https://evil.example/cb'], 'a link back' => ['code_challenge_method' => 'plain']] as $case => $change) {
+            $this->client->request('GET', $this->authorizePath($change));
+
+            self::assertResponseStatusCodeSame(400, $case);
+            self::assertSame("form-action 'self'", $this->cspDirectives()['form-action'] ?? null, $case);
+        }
+    }
+
+    /**
+     * @return array<string, string> the last response's Content-Security-Policy directives by name
+     */
+    private function cspDirectives(): array
+    {
+        $directives = [];
+        foreach (explode('; ', (string) $this->client->getResponse()->headers->get('Content-Security-Policy')) as $directive) {
+            $directives[explode(' ', $directive, 2)[0]] = $directive;
+        }
+        self::assertCount(10, $directives);
+
+        return $directives;
+    }
+
+    /**
      * @return array{User, OrganizationId, OrganizationId, OrganizationId, OrganizationId} Omar, Acme Foods, Beta
      *                                                                                     Bakery, Cedar Market and
      *                                                                                     Dune Deli

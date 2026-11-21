@@ -12,8 +12,10 @@ use App\Identity\Application\OAuthAuthorizationRefused;
 use App\Identity\Application\OAuthAuthorizationRequest;
 use App\Identity\Application\OAuthConsentOrganizationNotFound;
 use App\Identity\Application\OAuthDiscovery;
+use App\Identity\UI\OAuthRedirectOrigin;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
+use App\SharedKernel\UI\CspFormActionOrigin;
 use App\SharedKernel\UI\RequiresRecentAuth;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -61,7 +63,7 @@ final class OAuthConsentController extends AbstractController
             return $this->renderRefusal($refusal);
         }
 
-        return $this->renderConsent($authorization);
+        return $this->renderConsent($request, $authorization);
     }
 
     /**
@@ -74,7 +76,7 @@ final class OAuthConsentController extends AbstractController
         $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
         $fields = $request->request->all();
         if (!$this->isCsrfTokenValid(self::CSRF_ID, $request->request->getString('_csrf_token'))) {
-            return $this->formExpiredAnswer($fields);
+            return $this->formExpiredAnswer($request, $fields);
         }
 
         try {
@@ -93,7 +95,7 @@ final class OAuthConsentController extends AbstractController
     /**
      * @param array<array-key, mixed> $fields
      */
-    private function formExpiredAnswer(array $fields): Response
+    private function formExpiredAnswer(Request $request, array $fields): Response
     {
         try {
             $authorization = $this->authorizeOAuthClient->check($fields);
@@ -101,7 +103,7 @@ final class OAuthConsentController extends AbstractController
             return $this->renderRefusalPage(LoginController::FORM_EXPIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        return $this->renderConsent($authorization, LoginController::FORM_EXPIRED);
+        return $this->renderConsent($request, $authorization, LoginController::FORM_EXPIRED);
     }
 
     /**
@@ -131,8 +133,16 @@ final class OAuthConsentController extends AbstractController
         return $this->renderRefusalPage(self::CLIENT_REQUEST_REFUSED, Response::HTTP_BAD_REQUEST, $refusal->getMessage(), $refusal->errorRedirectUrl, $refusal->redirectHost);
     }
 
-    private function renderConsent(OAuthAuthorizationRequest $authorization, ?string $formError = null): Response
+    /**
+     * Only this page widens form-action, by the checked redirect URI's origin: browsers hold the redirect its Allow and
+     * Deny answer with to the policy of the page the form was on.
+     */
+    private function renderConsent(Request $request, OAuthAuthorizationRequest $authorization, ?string $formError = null): Response
     {
+        $redirectOrigin = OAuthRedirectOrigin::of($authorization->redirectUri);
+        if (null !== $redirectOrigin) {
+            CspFormActionOrigin::allowOn($request, $redirectOrigin);
+        }
         $currentOrganizationId = $this->tenantContext->get()?->toString();
         $organizations = $this->authorizeOAuthClient->organizationsOf($this->currentSession->userId());
         $organizationIds = array_map(static fn (MemberOrganization $organization): string => $organization->id->toString(), $organizations);

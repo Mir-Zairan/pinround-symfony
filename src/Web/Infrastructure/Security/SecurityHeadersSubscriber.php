@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Web\Infrastructure\Security;
 
 use App\SharedKernel\UI\CspConnectSources;
+use App\SharedKernel\UI\CspFormActionOrigin;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
@@ -18,7 +19,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * from it and presigned uploads are PUT to it); the origin of MERCURE_PUBLIC_URL (the hub browsers subscribe to)
  * joins connect-src. An empty value adds no source; a value that is not http(s) with a
  * plain host throws \InvalidArgumentException. The origins the rendered page put in CspConnectSources (Ollama on the
- * laptop, for an organization whose AI runs there) join connect-src last.
+ * laptop, for an organization whose AI runs there) join connect-src last. The origin the page put in
+ * CspFormActionOrigin (the OAuth consent page's app address) joins form-action of that response only.
  */
 final readonly class SecurityHeadersSubscriber
 {
@@ -50,7 +52,7 @@ final readonly class SecurityHeadersSubscriber
         }
 
         $headers = $event->getResponse()->headers;
-        $headers->set('Content-Security-Policy', $this->contentSecurityPolicy());
+        $headers->set('Content-Security-Policy', $this->contentSecurityPolicy(CspFormActionOrigin::allowedOn($event->getRequest())));
         if ('prod' === $this->kernelEnvironment) {
             $headers->set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
         }
@@ -60,7 +62,7 @@ final readonly class SecurityHeadersSubscriber
         $headers->set('Cross-Origin-Opener-Policy', 'same-origin');
     }
 
-    private function contentSecurityPolicy(): string
+    private function contentSecurityPolicy(?string $formActionOrigin): string
     {
         $nonceSource = "'nonce-".$this->cspNonce->current()."'";
 
@@ -74,7 +76,7 @@ final readonly class SecurityHeadersSubscriber
             "font-src 'self'",
             "frame-ancestors 'none'",
             "base-uri 'none'",
-            "form-action 'self'",
+            self::directive('form-action', "'self'", $formActionOrigin),
             "object-src 'none'",
         ]);
     }

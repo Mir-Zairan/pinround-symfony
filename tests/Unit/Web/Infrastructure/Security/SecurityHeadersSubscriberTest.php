@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Web\Infrastructure\Security;
 
 use App\SharedKernel\UI\CspConnectSources;
+use App\SharedKernel\UI\CspFormActionOrigin;
 use App\Tests\Fixtures\Security\ExpectedSecurityHeaders;
 use App\Web\Infrastructure\Security\CspNonce;
 use App\Web\Infrastructure\Security\SecurityHeadersSubscriber;
@@ -174,9 +175,36 @@ final class SecurityHeadersSubscriberTest extends TestCase
         );
     }
 
-    private function respond(SecurityHeadersSubscriber $subscriber, int $requestType = HttpKernelInterface::MAIN_REQUEST, Response $response = new Response()): Response
+    #[Test]
+    public function theFormActionOriginOfTheRequestJoinsOnlyFormActionOfThatResponse(): void
     {
-        $subscriber->addSecurityHeaders(new ResponseEvent(self::createStub(HttpKernelInterface::class), Request::create('/'), $requestType, $response));
+        $cspNonce = new CspNonce();
+        $subscriber = new SecurityHeadersSubscriber($cspNonce, new CspConnectSources(), self::STORAGE_URL, self::MERCURE_URL, 'dev');
+        $consentRequest = Request::create('/oauth/authorize');
+        CspFormActionOrigin::allowOn($consentRequest, 'https://claude.example');
+
+        $consentDirectives = $this->cspDirectives($this->respond($subscriber, request: $consentRequest));
+        $plainResponse = $this->respond($subscriber);
+
+        self::assertSame("form-action 'self' https://claude.example", $consentDirectives['form-action']);
+        $plainDirectives = $this->cspDirectives(new Response(headers: ExpectedSecurityHeaders::withoutStrictTransportSecurity($cspNonce->current(), self::STORAGE_URL, self::MERCURE_ORIGIN)));
+        self::assertSame(array_diff_key($plainDirectives, ['form-action' => true]), array_diff_key($consentDirectives, ['form-action' => true]));
+        self::assertCount(10, $consentDirectives);
+        self::assertSame("form-action 'self'", $this->cspDirectives($plainResponse)['form-action']);
+    }
+
+    #[Test]
+    public function anUncheckedFormActionAttributeAddsNoSource(): void
+    {
+        $request = Request::create('/oauth/authorize');
+        $request->attributes->set('_csp_form_action_origin', 'https://*.example');
+
+        self::assertSame("form-action 'self'", $this->cspDirectives($this->respond(new SecurityHeadersSubscriber(new CspNonce(), new CspConnectSources(), '', '', 'dev'), request: $request))['form-action']);
+    }
+
+    private function respond(SecurityHeadersSubscriber $subscriber, int $requestType = HttpKernelInterface::MAIN_REQUEST, Response $response = new Response(), Request $request = new Request()): Response
+    {
+        $subscriber->addSecurityHeaders(new ResponseEvent(self::createStub(HttpKernelInterface::class), $request, $requestType, $response));
 
         return $response;
     }
