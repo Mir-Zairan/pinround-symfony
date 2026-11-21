@@ -94,9 +94,32 @@ a.seg {
 }
 
 .seg[aria-pressed="true"],
-.seg[aria-current="page"] {
+.seg[aria-current="page"],
+.seg-radio:has(input:checked) {
   background: var(--secondary-container);
   color: var(--on-secondary-container);
+}
+
+/* A segment that is a labelled radio, for a form that must post without script; the radio covers the label, so a click
+   anywhere on it picks it and the radio keeps its role and keyboard behaviour. */
+.seg-radio {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.seg-radio input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.seg-radio:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .chip {

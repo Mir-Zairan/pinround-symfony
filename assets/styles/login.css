@@ -69,7 +69,8 @@
   font-weight: 400;
 }
 
-.login__input:read-only {
+/* A select is always :read-only, so the rule names the fields that can really be read-only. */
+.login__input:is(input, textarea):read-only {
   background: var(--s-c);
   color: var(--on-surface-var);
 }

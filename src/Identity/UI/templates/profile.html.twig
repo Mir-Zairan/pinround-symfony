@@ -46,12 +46,15 @@
                 </div>
                 <fieldset class="profile__themes"{% if themeError %} aria-describedby="profile-theme-error"{% endif %}>
                     <legend class="profile__legend">Theme</legend>
-                    {% for value, themeLabel in themeOptions %}
-                        <label class="profile__theme">
-                            <input type="radio" name="theme" value="{{ value }}"{% if value == profile.theme %} checked{% endif %} required>
-                            {{ themeLabel }}
-                        </label>
-                    {% endfor %}
+                    {#- The avatar menu's theme switch look, built from radios so the form still posts without script. -#}
+                    <div class="seg-group">
+                        {% for value, themeLabel in themeOptions %}
+                            <label class="seg seg-radio">
+                                <input type="radio" name="theme" value="{{ value }}"{% if value == profile.theme %} checked{% endif %} required>
+                                {{ themeLabel }}
+                            </label>
+                        {% endfor %}
+                    </div>
                     {% if themeError %}
                         <p class="profile__error" id="profile-theme-error">{{ themeError }}</p>
                     {% endif %}

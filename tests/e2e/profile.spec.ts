@@ -28,6 +28,19 @@ test('the profile page has the name, the time zone, the theme and a Save button'
   await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
 });
 
+test('the theme choice looks like the avatar menu\'s: the chosen theme is filled as the menu\'s pressed segment', async ({ page }) => {
+  await openProfilePage(page);
+  const chosenTheme = page.getByRole('group', { name: 'Theme' }).locator('label', { has: page.locator('input:checked') });
+  const pressedMenuTheme = page.locator('.avatar-menu__theme .seg[aria-pressed="true"]');
+  const looksOf = (element: Element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, height: style.height, radius: style.borderRadius };
+  };
+
+  await expect(chosenTheme).toHaveCount(1);
+  expect(await chosenTheme.evaluate(looksOf)).toEqual(await pressedMenuTheme.evaluate(looksOf));
+});
+
 for (const scheme of ['light', 'dark'] as const) {
   test(`the profile page has no serious or critical accessibility violations in ${scheme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });

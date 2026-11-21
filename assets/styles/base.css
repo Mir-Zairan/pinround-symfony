@@ -45,6 +45,11 @@ button {
   font: inherit;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--primary);
+}
+
 /* The browser's own [hidden] rule loses to any class that sets display (.btn is inline-flex), so a hidden button showed. */
 [hidden] {
   display: none !important;
