@@ -184,6 +184,65 @@ for (const scheme of ['light', 'dark'] as const) {
   });
 }
 
+async function openAiPage(page: Page): Promise<void> {
+  await page.goto('/admin/ai');
+  await expect(page.getByRole('heading', { name: 'AI', level: 1 })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`the AI page has no serious or critical accessibility violations in ${scheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openAiPage(page);
+
+    expect(await seriousViolations(page)).toEqual([]);
+  });
+}
+
+test.describe('phone viewport', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('on the AI page each switch shares a line with its label, and Save key lines up with the key field', async ({ page }) => {
+    await openAiPage(page);
+    const switchRows = page.locator('.admin-ai__row--switch');
+    await expect(switchRows).toHaveCount(3);
+
+    for (const row of await switchRows.all()) {
+      const switchBox = await row.getByRole('switch').boundingBox();
+      const labelBox = await row.locator('span').boundingBox();
+      expect(switchBox, 'the switch is laid out').not.toBeNull();
+      expect(labelBox, 'the label is laid out').not.toBeNull();
+      // Side by side: the label starts right of the switch and the two overlap in height.
+      expect(labelBox!.x).toBeGreaterThan(switchBox!.x + switchBox!.width);
+      expect(labelBox!.y).toBeLessThan(switchBox!.y + switchBox!.height);
+      expect(switchBox!.y).toBeLessThan(labelBox!.y + labelBox!.height);
+    }
+
+    const keyBox = await page.getByLabel('API key').boundingBox();
+    const saveBox = await page.getByRole('button', { name: 'Save key' }).boundingBox();
+    expect(keyBox, 'the key field is laid out').not.toBeNull();
+    expect(saveBox, 'Save key is laid out').not.toBeNull();
+    // At this width Save key goes under the field, on its left edge, before the notes.
+    expect(saveBox!.x).toBeCloseTo(keyBox!.x, 0);
+    expect(saveBox!.y).toBeGreaterThanOrEqual(keyBox!.y + keyBox!.height);
+    const statusBox = await page.locator('#admin-ai-key-status').boundingBox();
+    expect(statusBox!.y).toBeGreaterThanOrEqual(saveBox!.y + saveBox!.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  });
+});
+
+test('on a wide screen Save key sits beside the key field, centred on it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openAiPage(page);
+
+  const keyBox = await page.getByLabel('API key').boundingBox();
+  const saveBox = await page.getByRole('button', { name: 'Save key' }).boundingBox();
+  expect(keyBox, 'the key field is laid out').not.toBeNull();
+  expect(saveBox, 'Save key is laid out').not.toBeNull();
+  expect(saveBox!.x).toBeGreaterThan(keyBox!.x + keyBox!.width);
+  expect(saveBox!.y + saveBox!.height / 2).toBeCloseTo(keyBox!.y + keyBox!.height / 2, 0);
+});
+
 test.describe('narrow viewport', () => {
   test.use({ viewport: { width: 360, height: 800 } });
 

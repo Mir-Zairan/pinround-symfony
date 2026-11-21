@@ -4,7 +4,7 @@
 #}
 {% macro switch_row(setting, label, chosen) %}
     {% set is_on = chosen == 'on' %}
-    <div class="admin-ai__row">
+    <div class="admin-ai__row admin-ai__row--switch">
         <form class="admin-ai__setting-form" method="post" action="{{ path('organization_admin_ai_change') }}">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_change') }}">
             <input type="hidden" name="setting" value="{{ setting }}">

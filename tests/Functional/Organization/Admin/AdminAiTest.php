@@ -95,8 +95,12 @@ final class AdminAiTest extends WebTestCase
         self::assertSame('new-password', $keyField->attr('autocomplete'));
         self::assertNull($keyField->attr('aria-invalid'));
         self::assertSame('admin-ai-key-status', $keyField->attr('aria-describedby'));
+        self::assertSame('admin-ai-provider-key', $keyField->attr('id'));
+        self::assertSame('API key', $page->filter('main label[for="admin-ai-provider-key"]')->text());
         self::assertCount(0, $page->filter('main #admin-ai-key-error'));
         self::assertCount(0, $page->filter('main [role="alert"]'));
+        // The page names no library, wire format or plumbing an admin has no use for (P14.T17 step 4).
+        self::assertDoesNotMatchRegularExpression('/Symfony|bridge|JSON/i', $page->filter('main')->text());
         // RequiresRecentAuth asks for both a password and a code of the last 10 minutes, and turning on two-step login
         // records only a code, so the note names both and promises no time.
         self::assertContains('Before the key is saved, you may need to confirm it’s you with your password and a code.', $page->filter('main .admin-ai__note')->each(static fn (Crawler $note): string => $note->text()));

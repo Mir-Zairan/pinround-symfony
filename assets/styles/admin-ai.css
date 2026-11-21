@@ -19,6 +19,38 @@
   align-items: baseline;
 }
 
+/* The switch keeps its size and the label wraps beside it, so a phone shows them on one line. */
+.admin-ai__row--switch {
+  flex-wrap: nowrap;
+}
+
+.admin-ai__row--switch > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.admin-ai__setting-form {
+  flex: none;
+}
+
+.admin-ai__key-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-ai__key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-ai__key-input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
 .admin-ai__label {
   min-width: 160px;
   font-weight: 600;

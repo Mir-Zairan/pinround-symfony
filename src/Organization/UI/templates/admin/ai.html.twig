@@ -43,37 +43,36 @@
             {% import '@Organization/admin/_ai_setting_controls.html.twig' as ai_settings %}
             <h2 class="admin-tab__heading" id="admin-ai-provider-title">Cloud AI</h2>
             {{ ai_settings.chip_group('provider', 'Provider', {huggingface: 'Hugging Face', anthropic: 'Anthropic (Claude)', ollama: 'Ollama server'}, chosen.provider) }}
-            <form class="admin-tab__inline-form" method="post" action="{{ path('organization_admin_ai_provider_key') }}">
+            {#- The label sits above the row, so Save key lines up with the field and not with the notes under it. -#}
+            <form class="admin-ai__key-form" method="post" action="{{ path('organization_admin_ai_provider_key') }}">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_admin_ai_provider_key') }}">
-                <div class="profile__field admin-tab__field">
-                    <label class="login__field">
-                        API key
-                        {# Never filled in: the saved key is not shown again, and a refused one is typed again. #}
-                        <input class="login__input" type="password" name="provider_key" value="" maxlength="{{ providerKeyMaxLength }}" autocomplete="new-password" required
-                            {%- if providerKeyError %} aria-invalid="true" aria-describedby="admin-ai-key-error admin-ai-key-status"{% else %} aria-describedby="admin-ai-key-status"{% endif %}>
-                    </label>
-                    {% if providerKeyError %}
-                        <p class="profile__error" id="admin-ai-key-error">{{ providerKeyError }}</p>
-                    {% endif %}
-                    <p class="admin-ai__note" id="admin-ai-key-status">
-                        {%- if hasProviderKey -%}
-                            A key is saved. A new key replaces it.
-                        {%- else -%}
-                            No key saved. pinround uses its own key.
-                        {%- endif -%}
-                    </p>
+                <label class="admin-ai__label" for="admin-ai-provider-key">API key</label>
+                <div class="admin-ai__key-row">
+                    {# Never filled in: the saved key is not shown again, and a refused one is typed again. #}
+                    <input class="login__input admin-ai__key-input" id="admin-ai-provider-key" type="password" name="provider_key" value="" maxlength="{{ providerKeyMaxLength }}" autocomplete="new-password" required
+                        {%- if providerKeyError %} aria-invalid="true" aria-describedby="admin-ai-key-error admin-ai-key-status"{% else %} aria-describedby="admin-ai-key-status"{% endif %}>
+                    <twig:Button type="submit">Save key</twig:Button>
                 </div>
-                <twig:Button type="submit">Save key</twig:Button>
+                {% if providerKeyError %}
+                    <p class="profile__error" id="admin-ai-key-error">{{ providerKeyError }}</p>
+                {% endif %}
+                <p class="admin-ai__note" id="admin-ai-key-status">
+                    {%- if hasProviderKey -%}
+                        A key is saved. A new key replaces it.
+                    {%- else -%}
+                        No key saved. pinround uses its own key.
+                    {%- endif -%}
+                </p>
             </form>
             <p class="admin-ai__note">Before the key is saved, you may need to confirm it’s you with your password and a code.</p>
         </twig:Card>
 
         <twig:Card tag="section" class="admin-ai__card" aria-labelledby="admin-ai-model-title">
             <h2 class="admin-tab__heading" id="admin-ai-model-title">Model for laptops</h2>
-            <p><span class="mono">qwen3:4b</span> · about 2.5 GB · runs on the processor, no graphics card needed · good at returning the JSON pinround asks for.</p>
+            <p><span class="mono">qwen3:4b</span> · about 2.5 GB · runs on the processor, no graphics card needed · good at answering in the exact form pinround asks for.</p>
             <p class="admin-ai__note">Lighter: <span class="mono">phi4-mini</span>. Test both on your slowest laptop before you choose.</p>
         </twig:Card>
 
-        <p class="admin-ai__footnote">pinround uses Symfony AI: the Ollama bridge for laptops, and a cloud bridge (Claude or Hugging Face) for the rest.</p>
+        <p class="admin-ai__footnote">On laptops, pinround talks to Ollama. Everything else goes to the cloud AI you pick above.</p>
     </div>
 {% endblock %}
