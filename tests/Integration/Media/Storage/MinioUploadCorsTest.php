@@ -12,21 +12,29 @@ use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
- * The dev stack's MinIO lets only the app origin's browser send presigned PUTs: minio-init sets cors_allow_origin to
- * MINIO_CORS_ALLOW_ORIGIN, whose compose.yaml default is https://localhost.
+ * The dev stack's MinIO lets only the app's and the browser extension's browser send presigned PUTs: minio-init sets
+ * cors_allow_origin to MINIO_CORS_ALLOW_ORIGIN, whose compose.yaml default is those two origins.
  */
 #[Group('object-storage')]
 final class MinioUploadCorsTest extends TestCase
 {
-    private const string APP_ORIGIN = 'https://localhost';
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function allowedOrigins(): iterable
+    {
+        yield 'the app' => ['https://localhost'];
+        yield 'the browser extension' => ['chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo'];
+    }
 
     #[Test]
-    public function aPreflightFromTheAppOriginIsAllowed(): void
+    #[DataProvider('allowedOrigins')]
+    public function aPreflightFromAnAllowedOriginIsAllowed(string $origin): void
     {
-        $response = self::preflightPut(self::APP_ORIGIN);
+        $response = self::preflightPut($origin);
 
         self::assertSame(204, $response->getStatusCode());
-        self::assertSame([self::APP_ORIGIN], $response->getHeaders(false)['access-control-allow-origin'] ?? []);
+        self::assertSame([$origin], $response->getHeaders(false)['access-control-allow-origin'] ?? []);
         self::assertSame(['PUT'], $response->getHeaders(false)['access-control-allow-methods'] ?? []);
     }
 
@@ -39,6 +47,7 @@ final class MinioUploadCorsTest extends TestCase
         yield 'the app host over http' => ['http://localhost'];
         yield 'the app host on another port' => ['https://localhost:8443'];
         yield 'a look-alike host' => ['https://localhost.example.test'];
+        yield 'another browser extension' => ['chrome-extension://abcdefghijklmnopabcdefghijklmnop'];
     }
 
     #[Test]

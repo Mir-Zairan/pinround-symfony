@@ -3,6 +3,7 @@
   "name": "pinround",
   "description": "Capture the page you are on into a pinround report draft or your draft round.",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs53QCot/GIMwVnD2DBXtYfyVJgUhPbp29Y+BrXpUAlnhHiyRcpHkogn60y8ktrsWQdket/nhjxXWGdb0hFRtQgsW6Ms0dMIjP34SnQu0ZmIUum6dmcb8QaC1NR7l6WyXyFT2dVGZUQaqIAYmVfCqDfd4O0aSSzf2yY4N/eD5Tyd+ORFvgxyKX3qIzyRzEyuqrGKkiqLOWWScKFuzdBIDbLfIuJZGt9pIuqXt6kR3FpaJAts3IDQ4ICiAxy7xoeN0GUQ7SMBxaDd1oIVsxCV63hDRxVKQqe55AoUhy8DYm6XL+OXzO1JtD6hj/2MVk7PPlsPcMDQXamTH4QrG/v8lgwIDAQAB",
   "minimum_chrome_version": "120",
   "action": {
     "default_title": "Capture with pinround",

@@ -189,9 +189,10 @@ services:
         condition: service_healthy
     environment:
       <<: *minio-credentials
-      # The app origin, the only one whose browser may send presigned PUTs (ADR-0011).
-      MINIO_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN:-https://localhost}
-    # One-shot: creates the private bucket, limits CORS to the app origin and exits 0.
+      # The only origins whose browser may send presigned PUTs (ADR-0011): the app, and the browser extension, whose
+      # fixed manifest key gives it this id on every machine (extension/manifest.json, EXTENSION_ORIGINS in .env.dev).
+      MINIO_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN:-https://localhost,chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo}
+    # One-shot: creates the private bucket, limits CORS to those origins and exits 0.
     # MinIO answers PutBucketCors with NotImplemented, so the origin list is its server-wide api setting, which cannot
     # limit methods; a provider with bucket CORS must also allow PUT only.
     entrypoint: ["sh", "-c"]

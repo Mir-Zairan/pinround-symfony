@@ -45,7 +45,7 @@ interface MadeByTitle {
 const madeReportDrafts: MadeByTitle[] = [];
 const madeNotebooks: MadeByTitle[] = [];
 
-// A .env.dev.local that sets EXTENSION_ORIGINS to only a person's own extension drops the test copy's origin, and
+// A .env.dev.local that sets EXTENSION_ORIGINS to only another extension's origin drops this one's, and
 // every popup POST then fails on RestRequestGuard's 403 deep in a journey. Say so before the journey starts.
 test.beforeEach(async ({ request, baseURL }) => {
   const preflight = await request.fetch(`${String(baseURL)}/api/v1/me`, { method: 'OPTIONS', headers: { Origin: `chrome-extension://${EXTENSION_ID}` } });

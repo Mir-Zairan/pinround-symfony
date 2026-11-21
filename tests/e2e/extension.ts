@@ -1,5 +1,6 @@
 import { test as base, chromium, expect, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,18 +12,24 @@ export const TEST_PAGE_FILE =path.join(__dirname, 'fixtures', 'extension', 'test
 export const TEST_PAGE_ORIGIN = 'http://shop.acme-foods.test';
 export const TEST_PAGE_URL = `${TEST_PAGE_ORIGIN}/`;
 
-// The public half of a key pair made for these tests only; Chrome derives the extension id from it, so the id is known
-// before the browser starts. The private half was never kept: an unpacked extension does not need it.
-const TEST_MANIFEST_KEY =
-  'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0i1N24OpeG7XLZnGEzVsQi0PWZuLvKnsDnDoV31AgBv2+5Dl9j9fgwfcWSxfAAPjRXeC6EfdCQ3uvNRuBtSCdmm42voFPXfA2OHe/x3AmqLl/jjVJDRkU5zBOCmpRJ65eQWN+7GV6tgz6bBp0l2J58D3sPFCptURi1liJuEvYuKquIPl8puYMIJXJAnDjHMeGbk5css2B5DHmy+3Tyl/MDd7xDY+g8XhapR+bh5fLMcIJdG6OnyRJf6iX1LJC75/q6efoVMytmSCzniQXVtN5CN0RR2B9uDGhHSCN6XF4Nqsd59SWxiQd7EgUA5pOqDDYOi2guDA7VblPDSKqomI7wIDAQAB';
-
 /** Chrome's id for an extension with this manifest key: the first 128 bits of its SHA-256, each hex digit as a to p. */
 function extensionIdOf(manifestKey: string): string {
   const hex = createHash('sha256').update(Buffer.from(manifestKey, 'base64')).digest('hex').slice(0, 32);
   return [...hex].map((digit) => String.fromCharCode('a'.charCodeAt(0) + parseInt(digit, 16))).join('');
 }
 
-export const EXTENSION_ID = extensionIdOf(TEST_MANIFEST_KEY);
+function shippedManifestKey(): string {
+  const manifest = JSON.parse(readFileSync(path.join(SHIPPED_EXTENSION, 'manifest.json'), 'utf8')) as { key?: unknown };
+  if (typeof manifest.key !== 'string' || manifest.key === '') {
+    throw new Error('extension/manifest.json has no "key", so Chrome would give the extension an id of its path.');
+  }
+
+  return manifest.key;
+}
+
+// The test copy keeps the shipped manifest's key, so it gets the same id as a person's unpacked extension, the one
+// .env.dev allows.
+export const EXTENSION_ID = extensionIdOf(shippedManifestKey());
 
 /**
  * A copy of extension/ whose manifest also grants `hostPermissions`. The shipped manifest asks only activeTab, which
@@ -33,7 +40,7 @@ async function testCopyOfExtension(hostPermissions: string[]): Promise<string> {
   const copy = await mkdtemp(path.join(os.tmpdir(), 'pinround-extension-'));
   await cp(SHIPPED_EXTENSION, copy, { recursive: true, filter: (source) => path.basename(source) !== 'tests' });
   const manifest = JSON.parse(await readFile(path.join(SHIPPED_EXTENSION, 'manifest.json'), 'utf8')) as Record<string, unknown>;
-  await writeFile(path.join(copy, 'manifest.json'), JSON.stringify({ ...manifest, key: TEST_MANIFEST_KEY, host_permissions: hostPermissions }));
+  await writeFile(path.join(copy, 'manifest.json'), JSON.stringify({ ...manifest, host_permissions: hostPermissions }));
   return copy;
 }
 

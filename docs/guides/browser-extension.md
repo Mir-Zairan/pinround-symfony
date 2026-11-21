@@ -4,8 +4,8 @@ How to install, connect and use the Chrome extension that captures the page you 
 
 ## Index
 - [What it does](#what-it-does) — where a capture can go, and what it never does
-- [Install it](#install-it) — load the folder, find its id
-- [Let pinround accept it](#let-pinround-accept-it) — the two origin settings an admin sets once
+- [Install it](#install-it) — load the folder; its id is the same on every computer
+- [Let pinround accept it](#let-pinround-accept-it) — the two origin settings: set in the dev stack, set once elsewhere
 - [Connect it](#connect-it) — Connect on pinround's consent page, or paste a token instead
 - [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket, as a new screenshot or a retake
 - [Notebooks](#notebooks) — make one, pin a page and capture it there
@@ -29,14 +29,16 @@ How to install, connect and use the Chrome extension that captures the page you 
 The extension is not in the Chrome Web Store yet. Load it from the repository:
 1. Open `chrome://extensions` and turn on **Developer mode** (top right).
 2. Click **Load unpacked** and pick the `extension/` folder.
-3. Note the extension's **ID** on its card, for example `abcdefghijklmnopabcdefghijklmnop`. Its origin is `chrome-extension://` followed by that ID.
+3. Go on with [Connect it](#connect-it). On the dev stack (`make demo` or `make up`) there is nothing to set first.
 
-The ID stays the same as long as the folder is loaded from the same path on that computer. Chrome 120 or newer.
+The `key` in `extension/manifest.json` gives the extension the same **ID** on every computer and from any folder: `ecijiihpbchkekoddiblnidjpeaajkfo`, so its origin is `chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo`. Only the public half of that key is in the repository; an unpacked extension needs no more. Chrome 120 or newer.
 
 ## Let pinround accept it
-A browser sends the extension's origin with every request. pinround and its storage accept only the origins they are told, so an admin of the pinround server sets both once:
-- `EXTENSION_ORIGINS` for the app: the extension's origin, for example `chrome-extension://abcdefghijklmnopabcdefghijklmnop`. Several are comma-separated. Without it every call from the extension gets 403 ([config.md](../operations/config.md)).
-- The storage's CORS origins: in the dev stack, `MINIO_CORS_ALLOW_ORIGIN` in `.env.local`, as a comma-separated list with the app origin first, for example `https://localhost,chrome-extension://abcdefghijklmnopabcdefghijklmnop`; then run `docker compose up -d --force-recreate minio-init`. In production, add the origin to the bucket's CORS rule for `PUT`. Without it the picture upload fails with "The screenshot could not be stored."
+A browser sends the extension's origin with every request. pinround and its storage accept only the origins they are told. The dev stack already allows the extension's origin in both; a pinround server elsewhere, or an extension with another ID (a changed or removed `key`), needs an admin to set both once:
+- `EXTENSION_ORIGINS` for the app: the extension's origin. Several are comma-separated. `.env.dev` sets `chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo`; to add another, set both in `.env.dev.local`. Without it every call from the extension gets 403 ([config.md](../operations/config.md)).
+- The storage's CORS origins: in the dev stack, `MINIO_CORS_ALLOW_ORIGIN`, whose `compose.yaml` default is `https://localhost,chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo`. To add another, set the whole comma-separated list, app origin first, in `.env.local`, then run `docker compose up -d --force-recreate minio-init`. In production, add the origin to the bucket's CORS rule for `PUT`. Without it the picture upload fails with "The screenshot could not be stored."
+
+For another ID on the dev stack, `.claude/skills/pinround-setup/pinround-setup.sh extension <id>` sets both.
 
 ## Connect it
 Connect with pinround's own consent page, with no token to make or paste ([ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)):
@@ -153,7 +155,7 @@ It asks for no host permission and has no content scripts. It injects only its o
 
 ## Manual check
 Run by hand on the dev stack after a change to the extension:
-1. Load the extension, set `EXTENSION_ORIGINS` and `MINIO_CORS_ALLOW_ORIGIN` as above, and connect with a token that has `read`, `rounds:write` and `reports:write`.
+1. Load the extension (off the dev stack, set `EXTENSION_ORIGINS` and the storage's CORS origins as above) and connect with a token that has `read`, `rounds:write` and `reports:write`.
 2. Capture two pages as a new report for `SHOP`, press **Done**, check that pinround opens the draft with both pictures (after "Processing…"), and press **Send**: the ticket has Round 0 with both pictures.
 3. As the assignee of a ticket, capture into **My draft round on** it: the picture is in your draft round, and the tester does not see it.
 4. Capture the same page again with **Add it as** set to **Retake of screenshot 1**: the draft round shows screenshot 1 with two tries. Retake it until it has 5 tries, then once more: the popup shows "This screenshot already has 5 tries. Remove one before you add another." and the pins stay on the page.
