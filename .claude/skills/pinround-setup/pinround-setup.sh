@@ -17,6 +17,8 @@
 #                         (run it in your own terminal: it reads the key from the keyboard)
 #   ai-status             say which cloud AI keys the app has and test them, and whether Ollama here is ready for pinround
 #   demo-mode <on|off>    turn the dev-only switch that skips two-step login on or off (PINROUND_DEMO_SKIP_2FA), restart
+#   demo                  a first look in about 5 minutes: ready-made images where they fit this machine, demo mode on,
+#                         the stack, the demo people and their tickets, then the address and who to log in as
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -25,6 +27,14 @@ cd "$repo"
 ca_file="$HOME/.config/pinround/caddy-root.crt"
 container_ca=/data/caddy/pki/authorities/local/root.crt
 extension_id_pattern='^[a-p]{32}$'
+
+# Ready-made dev images, pinned by digest, for `demo` (amd64 and arm64). Building them takes 7 to 8 minutes, mostly
+# MinIO's Go build and the PHP extensions. They are pulled by digest from our own namespace and tagged with the local
+# names compose.yaml uses, so compose itself still never pulls (its pull_policy: never stays). The app image runs as
+# uid 1000, so a Linux user with another uid builds instead. Rebuild and re-pin both after a change to the Dockerfile,
+# docker/frankenphp/ or docker/minio/ (docs/guides/demo.md says how).
+ready_app_image=ghcr.io/mir-zairan/pinround-app@sha256:a313c7c0cac28c9e0dfe4db8fb1fb0b98620f1101c20302dad5e90eabfa92bed
+ready_minio_image=ghcr.io/mir-zairan/pinround-minio@sha256:8bd9df1d51b51f9041449ed062bd53a951b4aa42694d9d708bd2dac25f0f608c
 
 # The same env files, in the same order, as the Makefile's COMPOSE. Plain `docker compose` skips .env.local,
 # so it would start services on the default ports and without the local CORS setting.
@@ -457,8 +467,48 @@ cmd_demo_mode() {
     fi
 }
 
+# The ready app image runs as uid 1000. Docker Desktop on macOS maps file owners on its mounts; on Linux the clone's
+# owner must be that uid, or the app cannot write vendor/ and var/.
+ready_images_fit() {
+    [[ $(uname -s) == Darwin ]] || [[ $(id -u) == 1000 ]]
+}
+
+use_ready_images() {
+    echo 'Pulling the ready-made app and storage images (about 1 GB on the first run).'
+    docker pull -q "$ready_app_image" > /dev/null || return 1
+    docker pull -q "$ready_minio_image" > /dev/null || return 1
+    docker tag "$ready_app_image" pinround-app:dev
+    docker tag "$ready_minio_image" pinround-minio:dev
+}
+
+cmd_demo() {
+    if ! demo_password_is_set; then
+        set_env_line .env.dev.local DEMO_PASSWORD "$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
+    fi
+    # Before the first start, so no restart is needed for it (ADR-0049: dev only, every page says so).
+    set_env_line .env.dev.local PINROUND_DEMO_SKIP_2FA 1
+    if ready_images_fit && use_ready_images; then
+        ok 'ready-made images in place'
+    else
+        echo 'Building the images here instead (the first build takes 7 to 8 minutes).'
+        compose build
+    fi
+    echo 'Starting pinround.'
+    compose up -d --wait app > /dev/null || fail 'the app did not start; run: make logs'
+    make --no-print-directory db-roles migrate > /dev/null || fail 'the database setup failed; run: make db-roles migrate'
+    compose up -d --wait > /dev/null || fail 'a service did not start; run: make logs'
+    echo 'Loading the demo people and their tickets.'
+    make --no-print-directory seed > /dev/null || fail 'the demo data did not load; run: make seed'
+    echo
+    echo "Ready: open $(base_url) (your browser warns about the local certificate once: choose to continue)."
+    echo 'Log in as mia@acme-foods.example (tester), omar@acme-foods.example (developer) or lena@acme-foods.example (lead).'
+    echo 'They share one password; see it with: grep DEMO_PASSWORD .env.dev.local'
+    echo 'Demo mode is on: no two-step login. Stop with: make down.'
+}
+
 case ${1:-} in
     check) cmd_check ;;
+    demo) cmd_demo ;;
     stack) cmd_stack ;;
     trust-ca) cmd_trust_ca ;;
     extension) cmd_extension "${2:-}" ;;

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down sh logs test qa e2e e2e-update db-roles migrate migrate-test demo-shop seed check-compose
+.PHONY: help demo up down sh logs test qa e2e e2e-update db-roles migrate migrate-test demo-shop seed check-compose
 
 # .env.dev holds the dev Mercure keys; .env.local is git-ignored and overrides both (for example HTTP_PORT); later files win.
 ENV_FILES := --env-file .env --env-file .env.dev $(if $(wildcard .env.local),--env-file .env.local)
@@ -29,6 +29,9 @@ ROLES_SQL := -f /pinround/postgres/roles.sql \
 
 help: ## List the targets
 	@grep -hE '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
+
+demo: ## A first look in about 5 minutes: ready-made images, demo mode on, the demo people and tickets
+	bash .claude/skills/pinround-setup/pinround-setup.sh demo
 
 up: ## Build the image, start the stack, apply the database roles and migrate
 	$(COMPOSE) build
