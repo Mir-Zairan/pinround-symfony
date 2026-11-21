@@ -2,37 +2,57 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { CONFIRMED_HOSTS_KEY } from '../src/shared/allowed-hosts.js';
-import { ApiError, CONNECT_AGAIN, PAIR_AGAIN } from '../src/shared/api.js';
-import { CLIENT_KEY, CLIENT_NAME, ConnectRefused, DENIED, NOT_CONNECTED, NOT_OAUTH_SERVER, SCOPES, pinroundApiOf, pkceChallengeOf } from '../src/shared/oauth-connection.js';
-import { loadSettings } from '../src/shared/settings.js';
+import { ApiError, CONNECT_AGAIN, NOT_REACHED, PAIR_AGAIN } from '../src/shared/api.js';
+import {
+    CLIENT_KEY, CLIENT_NAME, ConnectRefused, DENIED, NOT_CONNECTED, NOT_OAUTH_SERVER, SCOPES, TOKEN_REFRESH_LOCK, pinroundApiOf, pkceChallengeOf, renewAccessToken, tokenRefreshLocksOf,
+} from '../src/shared/oauth-connection.js';
+import { loadSettings, saveConnection } from '../src/shared/settings.js';
 import { CONNECTED, CONNECTION_SIGNED_OUT_LOCALLY, SIGNED_OUT, connectToPinround, signOut } from '../src/options/pairing.js';
 import { FAKE_EXTENSION_ID, fakeBrowser } from './fake-browser.mjs';
+import { fakeLocks } from './fake-locks.mjs';
 
 const ORIGIN = 'https://pinround.acme-foods.example';
+const UNUSABLE_REFRESH_TOKEN = 'The refresh token is unknown, used, revoked or expired. Connect again.';
 const REDIRECT_URI = `https://${FAKE_EXTENSION_ID}.chromiumapp.org/`;
 const CONFIRMED_HOSTS = CONFIRMED_HOSTS_KEY;
 
 /**
  * pinround's OAuth server as ADR-0050 has it: one registration per POST, codes single use and bound to the redirect URI
- * and the PKCE challenge, refresh tokens rotated (the old one refused once used), revocation answering 200 always, and
- * /api/v1 refusing any token that is not a live access token with 401.
+ * and the PKCE challenge, refresh tokens rotated, a used one coming back revoking every token of its grant's family
+ * (RefreshOAuthTokens), each refused refresh answered invalid_grant with RefreshOAuthTokens::UNUSABLE_REFRESH_TOKEN,
+ * revocation answering 200 always, and /api/v1 refusing any token that is not a live access token with 401.
  */
 function fakeOAuthServer({ discovery = {} } = {}) {
     const registrations = [];
     const codes = new Map();
     const liveAccessTokens = new Set();
     const liveRefreshTokens = new Map();
+    const familyOfToken = new Map();
+    const usedRefreshTokens = new Set();
+    const refreshesAsked = [];
+    const revokedFamilies = [];
     const revoked = [];
     const apiCalls = [];
     let issued = 0;
     const json = (status, body) => ({ ok: status < 300, status, json: async () => body });
-    const issuePair = (clientId) => {
+    const issuePair = (clientId, family) => {
         issued += 1;
         const pair = { access_token: `access-${issued}-secret`, refresh_token: `refresh-${issued}-secret` };
         liveAccessTokens.add(pair.access_token);
         liveRefreshTokens.set(pair.refresh_token, clientId);
+        familyOfToken.set(pair.access_token, family);
+        familyOfToken.set(pair.refresh_token, family);
 
         return json(200, { ...pair, token_type: 'Bearer', expires_in: 3600, scope: SCOPES });
+    };
+    const revokeFamily = (family) => {
+        revokedFamilies.push(family);
+        for (const [token, tokenFamily] of familyOfToken) {
+            if (tokenFamily === family) {
+                liveAccessTokens.delete(token);
+                liveRefreshTokens.delete(token);
+            }
+        }
     };
     const server = {
         registrations,
@@ -40,6 +60,9 @@ function fakeOAuthServer({ discovery = {} } = {}) {
         apiCalls,
         liveAccessTokens,
         liveRefreshTokens,
+        /** The refresh_token of each refresh_token grant asked for, in order. */
+        refreshesAsked,
+        revokedFamilies,
         refreshAnswer: null,
         /** What the person does on the consent page: Allow, with the state echoed. */
         allow(url) {
@@ -75,18 +98,25 @@ function fakeOAuthServer({ discovery = {} } = {}) {
                     return json(400, { error: 'invalid_grant' });
                 }
 
-                return issuePair(code.clientId);
+                return issuePair(code.clientId, form.get('code'));
             }
             if ('/oauth/token' === pathname && 'refresh_token' === form.get('grant_type')) {
+                const refreshToken = form.get('refresh_token');
+                refreshesAsked.push(refreshToken);
                 if (null !== server.refreshAnswer) {
                     return json(server.refreshAnswer, { error: 'server_error' });
                 }
-                if (liveRefreshTokens.get(form.get('refresh_token')) !== form.get('client_id')) {
-                    return json(400, { error: 'invalid_grant' });
-                }
-                liveRefreshTokens.delete(form.get('refresh_token'));
+                if (liveRefreshTokens.get(refreshToken) !== form.get('client_id')) {
+                    if (usedRefreshTokens.has(refreshToken)) {
+                        revokeFamily(familyOfToken.get(refreshToken));
+                    }
 
-                return issuePair(form.get('client_id'));
+                    return json(400, { error: 'invalid_grant', error_description: UNUSABLE_REFRESH_TOKEN });
+                }
+                liveRefreshTokens.delete(refreshToken);
+                usedRefreshTokens.add(refreshToken);
+
+                return issuePair(form.get('client_id'), familyOfToken.get(refreshToken));
             }
             if ('/oauth/revoke' === pathname) {
                 revoked.push({ token: form.get('token'), hint: form.get('token_type_hint'), clientId: form.get('client_id') });
@@ -204,7 +234,7 @@ test('a second 401 after the refresh is not refreshed again', async () => {
     assert.equal((await loadSettings(browserApi.storage.local)).refreshToken, 'refresh-2-secret', 'one refresh, not two');
 });
 
-test('a refused refresh says Connect again and forgets the tokens, the confirmed hosts stay', async () => {
+test('a refused refresh shows pinround\'s reason and forgets the tokens, the confirmed hosts stay', async () => {
     const server = fakeOAuthServer();
     const browserApi = await connectedBrowser(server);
     await browserApi.storage.local.set({ [CONFIRMED_HOSTS]: ['https://shop.acme-foods.test'] });
@@ -212,10 +242,114 @@ test('a refused refresh says Connect again and forgets the tokens, the confirmed
     server.liveRefreshTokens.clear();
 
     const settings = await loadSettings(browserApi.storage.local);
-    await assert.rejects(pinroundApiOf(settings, browserApi.storage.local, server.fetchFn).call('GET', '/api/v1/me/tickets'), (error) => error instanceof ApiError && CONNECT_AGAIN === error.message && /Connect again/.test(error.message));
+    await assert.rejects(pinroundApiOf(settings, browserApi.storage.local, server.fetchFn).call('GET', '/api/v1/me/tickets'), new ApiError(UNUSABLE_REFRESH_TOKEN, 401));
     assert.equal(await loadSettings(browserApi.storage.local), null);
     assert.deepEqual((await browserApi.storage.local.get(CONFIRMED_HOSTS))[CONFIRMED_HOSTS], ['https://shop.acme-foods.test']);
     assert.deepEqual(server.apiCalls.length, 1, 'no retry without a token');
+});
+
+test('a refresh refused for the token cap shows the cap\'s reason, and one refused with no reason says Connect to pinround', async () => {
+    const capReason = 'You have 20 tokens that still work in this organization.';
+    for (const [refusal, shown] of [[{ error: 'invalid_grant', error_description: capReason }, capReason], [{ error: 'invalid_grant' }, CONNECT_AGAIN], [{ error: 'invalid_grant', error_description: '' }, CONNECT_AGAIN]]) {
+        const server = fakeOAuthServer();
+        const browserApi = await connectedBrowser(server);
+        server.liveAccessTokens.clear();
+        const fetchFn = async (url, init) => ('/oauth/token' === new URL(url).pathname ? { ok: false, status: 400, json: async () => refusal } : server.fetchFn(url, init));
+
+        await assert.rejects(pinroundApiOf(await loadSettings(browserApi.storage.local), browserApi.storage.local, fetchFn).call('GET', '/api/v1/me/tickets'), new ApiError(shown, 401));
+        assert.equal(await loadSettings(browserApi.storage.local), null);
+    }
+    assert.match(CONNECT_AGAIN, /Press Connect to pinround in the extension options\./);
+});
+
+test('a refused refresh keeps the tokens a Connect saved while it was asked', async () => {
+    const server = fakeOAuthServer();
+    const browserApi = await connectedBrowser(server);
+    const before = await loadSettings(browserApi.storage.local);
+    const reconnected = { ...before, token: 'access-9-secret', refreshToken: 'refresh-9-secret' };
+    const fetchFn = async (url, init) => {
+        if ('/oauth/token' !== new URL(url).pathname) {
+            return server.fetchFn(url, init);
+        }
+        await saveConnection(reconnected, browserApi.storage.local);
+
+        return { ok: false, status: 400, json: async () => ({ error: 'invalid_grant', error_description: UNUSABLE_REFRESH_TOKEN }) };
+    };
+
+    assert.equal(await renewAccessToken('access-1-secret', browserApi.storage.local, fetchFn, fakeLocks()), 'access-9-secret');
+    assert.deepEqual(await loadSettings(browserApi.storage.local), reconnected);
+});
+
+test('two pages renewing at once send the refresh token once, and both get the new access token', async () => {
+    const sharedLocks = fakeLocks();
+    for (const locks of [sharedLocks, tokenRefreshLocksOf({})]) {
+        const server = fakeOAuthServer();
+        const browserApi = await connectedBrowser(server);
+        const before = await loadSettings(browserApi.storage.local);
+        server.liveAccessTokens.delete('access-1-secret');
+        const popupApi = pinroundApiOf(before, browserApi.storage.local, server.fetchFn, locks);
+        const dockApi = pinroundApiOf(before, browserApi.storage.local, server.fetchFn, locks);
+
+        const answers = await Promise.all([popupApi.call('GET', '/api/v1/me/tickets'), dockApi.call('GET', '/api/v1/me/tickets')]);
+
+        assert.deepEqual(answers, [{ tickets: [] }, { tickets: [] }]);
+        assert.deepEqual(server.refreshesAsked, ['refresh-1-secret']);
+        assert.deepEqual(server.revokedFamilies, []);
+        assert.deepEqual([popupApi.token, dockApi.token], ['access-2-secret', 'access-2-secret']);
+        assert.deepEqual(await loadSettings(browserApi.storage.local), { ...before, token: 'access-2-secret', refreshToken: 'refresh-2-secret' });
+        assert.equal(server.liveRefreshTokens.has('refresh-2-secret'), true);
+    }
+    assert.deepEqual(sharedLocks.granted, [TOKEN_REFRESH_LOCK, TOKEN_REFRESH_LOCK]);
+});
+
+test('a renewal that waited for the lock and finds the tokens renewed meanwhile uses them and posts nothing', async () => {
+    const server = fakeOAuthServer();
+    const browserApi = await connectedBrowser(server);
+    const storage = browserApi.storage.local;
+    const renewedByOtherPage = { ...(await loadSettings(storage)), token: 'access-9-secret', refreshToken: 'refresh-9-secret' };
+    const locks = fakeLocks();
+    let release;
+    let markGranted;
+    const granted = new Promise((resolve) => {
+        markGranted = resolve;
+    });
+    const otherPage = locks.request(TOKEN_REFRESH_LOCK, () => {
+        markGranted();
+
+        return new Promise((resolve) => {
+            release = resolve;
+        });
+    });
+    await granted;
+
+    const renewal = renewAccessToken('access-1-secret', storage, server.fetchFn, locks);
+    await saveConnection(renewedByOtherPage, storage);
+    release();
+    await otherPage;
+
+    assert.equal(await renewal, 'access-9-secret');
+    assert.deepEqual(server.refreshesAsked, []);
+    assert.deepEqual(await loadSettings(storage), renewedByOtherPage);
+});
+
+test('a renewal pinround did not answer lets the next one have the lock', async () => {
+    for (const locks of [fakeLocks(), tokenRefreshLocksOf({})]) {
+        const server = fakeOAuthServer();
+        const browserApi = await connectedBrowser(server);
+        server.liveAccessTokens.clear();
+
+        await assert.rejects(renewAccessToken('access-1-secret', browserApi.storage.local, async () => { throw new TypeError('Failed to fetch'); }, locks), new ApiError(NOT_REACHED, 0));
+        assert.equal(await renewAccessToken('access-1-secret', browserApi.storage.local, server.fetchFn, locks), 'access-2-secret');
+    }
+});
+
+test('the renewal lock is navigator.locks, which pages and the service worker share, when the browser has it', () => {
+    const navigatorLocks = fakeLocks();
+
+    assert.equal(tokenRefreshLocksOf({ locks: navigatorLocks }), navigatorLocks);
+    assert.notEqual(tokenRefreshLocksOf({}), navigatorLocks);
+    assert.equal(tokenRefreshLocksOf(null), tokenRefreshLocksOf({}));
+    assert.equal(tokenRefreshLocksOf(), globalThis.navigator.locks);
 });
 
 test('a refresh pinround did not answer, or answered 429 or 5xx, keeps the tokens', async () => {

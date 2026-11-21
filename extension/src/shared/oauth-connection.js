@@ -2,17 +2,18 @@
 // person allows it on pinround's consent page in the browser's sign-in window (identity.launchWebAuthFlow), and the issued access token is renewed with
 // the refresh token when pinround stops accepting it. Tokens go only to pinround's own endpoints and into the
 // extension's local storage; nothing here logs.
-import { ApiError, NOT_REACHED, PinroundApi } from './api.js';
+import { ApiError, CONNECT_AGAIN, NOT_REACHED, PinroundApi } from './api.js';
 import { forgetTokens, loadSettings, pinroundOriginOf, saveConnection } from './settings.js';
 
 export const DISCOVERY_PATH = '/.well-known/oauth-authorization-server';
 export const CLIENT_KEY = 'pinroundOAuthClient';
 export const CLIENT_NAME = 'pinround browser extension';
 export const SCOPES = 'read rounds:write reports:write notebooks:write';
-export const NOT_CONNECTED = 'The extension is not connected. Try Connect again.';
+export const TOKEN_REFRESH_LOCK = 'pinround-token-refresh';
+export const NOT_CONNECTED = 'The extension is not connected. Press Connect to pinround to try again.';
 export const DENIED = 'You chose Deny, so the extension is not connected.';
-export const NOT_OAUTH_SERVER = 'This pinround does not offer Connect. Use a personal access token instead.';
-export const WRONG_ANSWER = 'pinround answered something the extension does not understand. Try Connect again.';
+export const NOT_OAUTH_SERVER = 'This pinround cannot connect this way. Use a personal access token instead.';
+export const WRONG_ANSWER = 'pinround answered something the extension does not understand. Press Connect to pinround to try again.';
 
 const ENDPOINT_FIELDS = ['authorization_endpoint', 'token_endpoint', 'registration_endpoint', 'revocation_endpoint'];
 const VERIFIER_BYTES = 32;
@@ -174,15 +175,44 @@ export async function connect(typedOrigin, browserApi, { fetchFn = defaultFetch,
     return { origin, ...issued, clientId, tokenEndpoint: endpoints.token_endpoint, revocationEndpoint: endpoints.revocation_endpoint };
 }
 
+const inContextTails = new Map();
+
+/** One holder per name at a time, in request order, within this page or worker only. */
+const IN_CONTEXT_LOCKS = {
+    request(name, callback) {
+        const held = (inContextTails.get(name) ?? Promise.resolve()).then(() => callback({ name, mode: 'exclusive' }));
+        inContextTails.set(name, held.then(() => undefined, () => undefined));
+
+        return held;
+    },
+};
+
+/**
+ * The locks a renewal waits on: navigator.locks, which the extension's pages and its service worker share, or, in a
+ * browser without it, a lock that keeps the renewals of this page or worker apart but not those of two of them.
+ *
+ * @returns {{request: (name: string, callback: () => Promise<any>) => Promise<any>}}
+ */
+export function tokenRefreshLocksOf(navigatorObject = globalThis.navigator) {
+    return navigatorObject?.locks ?? IN_CONTEXT_LOCKS;
+}
+
 /**
  * A new access token after pinround refused `refusedToken`: the one another page already renewed, or one the refresh
- * token buys, kept with its rotated refresh token. When pinround refuses the refresh token, the tokens are forgotten
- * unless another page rotated them meanwhile.
+ * token buys, kept with its rotated refresh token. Runs under the TOKEN_REFRESH_LOCK, so two pages never send the same
+ * refresh token, which pinround would take as reuse and answer by revoking the whole connection. When pinround refuses
+ * the refresh token, the tokens are forgotten unless they changed meanwhile (a Connect from the options).
  *
- * @returns {Promise<string|null>} the token to retry with, or null when the connection ended
- * @throws {ApiError} NOT_REACHED when pinround did not answer; the tokens stay
+ * @returns {Promise<string|null>} the token to retry with, or null when no Connect is kept
+ * @throws {ApiError} NOT_REACHED when pinround did not answer, or its status for a 429 or 5xx; the tokens stay
+ * @throws {ApiError} 401 with pinround's error_description, or CONNECT_AGAIN when it gave none, when it refused the
+ *   refresh token; the tokens are forgotten
  */
-export async function renewAccessToken(refusedToken, storageLocal, fetchFn = defaultFetch) {
+export function renewAccessToken(refusedToken, storageLocal, fetchFn = defaultFetch, locks = tokenRefreshLocksOf()) {
+    return locks.request(TOKEN_REFRESH_LOCK, () => renewedUnderLock(refusedToken, storageLocal, fetchFn));
+}
+
+async function renewedUnderLock(refusedToken, storageLocal, fetchFn) {
     const connection = await loadSettings(storageLocal);
     if (null === connection || undefined === connection.refreshToken) {
         return null;
@@ -196,7 +226,8 @@ export async function renewAccessToken(refusedToken, storageLocal, fetchFn = def
     } catch {
         throw new ApiError(NOT_REACHED, 0);
     }
-    const issued = response.ok ? issuedPairOf(await jsonOf(response)) : null;
+    const answer = await jsonOf(response);
+    const issued = response.ok ? issuedPairOf(answer) : null;
     if (null !== issued) {
         await saveConnection({ ...connection, ...issued }, storageLocal);
 
@@ -211,15 +242,15 @@ export async function renewAccessToken(refusedToken, storageLocal, fetchFn = def
     }
     await forgetTokens(storageLocal);
 
-    return null;
+    throw new ApiError('string' === typeof answer.error_description && '' !== answer.error_description ? answer.error_description : CONNECT_AGAIN, 401);
 }
 
 /**
  * The API client for the kept pairing: a Connect's access token is renewed once after a 401 (renewAccessToken), a
  * pasted token is not.
  */
-export function pinroundApiOf(settings, storageLocal, fetchFn = undefined) {
-    const renewToken = undefined === settings.refreshToken ? null : (refusedToken) => renewAccessToken(refusedToken, storageLocal, fetchFn);
+export function pinroundApiOf(settings, storageLocal, fetchFn = undefined, locks = undefined) {
+    const renewToken = undefined === settings.refreshToken ? null : (refusedToken) => renewAccessToken(refusedToken, storageLocal, fetchFn, locks);
 
     return new PinroundApi(settings.origin, settings.token, fetchFn, renewToken);
 }
