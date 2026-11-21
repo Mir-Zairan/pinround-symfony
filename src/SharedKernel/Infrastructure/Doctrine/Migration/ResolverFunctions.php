@@ -29,5 +29,6 @@ final class ResolverFunctions
         'organizations_with_due_notifications',
         'digest_recipients',
         'organizations_with_expiring_api_tokens',
+        'resolve_oauth_authorization_code',
     ];
 }

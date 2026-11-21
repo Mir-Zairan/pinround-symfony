@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Identity\Domain\OAuthAuthorizationCode" table="idn_oauth_authorization_code">
+        <unique-constraints>
+            <!-- For resolve_oauth_authorization_code, which runs before the tenant is known (data-model.md, the documented exception). -->
+            <unique-constraint name="idn_oauth_authorization_code_code_hash_key" columns="code_hash"/>
+        </unique-constraints>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="userId" type="guid" column="user_id"/>
+        <field name="clientId" type="text" column="client_id"/>
+        <field name="redirectUri" type="text" column="redirect_uri"/>
+        <field name="codeChallenge" type="text" column="code_challenge"/>
+        <field name="scopes" type="text_array" column="scopes"/>
+        <field name="codeHash" type="binary" column="code_hash"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+        <field name="expiresAt" type="datetimetz_immutable" column="expires_at"/>
+        <field name="usedAt" type="datetimetz_immutable" column="used_at" nullable="true"/>
+    </entity>
+</doctrine-mapping>
