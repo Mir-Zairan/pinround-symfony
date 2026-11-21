@@ -10,10 +10,8 @@ use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\User;
 use App\Identity\UI\Controller\LoginController;
 use App\Identity\UI\Controller\TokenController;
-use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Organization\LogsInAdmins;
-use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -37,6 +35,7 @@ final class OAuthConsentTest extends WebTestCase
     use LogsInUsers {
         tearDown as private removeUsersAndOrganizations;
     }
+    use RegistersOAuthClients;
     use TurnsOnTwoStepLogin;
 
     private const string NOW = '2026-11-17 09:00:00 UTC';
@@ -50,27 +49,18 @@ final class OAuthConsentTest extends WebTestCase
     private MockClock $clock;
     private string $clientId;
 
-    /** @var list<string> */
-    private array $registeredClientIds = [];
-
     protected function setUp(): void
     {
         $this->client = self::createClient([], ['HTTPS' => 'on', 'REMOTE_ADDR' => \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254))]);
         $this->client->disableReboot();
         $this->clock = new MockClock(self::NOW);
         self::getContainer()->set('clock', $this->clock);
-        $this->clientId = $this->registerClient('Claude', [self::CALLBACK, self::LOOPBACK_CALLBACK]);
+        $this->clientId = $this->registerClient($this->client, 'Claude', [self::CALLBACK, self::LOOPBACK_CALLBACK]);
     }
 
     protected function tearDown(): void
     {
-        foreach ($this->createdOrganizationIds as $organizationId) {
-            $this->readAs(new OrganizationId($organizationId), static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM idn_oauth_authorization_code'));
-        }
-        if ([] !== $this->registeredClientIds) {
-            $this->migrator()->executeStatement('DELETE FROM idn_oauth_client WHERE client_id IN (?)', [$this->registeredClientIds], [ArrayParameterType::STRING]);
-            $this->registeredClientIds = [];
-        }
+        $this->removeOAuthClientsAndCodes();
         $this->removeUsersAndOrganizations();
     }
 
@@ -108,7 +98,7 @@ final class OAuthConsentTest extends WebTestCase
         [$omar, $acmeFoods, $betaBakery] = $this->omarAndHisOrganizations();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $form = $this->consentForm($this->authorizePath(['scope' => 'read tickets:move']), 'Allow');
-        $form['organization_id']->setValue($acmeFoods->toString());
+        $form->setValues(['organization_id' => $acmeFoods->toString()]);
 
         $this->client->submit($form);
 
@@ -150,7 +140,7 @@ final class OAuthConsentTest extends WebTestCase
         [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $form = $this->consentForm($this->authorizePath(['redirect_uri' => 'http://127.0.0.1:53127/callback']), 'Allow');
-        $form['organization_id']->setValue($acmeFoods->toString());
+        $form->setValues(['organization_id' => $acmeFoods->toString()]);
 
         $this->client->submit($form);
 
@@ -196,8 +186,7 @@ final class OAuthConsentTest extends WebTestCase
         [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $form = $this->consentForm($this->authorizePath(), 'Allow');
-        $form['organization_id']->setValue($acmeFoods->toString());
-        $form['redirect_uri']->setValue('https://evil.example/cb');
+        $form->setValues(['organization_id' => $acmeFoods->toString(), 'redirect_uri' => 'https://evil.example/cb']);
 
         $page = $this->client->submit($form);
 
@@ -243,8 +232,7 @@ final class OAuthConsentTest extends WebTestCase
         [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $form = $this->consentForm($this->authorizePath(), 'Allow');
-        $form['organization_id']->setValue($acmeFoods->toString());
-        $form['code_challenge_method']->setValue('plain');
+        $form->setValues(['organization_id' => $acmeFoods->toString(), 'code_challenge_method' => 'plain']);
 
         $this->client->submit($form);
 
@@ -320,7 +308,7 @@ final class OAuthConsentTest extends WebTestCase
         [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
         $this->logInWithACode($this->client, $this->clock, $omar);
         $form = $this->consentForm($this->authorizePath(), 'Allow');
-        $form['organization_id']->setValue($acmeFoods->toString());
+        $form->setValues(['organization_id' => $acmeFoods->toString()]);
         $this->clock->sleep(RecentAuth::WINDOW_SECONDS + 1);
 
         $authorizePath = $this->authorizePath();
@@ -417,22 +405,6 @@ final class OAuthConsentTest extends WebTestCase
     }
 
     /**
-     * @param list<string> $redirectUris
-     */
-    private function registerClient(string $clientName, array $redirectUris): string
-    {
-        $this->client->request('POST', '/oauth/register', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode(['client_name' => $clientName, 'redirect_uris' => $redirectUris], \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES));
-        self::assertResponseStatusCodeSame(201);
-        $answer = json_decode((string) $this->client->getResponse()->getContent(), true, 8, \JSON_THROW_ON_ERROR);
-        self::assertIsArray($answer);
-        $clientId = $answer['client_id'] ?? null;
-        self::assertIsString($clientId);
-        $this->registeredClientIds[] = $clientId;
-
-        return $clientId;
-    }
-
-    /**
      * @return list<array<string, mixed>> the codes stored in the organization, with their hash in hex and the whole row
      *                                    as JSON text
      */
@@ -459,27 +431,6 @@ final class OAuthConsentTest extends WebTestCase
         }
 
         return $count;
-    }
-
-    /**
-     * Through the migrator, which owns the table; FORCE ROW LEVEL SECURITY binds it too, so it runs under the tenant.
-     *
-     * @template T
-     *
-     * @param \Closure(Connection): T $work
-     *
-     * @return T
-     */
-    private function readAs(OrganizationId $organizationId, \Closure $work): mixed
-    {
-        $tenantContext = self::getContainer()->get(TenantContext::class);
-        $tenantContext->reset();
-        $tenantContext->set($organizationId);
-        try {
-            return $this->migrator()->transactional($work);
-        } finally {
-            $tenantContext->reset();
-        }
     }
 
     /**
