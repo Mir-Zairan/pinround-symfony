@@ -728,6 +728,23 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
+     * P14.T7: an empty thread is one muted line, not the dashed empty box, so the page stays short above the Rounds.
+     */
+    #[Test]
+    public function aTicketWithNoMessagesShowsTheCompactEmptyThreadLine(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'todo', 'assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key.'/thread', [], [], ['HTTP_TURBO_FRAME' => Thread::FRAME_ID]);
+
+        self::assertResponseStatusCodeSame(200);
+        $messages = $page->filter('turbo-frame#'.Thread::FRAME_ID.' #'.Thread::MESSAGES_ID);
+        self::assertSame([Thread::EMPTY_THREAD], $messages->filter('p.thread__empty')->each(static fn (Crawler $line): string => $line->text()));
+        self::assertCount(0, $messages->filter('.empty-state, .thread__messages'));
+    }
+
+    /**
      * Omar reported the ticket and has it, Mia reviews it; Lena, who looks, and Raj have no part in it, so they are not
      * offered although both are members.
      */

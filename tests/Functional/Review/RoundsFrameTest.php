@@ -143,6 +143,34 @@ final class RoundsFrameTest extends WebTestCase
         self::assertStringNotContainsString('An AI guess nobody wanted', (string) $this->client->getResponse()->getContent());
     }
 
+    /**
+     * P14.T7: review.css caps Round 0's picture by the thumbnail hook, so five rounds fit one screen; the owner's draft
+     * editor keeps its pictures full width, as pins are placed on them.
+     */
+    #[Test]
+    public function roundZerosPictureAndPinListCarryTheThumbnailHookAndTheOwnersDraftPictureDoesNot(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Report shot', null);
+        $this->addPin($reportShot, 1, '12.35', '7.10', 'The total is off', 'Mia');
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 0, 'Draft shot', null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $thumbnails = $page->filter(self::ROUNDS.' article#round-'.$report.' .round-card__screenshot--thumbnail');
+        self::assertCount(1, $thumbnails);
+        self::assertSame(['Report shot'], $thumbnails->filter('figure.screenshot .screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+        self::assertSame(['The total is off'], $thumbnails->filter('.pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
+        $draftCard = $page->filter(self::ROUNDS.' article#round-'.$draft);
+        self::assertCount(1, $draftCard->filter('figure.screenshot'), 'The draft shows its picture.');
+        self::assertCount(0, $draftCard->filter('.round-card__screenshot--thumbnail'));
+        self::assertCount(1, $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail'));
+    }
+
     #[Test]
     public function aPictureStillProcessingARefusedOneAndOneMediaDoesNotKnowEachShowTheirOwnPlaceholder(): void
     {

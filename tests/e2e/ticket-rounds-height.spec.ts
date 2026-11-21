@@ -14,6 +14,8 @@ import { makeTicketForOmar, openAs } from './ticket';
 // round 4: under ADR-0048 a share waits while another shared round is open.
 
 const MAX_PAGE_HEIGHT_PX = 1400;
+/** review.css's --round-thumbnail-width. */
+const ROUND_ZERO_THUMBNAIL_PX = 480;
 const ROUNDS = 5;
 const ROWS = 3;
 const ROW_HEADLINE = /^Round \d+ · (review|self-check|findings) by Omar · (open|closed)( · \d+ screenshots?)?$/;
@@ -31,6 +33,8 @@ async function openTicketWithRoundsLoaded(page: Page): Promise<void> {
   await page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
   await expect(page.locator('turbo-frame#ticket-rounds article.round-card')).toHaveCount(ROUNDS);
   await expect(page.locator('turbo-frame#ticket-round-bar .round-bar__text')).toHaveText(/^Round \d+ is open/);
+  // The thread's frame is lazy too: measured before it loads, the page would be shorter than it is.
+  await expect(page.locator('turbo-frame#ticket-thread form.thread__composer')).toBeVisible();
   await page.waitForLoadState('networkidle');
 }
 
@@ -66,6 +70,12 @@ test('a SHOP ticket with five rounds is under 1,400 px tall at 1440x900, with th
   }
   await expect(rows.getByRole('link', { name: 'Open round' })).toHaveCount(ROWS);
   await expect(rows.locator('img')).toHaveCount(0);
+
+  // Round 0's picture is a thumbnail (review.css), and the empty thread one line, not the dashed box (P14.T7).
+  const roundZeroPicture = (await frame.locator('.round-card__screenshot--thumbnail img.screenshot__image').boundingBox())!;
+  expect(roundZeroPicture.width, "Round 0's picture width").toBeLessThanOrEqual(ROUND_ZERO_THUMBNAIL_PX);
+  await expect(page.locator('turbo-frame#ticket-thread .thread__empty')).toBeVisible();
+  await expect(page.locator('turbo-frame#ticket-thread .empty-state')).toHaveCount(0);
 
   const pageHeight = await page.evaluate(() => document.scrollingElement?.scrollHeight ?? Number.POSITIVE_INFINITY);
   expect(pageHeight, 'the ticket page height at 1440x900').toBeLessThan(MAX_PAGE_HEIGHT_PX);
