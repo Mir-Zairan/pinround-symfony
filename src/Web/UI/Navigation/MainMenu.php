@@ -9,7 +9,6 @@ use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
 use App\Organization\Api\TeamQueries;
 use App\Organization\Api\TeamSummary;
-use App\SharedKernel\Domain\TeamId;
 use App\Web\UI\Admin\AdminTabRail;
 use App\Web\UI\Controller\Admin\AdminShellController;
 use App\Web\UI\Controller\MyReportsController;
@@ -59,7 +58,8 @@ final readonly class MainMenu
      *
      * @return list<MenuItem> in this order, each when the roles allow it: Home, Tickets, My reports (once its page
      *                        exists; its count tag is the questions that wait on the person in their reports, one
-     *                        query), Team (or the "Teams" group for two or more teams), Admin
+     *                        query), Team (or the "Teams" group for two or more teams; a Manager's are every team of
+     *                        the organization, one query), Admin
      */
     #[AsTwigFunction('main_menu')]
     public function items(): array
@@ -75,15 +75,13 @@ final readonly class MainMenu
         if ([] !== $teamIds || $roles->isManager()) {
             $items[] = $this->pageItem('Tickets', self::TICKETS_ROUTE);
         }
-        if ([] !== $teamIds) {
-            if (null !== $this->urlOf(self::MY_REPORTS_ROUTE, [])) {
-                $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE)
-                    ->withBadgeCount($this->myReportsCounts->questionsWaitingOn($actor->organizationId(), $actor->userId()));
-            }
-            $teamItem = $this->teamItem($actor, $teamIds);
-            if (null !== $teamItem) {
-                $items[] = $teamItem;
-            }
+        if ([] !== $teamIds && null !== $this->urlOf(self::MY_REPORTS_ROUTE, [])) {
+            $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE)
+                ->withBadgeCount($this->myReportsCounts->questionsWaitingOn($actor->organizationId(), $actor->userId()));
+        }
+        $teamItem = $this->teamItem($actor);
+        if (null !== $teamItem) {
+            $items[] = $teamItem;
         }
         if ($roles->isAdmin()) {
             $items[] = MenuItem::page('Admin', self::ADMIN_ROUTE, [], $this->adminHomeUrl(), $this->isAdminPage());
@@ -107,26 +105,51 @@ final readonly class MainMenu
     }
 
     /**
-     * @param non-empty-list<TeamId> $teamIds
+     * The teams whose pages TeamVoter lets the person open: a Manager may open every team of the organization, anyone
+     * else only the teams they hold a role in.
      *
-     * @return MenuItem|null null when none of the teams is found, which happens only outside the request transaction,
-     *                       or when the roles carry no slug for the only team
+     * @return MenuItem|null null without a team, when none of the teams is found, which happens only outside the
+     *                       request transaction, or when the roles carry no slug for the only team
      */
-    private function teamItem(ActorContext $actor, array $teamIds): ?MenuItem
+    private function teamItem(ActorContext $actor): ?MenuItem
     {
+        $roles = $actor->roles();
+        if ($roles->isManager()) {
+            return $this->teamPagesItem($this->teamQueries->allSummariesOf($actor->organizationId()));
+        }
+
+        $teamIds = $roles->teamIds();
+        if ([] === $teamIds) {
+            return null;
+        }
         if (1 === \count($teamIds)) {
             // The slug comes with the roles, so the one-team menu runs no team query.
-            $slug = $actor->roles()->teamSlugOf($teamIds[0]);
+            $slug = $roles->teamSlugOf($teamIds[0]);
 
             return null === $slug ? null : $this->pageItem('Team', self::TEAM_ROUTE, ['slug' => $slug]);
         }
 
-        $teamPages = array_map(
-            fn (TeamSummary $team): MenuItem => $this->pageItem($team->name(), self::TEAM_ROUTE, ['slug' => $team->slug()]),
-            $this->teamQueries->summariesOf($actor->organizationId(), $teamIds),
-        );
+        return $this->teamPagesItem($this->teamQueries->summariesOf($actor->organizationId(), $teamIds));
+    }
 
-        return [] === $teamPages ? null : MenuItem::group('Teams', $teamPages);
+    /**
+     * @param list<TeamSummary> $teams
+     *
+     * @return MenuItem|null "Team" for one team, the "Teams" group for two or more, null for none
+     */
+    private function teamPagesItem(array $teams): ?MenuItem
+    {
+        if ([] === $teams) {
+            return null;
+        }
+        if (1 === \count($teams)) {
+            return $this->pageItem('Team', self::TEAM_ROUTE, ['slug' => $teams[0]->slug()]);
+        }
+
+        return MenuItem::group('Teams', array_map(
+            fn (TeamSummary $team): MenuItem => $this->pageItem($team->name(), self::TEAM_ROUTE, ['slug' => $team->slug()]),
+            $teams,
+        ));
     }
 
     /**

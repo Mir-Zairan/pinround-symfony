@@ -34,7 +34,7 @@
                 {% for team in teams %}
                     <li>
                         <twig:Card tag="article" class="home__team" aria-labelledby="home-team-{{ team.id.toString }}">
-                            <h2 class="home__team-name" id="home-team-{{ team.id.toString }}">{{ team.name }}</h2>
+                            <h2 class="home__team-name" id="home-team-{{ team.id.toString }}"><a href="{{ path(constant('App\\Web\\UI\\Navigation\\MainMenu::TEAM_ROUTE'), {slug: team.slug}) }}">{{ team.name }}</a></h2>
                             <twig:EmptyState message="Ticket counts for this team come later."/>
                         </twig:Card>
                     </li>

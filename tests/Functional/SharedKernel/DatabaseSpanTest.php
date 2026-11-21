@@ -46,12 +46,13 @@ final class DatabaseSpanTest extends WebTestCase
     }
 
     #[Test]
-    public function theManagerHomeRunsOneTeamQueryAndNoFocusQuery(): void
+    public function theManagerHomeRunsNoQueryPerTeamAndNoFocusQuery(): void
     {
         // As the work Home before its focus query (login, organizations, BEGIN, the roles reads), then
-        // every team in one query (allSummariesOf), then the header's Local AI chip's AI settings (LocalAiChip).
+        // every team in one query (allSummariesOf) for the cards and one more for the menu's Teams list (MainMenu), then
+        // the header's Local AI chip's AI settings (LocalAiChip).
         self::assertSame(
-            ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
+            ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
             $this->spanNamesOfHomeFor('{manager}'),
         );
     }
