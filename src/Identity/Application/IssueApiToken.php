@@ -42,13 +42,39 @@ final readonly class IssueApiToken
      */
     public function __invoke(OrganizationId $organizationId, UserId $userId, string $name, array $scopes, int $lifetimeDays, \DateTimeImmutable $now): IssuedApiToken
     {
-        $issued = ApiToken::issue($this->tokens->nextIdentity(), $organizationId, $userId, $name, $scopes, $this->hashing, $now, $lifetimeDays);
+        return $this->saved(ApiToken::issue($this->tokens->nextIdentity(), $organizationId, $userId, $name, $scopes, $this->hashing, $now, $lifetimeDays), $now);
+    }
 
+    /**
+     * The access token of an OAuth grant (ADR-0050), named after the client, lasting
+     * ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS; it counts towards MAX_LIVE_TOKENS_PER_USER as any other token.
+     *
+     * @param string              $clientName the client's name, or a stand-in for a client without one
+     * @param list<ApiTokenScope> $scopes     the grant's
+     *
+     * @return IssuedApiToken the token, saved, and its plain text, to hand to the client once
+     *
+     * @throws InvalidApiToken  when ApiToken::issueForOAuthClient() refuses the name or scopes; nothing is added
+     * @throws TooManyApiTokens as __invoke(); nothing is added
+     * @throws \LogicException  as __invoke()
+     */
+    public function issueForOAuthClient(OrganizationId $organizationId, UserId $userId, string $clientName, array $scopes, \DateTimeImmutable $now): IssuedApiToken
+    {
+        return $this->saved(ApiToken::issueForOAuthClient($this->tokens->nextIdentity(), $organizationId, $userId, $clientName, $scopes, $this->hashing, $now), $now);
+    }
+
+    /**
+     * Adds the token under the cap and publishes ApiTokenIssued.
+     */
+    private function saved(IssuedApiToken $issued, \DateTimeImmutable $now): IssuedApiToken
+    {
+        $token = $issued->token();
+        $organizationId = $token->organizationId();
+        $userId = $token->userId();
         $this->tokens->lockIssuingFor($organizationId, $userId);
         if ($this->tokens->countLiveOf($userId, $now) >= self::MAX_LIVE_TOKENS_PER_USER) {
             throw new TooManyApiTokens(self::MAX_LIVE_TOKENS_PER_USER);
         }
-        $token = $issued->token();
         $this->tokens->add($token);
         $this->events->publish(new ApiTokenIssued(
             $organizationId->toString(),

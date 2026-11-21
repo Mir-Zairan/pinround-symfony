@@ -22,6 +22,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * DoctrineOAuthAuthorizationCodes on the real idn_oauth_authorization_code table as pinround_app. The codes are
@@ -119,6 +120,42 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
 
         $this->tenantContext()->reset();
         self::assertSame('2027-03-15 10:00:59', $this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
+    }
+
+    /**
+     * Two app processes trade the same code at once: the test holds the row's lock until both of their UPDATEs wait
+     * on it, then lets go, so they race for real. PostgreSQL checks used_at again after the wait, so only one marks it.
+     */
+    #[Test]
+    public function ofTwoConsumesAtOnceOnTwoConnectionsExactlyOneGetsTheCode(): void
+    {
+        $code = $this->issue(self::ACME_FOODS);
+        $this->codes()->add($code);
+        $consumes = [];
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $this->migrator()->beginTransaction();
+        try {
+            self::assertSame([$code->id()], $this->migrator()->fetchFirstColumn('SELECT id FROM idn_oauth_authorization_code WHERE organization_id = ? AND id = ? FOR UPDATE', [self::ACME_FOODS, $code->id()]));
+            foreach (['first', 'second'] as $process) {
+                $consume = new Process([\PHP_BINARY, \dirname(__DIR__, 2).'/consume-oauth-code.php', self::ACME_FOODS, bin2hex($code->codeHash()), $this->at('+5 seconds')->format(\DATE_ATOM)]);
+                $consume->start();
+                $consumes[$process] = $consume;
+            }
+            $this->waitUntilBothWaitOnTheLock($consumes);
+        } finally {
+            $this->migrator()->rollBack();
+            $this->tenantContext()->reset();
+        }
+
+        $outcomes = [];
+        foreach ($consumes as $consume) {
+            $consume->wait();
+            self::assertTrue($consume->isSuccessful(), $consume->getErrorOutput());
+            $outcomes[] = $consume->getOutput();
+        }
+        sort($outcomes);
+        self::assertSame(['lost', 'won'], $outcomes);
+        self::assertSame('2027-03-15 10:00:05', $this->rowOf(self::ACME_FOODS, $code->id())['used_at']);
     }
 
     #[Test]
@@ -308,6 +345,29 @@ final class DoctrineOAuthAuthorizationCodesTest extends KernelTestCase
             new HmacApiTokenHashing(self::PEPPER),
             new \DateTimeImmutable($issuedAt),
         )->code();
+    }
+
+    /**
+     * Polls pg_locks, which every role may read, on the app's connection outside the held transaction. Fails when a
+     * process ends first, such as on a boot error, or when both are not waiting within 30 seconds.
+     *
+     * @param array<string, Process> $consumes
+     */
+    private function waitUntilBothWaitOnTheLock(array $consumes): void
+    {
+        $deadline = microtime(true) + 30;
+        do {
+            foreach ($consumes as $name => $consume) {
+                self::assertTrue($consume->isRunning(), 'the '.$name.' consume ended before it waited: '.$consume->getOutput().$consume->getErrorOutput());
+            }
+            $waitingProcesses = $this->connection()->fetchOne('SELECT count(DISTINCT pid) FROM pg_locks WHERE NOT granted');
+            if (2 === $waitingProcesses) {
+                return;
+            }
+            usleep(20_000);
+        } while (microtime(true) < $deadline);
+
+        self::fail('The two consumes did not both wait on the held row within 30 seconds.');
     }
 
     private function at(string $afterIssue): \DateTimeImmutable

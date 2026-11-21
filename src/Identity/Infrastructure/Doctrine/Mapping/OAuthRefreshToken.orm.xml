@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="App\Identity\Domain\OAuthRefreshToken" table="idn_oauth_refresh_token">
+        <indexes>
+            <index name="idn_oauth_refresh_token_family_id_idx" columns="organization_id,family_id"/>
+            <index name="idn_oauth_refresh_token_access_token_id_idx" columns="organization_id,access_token_id"/>
+        </indexes>
+        <unique-constraints>
+            <!-- For resolve_oauth_refresh_token, which runs before the tenant is known (data-model.md, the documented exception). -->
+            <unique-constraint name="idn_oauth_refresh_token_token_hash_key" columns="token_hash"/>
+        </unique-constraints>
+
+        <id name="organizationId" type="guid" column="organization_id" position="0"/>
+        <id name="id" type="guid" column="id" position="1"/>
+
+        <field name="familyId" type="guid" column="family_id"/>
+        <field name="userId" type="guid" column="user_id"/>
+        <field name="clientId" type="text" column="client_id"/>
+        <field name="scopes" type="text_array" column="scopes"/>
+        <field name="tokenHash" type="binary" column="token_hash"/>
+        <field name="accessTokenId" type="guid" column="access_token_id"/>
+        <field name="createdAt" type="datetimetz_immutable" column="created_at"/>
+        <field name="expiresAt" type="datetimetz_immutable" column="expires_at"/>
+        <field name="usedAt" type="datetimetz_immutable" column="used_at" nullable="true"/>
+        <field name="revokedAt" type="datetimetz_immutable" column="revoked_at" nullable="true"/>
+    </entity>
+</doctrine-mapping>

@@ -17,8 +17,12 @@ use App\SharedKernel\Domain\UserId;
 final class ApiToken implements TenantOwned
 {
     public const string PLAIN_PREFIX = 'pr_';
+    /** What issue() hands out: the prefix and 32 random bytes in base64url. */
+    public const string PLAIN_SHAPE = '/\A'.self::PLAIN_PREFIX.'[A-Za-z0-9_-]{43}\z/';
     public const int DEFAULT_LIFETIME_DAYS = 90;
     public const int MAX_LIFETIME_DAYS = 365;
+    /** An OAuth access token lasts an hour (ADR-0050); the token response's expires_in. */
+    public const int OAUTH_ACCESS_LIFETIME_SECONDS = 3600;
     public const int NAME_MAX_LENGTH = 100;
     public const int DISPLAY_PREFIX_LENGTH = 8;
     /**
@@ -44,13 +48,13 @@ final class ApiToken implements TenantOwned
     /**
      * @param list<string> $scopes
      */
-    private function __construct(private readonly string $id, OrganizationId $organizationId, UserId $userId, private readonly string $name, string $tokenHash, private readonly string $prefix, private readonly array $scopes, private readonly \DateTimeImmutable $createdAt, int $lifetimeDays)
+    private function __construct(private readonly string $id, OrganizationId $organizationId, UserId $userId, private readonly string $name, string $tokenHash, private readonly string $prefix, private readonly array $scopes, private readonly \DateTimeImmutable $createdAt, \DateInterval $lifetime)
     {
         $this->organizationId = $organizationId->toString();
         $this->userId = $userId->toString();
         $this->tokenHash = $tokenHash;
         // In UTC, so a daylight saving change cannot make a day 25 hours and the cap check in the table refuse it.
-        $this->expiresAt = $createdAt->setTimezone(new \DateTimeZone('UTC'))->add(new \DateInterval('P'.$lifetimeDays.'D'));
+        $this->expiresAt = $createdAt->setTimezone(new \DateTimeZone('UTC'))->add($lifetime);
     }
 
     /**
@@ -68,6 +72,32 @@ final class ApiToken implements TenantOwned
      */
     public static function issue(string $id, OrganizationId $organizationId, UserId $userId, string $name, array $scopes, ApiTokenHashing $hashing, \DateTimeImmutable $issuedAt, int $lifetimeDays = self::DEFAULT_LIFETIME_DAYS): IssuedApiToken
     {
+        if ($lifetimeDays < 1 || $lifetimeDays > self::MAX_LIFETIME_DAYS) {
+            throw new InvalidApiToken(\sprintf('A token lasts from 1 to %d days.', self::MAX_LIFETIME_DAYS));
+        }
+
+        return self::issueLasting($id, $organizationId, $userId, $name, $scopes, $hashing, $issuedAt, new \DateInterval('P'.$lifetimeDays.'D'));
+    }
+
+    /**
+     * The access token of an OAuth grant (ADR-0050): a token like any other, valid for OAUTH_ACCESS_LIFETIME_SECONDS
+     * from $issuedAt, so the same token check, scopes and voters apply to it.
+     *
+     * @param string              $name   the client's name, by the rule of issue()
+     * @param list<ApiTokenScope> $scopes the grant's, at least one
+     *
+     * @throws InvalidApiToken as issue(), for the name or scopes
+     */
+    public static function issueForOAuthClient(string $id, OrganizationId $organizationId, UserId $userId, string $name, array $scopes, ApiTokenHashing $hashing, \DateTimeImmutable $issuedAt): IssuedApiToken
+    {
+        return self::issueLasting($id, $organizationId, $userId, $name, $scopes, $hashing, $issuedAt, new \DateInterval('PT'.self::OAUTH_ACCESS_LIFETIME_SECONDS.'S'));
+    }
+
+    /**
+     * @param list<ApiTokenScope> $scopes
+     */
+    private static function issueLasting(string $id, OrganizationId $organizationId, UserId $userId, string $name, array $scopes, ApiTokenHashing $hashing, \DateTimeImmutable $issuedAt, \DateInterval $lifetime): IssuedApiToken
+    {
         $trimmedName = OneLineText::trimmed($name);
         if (null === $trimmedName) {
             throw new InvalidApiToken('A token name is one line of plain text.');
@@ -84,10 +114,6 @@ final class ApiToken implements TenantOwned
         if ([] === $scopes) {
             throw new InvalidApiToken('Choose at least one thing the token may do.');
         }
-        if ($lifetimeDays < 1 || $lifetimeDays > self::MAX_LIFETIME_DAYS) {
-            throw new InvalidApiToken(\sprintf('A token lasts from 1 to %d days.', self::MAX_LIFETIME_DAYS));
-        }
-
         $randomPart = rtrim(strtr(base64_encode(random_bytes(self::RANDOM_BYTES)), '+/', '-_'), '=');
         $plainToken = self::PLAIN_PREFIX.$randomPart;
         // In the order of the cases, so the same choice is always stored the same way.
@@ -104,7 +130,7 @@ final class ApiToken implements TenantOwned
             self::PLAIN_PREFIX.substr($randomPart, 0, self::DISPLAY_PREFIX_LENGTH),
             $scopeValues,
             $issuedAt,
-            $lifetimeDays,
+            $lifetime,
         );
 
         return new IssuedApiToken($token, $plainToken);

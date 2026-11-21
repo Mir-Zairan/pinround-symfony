@@ -1,0 +1,138 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Identity\Infrastructure\Doctrine;
+
+use App\Identity\Domain\OAuthRefreshToken;
+use App\Identity\Domain\OAuthRefreshTokens;
+use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
+use Doctrine\DBAL\ParameterType;
+use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Uid\Uuid;
+
+/**
+ * OAuthRefreshTokens on idn_oauth_refresh_token (Version20261121230000), a tenant table: marked used and revoked in one
+ * conditional SQL statement each, naming the tenant's organization_id as well as row-level security does.
+ */
+final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
+{
+    // PostgreSQL checks the WHERE clause again after waiting on another call's row lock, so only one call marks it.
+    private const string MARK_USED = 'UPDATE idn_oauth_refresh_token SET used_at = ?'
+        .' WHERE organization_id = ? AND token_hash = ? AND client_id = ? AND used_at IS NULL AND revoked_at IS NULL'
+        .' AND expires_at > ? RETURNING id::text';
+
+    private const string ID_BY_HASH = 'SELECT id::text FROM idn_oauth_refresh_token WHERE organization_id = ? AND token_hash = ?';
+
+    private const string REVOKE_FAMILY = 'UPDATE idn_oauth_refresh_token SET revoked_at = ?'
+        .' WHERE organization_id = ? AND family_id = ? AND revoked_at IS NULL RETURNING access_token_id::text, used_at IS NULL AS untraded';
+
+    private const string RESOLVE = 'SELECT organization_id FROM resolve_oauth_refresh_token(?)';
+
+    // The columns keep whole seconds, and PostgreSQL rounds a fraction; cutting it here keeps "now" from moving ahead.
+    private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:sP';
+
+    public function __construct(private EntityManagerInterface $entityManager, private TenantContext $tenantContext)
+    {
+    }
+
+    public function nextIdentity(): string
+    {
+        return Uuid::v7()->toRfc4122();
+    }
+
+    public function add(OAuthRefreshToken $token): void
+    {
+        if (!$this->tenantContext->require()->equals($token->organizationId())) {
+            throw new \LogicException('A refresh token is saved under its own organization as tenant.');
+        }
+        $this->entityManager->persist($token);
+        $this->entityManager->flush();
+    }
+
+    public function markUsed(#[\SensitiveParameter] string $tokenHash, string $clientId, \DateTimeImmutable $at): ?OAuthRefreshToken
+    {
+        $organizationId = $this->tenantContext->require()->toString();
+        $usedAt = $at->format(self::TIMESTAMP_FORMAT);
+        $markedIds = $this->entityManager->getConnection()->fetchFirstColumn(
+            self::MARK_USED,
+            [$usedAt, $organizationId, $tokenHash, $clientId, $usedAt],
+            [2 => ParameterType::BINARY],
+        );
+        // token_hash is unique, so more than one row cannot be marked; anything but one is a refusal.
+        if (1 !== \count($markedIds) || !\is_string($markedIds[0])) {
+            return null;
+        }
+
+        return $this->freshById($organizationId, $markedIds[0]);
+    }
+
+    public function byHash(#[\SensitiveParameter] string $tokenHash): ?OAuthRefreshToken
+    {
+        $organizationId = $this->tenantContext->require()->toString();
+        $id = $this->entityManager->getConnection()->fetchOne(self::ID_BY_HASH, [$organizationId, $tokenHash], [1 => ParameterType::BINARY]);
+        if (!\is_string($id)) {
+            return null;
+        }
+
+        return $this->entityManager->find(OAuthRefreshToken::class, ['organizationId' => $organizationId, 'id' => $id]);
+    }
+
+    public function byAccessTokenId(string $accessTokenId): ?OAuthRefreshToken
+    {
+        $organizationId = $this->tenantContext->require()->toString();
+        if (!Uuid::isValid($accessTokenId)) {
+            return null;
+        }
+
+        return $this->entityManager->getRepository(OAuthRefreshToken::class)->findOneBy(['organizationId' => $organizationId, 'accessTokenId' => strtolower($accessTokenId)]);
+    }
+
+    public function revokeFamily(string $familyId, \DateTimeImmutable $revokedAt): array
+    {
+        $revoked = $this->entityManager->getConnection()->fetchAllAssociative(self::REVOKE_FAMILY, [
+            $revokedAt->format(self::TIMESTAMP_FORMAT),
+            $this->tenantContext->require()->toString(),
+            $familyId,
+        ]);
+        $accessTokenIds = [];
+        foreach ($revoked as $row) {
+            if (true === $row['untraded'] && \is_string($row['access_token_id'])) {
+                $accessTokenIds[] = $row['access_token_id'];
+            }
+        }
+
+        return $accessTokenIds;
+    }
+
+    public function organizationOfToken(#[\SensitiveParameter] string $tokenHash): ?OrganizationId
+    {
+        $organizationId = $this->entityManager->getConnection()->fetchOne(self::RESOLVE, [$tokenHash], [ParameterType::BINARY]);
+        if (false === $organizationId) {
+            return null;
+        }
+        if (!\is_string($organizationId)) {
+            throw new \UnexpectedValueException('resolve_oauth_refresh_token gave a row without its organization.');
+        }
+
+        return new OrganizationId($organizationId);
+    }
+
+    /**
+     * Read again from the database even when the entity manager holds it, so used_at is the one just written. A loaded
+     * copy is detached rather than refreshed, as Doctrine refuses to refresh the readonly createdAt.
+     */
+    private function freshById(string $organizationId, string $id): ?OAuthRefreshToken
+    {
+        $loaded = $this->entityManager->getUnitOfWork()->tryGetById(['organizationId' => $organizationId, 'id' => $id], OAuthRefreshToken::class);
+        if ($loaded instanceof OAuthRefreshToken) {
+            $this->entityManager->detach($loaded);
+        }
+        $token = $this->entityManager->createQuery('SELECT t FROM '.OAuthRefreshToken::class.' t WHERE t.organizationId = :organizationId AND t.id = :id')
+            ->setParameters(['organizationId' => $organizationId, 'id' => $id])
+            ->getOneOrNullResult();
+
+        return $token instanceof OAuthRefreshToken ? $token : null;
+    }
+}
