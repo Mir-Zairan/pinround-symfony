@@ -114,14 +114,14 @@ final class FindingsRoundChecklistTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
         $page = $this->roundsFrame();
         self::assertSame(
-            ['Round 0 · Report · by Mia · 1 pin', 'Round 1 · Checklist from the report', 'Round 2 · findings by Mia', 'Checklist'],
+            ['Round 0 · Report · by Mia · 1 pin', 'Round 1 · Checklist from the report', 'Round 2 · findings by Mia · open · 1 screenshot', 'Checklist'],
             $page->filter('turbo-frame#ticket-rounds .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
         $card = $page->filter('article#round-'.$this->miasDraftId);
         self::assertSame('round-'.$this->miasDraftId.'-heading', $card->attr('aria-labelledby'));
-        self::assertSame('Round 2 · findings by Mia', $card->filter('h3#round-'.$this->miasDraftId.'-heading')->text());
-        self::assertSame('What Mia found while checking the ticket.', $card->filter('.round-card__description')->first()->text());
-        self::assertCount(1, $card->filter('figure.screenshot'), 'The findings keep their picture above the items.');
+        self::assertSame('Round 2 · findings by Mia · open · 1 screenshot', $card->filter('h3#round-'.$this->miasDraftId.'-heading')->text());
+        self::assertSame(['/t/SHOP-1/rounds/2'], $card->filter('a.round-card__open')->each(static fn (Crawler $link): string => (string) $link->attr('href')));
+        self::assertCount(0, $card->filter('figure.screenshot'), 'The findings round is a row: its picture is on its own page, its items stay here.');
         $checklist = $card->filter('div#checklist-'.$this->miasDraftId.'.checklist');
         self::assertCount(1, $checklist);
         self::assertSame('0 of 2 checked OK', $checklist->filter('.round-card__status')->text());

@@ -25,11 +25,12 @@ use App\Ticketing\Api\TicketVisibility;
 /**
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
  * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
- * number of rounds. Only the report and drafts show their pictures, at most MAX_PICTURES_PER_CARD each; a review round
- * is a row that opens its own page. The checklist round shows its rows, and a findings round its check items under its
- * pictures, through ChecklistCards, read only when the ticket has a checklist round or a shared draft. The viewer's own
- * unshared draft is the exception: its card shows every picture (the domain caps them), so its editor can reach each
- * one, as one screenshot per chain of tries with its earlier tries (ADR-0048). forDraft builds that one card alone.
+ * number of rounds. On the ticket only the report and the viewer's own unshared draft are cards with pictures, the
+ * report's at most MAX_PICTURES_PER_CARD. The checklist round is a card of its rows. Every review round and shared draft
+ * is a one-line row that opens its own page and signs no picture; a findings round keeps its check items under its row
+ * (ChecklistCards, read only when the ticket has a checklist round or a shared draft). The unshared draft's card shows
+ * every picture (the domain caps them), so its editor can reach each one, as one screenshot per chain of tries with its
+ * earlier tries (ADR-0048). forDraft builds one draft's card alone, shared or not, with its pictures.
  */
 final readonly class RoundCards
 {
@@ -51,6 +52,7 @@ final readonly class RoundCards
 
     private const string REPORT = 'report';
     private const string CHECKLIST = 'checklist';
+    private const string REVIEW = 'review';
     private const string DISMISSED = 'dismissed';
     private const string LOOKS_RIGHT = 'looks_right';
     private const string AI = 'ai';
@@ -65,6 +67,11 @@ final readonly class RoundCards
     /** A shared draft of anyone else (ADR-0044): a tester's or reviewer's new findings, each pin a check item. */
     private const string FINDINGS_HEADLINE = 'Round %d · findings by %s';
     private const string FINDINGS_DESCRIPTION = 'What %s found while checking the ticket.';
+
+    /** The rows of later rounds: number, owner's name, open or closed, and for a shared draft its screenshot count. */
+    private const string REVIEW_ROW = 'Round %d · review by %s · %s';
+    private const string SELF_CHECK_ROW = 'Round %d · self-check by %s · %s · %s';
+    private const string FINDINGS_ROW = 'Round %d · findings by %s · %s · %s';
 
     public function __construct(
         private RoundsVisibleTo $roundsVisibleTo,
@@ -89,11 +96,17 @@ final readonly class RoundCards
         }
 
         $ownerNames = $this->memberNameQueries->displayNamesOf($organizationId, self::ownersOf($rounds));
-        $images = $this->imagesOf($organizationId, $rounds, $now);
+        $images = $this->imagesOf($organizationId, array_values(array_filter($rounds, static fn (RoundView $round): bool => !self::isRow($round))), $now);
         $checklists = $this->checklistCards->forRounds($organizationId, $ticketId, self::idsOfRoundsWithItems($rounds));
 
         return new RoundsSectionView(
-            array_map(fn (RoundView $round): RoundCard => $this->cardOf($round, $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER, $assigneeId, $images, $checklists[$round->id] ?? null), $rounds),
+            array_map(function (RoundView $round) use ($ownerNames, $assigneeId, $images, $checklists): RoundCard {
+                $ownerName = $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER;
+
+                return self::isRow($round)
+                    ? self::rowOf($round, $ownerName, $assigneeId, $checklists[$round->id] ?? null)
+                    : $this->cardOf($round, $ownerName, $assigneeId, $images, $checklists[$round->id] ?? null);
+            }, $rounds),
             $ticketRounds->olderRoundsNotShown,
         );
     }
@@ -134,7 +147,7 @@ final readonly class RoundCards
             return new RoundCard($round->id, $domId, $checklist->headline, $checklist->status, false, [], false, number: $round->number, checklist: $checklist);
         }
         if (!$this->showsPictures($round)) {
-            return new RoundCard($round->id, $domId, \sprintf('Round %d · Review · by %s', $round->number ?? 0, $ownerName), null, false, [], true, number: $round->number);
+            throw new \LogicException(\sprintf('A %s round is a row, not a card.', $round->kind));
         }
 
         $pictureLimit = self::pictureLimitOf($round);
@@ -183,6 +196,42 @@ final readonly class RoundCards
             $emptyNote,
             findingsChecklist: $checklist,
         );
+    }
+
+    /**
+     * A review round or a shared draft on the ticket: one line and "Open round", no picture. A review round is loaded
+     * without its screenshots (RoundView), so only a shared draft's line counts them, one per chain of tries.
+     *
+     * @param ChecklistCard|null $findingsChecklist a findings round's check items, the one place to mark them fixed
+     */
+    private static function rowOf(RoundView $round, string $ownerName, ?UserId $assigneeId, ?ChecklistCard $findingsChecklist): RoundCard
+    {
+        $number = $round->number ?? 0;
+        if (RoundView::DRAFT !== $round->kind) {
+            $headline = \sprintf(self::REVIEW_ROW, $number, $ownerName, $round->state);
+        } else {
+            $isSelfCheck = null !== $assigneeId && $round->ownerId->equals($assigneeId);
+            $headline = \sprintf($isSelfCheck ? self::SELF_CHECK_ROW : self::FINDINGS_ROW, $number, $ownerName, $round->state, self::screenshotCountOf(\count(self::shownChainsOf($round))));
+        }
+
+        return new RoundCard($round->id, 'round-'.$round->id, $headline, null, false, [], true, number: $round->number, findingsChecklist: $findingsChecklist, isRow: true);
+    }
+
+    private static function screenshotCountOf(int $count): string
+    {
+        return match ($count) {
+            0 => 'no screenshots',
+            1 => '1 screenshot',
+            default => $count.' screenshots',
+        };
+    }
+
+    /**
+     * Every round after the report and the checklist that the team sees: a review round or a shared draft.
+     */
+    private static function isRow(RoundView $round): bool
+    {
+        return self::REVIEW === $round->kind || (RoundView::DRAFT === $round->kind && !$round->isUnsharedDraft());
     }
 
     /**

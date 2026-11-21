@@ -16,7 +16,7 @@ test.use({ viewport: { width: 1280, height: 900 } });
 // Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one test at a time.
 
 const DRAFT_HEADLINE = 'Draft round · only you can see this';
-const SHARED_HEADLINE = /^Round \d+ · self-check by Omar$/;
+const SHARED_HEADLINE = /^Round \d+ · self-check by Omar · open · 1 screenshot$/;
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // COPIED_SHOWN_FOR_MS in copy-text_controller.js.
 const COPIED_SHOWN_FOR_MS = 2000;
@@ -89,10 +89,10 @@ test.describe('Draft round', () => {
 
     await card.getByRole('button', { name: 'Share with the team now' }).click();
 
-    const shared = page.locator('article.round-card').filter({ has: page.getByRole('heading', { name: SHARED_HEADLINE, level: 3 }) });
+    const shared = page.locator('article.round-card--row').filter({ has: page.getByRole('heading', { name: SHARED_HEADLINE, level: 3 }) });
     await expect(shared).toBeVisible();
     await expect(shared.getByText('PRIVATE', { exact: true })).toHaveCount(0);
-    await expect(shared.getByText('What Omar checked before passing the ticket on.')).toBeVisible();
+    await expect(shared.getByRole('link', { name: 'Open round' })).toBeVisible();
     await expect(shared.getByRole('button', { name: 'Share with the team now' })).toHaveCount(0);
     await expect(shared.getByRole('button', { name: 'Delete draft' })).toHaveCount(0);
     await expect(shared.getByRole('button', { name: 'Add screenshot' })).toHaveCount(0);

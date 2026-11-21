@@ -429,6 +429,16 @@ textarea.screenshot-report__input {
   border: 1.5px dashed var(--outline);
 }
 
+/* A later round as one line with "Open round" (P14.T7), so five rounds do not make the ticket page long. */
+.card.round-card--row {
+  padding-block: var(--space-12);
+}
+
+.round-card--row .round-card__headline {
+  font-size: 14px;
+  font-weight: 500;
+}
+
 .round-card__header {
   display: flex;
   flex-wrap: wrap;
