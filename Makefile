@@ -59,15 +59,15 @@ qa: ## Run every quality gate in the app container
 e2e: export E2E_PASSWORD ?= $(DEMO_PASSWORD)
 e2e-update: export E2E_PASSWORD ?= $(DEMO_PASSWORD)
 
-e2e: ## Run the Playwright tests (login, shell, components, gallery) against the seeded stack (E2E_BASE_URL, E2E_PASSWORD or DEMO_PASSWORD)
+e2e: ## Run the Playwright tests (login, shell, components, gallery) against the seeded stack (E2E_BASE_URL, E2E_PASSWORD or DEMO_PASSWORD; E2E_ARGS="tests/e2e/x.spec.ts" runs only those specs)
 	npm ci --prefix tests/e2e
 	npm exec --prefix tests/e2e -- playwright install chromium
-	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts
+	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts $(E2E_ARGS)
 
 e2e-update: ## Refresh the Playwright screenshot baselines
 	npm ci --prefix tests/e2e
 	npm exec --prefix tests/e2e -- playwright install chromium
-	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts --update-snapshots
+	npm exec --prefix tests/e2e -- playwright test --config tests/e2e/playwright.config.ts --update-snapshots $(E2E_ARGS)
 
 db-roles: ## Create pinround_test if missing and apply docker/postgres/roles.sql to both databases
 	$(PSQL) -d pinround -tAc "SELECT 1 FROM pg_database WHERE datname = 'pinround_test'" | grep -q 1 \
