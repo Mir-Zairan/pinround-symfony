@@ -45,6 +45,13 @@ interface MadeByTitle {
 const madeReportDrafts: MadeByTitle[] = [];
 const madeNotebooks: MadeByTitle[] = [];
 
+// A .env.dev.local that sets EXTENSION_ORIGINS to only a person's own extension drops the test copy's origin, and
+// every popup POST then fails on RestRequestGuard's 403 deep in a journey. Say so before the journey starts.
+test.beforeEach(async ({ request, baseURL }) => {
+  const preflight = await request.fetch(`${String(baseURL)}/api/v1/me`, { method: 'OPTIONS', headers: { Origin: `chrome-extension://${EXTENSION_ID}` } });
+  expect(preflight.status(), `the app's EXTENSION_ORIGINS must hold chrome-extension://${EXTENSION_ID} (set in .env.dev; a .env.dev.local that sets its own must list it too, comma-separated); restart the app after changing it`).toBe(204);
+});
+
 test.afterEach(() => {
   revokeTokensLeftOpen();
   for (const { ownerEmail, title } of madeReportDrafts.splice(0)) {
