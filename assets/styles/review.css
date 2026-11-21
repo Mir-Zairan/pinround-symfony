@@ -498,7 +498,7 @@ textarea.screenshot-report__input {
 
 /* A later round as one line with "Open round" (P14.T7), so five rounds do not make the ticket page long. */
 .card.round-card--row {
-  padding-block: var(--space-12);
+  padding-block: var(--space-8);
 }
 
 .round-card--row .round-card__headline {
@@ -578,6 +578,63 @@ textarea.screenshot-report__input {
 .round-card__screenshot--thumbnail > .pin-list {
   flex: 1 1 12rem;
   margin: 0;
+}
+
+/* With room on the ticket, the picture's title and summary sit beside it and its pins under them (P14.T7): rows of the
+   label, the caption and the pins, the picture spanning the last two in the first column. The figure lays its caption
+   and frame out on the hook's own tracks (subgrid), so the pin list, the hook's other child, starts below the caption
+   however long it is; the caption stays first in reading order. The frame keeps the picture's own size, so the pin
+   layer over it does too. The last row is 1fr so a picture taller than its text and pins stretches only that row,
+   never the gap between the caption and the pins. */
+@container ticket (min-width: 560px) {
+  .round-card__screenshot--thumbnail {
+    /* RoundCards::THUMBNAIL_MAX_HEIGHT */
+    --round-thumbnail-max-height: 200px;
+
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(12rem, 1fr);
+    grid-template-rows: auto auto 1fr;
+    gap: 0 var(--space-16);
+  }
+
+  .round-card__screenshot--thumbnail > .round-card__screenshot-label {
+    grid-row: 1;
+    grid-column: 1 / 3;
+    margin-bottom: var(--space-12);
+  }
+
+  .round-card__screenshot--thumbnail > .screenshot {
+    display: grid;
+    grid-row: 2 / 4;
+    grid-column: 1 / 3;
+    grid-template-rows: subgrid;
+    grid-template-columns: subgrid;
+    min-width: 0;
+  }
+
+  .round-card__screenshot--thumbnail > .screenshot > .screenshot__text {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .round-card__screenshot--thumbnail > .screenshot > .screenshot__frame {
+    grid-row: 1 / 3;
+    grid-column: 1;
+    align-self: start;
+    justify-self: start;
+    max-width: var(--round-thumbnail-width);
+  }
+
+  /* A picture still processing or refused has no known shape on the ticket: its 16:9 box is drawn as high as the cap. */
+  .round-card__screenshot--thumbnail > .screenshot > .screenshot__frame--placeholder {
+    width: calc(var(--round-thumbnail-max-height) * 16 / 9);
+    max-width: 100%;
+  }
+
+  .round-card__screenshot--thumbnail > .pin-list {
+    grid-row: 3;
+    grid-column: 2;
+  }
 }
 
 .tag.verdict-tag--none {

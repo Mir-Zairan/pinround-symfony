@@ -42,10 +42,11 @@ final readonly class RoundCards
     public const string THUMB_VARIANT = 'thumb';
 
     /**
-     * The most CSS pixels high a report picture is drawn on the ticket, its width scaled with it. A 4:3 thumb is exactly
-     * this high, so only a taller shot, such as a phone's, is drawn smaller.
+     * The most CSS pixels high a report picture is drawn on the ticket, its width scaled with it, so a ticket with five
+     * rounds fits under 1,400 px at 1440 × 900 (P14.T7). A 480 px thumb of a common screen shape (16:10, 300 high) is
+     * drawn 320 × 200.
      */
-    public const int THUMBNAIL_MAX_HEIGHT = 360;
+    public const int THUMBNAIL_MAX_HEIGHT = 200;
 
     /**
      * The "For Claude Code" box of the viewer's own unshared draft: the line to give Claude Code, with the ticket's key,
