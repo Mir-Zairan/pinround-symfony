@@ -10,7 +10,8 @@ import { makeTicketForOmar, openAs } from './ticket';
 // tests/Functional/Ticketing/TicketPageTest.php; here the browser lays the page out.
 //
 // The rounds are seeded through the dev-only console commands (review-round-seed.ts, draft-picture.ts): Round 0, the
-// Round 1 checklist, Omar's shared round 2, the review round 3, then a draft of Omar's he shares as round 4.
+// Round 1 checklist, Omar's shared round 2 and the review round 3, both closed, then a draft of Omar's he shares as
+// round 4: under ADR-0048 a share waits while another shared round is open.
 
 const MAX_PAGE_HEIGHT_PX = 1400;
 const ROUNDS = 5;
@@ -36,7 +37,7 @@ async function openTicketWithRoundsLoaded(page: Page): Promise<void> {
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(90_000);
   key = await makeTicketForOmar(browser, 'Rounds on the ticket page stay short');
-  checklistNumber = seedChecklistRound(key);
+  checklistNumber = seedChecklistRound(key, { closed: true });
   seedDraftWithPicture(key);
 
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);

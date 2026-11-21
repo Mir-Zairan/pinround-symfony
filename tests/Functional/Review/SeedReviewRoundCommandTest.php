@@ -196,6 +196,24 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
         self::assertSame(['rounds' => 4, 'media' => 5, 'screenshots' => 5, 'pins' => 4, 'areas' => 2, 'items' => 2], $this->rowCounts());
     }
 
+    public function testWithTheClosedOptionItClosesTheSharedAndReviewRoundsAndLeavesRoundZeroAndTheChecklistAsTheyWere(): void
+    {
+        $ticketId = $this->seedAssignedTicket();
+        $tester = $this->commandTester();
+
+        $exitCode = $tester->execute(['organization' => 'acme-foods', 'ticket' => 'SHOP-1', '--checklist' => true, '--closed' => true]);
+
+        self::assertSame(Command::SUCCESS, $exitCode, $tester->getDisplay());
+        self::assertStringContainsString('Rounds 2 and 3 on SHOP-1 are closed.', $tester->getDisplay());
+        $rounds = $this->roundRowsOf($ticketId);
+        usort($rounds, static fn (array $one, array $other): int => $one['number'] <=> $other['number']);
+        self::assertSame(
+            [['report', 0, 'open'], ['checklist', 1, 'open'], ['draft', 2, 'closed'], ['review', 3, 'closed']],
+            array_map(static fn (array $round): array => [$round['kind'], $round['number'], $round['state']], $rounds),
+        );
+        self::assertSame(['rounds' => 4, 'media' => 5, 'screenshots' => 5, 'pins' => 4, 'areas' => 2, 'items' => 2], $this->rowCounts());
+    }
+
     /**
      * @return iterable<string, array{string}>
      */

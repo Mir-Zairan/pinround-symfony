@@ -43,10 +43,16 @@ export function seedReviewRound(ticketKey: string, options: ReviewRoundSeedOptio
   return numberSaid(runConsole('app:e2e:seed-review-round', 'acme-foods', ticketKey, ...flags), /Round (\d+) on /, 'review round');
 }
 
+export type ChecklistRoundSeedOptions = {
+  /** Close the shared round and the review round afterwards, so the assignee may share another round (ADR-0048). */
+  closed?: boolean;
+};
+
 /**
  * As seedReviewRound, after first giving the ticket its reporter's Round 0 with the pins REPORT_PIN_NOTES and the
  * checklist round made from it, both items open. Returns the checklist round's number.
  */
-export function seedChecklistRound(ticketKey: string): number {
-  return numberSaid(runConsole('app:e2e:seed-review-round', 'acme-foods', ticketKey, '--checklist'), /Checklist round (\d+) on /, 'checklist round');
+export function seedChecklistRound(ticketKey: string, options: ChecklistRoundSeedOptions = {}): number {
+  const flags = ['--checklist', ...(options.closed ? ['--closed'] : [])];
+  return numberSaid(runConsole('app:e2e:seed-review-round', 'acme-foods', ticketKey, ...flags), /Checklist round (\d+) on /, 'checklist round');
 }

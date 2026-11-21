@@ -11,6 +11,8 @@ use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
+use App\Review\Application\LockedRoundClosing;
+use App\Review\Domain\Rounds;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Domain\OrganizationId;
@@ -40,7 +42,8 @@ use Symfony\Component\Uid\Uuid;
  * For the full-screen review's layout checks, LONG_NOTE_OPTION gives the first pin a long note and PENDING_AFTER_OPTION
  * leaves one area's "after" picture pending. For the checklist card's checks, CHECKLIST_OPTION first gives the ticket the
  * reporter's Round 0 with one ready picture and REPORT_PIN_NOTES, and the checklist round the app makes from it, so the
- * draft and review rounds come after it.
+ * draft and review rounds come after it. CLOSED_OPTION then closes the shared and review rounds, as a move on by the
+ * person whose turn it is would, so the assignee may share another round (ADR-0048).
  */
 // Never registered in prod, so no console call there can fake processed pictures or a round.
 #[AsCommand(name: 'app:e2e:seed-review-round', description: 'Give a ticket with no rounds a round 1 with pins and a review round 2 with two screen areas (dev and test only)')]
@@ -60,6 +63,7 @@ final class SeedReviewRoundCommand extends Command
     public const string PENDING_AFTER_OPTION = 'pending-after';
     public const string LONG_NOTE_OPTION = 'long-note';
     public const string CHECKLIST_OPTION = 'checklist';
+    public const string CLOSED_OPTION = 'closed';
 
     /** The first pin's note with LONG_NOTE_OPTION: long enough to wrap over many lines on a narrow screen. */
     public const string LONG_PIN_NOTE = 'The total shows the old price after a coupon is removed. The line under it still lists the discount, '
@@ -75,6 +79,8 @@ final class SeedReviewRoundCommand extends Command
         private readonly TicketTurnQueries $ticketTurnQueries,
         private readonly RoundCommands $roundCommands,
         private readonly ChecklistCommands $checklistCommands,
+        private readonly Rounds $rounds,
+        private readonly LockedRoundClosing $lockedRoundClosing,
         private readonly ReadyPictureSeeds $readyPictureSeeds,
         private readonly Connection $connection,
         private readonly EntityManagerInterface $entityManager,
@@ -90,7 +96,8 @@ final class SeedReviewRoundCommand extends Command
             ->addArgument('ticket', InputArgument::REQUIRED, 'The ticket key, for example SHOP-12; it must be given to someone and have no rounds')
             ->addOption(self::PENDING_AFTER_OPTION, null, InputOption::VALUE_REQUIRED, 'The position of the screen area whose "after" picture stays pending (still processing), from 0')
             ->addOption(self::LONG_NOTE_OPTION, null, InputOption::VALUE_NONE, 'Give the first pin LONG_PIN_NOTE in place of its short note')
-            ->addOption(self::CHECKLIST_OPTION, null, InputOption::VALUE_NONE, 'First give the ticket a Round 0 report with two pins and its checklist round, both items open');
+            ->addOption(self::CHECKLIST_OPTION, null, InputOption::VALUE_NONE, 'First give the ticket a Round 0 report with two pins and its checklist round, both items open')
+            ->addOption(self::CLOSED_OPTION, null, InputOption::VALUE_NONE, 'Then close the shared round and the review round, so the assignee may share another');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -110,6 +117,7 @@ final class SeedReviewRoundCommand extends Command
         }
         $pinNotes = true === $input->getOption(self::LONG_NOTE_OPTION) ? [self::LONG_PIN_NOTE, ...\array_slice(self::PIN_NOTES, 1)] : self::PIN_NOTES;
         $withChecklist = true === $input->getOption(self::CHECKLIST_OPTION);
+        $isClosed = true === $input->getOption(self::CLOSED_OPTION);
 
         $organizationId = $this->demoOrganizations->idBySlug($slug);
         if (null === $organizationId) {
@@ -122,7 +130,7 @@ final class SeedReviewRoundCommand extends Command
         $this->entityManager->clear();
         $this->tenantContext->set($organizationId);
         try {
-            [$reviewNumber, $checklistNumber] = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition, $withChecklist): array {
+            [$reviewNumber, $checklistNumber] = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition, $withChecklist, $isClosed): array {
                 $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new TicketNotFound('That ticket does not exist.');
                 $facts = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
                 $owner = $facts->assigneeId ?? throw new RoundRefused('That ticket is not given to anyone, so there is no one to own the rounds.');
@@ -134,6 +142,11 @@ final class SeedReviewRoundCommand extends Command
                 [$earlierNumber, $earlierScreenshotIds] = $this->shareRoundWithPins($organizationId, $ticketId, $owner, $pinNotes, $now);
                 $reviewNumber = $earlierNumber + 1;
                 $this->addReviewRound($organizationId, $ticketId, $owner, $reviewNumber, $earlierScreenshotIds, $pendingAfterPosition, $now);
+                if ($isClosed) {
+                    foreach ($this->rounds->openSharedRoundsOf($ticketId) as $openRound) {
+                        $this->lockedRoundClosing->closeLockedRound($openRound, $now);
+                    }
+                }
 
                 return [$reviewNumber, $checklistNumber];
             });
@@ -153,6 +166,9 @@ final class SeedReviewRoundCommand extends Command
         }
         if (null !== $checklistNumber) {
             $output->writeln(\sprintf('Checklist round %d on %s has %d open items.', $checklistNumber, $key, \count(self::REPORT_PIN_NOTES)));
+        }
+        if ($isClosed) {
+            $output->writeln(\sprintf('Rounds %d and %d on %s are closed.', $reviewNumber - 1, $reviewNumber, $key));
         }
 
         return Command::SUCCESS;
