@@ -5,7 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Review;
 
 use App\Identity\Domain\User;
+use App\Media\Api\SignedUrls;
+use App\Organization\Api\MemberNameQueries;
+use App\Review\Api\RoundView;
+use App\Review\Api\TicketRounds;
+use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Checklist\ChecklistCard;
+use App\Review\UI\Checklist\ChecklistCards;
 use App\Review\UI\Component\DraftRoundEditor;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\Controller\ChecklistController;
@@ -284,7 +290,7 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 0 · Report · by Mia · 3 pins', 'Round 1 · Checklist from the report', 'Round 2 · review by Lena · open'],
+            ['Round 0 · Report · by Mia · 3 pins', 'Round 1 · Checklist from the report', 'Round 2 · review by Lena · open · 1 screenshot'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
         self::assertSame(['Open round'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => $link->text()));
@@ -343,7 +349,7 @@ final class RoundsFrameTest extends WebTestCase
             [
                 ['round-'.$selfCheck, 'Round 2 · self-check by Omar · open · 2 screenshots', '/t/SHOP-1/rounds/2', '_top'],
                 ['round-'.$findings, 'Round 3 · findings by Mia · open · 1 screenshot', '/t/SHOP-1/rounds/3', '_top'],
-                ['round-'.$review, 'Round 4 · review by Lena · closed', '/t/SHOP-1/rounds/4', '_top'],
+                ['round-'.$review, 'Round 4 · review by Lena · closed · no screenshots', '/t/SHOP-1/rounds/4', '_top'],
             ],
             $rows->each(static fn (Crawler $row): array => [
                 (string) $row->attr('id'),
@@ -382,7 +388,7 @@ final class RoundsFrameTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 0 · Report · by Mia · 0 pins', 'Round 1 · review by Lena · open', 'Draft round · only you can see this'],
+            ['Round 0 · Report · by Mia · 0 pins', 'Round 1 · review by Lena · open · no screenshots', 'Draft round · only you can see this'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
         self::assertCount(1, $page->filter(self::ROUNDS.' article#round-'.$omarsDraft.'.round-card--private'));
@@ -392,7 +398,7 @@ final class RoundsFrameTest extends WebTestCase
             $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
             self::assertResponseStatusCodeSame(200, $person);
             self::assertSame(
-                ['Round 0 · Report · by Mia · 0 pins', 'Round 1 · review by Lena · open'],
+                ['Round 0 · Report · by Mia · 0 pins', 'Round 1 · review by Lena · open · no screenshots'],
                 $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
                 $person,
             );
@@ -518,6 +524,44 @@ final class RoundsFrameTest extends WebTestCase
         self::assertStringNotContainsString(self::TEAM_ONLY_TITLE, serialize($unseen));
     }
 
+    /**
+     * A row says its screenshot count, and only the rounds query counts them; a round read alone has none, so a row of
+     * it fails rather than say "no screenshots" of a round that has some.
+     */
+    #[Test]
+    public function aRowOfARoundReadWithoutItsScreenshotCountIsRefused(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $reviewRound = new RoundView(Uuid::v7()->toRfc4122(), 2, 'review', $this->people['Lena']->id(), new \DateTimeImmutable(self::SHARED_AT), 'open', []);
+        $roundsWithNoCount = new class($reviewRound) implements RoundsVisibleTo {
+            public function __construct(private RoundView $round)
+            {
+            }
+
+            public function forVisibleTo(TicketId $ticketId, TicketVisibility $viewer): TicketRounds
+            {
+                return new TicketRounds([$this->round]);
+            }
+
+            public function sharedRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): RoundView
+            {
+                return $this->round;
+            }
+        };
+        $roundCards = new RoundCards($roundsWithNoCount, self::getContainer()->get(MemberNameQueries::class), self::getContainer()->get(SignedUrls::class), self::getContainer()->get(ChecklistCards::class));
+        $transactions = new TenantTransactions(self::getContainer()->get(EntityManagerInterface::class), self::getContainer()->get(TenantContext::class));
+        $viewer = TicketVisibility::for($this->acmeFoods, $this->people['Omar']->id(), [$this->shop], false, null);
+
+        $refusal = null;
+        try {
+            $transactions->rolledBackAs($this->acmeFoods->toString(), static fn (): RoundsSectionView => $roundCards->forTicket(new TicketId($ticketId), $viewer, null, new \DateTimeImmutable(self::NOW)));
+        } catch (\LogicException $exception) {
+            $refusal = $exception->getMessage();
+        }
+
+        self::assertSame(\sprintf('Round %s was read without its screenshot count, which its row shows.', $reviewRound->id), $refusal);
+    }
+
     #[Test]
     public function aKeptAiPinKeepsItsAiMarkOnThePictureAndInTheList(): void
     {
@@ -552,7 +596,7 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · review by a former member · open', 'Round 2 · findings by a former member · open · no screenshots'],
+            ['Round 0 · Report · by a former member · 0 pins', 'Round 1 · review by a former member · open · no screenshots', 'Round 2 · findings by a former member · open · no screenshots'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
         self::assertStringNotContainsString('Noor', (string) $this->client->getResponse()->getContent());
@@ -720,8 +764,8 @@ final class RoundsFrameTest extends WebTestCase
         $headlines = $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text());
         self::assertCount(21, $headlines);
         self::assertSame('Round 0 · Report · by Mia · 0 pins', $headlines[0]);
-        self::assertSame('Round 3 · review by Lena · open', $headlines[1], 'Rounds 1 and 2 are the oldest two of 22.');
-        self::assertSame('Round 22 · review by Lena · open', $headlines[20]);
+        self::assertSame('Round 3 · review by Lena · open · no screenshots', $headlines[1], 'Rounds 1 and 2 are the oldest two of 22.');
+        self::assertSame('Round 22 · review by Lena · open · no screenshots', $headlines[20]);
         self::assertSame('2 older rounds are not shown.', $page->filter(self::ROUNDS.' .rounds__older')->text());
     }
 

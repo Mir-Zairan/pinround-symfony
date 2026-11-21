@@ -17,8 +17,9 @@ use App\Ticketing\Api\TicketVisibility;
 interface RoundsVisibleTo
 {
     /**
-     * The same rounds, cap and queries as RoundQueries::forTicket for the viewer the visibility belongs to, less the
-     * reads of their roles and of the triager.
+     * The same rounds, cap, screenshot counts and queries as RoundQueries::forTicket for the viewer the visibility
+     * belongs to, less the reads of their roles and of the triager. Only the report and the viewer's own unshared draft
+     * come with their screenshots: the ticket page shows a shared draft as a row with its RoundView::$screenshotCount.
      *
      * @throws \LogicException           when no transaction is open or no tenant is set, before any query
      * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query
@@ -26,10 +27,10 @@ interface RoundsVisibleTo
     public function forVisibleTo(TicketId $ticketId, TicketVisibility $viewer): TicketRounds;
 
     /**
-     * The one shared round of the ticket with that number, as forVisibleTo lists it (the latest try of each screenshot,
-     * with its pins; none loaded for a checklist or review round), also when it is older than the newest
-     * RoundQueries::MAX_NUMBERED_ROUNDS. At most four queries whatever the number of rounds, screenshots and pins:
-     * Ticketing's visibility check of the ticket, the round, its screenshots and their pins.
+     * The one shared round of the ticket with that number, as RoundQueries::forTicket lists it (the latest try of each
+     * screenshot, with its pins; none loaded for a checklist or review round) but with no screenshot count, also when it
+     * is older than the newest RoundQueries::MAX_NUMBERED_ROUNDS. At most four queries whatever the number of rounds,
+     * screenshots and pins: Ticketing's visibility check of the ticket, the round, its screenshots and their pins.
      *
      * @param int $number 0 for the report, from 1 for the rounds after it
      *

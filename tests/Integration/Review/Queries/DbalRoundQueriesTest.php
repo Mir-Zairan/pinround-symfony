@@ -238,15 +238,15 @@ final class DbalRoundQueriesTest extends KernelTestCase
                 new RoundScreenshotView(self::REPORT_SECOND_SCREENSHOT, self::SECOND_MEDIA, 1, null, 'not_right', null, 'The button sits under the footer.', [
                     new RoundPinView(self::SECOND_PIN_ONE, 1, 99.99, 50.0, 'Hidden here', 'fixed', 'ai', 'kept', new UserId(self::MIA), null),
                 ]),
-            ]),
-            new RoundView(self::ROUND_ONE, 1, 'checklist', new UserId(self::OMAR), $sharedAt(self::ROUND_ONE_SHARED_AT), 'closed', []),
-            new RoundView(self::ROUND_TWO, 2, 'review', new UserId(self::LENA), $sharedAt(self::ROUND_TWO_SHARED_AT), 'open', []),
-            new RoundView(self::OMAR_SHARED_DRAFT, 3, 'draft', new UserId(self::OMAR), $sharedAt(self::DRAFT_SHARED_AT), 'open', []),
+            ], 2),
+            new RoundView(self::ROUND_ONE, 1, 'checklist', new UserId(self::OMAR), $sharedAt(self::ROUND_ONE_SHARED_AT), 'closed', [], 0),
+            new RoundView(self::ROUND_TWO, 2, 'review', new UserId(self::LENA), $sharedAt(self::ROUND_TWO_SHARED_AT), 'open', [], 2),
+            new RoundView(self::OMAR_SHARED_DRAFT, 3, 'draft', new UserId(self::OMAR), $sharedAt(self::DRAFT_SHARED_AT), 'open', [], 0),
             new RoundView(self::OMAR_DRAFT, null, 'draft', new UserId(self::OMAR), null, 'open', [
                 new RoundScreenshotView(self::OMAR_DRAFT_SCREENSHOT, self::FIRST_MEDIA, 0, null, null, null, null, [
                     new RoundPinView(self::OMAR_DRAFT_PIN, 1, 40.0, 60.0, 'Mine only', null, 'human', null, new UserId(self::OMAR), null),
                 ]),
-            ]),
+            ], 1),
         ], $rounds);
         self::assertTrue($rounds[4]->isUnsharedDraft());
         self::assertFalse($rounds[3]->isUnsharedDraft());
@@ -573,7 +573,8 @@ final class DbalRoundQueriesTest extends KernelTestCase
 
     /**
      * The viewer's own predicate, handed in, saves the roles and the triager reads: the same four queries as the
-     * visibility check, rounds, screenshots and pins, and the same rounds as when the query builds the predicate.
+     * visibility check, rounds, screenshots and pins, and the same rounds as when the query builds the predicate. The
+     * ticket's shared draft holds no screenshot, which forVisibleTo would not load (DbalRoundQueriesScreenshotCountTest).
      */
     #[Test]
     public function aVisibilityHandedInSavesTheRolesReadsAndGivesTheSameRounds(): void

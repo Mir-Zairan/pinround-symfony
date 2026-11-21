@@ -31,7 +31,7 @@ final readonly class RoundCard
      * @param ChecklistCard|null        $findingsChecklist   a findings round's check items, which show under its row or pictures;
      *                                                       null for every other round
      * @param bool                      $isRow               a later round shown as one line, for example
-     *                                                       "Round 2 · review by Lena · open"; false for the report, the
+     *                                                       "Round 2 · review by Lena · open · 2 screenshots"; false for the report, the
      *                                                       checklist and the viewer's own unshared draft
      * @param bool                      $hasFullScreen       whether the card carries the "Full screen" link to the
      *                                                       full-screen review: only the report's, when it has a
