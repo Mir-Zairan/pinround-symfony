@@ -47,44 +47,13 @@ final class ReportCardTextTest extends TestCase
         self::assertSame($expected, ReportCardText::sideTextOf($report, $group, new \DateTimeImmutable(self::NOW)));
     }
 
-    /**
-     * @return iterable<string, array{string, string}>
-     */
-    public static function turnKinds(): iterable
-    {
-        yield 'build' => ['build', 'Omar builds it'];
-        yield 'test' => ['test', 'Omar tests it'];
-        yield 'check' => ['check', 'Omar checks the new ticket'];
-        yield 'review' => ['review', 'Omar reviews the code'];
-        yield 'assign' => ['assign', 'Omar picks a developer'];
-        yield 'input' => ['input', 'Omar gives input'];
-        yield 'decide' => ['decide', 'Omar decides: go on or stop'];
-        yield 'answer, of a question to someone else' => ['answer', 'Omar answers a question'];
-    }
-
     #[Test]
-    #[DataProvider('turnKinds')]
-    public function theNowLineNamesTheTurnPersonAndTheirTask(string $kind, string $expected): void
-    {
-        $report = self::report(turnUserId: self::OMAR, turnKind: $kind);
-
-        self::assertSame($expected, ReportCardText::nowTextOf($report, ReportGroup::Moving, new UserId(self::MIA), 'Omar'));
-    }
-
-    #[Test]
-    public function onTheViewersOwnTurnTheNowLineSaysYou(): void
-    {
-        $report = self::report(turnUserId: self::MIA, turnKind: 'test');
-
-        self::assertSame('You test it', ReportCardText::nowTextOf($report, ReportGroup::Stuck, new UserId(self::MIA), 'Mia'));
-    }
-
-    #[Test]
-    public function aTurnPersonWithNoNameHereIsSomeone(): void
+    public function aTurnPersonsLineIsTheTicketPagesNowSentence(): void
     {
         $report = self::report(turnUserId: self::OMAR, turnKind: 'build');
 
-        self::assertSame('Someone builds it', ReportCardText::nowTextOf($report, ReportGroup::Moving, new UserId(self::MIA), null));
+        self::assertSame('Lena plans it', ReportCardText::nowTextOf($report, ReportGroup::Moving, 'Lena plans it'));
+        self::assertSame('You test it', ReportCardText::nowTextOf($report, ReportGroup::Stuck, 'You test it'));
     }
 
     #[Test]
@@ -92,14 +61,14 @@ final class ReportCardTextTest extends TestCase
     {
         $report = self::report(turnLabel: 'Customer', turnKind: 'input');
 
-        self::assertSame('Waiting on Customer', ReportCardText::nowTextOf($report, ReportGroup::Moving, new UserId(self::MIA), null));
+        self::assertSame('Waiting on Customer', ReportCardText::nowTextOf($report, ReportGroup::Moving, null));
     }
 
     #[Test]
-    public function withNoTurnNoOneNeedsToAct(): void
+    public function withNoTurnPersonNoOneNeedsToAct(): void
     {
-        self::assertSame('No one needs to act now', ReportCardText::nowTextOf(self::report(), ReportGroup::Moving, new UserId(self::MIA), null));
-        self::assertSame('No one needs to act now', ReportCardText::nowTextOf(self::report(turnUserId: self::OMAR), ReportGroup::Moving, new UserId(self::MIA), 'Omar'));
+        self::assertSame('No one needs to act now', ReportCardText::nowTextOf(self::report(), ReportGroup::Moving, null));
+        self::assertSame('No one needs to act now', ReportCardText::nowTextOf(self::report(turnUserId: self::OMAR), ReportGroup::Moving, null));
     }
 
     #[Test]
@@ -107,7 +76,7 @@ final class ReportCardTextTest extends TestCase
     {
         $report = self::report(turnUserId: self::OMAR, turnKind: 'build');
 
-        self::assertSame('Done', ReportCardText::nowTextOf($report, ReportGroup::Done, new UserId(self::MIA), 'Omar'));
+        self::assertSame('Done', ReportCardText::nowTextOf($report, ReportGroup::Done, 'Omar builds it'));
     }
 
     #[Test]
@@ -115,8 +84,8 @@ final class ReportCardTextTest extends TestCase
     {
         $report = self::report(turnUserId: self::MIA, turnKind: 'answer', isQuestionToReporter: true);
 
-        self::assertSame('A question waits for your answer', ReportCardText::nowTextOf($report, ReportGroup::NeedsYou, new UserId(self::MIA), 'Mia'));
-        self::assertSame('A question waits for your answer', ReportCardText::nowTextOf($report, ReportGroup::NeedsYou, new UserId(self::MIA), 'Mia', null));
+        self::assertSame('A question waits for your answer', ReportCardText::nowTextOf($report, ReportGroup::NeedsYou, 'You answer the question'));
+        self::assertSame('A question waits for your answer', ReportCardText::nowTextOf($report, ReportGroup::NeedsYou, 'You answer the question', null));
     }
 
     #[Test]
@@ -124,7 +93,7 @@ final class ReportCardTextTest extends TestCase
     {
         $report = self::report(turnUserId: self::MIA, turnKind: 'answer', isQuestionToReporter: true);
 
-        self::assertSame('Lena asks: “Which order?”', ReportCardText::nowTextOf($report, ReportGroup::NeedsYou, new UserId(self::MIA), 'Mia', 'Lena asks: “Which order?”'));
+        self::assertSame('Lena asks: “Which order?”', ReportCardText::nowTextOf($report, ReportGroup::NeedsYou, 'You answer the question', 'Lena asks: “Which order?”'));
     }
 
     #[Test]
@@ -132,8 +101,8 @@ final class ReportCardTextTest extends TestCase
     {
         $building = self::report(turnUserId: self::OMAR, turnKind: 'build');
 
-        self::assertSame('Omar builds it', ReportCardText::nowTextOf($building, ReportGroup::Moving, new UserId(self::MIA), 'Omar', 'Lena asks: “Which order?”'));
-        self::assertSame('Done', ReportCardText::nowTextOf($building, ReportGroup::Done, new UserId(self::MIA), 'Omar', 'Lena asks: “Which order?”'));
+        self::assertSame('Omar builds it', ReportCardText::nowTextOf($building, ReportGroup::Moving, 'Omar builds it', 'Lena asks: “Which order?”'));
+        self::assertSame('Done', ReportCardText::nowTextOf($building, ReportGroup::Done, 'Omar builds it', 'Lena asks: “Which order?”'));
     }
 
     /**
@@ -181,16 +150,6 @@ final class ReportCardTextTest extends TestCase
     public function thePinProgressCountsThePinsCheckedOk(int $okCount, int $pinCount, string $expected): void
     {
         self::assertSame($expected, ReportCardText::pinProgressTextOf(new PinProgress($okCount, $pinCount)));
-    }
-
-    #[Test]
-    public function aTurnKindThatIsNoNeedsYouKindIsRefused(): void
-    {
-        $report = self::report(turnUserId: self::OMAR, turnKind: 'nap');
-
-        $this->expectException(\ValueError::class);
-
-        ReportCardText::nowTextOf($report, ReportGroup::Moving, new UserId(self::MIA), 'Omar');
     }
 
     private static function report(

@@ -6,9 +6,7 @@ namespace App\Web\UI\MyReports;
 
 use App\Insight\Api\MyReport;
 use App\Insight\Api\ReportGroup;
-use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\PinProgress;
-use App\Workflow\Api\NeedsYouKind;
 
 /**
  * The words of a report card (my-reports.md, Card). Pure.
@@ -41,15 +39,14 @@ final class ReportCardText
 
     /**
      * The Now line: "Done", the question that waits on the viewer ("Lena asks: “…”", or a plain line when it is not
-     * known), "Waiting on Customer" for a label's turn, or the turn person's task with their first name ("Omar builds
-     * it", "You test it").
+     * known), "Waiting on Customer" for a label's turn, or the ticket page's Now sentence for the turn person ("Lena
+     * plans it" in Backlog, "You test it").
      *
-     * @param string|null $turnFirstName the first name of the report's turn person; null when they have none here
-     * @param string|null $questionLine  questionLineOf the open question to the viewer; null when it is not known
-     *
-     * @throws \ValueError for a turn kind that is not a NeedsYouKind value
+     * @param string|null $turnPersonNowText NowNext::now of the report's step and turn person; null when no person holds
+     *                                       the turn
+     * @param string|null $questionLine      questionLineOf the open question to the viewer; null when it is not known
      */
-    public static function nowTextOf(MyReport $report, ReportGroup $group, UserId $viewerId, ?string $turnFirstName, ?string $questionLine = null): string
+    public static function nowTextOf(MyReport $report, ReportGroup $group, ?string $turnPersonNowText, ?string $questionLine = null): string
     {
         if (ReportGroup::Done === $group) {
             return 'Done';
@@ -60,23 +57,8 @@ final class ReportCardText
         if (null !== $report->turnLabel) {
             return 'Waiting on '.$report->turnLabel;
         }
-        if (null === $report->turnUserId || null === $report->turnKind) {
-            return 'No one needs to act now';
-        }
 
-        $isViewer = $report->turnUserId->equals($viewerId);
-        [$verb, $rest] = match (NeedsYouKind::from($report->turnKind)) {
-            NeedsYouKind::Answer => ['answer', ' a question'],
-            NeedsYouKind::Check => ['check', ' the new ticket'],
-            NeedsYouKind::Review => ['review', ' the code'],
-            NeedsYouKind::Test => ['test', ' it'],
-            NeedsYouKind::Assign => ['pick', ' a developer'],
-            NeedsYouKind::Input => ['give', ' input'],
-            NeedsYouKind::Decide => ['decide', ': go on or stop'],
-            NeedsYouKind::Build => ['build', ' it'],
-        };
-
-        return $isViewer ? 'You '.$verb.$rest : ($turnFirstName ?? 'Someone').' '.$verb.'s'.$rest;
+        return $turnPersonNowText ?? 'No one needs to act now';
     }
 
     /**

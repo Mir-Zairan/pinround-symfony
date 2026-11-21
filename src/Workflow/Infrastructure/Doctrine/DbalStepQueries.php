@@ -63,7 +63,7 @@ final readonly class DbalStepQueries implements StepQueries
     public function listedSteps(): array
     {
         $rows = $this->connection->fetchAllAssociative(
-            'SELECT id, name, grp, archived_at IS NOT NULL AS is_archived FROM wf_step WHERE organization_id = ?'
+            'SELECT id, name, grp, core_code, archived_at IS NOT NULL AS is_archived FROM wf_step WHERE organization_id = ?'
             .' ORDER BY '.self::orderSql('grp', Group::inListOrder()).', '.self::orderSql('origin', StepOrigin::cases()).', position, id',
             [$this->tenantContext->require()->toString()],
         );
@@ -78,6 +78,7 @@ final readonly class DbalStepQueries implements StepQueries
                 $group->label(),
                 $group->listHint(),
                 true === $row['is_archived'],
+                null === $row['core_code'] ? null : self::text($row['core_code'], 'core code'),
             );
         }, $rows);
     }

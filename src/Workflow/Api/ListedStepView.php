@@ -16,6 +16,8 @@ final readonly class ListedStepView
      * @param string      $groupLabel the group's name as people read it, for example "Checking"
      * @param string|null $groupHint  the one-line hint under the group header; null for Done
      * @param bool        $isArchived true for a removed step, which still holds the tickets left in it
+     * @param string|null $coreCode   backlog, todo, progress, review, test, input, hold or done for a core step, which
+     *                                is never removed; null for a company or team step
      */
     public function __construct(
         public string $id,
@@ -24,6 +26,7 @@ final readonly class ListedStepView
         public string $groupLabel,
         public ?string $groupHint,
         public bool $isArchived,
+        public ?string $coreCode,
     ) {
     }
 }

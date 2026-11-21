@@ -246,19 +246,19 @@ final class DbalStepQueriesTest extends KernelTestCase
     {
         self::assertSame(
             [
-                [self::NEEDS_INPUT, 'Needs input', 'wait', 'Waiting', 'Someone must answer first', false],
-                [self::ON_HOLD, 'On hold', 'wait', 'Waiting', 'Someone must answer first', false],
-                [self::SHOP_READY_TO_SHIP, 'Ready to ship', 'wait', 'Waiting', 'Someone must answer first', false],
-                [self::CODE_REVIEW, 'Code review', 'check', 'Checking', 'Being checked', false],
-                [self::TESTING, 'Testing', 'check', 'Checking', 'Being checked', false],
-                [self::DESIGN_CHECK, 'Design check', 'check', 'Checking', 'Being checked', false],
-                [self::MOBILE_DEVICE_CHECK, 'Device check', 'check', 'Checking', 'Being checked', false],
-                [self::IN_PROGRESS, 'In progress', 'doing', 'Doing', 'Being built', false],
-                [self::SHOP_REMOVED_PAIRING, 'Pairing', 'doing', 'Doing', 'Being built', true],
-                [self::BACKLOG, 'Backlog', 'todo', 'To do', 'Not started', false],
-                [self::TODO, 'To do', 'todo', 'To do', 'Not started', false],
-                [self::REMOVED_TRIAGE, 'Triage', 'todo', 'To do', 'Not started', true],
-                [self::DONE, 'Done', 'done', 'Done', null, false],
+                [self::NEEDS_INPUT, 'Needs input', 'wait', 'Waiting', 'Someone must answer first', false, 'input'],
+                [self::ON_HOLD, 'On hold', 'wait', 'Waiting', 'Someone must answer first', false, 'hold'],
+                [self::SHOP_READY_TO_SHIP, 'Ready to ship', 'wait', 'Waiting', 'Someone must answer first', false, null],
+                [self::CODE_REVIEW, 'Code review', 'check', 'Checking', 'Being checked', false, 'review'],
+                [self::TESTING, 'Testing', 'check', 'Checking', 'Being checked', false, 'test'],
+                [self::DESIGN_CHECK, 'Design check', 'check', 'Checking', 'Being checked', false, null],
+                [self::MOBILE_DEVICE_CHECK, 'Device check', 'check', 'Checking', 'Being checked', false, null],
+                [self::IN_PROGRESS, 'In progress', 'doing', 'Doing', 'Being built', false, 'progress'],
+                [self::SHOP_REMOVED_PAIRING, 'Pairing', 'doing', 'Doing', 'Being built', true, null],
+                [self::BACKLOG, 'Backlog', 'todo', 'To do', 'Not started', false, 'backlog'],
+                [self::TODO, 'To do', 'todo', 'To do', 'Not started', false, 'todo'],
+                [self::REMOVED_TRIAGE, 'Triage', 'todo', 'To do', 'Not started', true, null],
+                [self::DONE, 'Done', 'done', 'Done', null, false, 'done'],
             ],
             $this->listedStepsAs(self::ACME_FOODS, $this->queries()),
         );
@@ -352,12 +352,12 @@ final class DbalStepQueriesTest extends KernelTestCase
     }
 
     /**
-     * @return list<array{string, string, string, string, string|null, bool}>
+     * @return list<array{string, string, string, string, string|null, bool, string|null}>
      */
     private function listedStepsAs(string $tenantId, StepQueries $stepQueries): array
     {
         return $this->transactions()->rolledBackAs($tenantId, static fn (): array => array_map(
-            static fn (ListedStepView $step): array => [$step->id, $step->name, $step->groupCode, $step->groupLabel, $step->groupHint, $step->isArchived],
+            static fn (ListedStepView $step): array => [$step->id, $step->name, $step->groupCode, $step->groupLabel, $step->groupHint, $step->isArchived, $step->coreCode],
             $stepQueries->listedSteps(),
         ));
     }

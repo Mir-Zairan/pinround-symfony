@@ -197,7 +197,7 @@ final class MyReportsTest extends WebTestCase
             [
                 ['SHOP-1', 'Ticket SHOP-1', '/t/SHOP-1', 'updated 1 Oct', false, 'Step 2 of 4: Building, waiting', 'Reported Waiting Checking Done', 'Mia', 'A question waits for your answer'],
                 ['SHOP-2', 'Ticket SHOP-2', '/t/SHOP-2', 'no change for 17 days', true, 'Step 2 of 4: Building', 'Reported Building Checking Done', 'Omar', 'Omar builds it'],
-                ['SHOP-4', 'Ticket SHOP-4', '/t/SHOP-4', 'changed recently', false, 'Step 3 of 4: Checking, waiting', 'Reported Building Waiting Done', 'Lena', 'Lena answers a question'],
+                ['SHOP-4', 'Ticket SHOP-4', '/t/SHOP-4', 'changed recently', false, 'Step 3 of 4: Checking, waiting', 'Reported Building Waiting Done', 'Lena', 'Lena answers the question'],
                 ['SHOP-3', 'Ticket SHOP-3', '/t/SHOP-3', 'changed recently', false, 'Step 4 of 4: Done', 'Reported Building Checking Done', null, 'Done'],
             ],
             $cards->each(static fn (Crawler $card): array => [
@@ -213,6 +213,38 @@ final class MyReportsTest extends WebTestCase
             ]),
         );
         self::assertSame(['progress-dots__stage progress-dots__stage--passed', 'progress-dots__stage progress-dots__stage--current progress-dots__stage--waiting', 'progress-dots__stage progress-dots__stage--later', 'progress-dots__stage progress-dots__stage--later'], $cards->eq(0)->filter('.progress-dots__stage')->each(static fn (Crawler $stage): string => (string) $stage->attr('class')));
+    }
+
+    /**
+     * One build turn of the lead reads by its step as on the ticket page: in Backlog Lena plans it, not "builds it".
+     * SHOP-5 has no turn row at all.
+     */
+    #[Test]
+    public function theNowLineIsTheTicketPagesSentenceForTheStep(): void
+    {
+        $backlog = $this->addStep($this->acmeFoods, 'Backlog', 'todo', 'backlog');
+        $codeReview = $this->addStep($this->acmeFoods, 'Code review', 'check', 'review');
+        $testing = $this->addStep($this->acmeFoods, 'Testing', 'check', 'test');
+        $this->addReport('Mia', 'SHOP-3', '2026-09-03 09:00:00', '2026-11-05 09:00:00', turn: ['Omar', 'review'], stepId: $codeReview);
+        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'build'], stepId: $backlog);
+        $this->addReport('Mia', 'SHOP-5', '2026-09-05 09:00:00', '2026-11-05 09:00:00', stepId: $backlog);
+        $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'build']);
+        $this->addReport('Mia', 'SHOP-4', '2026-09-04 09:00:00', '2026-11-05 09:00:00', turn: ['Raj', 'test'], stepId: $testing);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [
+                'SHOP-5 No one needs to act now',
+                'SHOP-4 Raj tests it',
+                'SHOP-3 Omar reviews the code',
+                'SHOP-2 Lena builds it',
+                'SHOP-1 Lena plans it',
+            ],
+            $page->filter('.my-reports__card')->each(static fn (Crawler $card): string => $card->filter('.my-reports__key')->text().' '.$card->filter('.my-reports__now')->text()),
+        );
     }
 
     /**
