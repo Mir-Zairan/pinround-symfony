@@ -28,7 +28,7 @@ final class ProgressDots
     #[PostMount]
     public function assertIsAStageOfTheRow(): void
     {
-        if (\count($this->labels) < 2 || array_any($this->labels, static fn (mixed $label): bool => !\is_string($label) || '' === trim($label))) {
+        if (\count($this->labels) < 2 || array_any($this->labels, static fn (string $label): bool => '' === trim($label))) {
             throw new \InvalidArgumentException('ProgressDots needs two or more non-empty stage labels.');
         }
         if ($this->current < 1 || $this->current > \count($this->labels)) {

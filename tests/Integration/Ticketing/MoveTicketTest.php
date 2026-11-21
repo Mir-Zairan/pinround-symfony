@@ -134,8 +134,10 @@ final class MoveTicketTest extends KernelTestCase
     private const array DRAFT_READ = [
         'SELECT id, organization_id, ticket_id, kind, owner_id, number, shared_at, state, version,',
         'SELECT pin.id, pin.screenshot_id,',
-        'SELECT round_id, id, media_id, position, variant_label, verdict, title, summary FROM rvw_',
+        'SELECT round_id, id, media_id, position, variant_label, verdict, title, summary, retake_of FROM rvw_',
     ];
+    /** The share's FOR SHARE read of the ticket's turn facts, so a give cannot change the assignee whose findings rounds it closes. */
+    private const string TICKET_FACTS_LOCKED = 'SELECT ticket.project_id, ';
     private const array OPEN_SHARED_ROUNDS_LOCKED = [
         'SELECT pg_advisory_xact_lock(',
         'SELECT id, organization_id, ticket_id, kind, owner',
@@ -147,7 +149,7 @@ final class MoveTicketTest extends KernelTestCase
     private const array DRAFT_SAVED = [
         'SAVEPOINT DOCTRINE_2',
         'UPDATE rvw_round SET number = ?, shared_at = ?,',
-        'SELECT id, media_id, position, variant_label, verdict, title, summary FROM rvw_screenshot',
+        'SELECT id, media_id, position, variant_label, verdict, title, summary, retake_of FROM rvw_screenshot',
         'SELECT pin.id, pin.screenshot_id,',
         'RELEASE SAVEPOINT DOCTRINE_2',
     ];
@@ -974,11 +976,12 @@ final class MoveTicketTest extends KernelTestCase
     /**
      * A verb move with the answer "share" reads only the facts of the mover's draft before the save. After the save the
      * assignee's move reads the open shared rounds under their locks to close them (ADR-0048); the share then reads the
-     * draft whole once, reads the open shared rounds under the same locks again, as every share does, because the close
-     * may have changed them, takes the round number, and shares and decides it in one save (P05.T9).
+     * draft whole once, reads the ticket's turn facts under FOR SHARE, reads the open shared rounds under the same locks
+     * again, as every share does, because the close may have changed them, takes the round number, and shares and decides
+     * it in one save (P05.T9).
      */
     #[Test]
-    public function aWarmVerbMoveThatSharesTheMoversDraftRunsTwentyTwoQueriesBesideItsSavepoints(): void
+    public function aWarmVerbMoveThatSharesTheMoversDraftRunsTwentyThreeQueriesBesideItsSavepoints(): void
     {
         $versionBefore = $this->stepAndVersion()[1];
         $ticketId = $this->ticketId();
@@ -991,8 +994,8 @@ final class MoveTicketTest extends KernelTestCase
             fn () => $this->ticketCommands()->move(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), self::KEY, 'send_to_code_review', $versionBefore + 1, new \DateTimeImmutable(self::MOVED_AT), DraftChoice::Share),
         );
 
-        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_READ, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
-        self::assertCount(22, self::queriesBesideSavepoints($statements), 'The 12 of the assignee\'s move, the draft read whole, the open shared rounds under lock, its number and its one save');
+        self::assertStatementsStartWith([self::TICKET_BY_KEY, self::WAITING_TURNS, self::OPEN_DRAFT, self::SAVED, ...self::PROJECTED_AND_PUBLISHED, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_READ, self::TICKET_FACTS_LOCKED, ...self::OPEN_SHARED_ROUNDS_LOCKED, ...self::DRAFT_NUMBERED, ...self::DRAFT_SAVED], $statements);
+        self::assertCount(23, self::queriesBesideSavepoints($statements), 'The 12 of the assignee\'s move, the draft read whole, the ticket\'s facts under lock, the open shared rounds under lock, its number and its one save');
     }
 
     /**

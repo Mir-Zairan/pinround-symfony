@@ -56,13 +56,16 @@ final class DatabaseSpanTest extends WebTestCase
         );
     }
 
+    /**
+     * As the work Home before its focus query, then the admin tiles: the people count (peopleCountOf), the team count
+     * (countOf) and the AI settings (aiSettingsOf). An admin with no team or manager role gets no Local AI chip, so the
+     * header reads no AI settings of its own.
+     */
     #[Test]
     public function theAdminHomeRunsOneTeamCountAndNoFocusQuery(): void
     {
-        // As the work Home before its focus query, then the team count (countOf). An admin with no team or manager role
-        // gets no Local AI chip, so the header reads no AI settings.
         self::assertSame(
-            ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
+            ['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'],
             $this->spanNamesOfHomeFor('{admin}'),
         );
     }
@@ -99,6 +102,13 @@ final class DatabaseSpanTest extends WebTestCase
         ));
     }
 
+    /**
+     * The user and their password, the user's organizations (resolve_user_orgs), then BEGIN with the tenant's set_config,
+     * then the user's org roles and team roles for the header's menu (MainMenu), then Needs you now's ticket visibility
+     * (TicketVisibilities::of reads the roles again and the triager), the viewer's own turns in one query
+     * (HomeQueries::viewersTurns), then the saved Home focus chip, then the AI settings for the header's Local AI chip
+     * (LocalAiChip).
+     */
     #[Test]
     public function theHomePageExportsOneChildSpanPerStatementItSendsUnderTheRequestSpan(): void
     {
@@ -115,10 +125,7 @@ final class DatabaseSpanTest extends WebTestCase
         $roots = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => !SpanContextValidator::isValidSpanId($span->getParentSpanId())));
         self::assertCount(1, $roots);
         $children = array_values(array_filter($spans, static fn (SpanDataInterface $span): bool => $span !== $roots[0]));
-        // The user and their password, the user's organizations (resolve_user_orgs), then BEGIN with the tenant's set_config,
-        // then the user's org roles and team roles for the header's menu (MainMenu), then the saved Home focus chip, then the
-        // AI settings for the header's Local AI chip (LocalAiChip).
-        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
+        self::assertSame(['db SELECT', 'db SELECT', 'db SELECT', 'db BEGIN', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db SELECT', 'db COMMIT'], array_map(static fn (SpanDataInterface $span): string => $span->getName(), $children));
         foreach ($children as $child) {
             self::assertSame($roots[0]->getTraceId(), $child->getTraceId());
             self::assertSame($roots[0]->getSpanId(), $child->getParentSpanId());

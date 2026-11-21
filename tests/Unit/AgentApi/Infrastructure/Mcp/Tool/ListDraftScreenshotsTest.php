@@ -76,14 +76,10 @@ final class ListDraftScreenshotsTest extends TestCase
         $definition = $this->tool()->definition();
 
         self::assertSame(ListDraftScreenshots::NAME, $definition->name);
-        self::assertSame([
-            'type' => 'object',
-            'properties' => [
-                'key' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 64, 'description' => 'The ticket key, such as SHOP-12.'],
-            ],
-            'required' => ['key'],
-            'additionalProperties' => false,
-        ], $definition->inputSchema);
+        self::assertSame(
+            '{"type":"object","properties":{"key":{"type":"string","minLength":1,"maxLength":64,"description":"The ticket key, such as SHOP-12."}},"required":["key"],"additionalProperties":false}',
+            json_encode($definition->inputSchema, \JSON_THROW_ON_ERROR),
+        );
         self::assertTrue($definition->annotations?->readOnlyHint);
         self::assertFalse($definition->annotations->destructiveHint);
         self::assertStringContainsString(UntrustedText::NOTICE, (string) $definition->description);
@@ -159,6 +155,7 @@ final class ListDraftScreenshotsTest extends TestCase
         self::assertSame($expected, $result->structuredContent);
         $text = $result->content[0] ?? null;
         self::assertInstanceOf(TextContent::class, $text);
+        self::assertIsString($text->text);
         self::assertSame($expected, json_decode($text->text, true, flags: \JSON_THROW_ON_ERROR));
         self::assertStringNotContainsString(self::MIAS_SHOT, $text->text);
     }
@@ -170,6 +167,7 @@ final class ListDraftScreenshotsTest extends TestCase
 
         $result = $this->tool()->call(['key' => 'SHOP-1'], $this->shop1Target());
 
+        self::assertIsArray($result->structuredContent);
         self::assertSame([['screenshot_id' => self::MIAS_SHOT, 'number' => 1, 'title' => '<untrusted_text>Mia private title</untrusted_text>', 'try_count' => 1]], $result->structuredContent['screenshots'] ?? null);
     }
 
@@ -191,6 +189,7 @@ final class ListDraftScreenshotsTest extends TestCase
 
         $result = $this->tool()->call(['key' => 'SHOP-1'], $this->shop1Target());
 
+        self::assertIsArray($result->structuredContent);
         self::assertSame([], $result->structuredContent['screenshots'] ?? null);
     }
 
