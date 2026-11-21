@@ -118,6 +118,11 @@ final class RoundPageScreenshotsTest extends WebTestCase
             $page->filter('nav.screenshot-strip a.screenshot-thumb')->each(static fn (Crawler $thumb): string => (string) $thumb->attr('href')),
         );
         self::assertSame('Screenshot 1', $page->filter('nav.screenshot-strip a[aria-current="page"] .screenshot-thumb__label')->text());
+        self::assertSame(
+            array_fill(0, 3, ['480', '300', null]),
+            self::thumbImageSizesOf($page),
+            'The thumb\'s size, not the 1280 by 800 view\'s, so the strip keeps its place; the strip is always in view, so it loads at once.',
+        );
         self::assertSame(['Draft shot 0'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         $back = $page->filter('.screenshot-pager__back');
         self::assertSame('true', $back->attr('aria-disabled'), 'There is no screenshot before the first.');
@@ -293,12 +298,17 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $reportShots = $this->seedRoundOfScreenshots($ticketId, 0, 'report', 'Mia', 'Report shot ', [0]);
         $reviewRound = $this->addRound($ticketId, 1, 'review', 'Omar', self::SHARED_TODAY);
         $this->addArea($reviewRound, 'Cart', 0, $reportShots[0], $this->addScreenshot($reviewRound, $this->addMedia('ready'), 0, 'Cart after', null), null, null);
-        $this->addArea($reviewRound, 'Checkout', 1, null, $this->addScreenshot($reviewRound, $this->addMedia('ready'), 1, 'Checkout after', null), null, null);
+        $this->addArea($reviewRound, 'Checkout', 1, null, $this->addScreenshot($reviewRound, $this->addMedia('ready', 'Mia', 1000, 2000), 1, 'Checkout after', null), null, null);
         $this->logIn($this->client, $this->people['Mia']);
 
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1?'.RoundController::AREA_PARAMETER.'=0');
 
         self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [['480', '300', null], ['480', '960', null]],
+            self::thumbImageSizesOf($page),
+            'Each area\'s thumb carries its own thumb size, worked out from its view\'s, and loads at once.',
+        );
         self::assertCount(1, $page->filter('.round-compare-control'));
         self::assertSame(['Before · round 0', 'After · round 1'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
 
@@ -389,6 +399,16 @@ final class RoundPageScreenshotsTest extends WebTestCase
     private static function thumbTextsOf(Crawler $page): array
     {
         return $page->filter('nav.screenshot-strip a.screenshot-thumb')->each(static fn (Crawler $thumb): string => (string) preg_replace('/\s+/', ' ', trim($thumb->text())));
+    }
+
+    /**
+     * @return list<array{string|null, string|null, string|null}> each strip picture's width, height and loading, in order
+     */
+    private static function thumbImageSizesOf(Crawler $page): array
+    {
+        return $page->filter('nav.screenshot-strip img.screenshot-thumb__image')->each(
+            static fn (Crawler $image): array => [$image->attr('width'), $image->attr('height'), $image->attr('loading')],
+        );
     }
 
     private function queryCountOf(string $uri): int

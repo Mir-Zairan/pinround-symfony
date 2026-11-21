@@ -187,7 +187,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
         self::assertSame(RoundsSection::FRAME_ID, $fullScreen->attr('data-fragment-focus-fragment-value'));
         self::assertStringContainsString('Round 0', $fullScreen->closest('.round-card')?->filter('.round-card__headline')->text() ?? '');
 
-        $page = $this->client->request('GET', (string) $fullScreen->attr('href'));
+        $page = $this->client->request('GET', $fullScreen->attr('href'));
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('SHOP-1 · Round 0 · Screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());

@@ -183,11 +183,14 @@ final readonly class RoundPages
         $images = $this->thumbImagesOf($ticket, array_map(static fn (AreaView $area): string => $area->after->mediaId, $round->areas), $now);
         $thumbs = [];
         foreach (self::tabsOf($round, $selected) as $index => $tab) {
+            $image = self::readyImageOf($images[$round->areas[$index]->after->mediaId] ?? null);
             $thumbs[] = new ScreenshotThumb(
                 $index + 1,
                 $tab->name,
                 [RoundController::AREA_PARAMETER => $tab->position],
-                self::thumbUrlOf($images[$round->areas[$index]->after->mediaId] ?? null),
+                $image?->url,
+                $image?->width,
+                $image?->height,
                 $tab->stateLabel,
                 $tab->stateClass,
                 self::AREA_STATE_ID_PREFIX.$tab->position,
@@ -212,11 +215,14 @@ final readonly class RoundPages
         $thumbs = [];
         foreach ($screenshots as $index => $screenshot) {
             $pinCount = \count(RoundCards::shownPinsOf($screenshot));
+            $image = self::readyImageOf($images[$screenshot->mediaId] ?? null);
             $thumbs[] = new ScreenshotThumb(
                 $index + 1,
                 \sprintf('Screenshot %d', $index + 1),
                 [RoundController::SCREENSHOT_PARAMETER => $index + 1],
-                self::thumbUrlOf($images[$screenshot->mediaId] ?? null),
+                $image?->url,
+                $image?->width,
+                $image?->height,
                 1 === $pinCount ? '1 pin' : $pinCount.' pins',
                 0 === $pinCount ? 'screenshot-thumb__pins--none' : 'screenshot-thumb__pins',
                 null,
@@ -258,9 +264,9 @@ final readonly class RoundPages
         return $images;
     }
 
-    private static function thumbUrlOf(?MediaImage $image): ?string
+    private static function readyImageOf(?MediaImage $image): ?MediaImage
     {
-        return null !== $image && MediaImageStatus::Ready === $image->status ? $image->url : null;
+        return null !== $image && MediaImageStatus::Ready === $image->status ? $image : null;
     }
 
     /**

@@ -59,8 +59,8 @@ final class ScreenshotPagerTest extends TestCase
     public function screenAreasPageByTheirAreaQuery(): void
     {
         $thumbs = [
-            new ScreenshotThumb(1, 'Cart', ['area' => 0], null, 'Passed', 'area-chip--passed', 'screenshot-thumb-state-0', false),
-            new ScreenshotThumb(2, 'Checkout', ['area' => 3], null, 'Not reviewed', 'area-chip--none', 'screenshot-thumb-state-3', true),
+            new ScreenshotThumb(1, 'Cart', ['area' => 0], null, null, null, 'Passed', 'area-chip--passed', 'screenshot-thumb-state-0', false),
+            new ScreenshotThumb(2, 'Checkout', ['area' => 3], null, null, null, 'Not reviewed', 'area-chip--none', 'screenshot-thumb-state-3', true),
         ];
 
         $pager = ScreenshotPager::over($thumbs);
@@ -146,6 +146,6 @@ final class ScreenshotPagerTest extends TestCase
 
     private static function thumb(int $number, bool $isShown): ScreenshotThumb
     {
-        return new ScreenshotThumb($number, 'Screenshot '.$number, ['screenshot' => $number], null, '0 pins', 'screenshot-thumb__pins--none', null, $isShown);
+        return new ScreenshotThumb($number, 'Screenshot '.$number, ['screenshot' => $number], null, null, null, '0 pins', 'screenshot-thumb__pins--none', null, $isShown);
     }
 }
