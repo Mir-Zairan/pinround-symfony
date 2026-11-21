@@ -18,11 +18,13 @@ use App\Ticketing\Api\TicketPageView;
 /**
  * Builds the full-screen review of one round for one viewer: signs the one picture shown and walks its pins. On a screen
  * area those are the earlier round's pins, the same the round page's side panel lists, in the same order; on a
- * screenshot of any other round, the screenshot's own pins that the round page draws, numbered as the round page
- * numbers its screenshots (RoundPages::screenshotsOf).
+ * screenshot of any other round, the pins that the round page draws on the picture shown, numbered as the round page
+ * numbers its screenshots (RoundPages::screenshotsOf). A shared draft's screenshot has the same Before as on the round
+ * page, the same-numbered screenshot of the hand-off round before it (RoundPages::beforeScreenshotOf).
  *
  * Its reads do not grow with the screenshots or pins: one signing call, and, for a round without areas other than a
- * review round, RoundPages' read of the one round whose screenshots it shows.
+ * review round, RoundPages' read of the one round whose screenshots it shows and, for a shared draft, its read of the
+ * hand-off round before it.
  */
 final readonly class FocusPages
 {
@@ -40,8 +42,8 @@ final readonly class FocusPages
      * @param int      $selectedPosition the area to show; the first one when the round has no area at that position
      * @param int|null $screenshotNumber from 1, the screenshot a round without areas shows; the first one when this is
      *                                   null. A round with areas and a review round do not read it
-     * @param string   $side             FocusPage::SIDE_BEFORE shows the earlier picture when the area has one; anything
-     *                                   else the round's own
+     * @param string   $side             FocusPage::SIDE_BEFORE shows the earlier picture when the area or the shared
+     *                                   draft's screenshot has one; anything else the round's own
      * @param int      $pinPosition      from 1, the stop to show first; the first one when the walk has none there
      * @param bool     $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
      *
@@ -73,12 +75,21 @@ final readonly class FocusPages
 
         $number = $shownIndex + 1;
         $count = \count($screenshots);
-        $pins = array_values(array_filter($screenshot->pins, RoundCards::isShownPin(...)));
+        $previousRound = $this->roundPages->previousHandOffRoundOf($visible, $round);
+        $before = RoundPages::beforeScreenshotOf($previousRound, $number);
+        $isBefore = null !== $before && FocusPage::SIDE_BEFORE === $side;
+        $shown = $isBefore ? $before : $screenshot;
+        // Each picture walks its own pins, as each side of the round page's Before / After draws its own.
+        $pins = array_values(array_filter($shown->pins, RoundCards::isShownPin(...)));
         $stops = self::stopsOf($ticket, $pins);
-        $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$screenshot->mediaId], RoundCards::VARIANT, $now)[$screenshot->mediaId] ?? null;
+        $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$shown->mediaId], RoundCards::VARIANT, $now)[$shown->mediaId] ?? null;
         $picture = RoundCards::viewOfPicture(
             'focus-picture',
-            self::altTextOf($round, $screenshot, $number),
+            match (true) {
+                null === $before => self::altTextOf($round, $screenshot, $number),
+                $isBefore => \sprintf('Before, round %d: %s', $previousRound->number ?? 0, $before->title ?? \sprintf('Screenshot %d', $number)),
+                default => \sprintf('After, round %d: %s', $round->number, $screenshot->title ?? \sprintf('Screenshot %d', $number)),
+            },
             null,
             null,
             $image,
@@ -89,8 +100,8 @@ final readonly class FocusPages
             $ticket->key,
             \sprintf('%s · Screenshot %d of %d', $roundLine, $number, $count),
             null,
-            FocusPage::SIDE_AFTER,
-            false,
+            $isBefore ? FocusPage::SIDE_BEFORE : FocusPage::SIDE_AFTER,
+            null !== $before,
             $picture,
             $stops,
             $stops[$pinPosition - 1] ?? $stops[0] ?? null,
