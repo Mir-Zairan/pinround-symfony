@@ -7,16 +7,17 @@ namespace App\Review\UI;
 use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
 use App\Insight\Api\TurnUserQueries;
-use App\Review\Api\RoundView;
+use App\Review\Application\OpenSharedRound;
 use App\Review\UI\Component\RoundBar;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketPageView;
 
 /**
  * Who an open shared round is ready for (ADR-0048), the one person the share refusal of a draft, the ticket's round bar
- * and the round page's header all name: the assignee for their findings round, else whoever's turn it is now.
- * TicketMoveController names the same person for the hand-off dialog with its own copy of this rule, as Ticketing's UI
- * may not use Review's (deptrac).
+ * and the round page's header all name: the assignee for their findings round, else whoever's turn it is now, unless
+ * their own move would not close the round (Round::notReadyForUserId, the owner of a round shared with "Share now").
+ * TicketMoveController names the same person for the hand-off dialog from what Review put in the refusal, as Ticketing's
+ * UI may not use Review's (deptrac).
  */
 final readonly class RoundReadyFor
 {
@@ -29,27 +30,36 @@ final readonly class RoundReadyFor
     /**
      * Reads ins_ticket_turn once, and only when the round is no findings round.
      *
-     * @param string $roundKind    RoundView's or ReviewRoundView's kind of the open shared round
-     * @param UserId $roundOwnerId who shared it
-     *
-     * @return UserId|null null when it is no findings round and the turn is a label's or the ticket has no turn row
+     * @return UserId|null null when it is no findings round and the turn is a label's, the ticket has no turn row, or
+     *                     the turn is the person the round is not ready for
      */
-    public function userIdOf(TicketPageView $ticket, string $roundKind, UserId $roundOwnerId): ?UserId
+    public function userIdOf(TicketPageView $ticket, OpenSharedRound $round): ?UserId
     {
-        return $this->namedOrTurnUserIdOf($ticket, self::findingsReadyFor($roundKind, $roundOwnerId, $ticket->turnSnapshot->assigneeId));
+        return $this->namedOrTurnUserIdOf($ticket, $round->findingsReadyFor($ticket->turnSnapshot->assigneeId), $round->notReadyForUserId());
     }
 
     /**
-     * For a caller whom Review already told who the round is ready for (RoundRefused::readyForUserId). Reads
-     * ins_ticket_turn once, and only when Review named nobody.
+     * For a caller whom Review already told who the round is ready for (RoundRefused::readyForUserId) and who not.
+     * Reads ins_ticket_turn once, and only when Review named nobody.
      *
      * @param UserId|null $namedByReview the assignee for their findings round (Round::findingsReadyFor), else null
+     * @param UserId|null $notReadyFor   Round::notReadyForUserId: whose own move leaves the round open, so whose turn
+     *                                   names nobody
      *
-     * @return UserId|null null when Review named nobody and the turn is a label's or the ticket has no turn row
+     * @return UserId|null null when Review named nobody and the turn is a label's, the ticket has no turn row, or the
+     *                     turn is $notReadyFor's
      */
-    public function namedOrTurnUserIdOf(TicketPageView $ticket, ?UserId $namedByReview): ?UserId
+    public function namedOrTurnUserIdOf(TicketPageView $ticket, ?UserId $namedByReview, ?UserId $notReadyFor): ?UserId
     {
-        return $namedByReview ?? $this->turnUserQueries->turnUsersOf([$ticket->id])[$ticket->id->toString()] ?? null;
+        if (null !== $namedByReview) {
+            return $namedByReview;
+        }
+        $turnUserId = $this->turnUserQueries->turnUsersOf([$ticket->id])[$ticket->id->toString()] ?? null;
+        if (null === $turnUserId || (null !== $notReadyFor && $turnUserId->equals($notReadyFor))) {
+            return null;
+        }
+
+        return $turnUserId;
     }
 
     /**
@@ -58,9 +68,9 @@ final readonly class RoundReadyFor
      *
      * @return string|null null when nobody is named, or Identity knows no name or an empty one for them
      */
-    public function readyForLineOf(VisibleTicket $visible, string $roundKind, UserId $roundOwnerId): ?string
+    public function readyForLineOf(VisibleTicket $visible, OpenSharedRound $round): ?string
     {
-        $readyForId = $this->userIdOf($visible->ticket, $roundKind, $roundOwnerId);
+        $readyForId = $this->userIdOf($visible->ticket, $round);
         if (null === $readyForId) {
             return null;
         }
@@ -82,13 +92,5 @@ final readonly class RoundReadyFor
         $displayName = $ticket->displayNames[$userId->toString()] ?? $this->userQueries->byIds([$userId])[$userId->toString()]->displayName ?? null;
 
         return null === $displayName ? null : new UserView($userId, $displayName)->firstName();
-    }
-
-    /**
-     * Round::findingsReadyFor's rule: a shared draft of anyone but the assignee is their findings, ready for them.
-     */
-    private static function findingsReadyFor(string $roundKind, UserId $roundOwnerId, ?UserId $assigneeId): ?UserId
-    {
-        return null !== $assigneeId && RoundView::DRAFT === $roundKind && !$roundOwnerId->equals($assigneeId) ? $assigneeId : null;
     }
 }

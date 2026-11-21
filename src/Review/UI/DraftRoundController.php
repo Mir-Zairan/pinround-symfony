@@ -14,7 +14,6 @@ use App\Review\UI\Controller\RefusalAnswers;
 use App\Review\UI\Controller\RefusedWithToast;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
-use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\SharedKernel\UI\RoundStillOpenReason;
 use App\Ticketing\Api\TicketNotFound;
@@ -235,15 +234,16 @@ final class DraftRoundController extends AbstractController
             return $refused;
         }
 
-        return new RefusedWithToast($this->roundStillOpenReasonOf($openRoundNumber, $refused->readyForUserId(), $visible));
+        return new RefusedWithToast($this->roundStillOpenReasonOf($openRoundNumber, $refused, $visible));
     }
 
     /**
-     * Names the person Review named, else whoever's turn it is now; nobody for a turn that is a label's or no turn row.
+     * Names the person Review named, else whoever's turn it is now; nobody for a turn that is a label's, no turn row,
+     * or the turn of the person Review says the round is not ready for.
      */
-    private function roundStillOpenReasonOf(int $openRoundNumber, ?UserId $readyForUserId, VisibleTicket $visible): string
+    private function roundStillOpenReasonOf(int $openRoundNumber, RoundRefused $refused, VisibleTicket $visible): string
     {
-        $verdictGiverId = $this->roundReadyFor->namedOrTurnUserIdOf($visible->ticket, $readyForUserId);
+        $verdictGiverId = $this->roundReadyFor->namedOrTurnUserIdOf($visible->ticket, $refused->readyForUserId(), $refused->notReadyForUserId());
         if (null === $verdictGiverId) {
             return RoundStillOpenReason::of($openRoundNumber, null);
         }

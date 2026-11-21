@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Review\UI;
 
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
+use App\Review\Application\OpenSharedRound;
 use App\Review\UI\RoundReadyFor;
 use App\Review\UI\VisibleTicket;
 use App\SharedKernel\Domain\OrganizationId;
@@ -39,7 +40,7 @@ final class RoundReadyForTest extends TestCase
     {
         $turnUserQueries = new InMemoryTurnUserQueries([self::TICKET => self::MIA]);
 
-        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->userIdOf(self::page([]), 'draft', new UserId(self::MIA));
+        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->userIdOf(self::page([]), self::round('draft', self::MIA));
 
         self::assertSame(self::OMAR, $readyForId?->toString());
         self::assertSame([], $turnUserQueries->askedTicketIds);
@@ -61,7 +62,7 @@ final class RoundReadyForTest extends TestCase
     {
         $turnUserQueries = new InMemoryTurnUserQueries([self::TICKET => self::MIA]);
 
-        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->userIdOf(self::page([], $assigneeId), $roundKind, new UserId($roundOwnerId));
+        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->userIdOf(self::page([], $assigneeId), self::round($roundKind, $roundOwnerId));
 
         self::assertSame(self::MIA, $readyForId?->toString());
         self::assertSame([self::TICKET], $turnUserQueries->askedTicketIds);
@@ -72,7 +73,7 @@ final class RoundReadyForTest extends TestCase
     {
         $turnUserQueries = new InMemoryTurnUserQueries([self::TICKET => self::MIA]);
 
-        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->namedOrTurnUserIdOf(self::page([]), new UserId(self::OMAR));
+        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->namedOrTurnUserIdOf(self::page([]), new UserId(self::OMAR), new UserId(self::MIA));
 
         self::assertSame(self::OMAR, $readyForId?->toString());
         self::assertSame([], $turnUserQueries->askedTicketIds);
@@ -83,10 +84,38 @@ final class RoundReadyForTest extends TestCase
     {
         $turnUserQueries = new InMemoryTurnUserQueries([self::TICKET => self::MIA]);
 
-        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->namedOrTurnUserIdOf(self::page([]), null);
+        $readyForId = new RoundReadyFor($turnUserQueries, new NamedUserQueries([]))->namedOrTurnUserIdOf(self::page([]), null, null);
 
         self::assertSame(self::MIA, $readyForId?->toString());
         self::assertSame([self::TICKET], $turnUserQueries->askedTicketIds);
+    }
+
+    /**
+     * ADR-0048: the owner of a round shared with "Share now" never closes it with their own move, so on their turn it
+     * waits for nobody yet, and the bar and header tell them nothing is theirs to do; shared in a move, it is theirs.
+     */
+    #[Test]
+    public function aRoundSharedNowIsNotReadyForItsOwnerOnTheirTurnButOneSharedInAMoveIs(): void
+    {
+        $readyFor = new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => self::OMAR]), new NamedUserQueries([]));
+        $ticket = self::page([self::OMAR => 'Omar Developer']);
+
+        self::assertNull($readyFor->userIdOf($ticket, self::round('draft', self::OMAR)));
+        self::assertNull($readyFor->readyForLineOf(self::visibleTo(self::OMAR, $ticket), self::round('draft', self::OMAR)), 'No "Ready for you".');
+        self::assertNull($readyFor->readyForLineOf(self::visibleTo(self::LENA, $ticket), self::round('draft', self::OMAR)), 'No "Ready for Omar" either.');
+        self::assertNull($readyFor->userIdOf(self::page([], self::OMAR), self::round('review', self::OMAR)), 'A review round is shared outside a move too.');
+
+        self::assertSame(self::OMAR, $readyFor->userIdOf($ticket, self::round('draft', self::OMAR, true))?->toString());
+        self::assertSame('Ready for you', $readyFor->readyForLineOf(self::visibleTo(self::OMAR, $ticket), self::round('draft', self::OMAR, true)));
+    }
+
+    #[Test]
+    public function aTurnOfThePersonReviewSaysTheRoundIsNotReadyForNamesNobody(): void
+    {
+        $readyFor = new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => self::MIA]), new NamedUserQueries([]));
+
+        self::assertNull($readyFor->namedOrTurnUserIdOf(self::page([]), null, new UserId(self::MIA)));
+        self::assertSame(self::MIA, $readyFor->namedOrTurnUserIdOf(self::page([]), null, new UserId(self::OMAR))?->toString(), 'Anyone else\'s turn still counts.');
     }
 
     #[Test]
@@ -94,9 +123,9 @@ final class RoundReadyForTest extends TestCase
     {
         $readyFor = new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => null]), new NamedUserQueries([]));
 
-        self::assertNull($readyFor->namedOrTurnUserIdOf(self::page([]), null));
-        self::assertNull($readyFor->userIdOf(self::page([]), 'review', new UserId(self::LENA)));
-        self::assertNull($readyFor->readyForLineOf(self::visibleTo(self::LENA, self::page([self::MIA => 'Mia Tester'])), 'review', new UserId(self::LENA)));
+        self::assertNull($readyFor->namedOrTurnUserIdOf(self::page([]), null, null));
+        self::assertNull($readyFor->userIdOf(self::page([]), self::round('review', self::LENA)));
+        self::assertNull($readyFor->readyForLineOf(self::visibleTo(self::LENA, self::page([self::MIA => 'Mia Tester'])), self::round('review', self::LENA)));
     }
 
     #[Test]
@@ -105,9 +134,9 @@ final class RoundReadyForTest extends TestCase
         $readyFor = new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => self::MIA]), new NamedUserQueries([]));
         $ticket = self::page([self::MIA => 'Mia Tester', self::OMAR => 'Omar Developer']);
 
-        self::assertSame('Ready for Omar', $readyFor->readyForLineOf(self::visibleTo(self::LENA, $ticket), 'draft', new UserId(self::MIA)));
-        self::assertSame('Ready for you', $readyFor->readyForLineOf(self::visibleTo(self::OMAR, $ticket), 'draft', new UserId(self::MIA)));
-        self::assertSame('Ready for Mia', $readyFor->readyForLineOf(self::visibleTo(self::LENA, $ticket), 'review', new UserId(self::OMAR)), 'A review round waits for the turn.');
+        self::assertSame('Ready for Omar', $readyFor->readyForLineOf(self::visibleTo(self::LENA, $ticket), self::round('draft', self::MIA)));
+        self::assertSame('Ready for you', $readyFor->readyForLineOf(self::visibleTo(self::OMAR, $ticket), self::round('draft', self::MIA)));
+        self::assertSame('Ready for Mia', $readyFor->readyForLineOf(self::visibleTo(self::LENA, $ticket), self::round('review', self::OMAR)), 'A review round waits for the turn.');
     }
 
     #[Test]
@@ -116,8 +145,8 @@ final class RoundReadyForTest extends TestCase
         $unknown = new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => self::LENA]), new NamedUserQueries([]));
         $empty = new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => self::LENA]), new NamedUserQueries([self::LENA => '   ']));
 
-        self::assertNull($unknown->readyForLineOf(self::visibleTo(self::MIA, self::page([])), 'review', new UserId(self::OMAR)));
-        self::assertNull($empty->readyForLineOf(self::visibleTo(self::MIA, self::page([])), 'review', new UserId(self::OMAR)));
+        self::assertNull($unknown->readyForLineOf(self::visibleTo(self::MIA, self::page([])), self::round('review', self::OMAR)));
+        self::assertNull($empty->readyForLineOf(self::visibleTo(self::MIA, self::page([])), self::round('review', self::OMAR)));
     }
 
     #[Test]
@@ -146,6 +175,11 @@ final class RoundReadyForTest extends TestCase
     public function someoneIdentityDoesNotKnowHasNoName(): void
     {
         self::assertNull(new RoundReadyFor(new InMemoryTurnUserQueries([]), new NamedUserQueries([]))->firstNameOf(new UserId(self::LENA), self::page([])));
+    }
+
+    private static function round(string $kind, string $ownerId, bool $isSharedInAMove = false): OpenSharedRound
+    {
+        return new OpenSharedRound(2, $kind, new UserId($ownerId), $isSharedInAMove);
     }
 
     private static function visibleTo(string $viewerId, TicketPageView $ticket): VisibleTicket

@@ -18,6 +18,7 @@ final class MoveRefused extends \DomainException
 {
     private ?int $openRoundNumber = null;
     private ?UserId $openRoundReadyForUserId = null;
+    private ?UserId $openRoundNotReadyForUserId = null;
 
     /**
      * @param string|null           $ruleNoteTemplate the note of the refusing rule with each person as a {placeholder}, or null when the rule has none
@@ -32,16 +33,20 @@ final class MoveRefused extends \DomainException
     }
 
     /**
-     * @param string      $reason                  the reason to show when no name is known, with no placeholder
-     * @param int         $openRoundNumber         the round that stays open, from 1
-     * @param UserId|null $openRoundReadyForUserId whose verdict it waits for, when Review knows it (the assignee for
-     *                                             their findings round); null when it is whoever's turn it is
+     * @param string      $reason                     the reason to show when no name is known, with no placeholder
+     * @param int         $openRoundNumber            the round that stays open, from 1
+     * @param UserId|null $openRoundReadyForUserId    whose verdict it waits for, when Review knows it (the assignee for
+     *                                                their findings round); null when it is whoever's turn it is
+     * @param UserId|null $openRoundNotReadyForUserId whose turn does not make it theirs, as their own move leaves it
+     *                                                open (its owner, who shared it with "Share now"); null when anyone's
+     *                                                turn does
      */
-    public static function roundStillOpen(string $reason, int $openRoundNumber, ?UserId $openRoundReadyForUserId, ?\Throwable $previous = null): self
+    public static function roundStillOpen(string $reason, int $openRoundNumber, ?UserId $openRoundReadyForUserId, ?UserId $openRoundNotReadyForUserId, ?\Throwable $previous = null): self
     {
         $refused = new self($reason, [], $previous);
         $refused->openRoundNumber = $openRoundNumber;
         $refused->openRoundReadyForUserId = $openRoundReadyForUserId;
+        $refused->openRoundNotReadyForUserId = $openRoundNotReadyForUserId;
 
         return $refused;
     }
@@ -60,5 +65,13 @@ final class MoveRefused extends \DomainException
     public function openRoundReadyForUserId(): ?UserId
     {
         return $this->openRoundReadyForUserId;
+    }
+
+    /**
+     * Whose turn does not make that round theirs (see roundStillOpen); null otherwise.
+     */
+    public function openRoundNotReadyForUserId(): ?UserId
+    {
+        return $this->openRoundNotReadyForUserId;
     }
 }

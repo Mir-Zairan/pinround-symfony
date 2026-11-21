@@ -462,28 +462,32 @@ final class Round
      */
     public function isFindingsFor(UserId $assigneeId): bool
     {
-        return RoundKind::Draft === $this->kind && $this->isSharedRound() && !$this->ownerId->equals($assigneeId);
+        return $this->isSharedRound() && $this->handOffRound()->isFindingsFor($assigneeId);
     }
 
     /**
-     * Whether a move-on verb by $moverId closes this round (ADR-0048): an open shared round closes when the person
-     * whose turn it is moves the ticket on, and a findings round also when the assignee does. A round its owner shared
-     * outside a move ("Share now") is not closed by that owner's own move. A lead-only move closes nothing, which is the
-     * caller's to know.
+     * Whether a move-on verb by $moverId closes this round (ADR-0048): only an open shared round closes, by
+     * HandOffRound::isClosedByMoveOf's rule, so never by the own move of an owner who shared it outside a move.
      *
      * @param bool        $isMoversTurn whether the ticket was $moverId's turn when they moved it
      * @param UserId|null $assigneeId   the ticket's assignee; null when nobody has it
      */
     public function isClosedByMoveOf(UserId $moverId, bool $isMoversTurn, ?UserId $assigneeId): bool
     {
-        if (!$this->isOpenSharedRound()) {
-            return false;
-        }
-        if ($this->ownerId->equals($moverId) && DraftDecision::Shared !== $this->decision) {
-            return false;
-        }
+        return $this->isOpenSharedRound() && $this->handOffRound()->isClosedByMoveOf($moverId, $isMoversTurn, $assigneeId);
+    }
 
-        return $isMoversTurn || (null !== $assigneeId && $moverId->equals($assigneeId) && $this->isFindingsFor($assigneeId));
+    /**
+     * HandOffRound::notReadyForUserId of a shared round; null for any other round, which waits for nobody.
+     */
+    public function notReadyForUserId(): ?UserId
+    {
+        return $this->isSharedRound() ? $this->handOffRound()->notReadyForUserId() : null;
+    }
+
+    private function handOffRound(): HandOffRound
+    {
+        return new HandOffRound($this->kind, $this->ownerId, DraftDecision::Shared === $this->decision);
     }
 
     /**

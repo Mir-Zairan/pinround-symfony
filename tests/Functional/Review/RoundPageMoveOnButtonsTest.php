@@ -122,6 +122,7 @@ final class RoundPageMoveOnButtonsTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUND_PAGE);
 
         self::assertResponseStatusCodeSame(200);
+        self::assertStringContainsString('Ready for you', $page->filter('h1.round-page__title')->text());
         $box = $page->filter('section.round-move-on');
         self::assertCount(1, $box);
         self::assertSame('Your verdict', $box->filter('h2.round-move-on__label')->text());
@@ -166,6 +167,47 @@ final class RoundPageMoveOnButtonsTest extends WebTestCase
         self::assertSame('Round 1', trim((string) preg_replace('/·.*\z/s', '', $page->filter('h1.round-page__title')->text())), 'The page itself shows.');
         self::assertCount(0, $page->filter('.round-move-on'));
         self::assertCount(0, $page->filter('form[action^="/t/SHOP-1/move/"]'));
+    }
+
+    /**
+     * ADR-0048: the owner's own move never closes a round he shared with "Share now", so on his turn the page neither
+     * says it is ready for him nor offers him a move on.
+     */
+    #[Test]
+    public function theOwnerWhoseTurnItIsGetsNoMoveOnVerbsForARoundHeSharedWithShareNow(): void
+    {
+        $this->giveOmarTheTurnInProgress();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUND_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        $title = $page->filter('h1.round-page__title')->text();
+        self::assertStringStartsWith('Round 1', $title, 'The page itself shows.');
+        self::assertStringNotContainsString('Ready for', $title);
+        self::assertCount(0, $page->filter('.round-move-on'));
+        self::assertCount(0, $page->filter('form[action^="/t/SHOP-1/move/"]'));
+    }
+
+    #[Test]
+    public function theOwnerWhoseTurnItIsGetsTheMoveOnVerbsForARoundHeSharedAtHandOff(): void
+    {
+        $this->giveOmarTheTurnInProgress();
+        $roundId = $this->omarsRound;
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "UPDATE rvw_round SET decision = 'shared', decided_at = shared_at WHERE id = ?",
+            [$roundId],
+        ));
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::ROUND_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertStringContainsString('Ready for you', $page->filter('h1.round-page__title')->text());
+        $box = $page->filter('section.round-move-on');
+        self::assertCount(1, $box);
+        self::assertSame('Move SHOP-1 on to close Round 1.', $box->filter('.round-move-on__sentence')->text());
+        self::assertGreaterThan(0, $box->filter('form[action^="/t/SHOP-1/move/"]')->count());
     }
 
     /**
@@ -345,6 +387,22 @@ final class RoundPageMoveOnButtonsTest extends WebTestCase
              SELECT organization_id, id, team_id, project_id, 'check', ?, NULL, 'test', 10, '2026-11-06 11:00:00+00', visibility, reporter_id, assignee_id, tester_id FROM tkt_ticket WHERE id = ?",
             [$miaId, $ticketId],
         ));
+    }
+
+    /**
+     * SHOP-1 is back In progress and the turn read model says Omar builds it.
+     */
+    private function giveOmarTheTurnInProgress(): void
+    {
+        $progressStepId = $this->steps['progress'];
+        $omarId = $this->people['Omar']->id()->toString();
+        $ticketId = $this->ticketId;
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($progressStepId, $omarId, $ticketId): int {
+            $migrator->executeStatement('UPDATE tkt_ticket SET step_id = ? WHERE id = ?', [$progressStepId, $ticketId]);
+            $migrator->executeStatement("UPDATE ins_ticket_turn SET grp = 'doing', kind = 'build', turn_user_id = ? WHERE ticket_id = ?", [$omarId, $ticketId]);
+
+            return 0;
+        });
     }
 
     /**

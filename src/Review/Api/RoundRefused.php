@@ -53,6 +53,7 @@ final class RoundRefused extends \DomainException
     private ?string $kind = null;
     private ?int $openRoundNumber = null;
     private ?UserId $readyForUserId = null;
+    private ?UserId $notReadyForUserId = null;
 
     /**
      * The draft no longer changes: it is shared or closed. Sending the change again cannot help.
@@ -84,17 +85,21 @@ final class RoundRefused extends \DomainException
     /**
      * The draft may not be shared while round $openRoundNumber of the ticket is open (ADR-0048).
      *
-     * @param int         $openRoundNumber the open round's number, from 1
-     * @param UserId|null $readyForUserId  whose verdict the round waits for, when Review knows it: the assignee for a
-     *                                     findings round; null for any other round, whose person is whoever's turn it
-     *                                     is now, which the caller reads from the turn
+     * @param int         $openRoundNumber   the open round's number, from 1
+     * @param UserId|null $readyForUserId    whose verdict the round waits for, when Review knows it: the assignee for a
+     *                                       findings round; null for any other round, whose person is whoever's turn it
+     *                                       is now, which the caller reads from the turn
+     * @param UserId|null $notReadyForUserId whose turn does not make the round theirs, as their own move leaves it
+     *                                       open (Round::notReadyForUserId: its owner, who shared it with "Share
+     *                                       now"); null when anyone's turn does
      */
-    public static function roundStillOpen(int $openRoundNumber, ?UserId $readyForUserId): self
+    public static function roundStillOpen(int $openRoundNumber, ?UserId $readyForUserId, ?UserId $notReadyForUserId): self
     {
         $refused = new self(\sprintf(self::ROUND_STILL_OPEN, $openRoundNumber));
         $refused->kind = self::KIND_SHARING_BLOCKED;
         $refused->openRoundNumber = $openRoundNumber;
         $refused->readyForUserId = $readyForUserId;
+        $refused->notReadyForUserId = $notReadyForUserId;
 
         return $refused;
     }
@@ -155,5 +160,13 @@ final class RoundRefused extends \DomainException
     public function readyForUserId(): ?UserId
     {
         return $this->readyForUserId;
+    }
+
+    /**
+     * Whose turn does not make the open round theirs (see roundStillOpen); null otherwise.
+     */
+    public function notReadyForUserId(): ?UserId
+    {
+        return $this->notReadyForUserId;
     }
 }

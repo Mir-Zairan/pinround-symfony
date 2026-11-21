@@ -10,6 +10,7 @@ use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundAccessFacts;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\VerdictPermission;
+use App\Review\Application\OpenSharedRound;
 use App\Review\UI\Component\RoundsSection;
 use App\Review\UI\RoundPage\FocusPage;
 use App\Review\UI\RoundPage\FocusPages;
@@ -17,6 +18,7 @@ use App\Review\UI\RoundPage\RoundPages;
 use App\Review\UI\RoundsController;
 use App\Review\UI\VisibleTicket;
 use App\Review\UI\VisibleTicketLookup;
+use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\MoveOnVerbQueries;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -31,7 +33,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * side panel with the verdict forms VerdictController answers for a person VerdictPermission SET grants. The viewer is
  * only ever the logged-in person; "?area=N" picks a screen area by its position, and "?screenshot=N", from 1, the
  * screenshot of a round without areas. On an open hand-off round the person whose turn it is also gets the ticket's
- * move-on verbs (MoveOnVerbQueries), which post to the ticket page's move and so close the round (ADR-0048).
+ * move-on verbs (MoveOnVerbQueries), which post to the ticket page's move and so close the round (ADR-0048), unless
+ * their move would leave it open (OpenSharedRound::isClosedByMoveOf), as the owner's of a round shared with "Share now".
  *
  * Runs in the request transaction. An unknown or malformed key or number, another organization's ticket, a ticket the
  * viewer may not see and a round RoundPermission VIEW denies all answer the same 404, so no answer tells that a hidden
@@ -58,9 +61,6 @@ final class RoundController extends AbstractController
 
     public const string NOT_FOUND = 'No round you may see has that number.';
     public const string SCREENSHOT_NOT_FOUND = 'This round has no screenshot with that number.';
-
-    private const string OPEN_ROUND = 'open';
-    private const array HAND_OFF_KINDS = ['review', 'draft'];
 
     public function __construct(
         private readonly MoveOnVerbQueries $moveOnVerbQueries,
@@ -97,19 +97,21 @@ final class RoundController extends AbstractController
             'roundNumber' => $round->number,
             'focusRoute' => self::FOCUS_ROUTE,
             'fullScreenControlId' => self::FULL_SCREEN_CONTROL_ID,
-            'moveOnForm' => self::isOpenHandOffRound($round) ? $this->moveOnVerbQueries->moveOnFormOf($ticket) : null,
+            'moveOnForm' => self::isClosedByMoveOnOf($visible->actor->userId(), $round, $ticket->turnSnapshot->assigneeId) ? $this->moveOnVerbQueries->moveOnFormOf($ticket) : null,
         ]);
     }
 
     /**
-     * A shared review or draft round after the report that is still open: the round a move-on verb of the person whose
-     * turn it is closes (ADR-0048). Round 0 and the checklist round never wait for one.
+     * Whether a move-on verb of $viewerId would close the round (ADR-0048), were it their turn: MoveOnVerbQueries
+     * gives verbs only to the person whose turn it is. False for Round 0, the checklist round and a closed round, and
+     * for the owner of a round shared with "Share now", whose own move leaves it open. Private: the container makes
+     * a public controller method's class-typed parameters action arguments, and UserId is no service.
+     *
+     * @param UserId|null $assigneeId the ticket's assignee; null when nobody has it
      */
-    public static function isOpenHandOffRound(ReviewRoundView $round): bool
+    private static function isClosedByMoveOnOf(UserId $viewerId, ReviewRoundView $round, ?UserId $assigneeId): bool
     {
-        return $round->number >= 1
-            && self::OPEN_ROUND === $round->state
-            && \in_array($round->kind, self::HAND_OFF_KINDS, true);
+        return true === OpenSharedRound::ofReviewRound($round)?->isClosedByMoveOf($viewerId, true, $assigneeId);
     }
 
     /**
