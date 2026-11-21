@@ -154,6 +154,41 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         );
     }
 
+    public function previousHandOffRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        if (!$viewer->organizationId()->equals($organizationId)) {
+            throw new \InvalidArgumentException('The ticket visibility given is not one of the tenant\'s organization.');
+        }
+        if ($number < 2 || [] === $this->ticketQueries->visibleTicketIdsOf($viewer, [$ticketId])) {
+            return null;
+        }
+
+        // By rvw_round_ticket_id_number_key, walked down from $number; Round::isOpenSharedRound's kinds, open or closed.
+        $roundRow = $this->connection->fetchAssociative(
+            'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state FROM rvw_round AS round'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            ." AND round.number < :number AND round.kind IN ('review', 'draft')"
+            .' AND round.shared_at IS NOT NULL AND round.deleted_at IS NULL'
+            .' ORDER BY round.number DESC LIMIT 1',
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'number' => $number],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+        $roundId = self::text($roundRow['id'], 'id');
+
+        return new RoundView(
+            $roundId,
+            self::integerOrNull($roundRow['number'], 'number'),
+            self::text($roundRow['kind'], 'kind'),
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
+            new \DateTimeImmutable(self::text($roundRow['shared_at'], 'shared_at')),
+            self::text($roundRow['state'], 'state'),
+            $this->screenshotsOf($organizationId->toString(), [$roundId], [])[$roundId] ?? [],
+        );
+    }
+
     public function lowestOpenSharedRoundOf(TicketId $ticketId): ?OpenSharedRound
     {
         $organizationId = $this->requireTransactionAndTenant();
