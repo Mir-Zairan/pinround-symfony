@@ -80,17 +80,20 @@ final class TicketTurnTableTest extends KernelTestCase
 
     /**
      * The first part of Home's "needs you" query (data-model.md, "Query patterns"), as pinround_app with the tenant set
-     * and the visibility predicate of a member who is neither admin nor triager.
+     * and the visibility predicate of a member who is neither admin nor triager. The table is analyzed over 600 turns of
+     * 60 people first: with the statistics of a near-empty table, which autovacuum may leave at any point of a run, every
+     * index costs about the same and the planner picked the assignee index.
      */
     #[Test]
     public function homesTurnQueryReadsTheTurnUserIndex(): void
     {
+        $this->addTurnsOfOtherPeople(600, 60);
         $connection = $this->connection();
         $tenantContext = self::getContainer()->get(TenantContext::class);
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
         $connection->beginTransaction();
         try {
-            // The test table holds a handful of rows, for which a sequential scan is cheaper than any index.
+            // 600 rows fit in a few pages, for which a sequential scan is cheaper than any index.
             $connection->executeStatement('SET LOCAL enable_seqscan = off');
             $plan = implode("\n", array_map(static fn (mixed $line): string => \is_string($line) ? $line : '', $connection->fetchFirstColumn(\sprintf(
                 "EXPLAIN SELECT ticket_id, kind, base_score, waiting_since FROM ins_ticket_turn tt
@@ -189,13 +192,54 @@ final class TicketTurnTableTest extends KernelTestCase
         }
     }
 
+    /**
+     * Tickets SHOP-(1000 + n) for n from 1 to $tickets, each with a turn row waiting on one of $people people by turns,
+     * none of them Lena; then the turn table is analyzed, through the migrator, which owns it. tearDown removes the
+     * tickets and so, by ON DELETE CASCADE, their turn rows.
+     */
+    private function addTurnsOfOtherPeople(int $tickets, int $people): void
+    {
+        $tenantContext = self::getContainer()->get(TenantContext::class);
+        $tenantContext->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $this->migrator()->transactional(static function (Connection $migrator) use ($tickets, $people): void {
+                $migrator->executeStatement(
+                    "INSERT INTO tkt_ticket (organization_id, id, project_id, number, key, title, description, type, priority, priority_rank,
+                         step_id, reporter_id, visibility, components, check_reasons, created_at, updated_at)
+                     SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8000-00000016' || lpad(to_hex(number), 4, '0') AS uuid), CAST(? AS uuid),
+                         1000 + number, 'SHOP-' || (1000 + number), 'Checkout button is hidden', '', 'bug', 'major', 2,
+                         CAST('0197a3c0-0000-7000-8000-00000000f0d0' AS uuid), CAST(? AS uuid), 'all', '{}', '{}',
+                         TIMESTAMPTZ '2027-03-15 10:00:00+00', TIMESTAMPTZ '2027-03-15 10:00:00+00'
+                     FROM generate_series(1, ?) AS number",
+                    [self::ACME_FOODS, self::SHOP_PROJECT, self::LENA, $tickets],
+                );
+                $migrator->executeStatement(
+                    "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, kind, base_score, waiting_since, visibility, reporter_id)
+                     SELECT CAST(? AS uuid), CAST('0197a3c0-0000-7000-8000-00000016' || lpad(to_hex(number), 4, '0') AS uuid), CAST(? AS uuid), CAST(? AS uuid),
+                         'doing', CAST('0197a3c0-0000-7000-8000-00000017' || lpad(to_hex(number % ?), 4, '0') AS uuid), 'build', 100,
+                         TIMESTAMPTZ '2027-02-01 06:00:00+00' + number * INTERVAL '1 minute', 'all', CAST(? AS uuid)
+                     FROM generate_series(1, ?) AS number",
+                    [self::ACME_FOODS, self::SHOP_TEAM, self::SHOP_PROJECT, $people, self::LENA, $tickets],
+                );
+            });
+        } finally {
+            $tenantContext->clear();
+        }
+        $this->migrator()->executeStatement('ANALYZE ins_ticket_turn');
+    }
+
     private function connection(): Connection
     {
         return self::getContainer()->get('doctrine.dbal.default_connection');
     }
 
+    private function migrator(): Connection
+    {
+        return self::getContainer()->get('doctrine.dbal.migrator_connection');
+    }
+
     private function ticketRows(): TicketRows
     {
-        return new TicketRows(self::getContainer()->get('doctrine.dbal.migrator_connection'), self::getContainer()->get(TenantContext::class));
+        return new TicketRows($this->migrator(), self::getContainer()->get(TenantContext::class));
     }
 }

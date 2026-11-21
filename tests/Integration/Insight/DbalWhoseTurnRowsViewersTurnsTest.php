@@ -55,8 +55,8 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
     {
         self::getContainer()->get('doctrine')->resetManager();
         $this->tenantContext()->reset();
-        // No ANALYZE after the rows go: statistics of an empty table let the planner pick any index, which breaks
-        // TicketTurnTableTest's plan check; those of the plan test's 600 rows keep the selective one the cheapest.
+        // No ANALYZE after the rows go: statistics of an empty table let the planner pick any index; those of the plan
+        // test's 600 rows keep the selective one the cheapest for a later plan check that seeds no rows of its own.
         $this->removeRows();
         parent::tearDown();
     }
