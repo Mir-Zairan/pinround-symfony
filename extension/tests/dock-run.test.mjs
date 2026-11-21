@@ -383,11 +383,11 @@ test('the page\'s DOM finds no dock, step card, pin, Remove or note, and a click
     inRoot('.surface').box = { left: 0, top: 0, width: 1280, height: 800 };
     page.keydown(page.document.body, 'p');
     page.click(inRoot('.surface'), { clientX: 320, clientY: 200 });
-    page.typeInto(inRoot('textarea'), note);
-    page.keydown(inRoot('textarea'), 'Escape');
+    page.typeInto(inRoot('.note-field'), note);
+    page.keydown(inRoot('.note-field'), 'Escape');
     assert.deepEqual([inRoot('.pin').getAttribute('aria-label'), inRoot('.dock-step').hidden], [`Pin 1: ${note}`, false]);
 
-    for (const className of ['dock', 'dock-handle', 'dock__clear', 'dock__status', 'dock-step', 'dock-step__do', 'surface', 'pin', 'pin-remove', 'pin__note', 'note-editor']) {
+    for (const className of ['dock', 'dock-handle', 'dock__clear', 'dock__status', 'dock-step', 'dock-step__do', 'surface', 'pin', 'note-editor__remove', 'pin__note', 'note-editor', 'dock__bar', 'dock-save']) {
         assert.notEqual(root.querySelector(`.${className}`), null, `The overlay holds a .${className}.`);
         assert.equal(page.document.querySelector(`.${className}`), null, className);
         assert.deepEqual(page.document.getElementsByClassName(className), [], className);
@@ -401,7 +401,7 @@ test('the page\'s DOM finds no dock, step card, pin, Remove or note, and a click
         listening.addEventListener('click', (event) => heard.push([nameOf(event.target), event.composedPath().map(nameOf)]), { capture: true });
     }
     page.document.addEventListener('click', () => heard.push('bubbled to the page'));
-    const clicked = ['.dock-step__title', '.dock__grip', '.pin', 'textarea', '.pin-remove'];
+    const clicked = ['.dock-step__title', '.dock__grip', '.pin', '.note-field', '.note-editor__remove'];
     for (const selector of clicked) {
         page.click(inRoot(selector));
     }

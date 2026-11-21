@@ -39,18 +39,14 @@ globalThis.pinroundDockRun ??= (() => {
     });
 
     const STYLES = `
-        .dock--playing { width: 260px; }
-        .dock-step { display: grid; gap: 6px; padding-top: 6px; border-top: 1px solid #c3c7cc; }
         .dock-step[hidden], .dock-step [hidden] { display: none; }
         .dock-step p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-        .dock-step__where { font-size: 12px; color: #4a5250; }
-        .dock-step__title { font-weight: 700; }
-        .dock-step__texts { display: grid; gap: 4px; max-height: 200px; overflow: auto; }
-        .dock-step__label { display: block; font-size: 12px; font-weight: 700; color: #4a5250; }
-        .dock-step__buttons { display: flex; flex-wrap: wrap; gap: 6px; }
-        .dock-step button { padding: 4px 10px; border: 1px solid #2f6fd6; border-radius: 6px; background: #ffffff; color: #1f4fa0; cursor: pointer; }
-        .dock-step .dock-step__passed { background: #006c51; border-color: #006c51; color: #ffffff; }
-        .dock-step .dock-step__problem { border-color: #a3221a; color: #a3221a; }
+        .dock-step__where { font-size: 0.75rem; color: var(--muted); }
+        .dock-step__title { font: 700 1rem/1.3 var(--heading-font); }
+        .dock-step__texts { display: grid; gap: 6px; max-height: 200px; overflow: auto; }
+        .dock-step__label { display: block; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+        .dock-step .dock-step__passed { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+        .dock-step .dock-step__problem { border-color: transparent; color: var(--danger); }
     `;
 
     const isObject = (value) => null !== value && 'object' === typeof value && !Array.isArray(value);
@@ -244,7 +240,6 @@ globalThis.pinroundDockRun ??= (() => {
             show(run) {
                 shownRun = run;
                 card.hidden = null === run;
-                slot.parentNode?.classList.toggle('dock--playing', null !== run);
                 if (null === run) {
                     return;
                 }

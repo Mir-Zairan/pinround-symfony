@@ -10,7 +10,7 @@ import { CHOOSE_TARGET_FIRST, NEW_NOTEBOOK, TargetGoneError, choiceValueOf, forg
 import { NEW_SCREENSHOT, captureToTarget, newReportSavedMessage } from '../capture/capture-to-target.js';
 import { OLD_CAPTURES_DROPPED, REPORT_KEPT_IN_PINROUND, REPORT_OPENED, clearNewReport, dropOldReportCaptures, finishNewReport, loadNewReport, saveTypedReport, sendPendingCapture } from '../capture/new-report.js';
 import { captureToNotebook, makeNotebook } from '../capture/notebook-capture.js';
-import { activePageContext } from '../capture/page-context.js';
+import { activePageTitle } from '../capture/page-context.js';
 import { activeTabId, openPageDock, openPinOverlay } from '../capture/page-pins.js';
 import { StepRefusal } from '../player/step-runner.js';
 import { fillReportInputs, showTargetFields } from './report-captures.js';
@@ -106,13 +106,13 @@ async function captureStepToNotebook(api, notebook, tabId, texts) {
 }
 
 /**
- * Starts the capture's title and summary from the page the popup was opened on, for the person to edit. A field the
- * person already typed in is kept, unless `isAfterCapture`: the last capture took its text.
+ * Starts the capture's title from the page the popup was opened on, for the person to edit; the summary starts empty.
+ * A field the person already typed in is kept, unless `isAfterCapture`: the last capture took its text.
  */
 async function fillShotTexts(isAfterCapture) {
     // Both texts are optional, so a tab that cannot be read leaves them empty rather than failing a capture that worked.
-    const { title, summary } = await activePageContext(browser, navigator).catch(() => ({ title: '', summary: '' }));
-    for (const [id, text] of [['shot-title', title], ['shot-summary', summary]]) {
+    const title = await activePageTitle(browser).catch(() => '');
+    for (const [id, text] of [['shot-title', title], ['shot-summary', '']]) {
         if (isAfterCapture || '' === element(id).value) {
             element(id).value = text;
         }

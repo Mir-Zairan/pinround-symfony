@@ -7,8 +7,9 @@ import { loadSettings } from '../shared/settings.js';
 import { captureTexts, listDraftScreenshots } from '../capture/capture.js';
 import { CHOOSE_TARGET_FIRST, NEW_REPORT, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
 import { captureToTarget } from '../capture/capture-to-target.js';
-import { REPORT_KEPT_IN_PINROUND, REPORT_OPENED, finishNewReport, loadNewReport } from '../capture/new-report.js';
-import { browserNameAndVersion, pageContext } from '../capture/page-context.js';
+import { clearNewReport, loadNewReport } from '../capture/new-report.js';
+import { pageTitleOf } from '../capture/page-context.js';
+import { capturedMessage, draftSavedMessage, keepWaitingCapture, loadWaitingCaptures, saveWaitingCaptures } from '../capture/waiting-captures.js';
 import { SYSTEM_CLOCK } from '../player/step-runner.js';
 import { openStartPage, scenarioToPlay, taggedCaptureTexts } from './dock-scenario.js';
 
@@ -23,11 +24,17 @@ export const DOCK_TEXTS = Object.freeze({
     choiceGone: 'That choice is no longer offered. Choose again.',
     nothingToSave: 'Capture into a new report first. Draft rounds and notebooks keep each capture as you take it.',
 });
+/** The longest title or project key the dock may send with Save draft; new-report.js holds the real caps. */
+const TYPED_MAX_LENGTH = 1000;
 
 /**
- * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean}} DockState
- *   count is the screenshots the chosen draft holds, null when the dock cannot tell (a notebook, or a list that did not
- *   load); canSave is true only for a new report that has its draft and no capture still on its way
+ * @typedef {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>}>, needsTitle: boolean, needsProject: boolean}} WaitingReport
+ *   the captures waiting for Save draft, with where their pins are; needsTitle while no draft is made, needsProject
+ *   when the popup has no project key either
+ * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean,
+ *   newReport: WaitingReport|null}} DockState count is the captures waiting for a new report, the screenshots of the
+ *   chosen draft round, or null when the dock cannot tell (a notebook, or a list that did not load); canSave is true
+ *   only for a new report with a capture waiting or one to send again; newReport only while a new report is chosen
  * @typedef {{message?: string, isError?: boolean, state?: DockState}} DockAnswer
  */
 
@@ -40,13 +47,13 @@ export function isDockRequest(message) {
  * @param {{pinroundDock: string, value?: unknown}} request
  * @param {{id?: number, url?: string, title?: string, width?: number, height?: number}} tab the tab whose dock asked,
  *   as Chrome names the sender
- * @param {{browser: object, navigator: object, apiOf?: (settings: {origin: string, token: string}) => import('../shared/api.js').PinroundApi,
+ * @param {{browser: object, apiOf?: (settings: {origin: string, token: string}) => import('../shared/api.js').PinroundApi,
  *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} deps the clock, in ms, times the wait for the
  *   start page to load; the system's by default
  * @returns {Promise<DockAnswer>} never rejects: a refusal is an answer with isError. A scenario request answers
  *   {scenario} (dock-scenario.js) instead of a state
  */
-export async function answerDockRequest(request, tab, { browser, navigator, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local), clock = SYSTEM_CLOCK }) {
+export async function answerDockRequest(request, tab, { browser, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local), clock = SYSTEM_CLOCK }) {
     if (!DOCK_ACTIONS.includes(request.pinroundDock) || !Number.isInteger(tab?.id) || !isReadableValue(request)) {
         return { message: DOCK_TEXTS.unknownRequest, isError: true };
     }
@@ -64,10 +71,10 @@ export async function answerDockRequest(request, tab, { browser, navigator, apiO
             return await choose(api, session, request.value);
         }
         if ('capture' === request.pinroundDock) {
-            return await capture({ api, browser, session, tab, navigator, stepTag: runRules.checkedTag(request.value ?? null) });
+            return await capture({ api, browser, session, tab, stepTag: runRules.checkedTag(request.value ?? null) });
         }
         if ('save-draft' === request.pinroundDock) {
-            return await saveDraft(api, browser, session, settings.origin);
+            return await saveDraft(api, session, request.value);
         }
         if ('scenario' === request.pinroundDock) {
             return await scenarioToPlay({ api, browser, session, pinroundOrigin: settings.origin }, request.value);
@@ -102,8 +109,22 @@ function isReadableValue({ pinroundDock: action, value }) {
     if ('open-start' === action) {
         return 'string' === typeof value && value.length <= runRules.URL_MAX_LENGTH;
     }
+    if ('save-draft' === action) {
+        return null !== value && 'object' === typeof value && isTypedText(value.reportTitle) && isTypedText(value.project);
+    }
 
     return true;
+}
+
+const isTypedText = (value) => 'string' === typeof value && value.length <= TYPED_MAX_LENGTH;
+
+/** The dock's shorter words for the popup's choices, as its narrow picker shows them. */
+function dockLabelOf({ value, label }) {
+    if (NEW_REPORT === value) {
+        return 'New report';
+    }
+
+    return label.replace(/^My draft round on /u, 'My draft round · ').replace(/^Notebook: /u, 'Notebook · ');
 }
 
 async function stateAnswer(api, session) {
@@ -122,22 +143,32 @@ async function dockStateWithProblems(api, session) {
     if (null !== droppedMessage) {
         await forgetCaptureTarget(session);
     }
-    const { count, canSave } = await draftCountOf(api, session, target);
+    const { count, canSave, newReport } = await draftCountOf(api, session, target);
 
     return {
-        state: { choices: choices.map(({ value, label }) => ({ value, label })), chosen: null === target ? '' : choiceValueOf(target), count, canSave },
+        state: { choices: choices.map((choice) => ({ value: choice.value, label: dockLabelOf(choice) })), chosen: null === target ? '' : choiceValueOf(target), count, canSave, newReport },
         problems: [droppedMessage, ...loadProblems].filter((problem) => null !== problem),
     };
 }
 
 async function draftCountOf(api, session, target) {
     if (null === target) {
-        return { count: null, canSave: false };
+        return { count: null, canSave: false, newReport: null };
     }
     if (NEW_REPORT === target.kind) {
         const newReport = await loadNewReport(session);
+        const waiting = await loadWaitingCaptures(session);
+        const needsTitle = null === newReport.draftId && null === newReport.pendingCapture;
 
-        return { count: newReport.screenshotCount, canSave: null !== newReport.draftId && null === newReport.pendingCapture };
+        return {
+            count: waiting.length,
+            canSave: waiting.length > 0 || null !== newReport.pendingCapture,
+            newReport: {
+                shots: waiting.map((shot) => ({ pinSpots: shot.pins.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })) })),
+                needsTitle,
+                needsProject: needsTitle && '' === newReport.project.trim(),
+            },
+        };
     }
     if ('ticket' === target.kind) {
         const screenshots = await listDraftScreenshots(api, target.ticketKey).catch((error) => {
@@ -147,10 +178,10 @@ async function draftCountOf(api, session, target) {
             throw error;
         });
 
-        return { count: null === screenshots ? null : screenshots.length, canSave: false };
+        return { count: null === screenshots ? null : screenshots.length, canSave: false, newReport: null };
     }
 
-    return { count: null, canSave: false };
+    return { count: null, canSave: false, newReport: null };
 }
 
 /** Remembers the picked target when pinround still offers it; '' forgets the choice. */
@@ -171,30 +202,40 @@ async function choose(api, session, value) {
 }
 
 /** stepTag, from the dock's run, names the step "Found a problem" was pressed on; null for a plain capture. */
-async function capture({ api, browser, session, tab, navigator, stepTag }) {
+async function capture({ api, browser, session, tab, stepTag }) {
     const target = await loadCaptureTarget(session);
     if (null === target) {
         return { message: CHOOSE_TARGET_FIRST, isError: true, state: await dockState(api, session) };
     }
-    // The dock has no fields to type in: a new report takes what the popup kept, and the texts start from the page.
-    const newReport = await loadNewReport(session);
-    const typed = { project: newReport.project, reportTitle: newReport.reportTitle };
-    const { title, summary } = pageContext(tab, await browserNameAndVersion(navigator).catch(() => ''));
-    const pageTexts = captureTexts(title, summary);
+    // The title starts from the page; the summary is the person's own words, which the dock does not ask for.
+    const pageTexts = captureTexts(pageTitleOf(tab), '');
     const texts = null === stepTag ? pageTexts : taggedCaptureTexts(pageTexts, stepTag);
-    const message = await captureToTarget({ api, browser, storage: session, tabId: tab.id, target, typed, texts });
+    if (NEW_REPORT === target.kind) {
+        const waitingCount = await keepWaitingCapture(browser, session, tab.id, texts);
+
+        return { message: capturedMessage(waitingCount), state: await dockState(api, session) };
+    }
+    const message = await captureToTarget({ api, browser, storage: session, tabId: tab.id, target, typed: { project: '', reportTitle: '' }, texts });
 
     return { message, state: await dockState(api, session) };
 }
 
-async function saveDraft(api, browser, session, pinroundOrigin) {
+/**
+ * Saves the captures waiting for the new report as its draft, with the title typed in the dock's Save draft panel and
+ * its project key, or the popup's when the panel asked for none. The draft is then forgotten here, as it is done: the
+ * person opens and sends it in pinround.
+ */
+async function saveDraft(api, session, typed) {
     const target = await loadCaptureTarget(session);
-    if (null === target || NEW_REPORT !== target.kind || null === (await loadNewReport(session)).draftId) {
+    if (null === target || NEW_REPORT !== target.kind) {
         return { message: DOCK_TEXTS.nothingToSave, isError: true, state: await dockState(api, session) };
     }
-    const isOpened = await finishNewReport(session, browser, pinroundOrigin);
+    const kept = await loadNewReport(session);
+    const project = '' === typed.project.trim() ? kept.project : typed.project;
+    const saved = await saveWaitingCaptures(session, api, { project, reportTitle: typed.reportTitle });
+    await clearNewReport(session);
 
-    return { message: isOpened ? REPORT_OPENED : REPORT_KEPT_IN_PINROUND, state: await dockState(api, session) };
+    return { message: draftSavedMessage(saved.screenshotCount), state: await dockState(api, session) };
 }
 
 async function forgetIfRemembered(session, goneTarget) {

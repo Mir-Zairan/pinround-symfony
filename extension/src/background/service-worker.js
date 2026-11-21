@@ -7,7 +7,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!isDockRequest(message) || undefined === sender.tab) {
         return false;
     }
-    answerDockRequest(message, sender.tab, { browser, navigator }).then(sendResponse);
+    answerDockRequest(message, sender.tab, { browser }).then(sendResponse);
 
     // Keeps the reply channel open until the answer is sent.
     return true;

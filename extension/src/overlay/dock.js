@@ -1,7 +1,8 @@
-// The dock: pinround's toolbar on the tested page, built by overlay.js inside the overlay's own closed shadow root, so
-// the page can neither find nor read it. Injected as a classic script before overlay.js, like pin-rules.js; node --test
-// imports it for its rules. The whole file is one expression, so a second injection keeps the first.
-// Every text from pinround or the page goes in through textContent or an option's text, never as markup.
+// The dock: pinround's one-row toolbar on the tested page, built by overlay.js inside the overlay's own closed shadow
+// root, so the page can neither find nor read it. Injected as a classic script before overlay.js, like pin-rules.js;
+// node --test imports it for its rules. The whole file is one expression, so a second injection keeps the first.
+// Every text from pinround or the page goes in through textContent or an option's text, never as markup. The colours
+// are the overlay's tokens (overlay.js :host), so the bar is dark on a light screen and light on a dark one.
 globalThis.pinroundDock ??= (() => {
     /** The local storage key's prefix; the site's host follows, so each site keeps its own side and height. */
     const PLACE_KEY_PREFIX = 'pinroundDockPlace:';
@@ -13,30 +14,55 @@ globalThis.pinroundDock ??= (() => {
     const EDGE_GAP_PX = 8;
     /** How far one arrow key on the grip moves the dock up or down, in percent of the room it has. */
     const GRIP_STEP_PCT = 5;
+    /** How far a press on the shrunk puck may move, in CSS pixels, and still be a click that opens the dock. */
+    const PUCK_CLICK_SLOP_PX = 4;
     const KEY_ACTIONS = Object.freeze({ p: 'pin', c: 'capture', h: 'shrink' });
     const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
     /** A cap on what the extension's answer may put in the picker, so a broken answer cannot flood the page. */
     const MAX_CHOICES = 200;
+    // The caps of capture.js and new-report.js, which a classic script cannot import; a test keeps them in step.
+    const MAX_SHOTS = 10;
+    const MAX_PIN_SPOTS = 100;
+    const REPORT_TITLE_MAX_LENGTH = 200;
+    const PROJECT_KEY_MAX_LENGTH = 20;
 
     const TEXTS = Object.freeze({
         toolbar: 'pinround dock',
         grip: 'Move the dock',
-        gripHint: 'Drag it, or use the arrow keys.',
-        target: 'Put it in',
-        noTarget: 'Choose where to put it',
+        gripHint: 'Drag to move. Arrow keys move it too.',
+        target: 'Save to',
+        noTarget: 'Choose where to save',
         pin: 'Pin',
+        pinHint: 'Pin mode (P)',
         clearPins: (pinCount) => `Clear ${pinCount} ${1 === pinCount ? 'pin' : 'pins'}`,
+        clearPinsHint: 'Remove every pin on this page',
         capture: 'Capture',
+        captureHint: 'Capture (C)',
         play: 'Play',
         saveDraft: 'Save draft',
-        shrink: 'Shrink',
+        saveDraftHint: 'Review the captures',
+        saveDraftCannot: 'Draft rounds and notebooks keep each capture as you take it.',
+        saveDraftCount: (count) => `Save draft, ${count} in it`,
+        shrink: 'Shrink the dock',
+        shrinkHint: 'Shrink (H)',
         letterKeys: 'Letter keys',
+        letterKeysShort: 'Keys',
         letterKeysHint: 'While on, P, C and H work anywhere on the page. Off, they work only in the dock.',
         switchedOn: 'On',
         switchedOff: 'Off',
         busy: 'Still working on the last request. Try again when it is done.',
-        open: 'Open the dock',
+        open: 'Open the pinround dock',
         notAnswered: 'The extension did not answer. Open its popup and try again.',
+        savePanel: 'Save draft',
+        saveCount: (count) => `Save ${count} ${1 === count ? 'capture' : 'captures'}`,
+        shotCaption: (shotNumber, pinCount) => `Shot ${shotNumber} · ${pinCount} ${1 === pinCount ? 'pin' : 'pins'}`,
+        reportTitle: 'What is wrong, in one line',
+        project: 'Project key',
+        projectExample: 'SHOP',
+        goesTo: 'Goes to a new report draft. Nobody is told yet. You send it from pinround.',
+        keepTesting: 'Keep testing',
+        titleRefused: 'Write what is wrong in one line, at most 200 characters.',
+        projectRefused: 'Type the project key, for example SHOP.',
     });
 
     const STYLES = `
@@ -46,38 +72,193 @@ globalThis.pinroundDock ??= (() => {
             top: calc(${EDGE_GAP_PX}px + (100% - ${2 * EDGE_GAP_PX}px) * var(--top-pct) / 100);
             transform: translateY(calc(var(--top-pct) * -1%));
             pointer-events: auto;
-            color: #161d1b;
-            background: #ffffff;
-            box-shadow: 0 0 0 1px #161d1b, 0 4px 12px rgb(0 0 0 / 30%);
+            font: 500 0.8rem/1.2 var(--font);
         }
         .dock--left { left: ${EDGE_GAP_PX}px; }
         .dock--right { right: ${EDGE_GAP_PX}px; }
         .dock--dragging { transform: none; right: auto; }
-        .dock { display: grid; gap: 6px; width: 172px; padding: 8px; border-radius: 10px; }
-        .dock[hidden], .dock-handle[hidden] { display: none; }
-        .dock__head { display: flex; align-items: center; gap: 6px; }
-        .dock__logo { display: flex; align-items: center; gap: 6px; flex: 1; font-weight: 700; }
-        .dock__logo::before { content: ''; width: 14px; height: 14px; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 0 2px #161d1b, inset 0 0 0 2px #161d1b; }
-        .dock__grip { padding: 2px 6px; border: none; border-radius: 6px; background: none; color: #4a5250; cursor: grab; letter-spacing: -2px; }
+        .dock[hidden], .dock-handle[hidden], .dock [hidden] { display: none; }
+        .dock__bar {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 4px;
+            border-radius: 12px;
+            background: var(--dock);
+            color: var(--dock-fg);
+            box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+            white-space: nowrap;
+        }
+        .dock button, .dock select, .dock input { font: inherit; color: inherit; }
+        .dock__bar button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+        }
+        .dock__bar button:hover { background: var(--dock-hover); }
+        .dock__bar button[aria-pressed="true"] { background: var(--primary); color: var(--on-primary); }
+        .dock__bar button[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+        .dock__bar button[aria-disabled="true"]:hover { background: transparent; }
+        .dock :focus-visible, .dock-handle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        .dock__grip { cursor: grab; padding: 4px 6px; }
         .dock--dragging .dock__grip { cursor: grabbing; }
-        .dock label { display: grid; gap: 2px; font-size: 12px; }
-        .dock select { width: 100%; padding: 4px; border: 1px solid #8a8f98; border-radius: 6px; color: inherit; background: #ffffff; text-overflow: ellipsis; }
-        .dock__action { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #2f6fd6; border-radius: 6px; background: #ffffff; color: #1f4fa0; cursor: pointer; }
-        .dock__action[hidden] { display: none; }
-        .dock__action[aria-pressed="true"] { background: #2f6fd6; color: #ffffff; }
-        .dock__action[aria-disabled="true"] { border-color: #c3c7cc; color: #6b7280; cursor: default; }
-        .dock select[aria-disabled="true"] { border-color: #c3c7cc; color: #6b7280; }
-        .dock kbd { font: 12px/1 system-ui, sans-serif; padding: 2px 4px; border: 1px solid currentColor; border-radius: 4px; opacity: 0.8; }
-        .dock__action[aria-pressed="true"] kbd { opacity: 1; }
-        .dock__count { min-width: 20px; padding: 0 6px; border-radius: 10px; background: #161d1b; color: #ffffff; font-size: 12px; line-height: 20px; text-align: center; }
-        .dock__count[hidden] { display: none; }
-        .dock__switch { font-size: 12px; font-weight: 700; }
-        .dock__status { margin: 0; font-size: 12px; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
+        .dock__logo { position: relative; flex: none; width: 22px; height: 22px; border-radius: 6px; background: #006b5f; }
+        .dock__logo::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 8px;
+            height: 8px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .dock__dots { flex: none; width: 6px; height: 14px; opacity: 0.7; background: radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 0 / 3px 4.67px; }
+        .dock__target {
+            max-width: 150px;
+            padding: 5px 6px;
+            border: 1px solid currentColor;
+            border-radius: 8px;
+            background: transparent;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+        .dock__target option { color: var(--fg); background: var(--panel); }
+        .dock__target[aria-disabled="true"] { opacity: 0.45; }
+        .dock__sep { flex: none; width: 1px; height: 22px; margin: 0 4px; background: currentColor; opacity: 0.2; }
+        .dock kbd { font: inherit; font-size: 0.7rem; opacity: 0.6; }
+        .dock__icon { position: relative; flex: none; display: inline-block; box-sizing: border-box; }
+        .dock__icon--pin { width: 12px; height: 12px; border: 2px solid currentColor; border-radius: 50%; }
+        .dock__icon--capture { width: 15px; height: 11px; border: 2px solid currentColor; border-radius: 3px; }
+        .dock__icon--capture::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: currentColor;
+            transform: translate(-50%, -50%);
+        }
+        .dock__icon--play { width: 0; height: 0; border-left: 9px solid currentColor; border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
+        .dock__icon--shrink { width: 12px; height: 2px; background: currentColor; }
+        .dock__send { background: var(--primary) !important; color: var(--on-primary); }
+        .dock__count {
+            min-width: 18px;
+            padding: 0 5px;
+            border-radius: 999px;
+            background: var(--on-primary);
+            color: var(--primary);
+            font-size: 0.7rem;
+            font-weight: 700;
+            line-height: 18px;
+            text-align: center;
+        }
+        .dock__keys { padding: 6px 6px; font-size: 0.7rem; opacity: 0.8; }
+        .dock__keys .dock__switch { font-weight: 700; }
+        .dock__pops {
+            position: absolute;
+            top: calc(100% + 8px);
+            display: grid;
+            gap: 8px;
+            justify-items: end;
+            width: max-content;
+        }
+        .dock--left .dock__pops { left: 0; justify-items: start; }
+        .dock--right .dock__pops { right: 0; }
+        .dock--low .dock__pops { top: auto; bottom: calc(100% + 8px); }
+        .dock-pop, .dock-step {
+            display: grid;
+            gap: 8px;
+            box-sizing: border-box;
+            width: min(340px, calc(100vw - 64px));
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: var(--panel);
+            color: var(--fg);
+            box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+            font: 400 0.875rem/1.4 var(--font);
+            white-space: normal;
+        }
+        .dock-pop h3 { margin: 0; font: 700 1rem/1.3 var(--heading-font); }
+        .dock-pop p { margin: 0; }
+        .dock-save__shots { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; }
+        .dock-save__shot { display: grid; gap: 4px; margin: 0; font-size: 0.75rem; color: var(--muted); }
+        .dock-save__thumb { position: relative; width: 92px; height: 60px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow: hidden; }
+        .dock-save__dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border: 1.5px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 0 0 1px #161d1b;
+            transform: translate(-50%, -50%);
+        }
+        .dock-save__field { display: grid; gap: 4px; font-weight: 500; }
+        .dock-save__field input {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+        }
+        .dock-save__field input[aria-invalid="true"] { border-color: var(--danger); }
+        .dock-save__error { color: var(--danger); font-weight: 500; }
+        .dock-save__error:empty { display: none; }
+        .dock-save__goes { color: var(--muted); }
+        .dock-save__buttons, .dock-step__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+        .dock-pop button, .dock-step button {
+            padding: 8px 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: transparent;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .dock-pop .dock-btn--primary { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+        .dock__status {
+            max-width: min(340px, calc(100vw - 64px));
+            max-height: 120px;
+            margin: 0;
+            padding: 8px 12px;
+            overflow: auto;
+            border-radius: 10px;
+            background: var(--dock);
+            color: var(--dock-fg);
+            box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+            font: 500 0.8rem/1.4 var(--font);
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
         .dock__status:empty { display: none; }
-        .dock__status--error { color: #a3221a; }
-        .dock-handle { width: 32px; height: 32px; padding: 0; border: none; border-radius: 50%; cursor: pointer; }
-        .dock-handle::before { content: ''; display: block; width: 14px; height: 14px; margin: auto; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 0 2px #161d1b, inset 0 0 0 2px #161d1b; }
-        .dock :focus-visible, .dock-handle:focus-visible { outline: 2px solid #2f6fd6; outline-offset: 2px; }
+        .dock__status--error { background: var(--panel); color: var(--danger); border: 1px solid var(--danger); }
+        .dock-handle {
+            width: 46px;
+            height: 46px;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: var(--dock);
+            box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+            cursor: pointer;
+            touch-action: none;
+        }
+        .dock-handle .dock__logo { width: 30px; height: 30px; margin: auto; border-radius: 8px; }
+        .dock-handle .dock__logo::after { width: 11px; height: 11px; }
+        .dock-handle .dock__count { position: absolute; top: -4px; right: -4px; background: var(--primary); color: var(--on-primary); }
+        @media (max-width: 600px) {
+            .dock__label, .dock kbd { display: none; }
+            .dock__target { max-width: 96px; }
+        }
     `;
 
     const clampedPercent = (value) => Math.min(100, Math.max(0, value));
@@ -157,8 +338,32 @@ globalThis.pinroundDock ??= (() => {
         return KEY_ACTIONS[event.key.toLowerCase()] ?? null;
     }
 
+    const isPercent = (value) => 'number' === typeof value && Number.isFinite(value) && value >= 0 && value <= 100;
+
+    /** @returns {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>}>, needsTitle: boolean, needsProject: boolean}|null|undefined} undefined when unreadable */
+    function checkedWaitingReport(value) {
+        if (undefined === value || null === value) {
+            return null;
+        }
+        if ('object' !== typeof value || !Array.isArray(value.shots) || value.shots.length > MAX_SHOTS
+            || 'boolean' !== typeof value.needsTitle || 'boolean' !== typeof value.needsProject) {
+            return undefined;
+        }
+        const shots = [];
+        for (const shot of value.shots) {
+            if (null === shot || 'object' !== typeof shot || !Array.isArray(shot.pinSpots) || shot.pinSpots.length > MAX_PIN_SPOTS
+                || !shot.pinSpots.every((spot) => null !== spot && 'object' === typeof spot && isPercent(spot.x_pct) && isPercent(spot.y_pct))) {
+                return undefined;
+            }
+            shots.push({ pinSpots: shot.pinSpots.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })) });
+        }
+
+        return { shots, needsTitle: value.needsTitle, needsProject: value.needsProject };
+    }
+
     /**
-     * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean}} DockState
+     * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean,
+     *   newReport: null|{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>}>, needsTitle: boolean, needsProject: boolean}}} DockState
      * @returns {DockState|null} the state as the extension answered it, or null when it is not one
      */
     function checkedState(state) {
@@ -166,9 +371,33 @@ globalThis.pinroundDock ??= (() => {
             || 'boolean' !== typeof state.canSave || !(null === state.count || (Number.isInteger(state.count) && state.count >= 0))) {
             return null;
         }
+        const newReport = checkedWaitingReport(state.newReport);
+        if (undefined === newReport) {
+            return null;
+        }
         const choices = state.choices.slice(0, MAX_CHOICES).filter((choice) => 'string' === typeof choice?.value && 'string' === typeof choice.label);
 
-        return { choices: choices.map(({ value, label }) => ({ value, label })), chosen: state.chosen, count: state.count, canSave: state.canSave };
+        return { choices: choices.map(({ value, label }) => ({ value, label })), chosen: state.chosen, count: state.count, canSave: state.canSave, newReport };
+    }
+
+    /**
+     * Why the Save draft panel cannot send what was typed, as new-report.js would refuse it, or null when it can.
+     *
+     * @param {{reportTitle: string, project: string}} typed
+     * @param {{needsTitle: boolean, needsProject: boolean}} asked which fields the panel shows
+     * @returns {null|string}
+     */
+    function refusalOfTyped(typed, asked) {
+        const reportTitle = typed.reportTitle.trim();
+        if (asked.needsTitle && ('' === reportTitle || [...reportTitle].length > REPORT_TITLE_MAX_LENGTH)) {
+            return TEXTS.titleRefused;
+        }
+        const project = typed.project.trim();
+        if (asked.needsProject && ('' === project || [...project].length > PROJECT_KEY_MAX_LENGTH)) {
+            return TEXTS.projectRefused;
+        }
+
+        return null;
     }
 
     /**
@@ -176,12 +405,19 @@ globalThis.pinroundDock ??= (() => {
      *
      * @param {ShadowRoot} shadow the overlay's closed root
      * @param {{storage: {get: Function, set: Function, onChanged: object}, siteHost: string, viewport: {width: () => number,
-     *   height: () => number}, onAction: (action: string, value?: string) => void}} options storage is the extension's local
-     *   storage; onAction hears pin, clear-pins, capture, play, save-draft and choose (with the picked value); shrink and
-     *   Letter keys stay in here. Play's step card goes in the answer's stepSlot.
+     *   height: () => number}, onAction: (action: string, value?: unknown) => void, guardTyping?: (field: HTMLInputElement) => (value: string) => void}} options
+     *   storage is the extension's local storage; onAction hears pin, clear-pins, capture, play, choose (with the picked
+     *   value) and save-draft (with {reportTitle, project}); shrink, Letter keys and the Save draft panel stay in here.
+     *   guardTyping puts the overlay's guard against the page writing into a field the person types in on the field, and
+     *   answers how the dock sets that field's value. Play's step card goes in the answer's stepSlot.
      */
-    function mountDock(shadow, { storage, siteHost, viewport, onAction }) {
+    function mountDock(shadow, { storage, siteHost, viewport, onAction, guardTyping = (field) => (value) => { field.value = value; } }) {
         const make = (tag, className, properties = {}) => Object.assign(document.createElement(tag), { className, ...properties });
+        const hiddenFromReaders = (element) => {
+            element.setAttribute('aria-hidden', 'true');
+
+            return element;
+        };
         const onlyTrusted = (handler) => (event) => {
             if (event.isTrusted) {
                 handler(event);
@@ -192,23 +428,23 @@ globalThis.pinroundDock ??= (() => {
         shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
 
         const dock = make('div', 'dock dock--right');
-        dock.setAttribute('role', 'toolbar');
-        dock.setAttribute('aria-label', TEXTS.toolbar);
-        dock.setAttribute('aria-orientation', 'vertical');
-        const logo = make('span', 'dock__logo', { textContent: 'pinround' });
-        logo.setAttribute('aria-hidden', 'true');
-        const grip = make('button', 'dock__grip', { type: 'button', textContent: '⋮⋮', title: TEXTS.gripHint });
+        const bar = make('div', 'dock__bar');
+        bar.setAttribute('role', 'toolbar');
+        bar.setAttribute('aria-label', TEXTS.toolbar);
+        const grip = make('button', 'dock__grip', { type: 'button', title: TEXTS.gripHint });
         grip.setAttribute('aria-label', TEXTS.grip);
-        const head = make('div', 'dock__head');
-        head.append(logo, grip);
+        grip.append(hiddenFromReaders(make('span', 'dock__logo')), hiddenFromReaders(make('span', 'dock__dots')));
 
         const picker = make('select', 'dock__target');
-        const pickerLabel = make('label', '');
-        pickerLabel.append(make('span', '', { textContent: TEXTS.target }), picker);
+        picker.setAttribute('aria-label', TEXTS.target);
+        const separator = () => hiddenFromReaders(make('span', 'dock__sep'));
 
-        const actionButton = (text, key) => {
+        const actionButton = (text, icon, key) => {
             const button = make('button', 'dock__action', { type: 'button' });
-            button.append(make('span', '', { textContent: text }));
+            if (undefined !== icon) {
+                button.append(hiddenFromReaders(make('span', `dock__icon dock__icon--${icon}`)));
+            }
+            button.append(make('span', 'dock__label', { textContent: text }));
             if (undefined !== key) {
                 const shortcut = make('kbd', '', { textContent: key });
                 shortcut.setAttribute('aria-hidden', 'true');
@@ -218,40 +454,84 @@ globalThis.pinroundDock ??= (() => {
 
             return button;
         };
-        const pinButton = actionButton(TEXTS.pin, 'P');
+        const pinButton = actionButton(TEXTS.pin, 'pin', 'P');
+        pinButton.title = TEXTS.pinHint;
         pinButton.setAttribute('aria-pressed', 'false');
-        const clearPinsButton = make('button', 'dock__action dock__clear', { type: 'button', hidden: true });
-        const captureButton = actionButton(TEXTS.capture, 'C');
-        const playButton = actionButton(TEXTS.play);
+        const captureButton = actionButton(TEXTS.capture, 'capture', 'C');
+        captureButton.title = TEXTS.captureHint;
+        const clearPinsButton = make('button', 'dock__action dock__clear', { type: 'button', hidden: true, title: TEXTS.clearPinsHint });
+        const playButton = actionButton(TEXTS.play, 'play');
+        playButton.setAttribute('aria-pressed', 'false');
         const saveButton = actionButton(TEXTS.saveDraft);
+        saveButton.classList.add('dock__send');
+        saveButton.title = TEXTS.saveDraftHint;
+        saveButton.setAttribute('aria-haspopup', 'dialog');
+        saveButton.setAttribute('aria-expanded', 'false');
         const count = make('span', 'dock__count', { hidden: true });
+        count.setAttribute('aria-hidden', 'true');
         saveButton.append(count);
-        const shrinkButton = actionButton(TEXTS.shrink, 'H');
-        const letterKeysButton = actionButton(TEXTS.letterKeys);
-        letterKeysButton.title = TEXTS.letterKeysHint;
+        // Small and last but Shrink: it exists for WCAG 2.1.4, and most people leave it on.
+        const letterKeysButton = make('button', 'dock__keys', { type: 'button', title: TEXTS.letterKeysHint });
+        letterKeysButton.setAttribute('aria-label', TEXTS.letterKeys);
         // The state in words as well as in the fill (WCAG 1.4.1); aria-pressed already says it, so readers skip the word.
-        const letterKeysState = make('span', 'dock__switch');
-        letterKeysState.setAttribute('aria-hidden', 'true');
-        letterKeysButton.append(letterKeysState);
+        const letterKeysState = hiddenFromReaders(make('span', 'dock__switch'));
+        letterKeysButton.append(hiddenFromReaders(make('span', 'dock__label', { textContent: `${TEXTS.letterKeysShort} ` })), letterKeysState);
+        const shrinkButton = make('button', 'dock__action dock__shrink', { type: 'button', title: TEXTS.shrinkHint });
+        shrinkButton.setAttribute('aria-label', TEXTS.shrink);
+        shrinkButton.setAttribute('aria-keyshortcuts', 'H');
+        shrinkButton.append(hiddenFromReaders(make('span', 'dock__icon dock__icon--shrink')));
+        bar.append(grip, picker, separator(), pinButton, captureButton, clearPinsButton, playButton, separator(), saveButton, letterKeysButton, shrinkButton);
+
+        const savePanel = make('section', 'dock-pop dock-save', { hidden: true });
+        savePanel.setAttribute('role', 'dialog');
+        savePanel.setAttribute('aria-label', TEXTS.savePanel);
+        const saveHeading = make('h3', 'dock-save__heading');
+        const shotList = make('div', 'dock-save__shots');
+        const titleField = make('input', 'dock-save__title', { type: 'text', maxLength: REPORT_TITLE_MAX_LENGTH, autocomplete: 'off' });
+        const titleLabel = make('label', 'dock-save__field');
+        titleLabel.append(make('span', '', { textContent: TEXTS.reportTitle }), titleField);
+        const projectField = make('input', 'dock-save__project', { type: 'text', maxLength: PROJECT_KEY_MAX_LENGTH, autocomplete: 'off', placeholder: TEXTS.projectExample });
+        const projectLabel = make('label', 'dock-save__field');
+        projectLabel.append(make('span', '', { textContent: TEXTS.project }), projectField);
+        const panelError = make('p', 'dock-save__error', { id: 'pinround-save-error' });
+        panelError.setAttribute('role', 'alert');
+        const goesTo = make('p', 'dock-save__goes', { textContent: TEXTS.goesTo });
+        const panelSaveButton = make('button', 'dock-btn dock-btn--primary dock-save__send', { type: 'button', textContent: TEXTS.saveDraft });
+        const keepTestingButton = make('button', 'dock-btn dock-save__keep', { type: 'button', textContent: TEXTS.keepTesting });
+        const panelButtons = make('div', 'dock-save__buttons');
+        panelButtons.append(panelSaveButton, keepTestingButton);
+        savePanel.append(saveHeading, shotList, titleLabel, projectLabel, panelError, goesTo, panelButtons);
+        const setTitleField = guardTyping(titleField);
+        const setProjectField = guardTyping(projectField);
+
         const status = make('p', 'dock__status');
         status.setAttribute('role', 'status');
         const stepSlot = make('div', 'dock__step-slot');
-        dock.append(head, pickerLabel, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton, letterKeysButton, stepSlot, status);
+        const pops = make('div', 'dock__pops');
+        pops.append(savePanel, stepSlot, status);
+        dock.append(bar, pops);
 
         const handle = make('button', 'dock-handle dock--right', { type: 'button', hidden: true });
         handle.setAttribute('aria-label', TEXTS.open);
         handle.setAttribute('aria-keyshortcuts', 'H');
+        const handleCount = make('span', 'dock__count', { hidden: true });
+        handleCount.setAttribute('aria-hidden', 'true');
+        handle.append(hiddenFromReaders(make('span', 'dock__logo')), handleCount);
         shadow.append(dock, handle);
 
         let place = { ...DEFAULT_PLACE };
         let isBusy = false;
         let canSave = false;
+        /** The new report as the extension last answered it, for the Save draft panel; null for any other target. */
+        let waitingReport = null;
         /** The picker's value as the extension last answered it, put back when the picker is changed while busy. */
         let chosenTarget = '';
         // Off until the stored switch is read, so a person who turned the keys off never has a key act meanwhile.
         let areLetterKeysOn = false;
-        /** @type {null|{dx: number, dy: number, width: number, height: number}} */
+        /** @type {null|{element: HTMLElement, dx: number, dy: number, width: number, height: number, startX: number, startY: number, hasMoved: boolean}} */
         let drag = null;
+        /** Set when a drag of the puck ends, so the click that follows it does not open the dock. */
+        let isPuckDropped = false;
 
         function applyPlace(newPlace) {
             place = checkedPlace(newPlace);
@@ -260,6 +540,8 @@ globalThis.pinroundDock ??= (() => {
                 element.classList.toggle('dock--right', 'right' === place.side);
                 element.style.setProperty('--top-pct', String(place.topPct));
             }
+            // Panels open towards the middle of the viewport, so they stay on screen.
+            dock.classList.toggle('dock--low', place.topPct > 50);
         }
 
         function keepPlace(newPlace) {
@@ -271,7 +553,7 @@ globalThis.pinroundDock ??= (() => {
         // aria-disabled, not disabled: a disabled control loses focus, so the keyboard user would be thrown out of the
         // dock each time a request starts. A press on one is ignored by whenEnabled instead.
         function enableControls() {
-            for (const control of [picker, captureButton]) {
+            for (const control of [picker, captureButton, panelSaveButton]) {
                 control.setAttribute('aria-disabled', String(isBusy));
             }
             saveButton.setAttribute('aria-disabled', String(isBusy || !canSave));
@@ -303,6 +585,89 @@ globalThis.pinroundDock ??= (() => {
             storage.set({ [LETTER_KEYS_KEY]: areLetterKeysOn }).catch(() => undefined);
         }
 
+        const isPanelOpen = () => !savePanel.hidden;
+        const hasFocusIn = (element) => null !== shadow.activeElement && element.contains(shadow.activeElement);
+
+        function showShots() {
+            const shots = waitingReport?.shots ?? [];
+            saveHeading.textContent = TEXTS.saveCount(shots.length);
+            shotList.replaceChildren(...shots.map((shot, index) => {
+                const thumb = hiddenFromReaders(make('div', 'dock-save__thumb'));
+                for (const spot of shot.pinSpots) {
+                    const dot = make('span', 'dock-save__dot');
+                    dot.style.left = `${spot.x_pct}%`;
+                    dot.style.top = `${spot.y_pct}%`;
+                    thumb.append(dot);
+                }
+                const figure = make('figure', 'dock-save__shot');
+                figure.append(thumb, make('figcaption', '', { textContent: TEXTS.shotCaption(index + 1, shot.pinSpots.length) }));
+
+                return figure;
+            }));
+            titleLabel.hidden = !(waitingReport?.needsTitle ?? false);
+            projectLabel.hidden = !(waitingReport?.needsProject ?? false);
+        }
+
+        function showPanelError(message, field = null) {
+            panelError.textContent = message;
+            for (const input of [titleField, projectField]) {
+                if (input === field) {
+                    input.setAttribute('aria-invalid', 'true');
+                    input.setAttribute('aria-describedby', panelError.id);
+                } else {
+                    input.removeAttribute('aria-invalid');
+                    input.removeAttribute('aria-describedby');
+                }
+            }
+        }
+
+        function openSavePanel() {
+            showShots();
+            showPanelError('');
+            savePanel.hidden = false;
+            saveButton.setAttribute('aria-expanded', 'true');
+            [titleField, projectField, panelSaveButton].find((control) => !control.parentNode.hidden)?.focus();
+        }
+
+        /** Closes the Save draft panel; focus inside it goes back to the bar's Save draft. @returns {boolean} whether it was open */
+        function closeSavePanel() {
+            if (!isPanelOpen()) {
+                return false;
+            }
+            const hadFocus = hasFocusIn(savePanel);
+            savePanel.hidden = true;
+            saveButton.setAttribute('aria-expanded', 'false');
+            if (hadFocus) {
+                saveButton.focus();
+            }
+
+            return true;
+        }
+
+        function sendTyped() {
+            const typed = { reportTitle: titleField.value, project: projectField.value };
+            const asked = { needsTitle: waitingReport?.needsTitle ?? false, needsProject: waitingReport?.needsProject ?? false };
+            const refusal = refusalOfTyped(typed, asked);
+            if (null !== refusal) {
+                const field = TEXTS.titleRefused === refusal ? titleField : projectField;
+                showPanelError(refusal, field);
+                field.focus();
+
+                return;
+            }
+            showPanelError('');
+            onAction('save-draft', { reportTitle: asked.needsTitle ? typed.reportTitle : '', project: asked.needsProject ? typed.project : '' });
+        }
+
+        function showCount(shownCount) {
+            for (const badge of [count, handleCount]) {
+                badge.hidden = null === shownCount || (badge === handleCount && 0 === shownCount);
+                badge.textContent = null === shownCount ? '' : String(shownCount);
+            }
+            saveButton.setAttribute('aria-label', null === shownCount ? TEXTS.saveDraft : TEXTS.saveDraftCount(shownCount));
+            handle.setAttribute('aria-label', null === shownCount || 0 === shownCount ? TEXTS.open : `${TEXTS.open}, ${shownCount} captures`);
+        }
+
         function showState(state) {
             const options = [make('option', '', { value: '', textContent: TEXTS.noTarget })];
             for (const choice of state.choices) {
@@ -312,10 +677,15 @@ globalThis.pinroundDock ??= (() => {
             const chosen = options.find((option) => option.value === state.chosen) ?? options[0];
             chosen.selected = true;
             chosenTarget = chosen.value;
-            count.hidden = null === state.count;
-            count.textContent = null === state.count ? '' : String(state.count);
-            saveButton.setAttribute('aria-label', null === state.count ? TEXTS.saveDraft : `${TEXTS.saveDraft}, ${state.count} in it`);
+            showCount(state.count);
             canSave = state.canSave;
+            waitingReport = state.newReport;
+            saveButton.title = null === state.newReport && null !== state.count ? TEXTS.saveDraftCannot : TEXTS.saveDraftHint;
+            if (!canSave) {
+                closeSavePanel();
+            } else if (isPanelOpen()) {
+                showShots();
+            }
             enableControls();
         }
 
@@ -341,38 +711,78 @@ globalThis.pinroundDock ??= (() => {
         clearPinsButton.addEventListener('click', onlyTrusted(() => onAction('clear-pins')));
         captureButton.addEventListener('click', whenEnabled(captureButton, () => onAction('capture')));
         playButton.addEventListener('click', onlyTrusted(() => onAction('play')));
-        saveButton.addEventListener('click', whenEnabled(saveButton, () => onAction('save-draft')));
+        saveButton.addEventListener('click', whenEnabled(saveButton, () => {
+            if (!closeSavePanel()) {
+                openSavePanel();
+            }
+        }));
+        panelSaveButton.addEventListener('click', whenEnabled(panelSaveButton, sendTyped));
+        keepTestingButton.addEventListener('click', onlyTrusted(closeSavePanel));
+        for (const field of [titleField, projectField]) {
+            field.addEventListener('keydown', onlyTrusted((event) => {
+                if ('Enter' === event.key && !event.isComposing) {
+                    event.preventDefault();
+                    if ('true' === panelSaveButton.getAttribute('aria-disabled')) {
+                        say(TEXTS.busy);
+                    } else {
+                        sendTyped();
+                    }
+                }
+            }));
+        }
         shrinkButton.addEventListener('click', onlyTrusted(toggleShrunk));
         letterKeysButton.addEventListener('click', onlyTrusted(toggleLetterKeys));
-        handle.addEventListener('click', onlyTrusted(toggleShrunk));
+        handle.addEventListener('click', onlyTrusted(() => {
+            if (isPuckDropped) {
+                isPuckDropped = false;
 
-        grip.addEventListener('pointerdown', onlyTrusted((event) => {
+                return;
+            }
+            toggleShrunk();
+        }));
+
+        // The grip moves the bar; the puck moves itself, and only once it has moved past a click's slop.
+        const startDrag = (source, moved) => onlyTrusted((event) => {
             if (0 !== event.button) {
                 return;
             }
             event.preventDefault();
-            grip.setPointerCapture(event.pointerId);
-            const box = dock.getBoundingClientRect();
-            drag = { dx: event.clientX - box.left, dy: event.clientY - box.top, width: box.width, height: box.height };
-            dock.style.left = `${box.left}px`;
-            dock.style.top = `${box.top}px`;
-            dock.classList.add('dock--dragging');
-        }));
-        grip.addEventListener('pointermove', onlyTrusted((event) => {
-            if (null !== drag) {
-                dock.style.left = `${event.clientX - drag.dx}px`;
-                dock.style.top = `${event.clientY - drag.dy}px`;
+            source.setPointerCapture(event.pointerId);
+            const box = moved.getBoundingClientRect();
+            drag = { element: moved, dx: event.clientX - box.left, dy: event.clientY - box.top, width: box.width, height: box.height, startX: event.clientX, startY: event.clientY, hasMoved: moved === dock };
+            if (drag.hasMoved) {
+                moved.style.left = `${box.left}px`;
+                moved.style.top = `${box.top}px`;
+                moved.classList.add('dock--dragging');
             }
-        }));
+        });
+        const moveDrag = onlyTrusted((event) => {
+            if (null === drag) {
+                return;
+            }
+            if (!drag.hasMoved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) <= PUCK_CLICK_SLOP_PX) {
+                return;
+            }
+            drag.hasMoved = true;
+            drag.element.classList.add('dock--dragging');
+            drag.element.style.left = `${event.clientX - drag.dx}px`;
+            drag.element.style.top = `${event.clientY - drag.dy}px`;
+        });
         const endDrag = (event, isDropped) => {
             if (null === drag) {
                 return;
             }
             const dropped = drag;
             drag = null;
-            dock.classList.remove('dock--dragging');
-            dock.style.left = '';
-            dock.style.top = '';
+            dropped.element.classList.remove('dock--dragging');
+            dropped.element.style.left = '';
+            dropped.element.style.top = '';
+            if (!dropped.hasMoved) {
+                return;
+            }
+            if (dropped.element === handle) {
+                isPuckDropped = isDropped;
+            }
             if (!isDropped) {
                 applyPlace(place);
 
@@ -382,8 +792,12 @@ globalThis.pinroundDock ??= (() => {
             const top = event.clientY - dropped.dy;
             keepPlace({ side: nearerSide(left + (dropped.width / 2), viewport.width()), topPct: topPercentOf(top, viewport.height(), dropped.height) });
         };
-        grip.addEventListener('pointerup', onlyTrusted((event) => endDrag(event, true)));
-        grip.addEventListener('pointercancel', onlyTrusted((event) => endDrag(event, false)));
+        for (const [source, moved] of [[grip, dock], [handle, handle]]) {
+            source.addEventListener('pointerdown', startDrag(source, moved));
+            source.addEventListener('pointermove', moveDrag);
+            source.addEventListener('pointerup', onlyTrusted((event) => endDrag(event, true)));
+            source.addEventListener('pointercancel', onlyTrusted((event) => endDrag(event, false)));
+        }
         grip.addEventListener('keydown', onlyTrusted((event) => {
             const moves = {
                 ArrowLeft: { side: 'left' },
@@ -415,14 +829,21 @@ globalThis.pinroundDock ??= (() => {
         return {
             /** Resolves once the site's stored place and the Letter keys switch are applied; when storage refused, the default place and the keys off. */
             ready,
-            /** Where the scenario's step card goes (dock-run.js): after Shrink, before the status line. */
+            /** Where the scenario's step card goes (dock-run.js): under the bar, beside the Save draft panel. */
             stepSlot,
-            /** The dock's focusable controls in Tab order, for the overlay's focus trap while pinning. */
-            focusables: () => (dock.hidden ? [handle] : [grip, picker, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton, letterKeysButton].filter((control) => !control.hidden)),
+            /** The dock's focusable controls in Tab order, the open Save draft panel's among them, for the overlay's focus trap while pinning. */
+            focusables: () => (dock.hidden ? [handle] : [
+                ...[grip, picker, pinButton, captureButton, clearPinsButton, playButton, saveButton, letterKeysButton, shrinkButton].filter((control) => !control.hidden),
+                ...(isPanelOpen() ? [titleField, projectField, panelSaveButton, keepTestingButton].filter((control) => !control.parentNode.hidden) : []),
+            ]),
             /** Whether P, C and H typed anywhere on the page are the dock's; inside the dock they always are. */
             areLetterKeysOn: () => areLetterKeysOn,
             setPinning(isPinning) {
                 pinButton.setAttribute('aria-pressed', String(isPinning));
+            },
+            /** Marks Play pressed while a scenario's step card shows. */
+            setPlaying(isPlaying) {
+                playButton.setAttribute('aria-pressed', String(isPlaying));
             },
             /** Shows "Clear N pins" for the pins on the page, and hides it while there are none. */
             setPinCount(pinCount) {
@@ -437,8 +858,11 @@ globalThis.pinroundDock ??= (() => {
                     say('');
                 }
             },
-            /** Shows the extension's answer: its state, its message; anything unreadable is said as no answer. */
-            showAnswer(answer) {
+            /**
+             * Shows the extension's answer to `action`: its state, its message; anything unreadable is said as no
+             * answer. A refused save-draft is said in the open panel, by its fields; a saved one closes the panel.
+             */
+            showAnswer(answer, action) {
                 if (null === answer || 'object' !== typeof answer) {
                     say(TEXTS.notAnswered, true);
 
@@ -450,19 +874,36 @@ globalThis.pinroundDock ??= (() => {
 
                     return;
                 }
+                const isPanelAnswer = 'save-draft' === action && isPanelOpen();
                 if (undefined !== state) {
                     showState(state);
                 }
-                if ('string' === typeof answer.message) {
-                    say(answer.message, true === answer.isError);
+                if ('string' !== typeof answer.message) {
+                    return;
                 }
+                if (isPanelAnswer && true === answer.isError && isPanelOpen()) {
+                    showPanelError(answer.message);
+
+                    return;
+                }
+                if (isPanelAnswer && true !== answer.isError) {
+                    setTitleField('');
+                    setProjectField('');
+                    closeSavePanel();
+                }
+                say(answer.message, true === answer.isError);
             },
             say,
+            /** Closes the Save draft panel, as Escape does. @returns {boolean} whether one was open */
+            closePanels: closeSavePanel,
             toggleShrunk,
             isShrunk: () => dock.hidden,
             focusPinButton: () => (dock.hidden ? handle : pinButton).focus(),
         };
     }
 
-    return Object.freeze({ PLACE_KEY_PREFIX, LETTER_KEYS_KEY, DEFAULT_PLACE, EDGE_GAP_PX, GRIP_STEP_PCT, TEXTS, nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, mountDock });
+    return Object.freeze({
+        PLACE_KEY_PREFIX, LETTER_KEYS_KEY, DEFAULT_PLACE, EDGE_GAP_PX, GRIP_STEP_PCT, MAX_SHOTS, REPORT_TITLE_MAX_LENGTH, PROJECT_KEY_MAX_LENGTH, TEXTS,
+        nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, refusalOfTyped, mountDock,
+    });
 })();

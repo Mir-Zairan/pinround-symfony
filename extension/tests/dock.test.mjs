@@ -5,7 +5,7 @@ import { OVERLAY_FILES } from '../src/capture/page-pins.js';
 import { fakeBrowser } from './fake-browser.mjs';
 import { fakePage } from './fake-page.mjs';
 
-const { DEFAULT_PLACE, EDGE_GAP_PX, LETTER_KEYS_KEY, TEXTS, actionOfKey, checkedPlace, isTypingTarget, loadPlace, nearerSide, placeKeyOf, savePlace, topPercentOf } = globalThis.pinroundDock;
+const { DEFAULT_PLACE, EDGE_GAP_PX, LETTER_KEYS_KEY, TEXTS, actionOfKey, checkedPlace, checkedState, isTypingTarget, loadPlace, nearerSide, placeKeyOf, refusalOfTyped, savePlace, topPercentOf } = globalThis.pinroundDock;
 
 const SHOP_HOST = 'shop.acme-foods.example';
 const MOBILE_HOST = 'm.acme-foods.example';
@@ -28,7 +28,8 @@ async function dockedPage({ siteHost = SHOP_HOST, storage = fakeBrowser().storag
     const root = page.closedRootOf(host);
     root.querySelector('.surface').box = { left: 0, top: 0, width: VIEWPORT.width, height: VIEWPORT.height };
     const inRoot = (selector) => root.querySelector(selector);
-    const buttonNamed = (text) => root.querySelectorAll('button').find((button) => button.textContent.startsWith(text));
+    // A button's accessible name: its aria-label, else its text.
+    const buttonNamed = (text) => root.querySelectorAll('button').find((button) => (button.getAttribute('aria-label') ?? button.textContent).startsWith(text));
 
     return { page, host, root, inRoot, buttonNamed, storage };
 }
@@ -105,7 +106,7 @@ test('the dock lives inside the overlay\'s one closed root, where the page canno
     for (const selector of ['.dock', '.dock-handle', 'select', 'button', '[role]']) {
         assert.equal(page.document.querySelector(selector), null, selector);
     }
-    assert.equal(inRoot('.dock').getAttribute('role'), 'toolbar');
+    assert.deepEqual([inRoot('.dock__bar').getAttribute('role'), inRoot('.dock__bar').getAttribute('aria-orientation')], ['toolbar', null], 'One horizontal bar.');
     assert.equal(inRoot('.surface').hidden, false);
 });
 
@@ -156,7 +157,7 @@ test('inside the overlay the same keys work on its controls but never in the not
     const { page, inRoot } = await dockedPage();
     page.keydown(page.document.body, 'p');
     page.click(inRoot('.surface'), { clientX: 0, clientY: 0 });
-    const noteField = inRoot('textarea');
+    const noteField = inRoot('.note-field');
     assert.equal(inRoot('.note-editor').hidden, false);
 
     page.keydown(noteField, 'c');
@@ -416,7 +417,7 @@ test('the dock shows the target picker and the draft\'s count from the extension
     const picker = inRoot('select');
 
     assert.deepEqual(picker.children.map((option) => [option.value, option.textContent]), [
-        ['', 'Choose where to put it'],
+        ['', 'Choose where to save'],
         ['new-report', 'A new report'],
         ['ticket:SHOP-12', 'My draft round on SHOP-12'],
         ['notebook:n1', `Notebook: ${markup}`],
@@ -438,31 +439,178 @@ test('an answer the dock cannot read, or no answer, is said as such and never as
     }
 });
 
-test('Save draft is pressed only for a draft it can save, and a second press while one runs is ignored', async () => {
-    let release;
-    const answers = [{ state: { ...STATE, chosen: 'new-report', count: 2, canSave: true } }];
-    const { page, buttonNamed } = await dockedPage({
-        answer: async () => answers.shift() ?? new Promise((resolve) => {
-            release = () => resolve({ message: 'Report draft opened in pinround. Check it there and press Send.', state: { ...STATE, chosen: 'new-report', count: 0, canSave: false } });
-        }),
+const WAITING = { shots: [{ pinSpots: [{ x_pct: 25, y_pct: 40 }, { x_pct: 75, y_pct: 60 }] }, { pinSpots: [] }], needsTitle: true, needsProject: false };
+const NEW_REPORT_STATE = { ...STATE, chosen: 'new-report', count: 2, canSave: true, newReport: WAITING };
+
+/** The dock on a new report with two captures waiting; save-draft answers wait until released. */
+async function dockWithCapturesWaiting(newReport = WAITING) {
+    const saves = [];
+    const docked = await dockedPage({
+        answer: async ({ pinroundDock }) => ('state' === pinroundDock ? { state: { ...NEW_REPORT_STATE, newReport } } : new Promise((resolve) => saves.push(resolve))),
     });
+
+    return { ...docked, saves };
+}
+
+const panelOf = (inRoot) => ({
+    isOpen: !inRoot('.dock-save').hidden,
+    heading: inRoot('.dock-save__heading').textContent,
+    captions: inRoot('.dock-save__shots').querySelectorAll('figcaption').map((caption) => caption.textContent),
+    hasTitle: !inRoot('.dock-save__title').parentNode.hidden,
+    hasProject: !inRoot('.dock-save__project').parentNode.hidden,
+    error: inRoot('.dock-save__error').textContent,
+});
+
+test('Save draft opens the panel with the captures, their pins as dots, and the title field for a new report, and asks nothing yet', async () => {
+    const { page, root, inRoot, buttonNamed } = await dockWithCapturesWaiting();
     const save = buttonNamed(TEXTS.saveDraft);
-    assert.equal(save.getAttribute('aria-disabled'), 'false');
-    assert.equal(save.getAttribute('aria-label'), 'Save draft, 2 in it');
+    assert.deepEqual([save.getAttribute('aria-label'), save.getAttribute('aria-disabled'), inRoot('.dock__count').textContent], ['Save draft, 2 in it', 'false', '2']);
+    assert.equal(panelOf(inRoot).isOpen, false);
+
+    page.click(save, { isTrusted: false });
+    assert.equal(panelOf(inRoot).isOpen, false, 'A click the page makes opens nothing.');
+    page.click(save);
+
+    assert.deepEqual(panelOf(inRoot), { isOpen: true, heading: 'Save 2 captures', captions: ['Shot 1 · 2 pins', 'Shot 2 · 0 pins'], hasTitle: true, hasProject: false, error: '' });
+    assert.deepEqual(inRoot('.dock-save__thumb').querySelectorAll('span').map((dot) => [dot.style.left, dot.style.top]), [['25%', '40%'], ['75%', '60%']]);
+    assert.equal(inRoot('.dock-save').getAttribute('role'), 'dialog');
+    assert.equal(inRoot('.dock-save__goes').textContent, 'Goes to a new report draft. Nobody is told yet. You send it from pinround.');
+    assert.equal(root.activeElement, inRoot('.dock-save__title'), 'Focus goes to the title.');
+    assert.equal(save.getAttribute('aria-expanded'), 'true');
+    assert.deepEqual(requestsOf(page), ['state']);
+});
+
+test('the panel refuses an empty or too long title inline with the plain message, marks the field and sends nothing', async () => {
+    const { page, root, inRoot, buttonNamed } = await dockWithCapturesWaiting();
+    page.click(buttonNamed(TEXTS.saveDraft));
+    const title = inRoot('.dock-save__title');
+
+    for (const typed of ['', '   ', '\u{1F600}'.repeat(201)]) {
+        title.value = typed;
+        page.click(inRoot('.dock-save__send'));
+
+        assert.deepEqual([panelOf(inRoot).error, title.getAttribute('aria-invalid'), root.activeElement], [TEXTS.titleRefused, 'true', title], JSON.stringify(typed.slice(0, 4)));
+    }
+    assert.deepEqual(requestsOf(page), ['state']);
+    assert.equal(panelOf(inRoot).isOpen, true);
+});
+
+test('typed rules: a title of 200 characters and a project key of 20 pass, one more of either is refused, and only the fields shown are asked', () => {
+    const asked = { needsTitle: true, needsProject: true };
+    assert.equal(refusalOfTyped({ reportTitle: '\u{1F600}'.repeat(200), project: 'S'.repeat(20) }, asked), null);
+    assert.equal(refusalOfTyped({ reportTitle: '\u{1F600}'.repeat(201), project: 'SHOP' }, asked), TEXTS.titleRefused);
+    assert.equal(refusalOfTyped({ reportTitle: 'Total is wrong', project: 'S'.repeat(21) }, asked), TEXTS.projectRefused);
+    assert.equal(refusalOfTyped({ reportTitle: 'Total is wrong', project: ' ' }, asked), TEXTS.projectRefused);
+    assert.equal(refusalOfTyped({ reportTitle: '', project: '' }, { needsTitle: false, needsProject: false }), null, 'A draft already made needs neither.');
+});
+
+test('the panel saves with the typed title, waits on one request, then closes and says the draft is saved', async () => {
+    const { page, root, inRoot, buttonNamed, saves } = await dockWithCapturesWaiting();
+    const save = buttonNamed(TEXTS.saveDraft);
+    page.click(save);
+    page.typeInto(inRoot('.dock-save__title'), 'Total is wrong');
+
+    page.keydown(inRoot('.dock-save__title'), 'Enter');
+    page.click(inRoot('.dock-save__send'));
+    await settled();
+
+    assert.deepEqual(page.sentMessages.slice(1), [{ pinroundDock: 'save-draft', value: { reportTitle: 'Total is wrong', project: '' } }], 'The second press waits on the first.');
+    assert.equal(inRoot('.dock-save__send').getAttribute('aria-disabled'), 'true');
+    saves[0]({ message: 'Draft saved with 2 captures. Open it in pinround to send it.', state: { ...STATE, chosen: 'new-report', count: 0, canSave: false, newReport: { ...WAITING, shots: [] } } });
+    await settled();
+    await settled();
+
+    assert.equal(panelOf(inRoot).isOpen, false);
+    assert.deepEqual([inRoot('.dock__status').textContent, inRoot('.dock__status').classList.contains('dock__status--error')], ['Draft saved with 2 captures. Open it in pinround to send it.', false]);
+    assert.deepEqual([save.getAttribute('aria-disabled'), save.getAttribute('aria-label')], ['true', 'Save draft, 0 in it']);
+    assert.equal(root.activeElement, save, 'Focus goes back to Save draft.');
+    assert.equal(inRoot('.dock-save__title').value, '', 'The next report starts with an empty title.');
+});
+
+test('a save pinround refuses keeps the panel open with the refusal in it and the title as typed', async () => {
+    const { page, inRoot, buttonNamed, saves } = await dockWithCapturesWaiting();
+    page.click(buttonNamed(TEXTS.saveDraft));
+    page.typeInto(inRoot('.dock-save__title'), 'Total is wrong');
+    page.click(inRoot('.dock-save__send'));
+    await settled();
+
+    saves[0]({ message: 'The screenshot did not reach pinround. Check your connection and press Send it again.', isError: true, state: NEW_REPORT_STATE });
+    await settled();
+    await settled();
+
+    assert.deepEqual([panelOf(inRoot).isOpen, panelOf(inRoot).error, inRoot('.dock-save__title').value], [true, 'The screenshot did not reach pinround. Check your connection and press Send it again.', 'Total is wrong']);
+    assert.equal(inRoot('.dock__status').textContent, '');
+});
+
+test('with no project key known the panel asks for it too, and a draft already made asks for neither', async () => {
+    const asksProject = await dockWithCapturesWaiting({ ...WAITING, needsProject: true });
+    asksProject.page.click(asksProject.buttonNamed(TEXTS.saveDraft));
+    asksProject.page.typeInto(asksProject.inRoot('.dock-save__title'), 'Total is wrong');
+    asksProject.page.click(asksProject.inRoot('.dock-save__send'));
+    assert.deepEqual([panelOf(asksProject.inRoot).hasProject, panelOf(asksProject.inRoot).error], [true, TEXTS.projectRefused]);
+    asksProject.page.typeInto(asksProject.inRoot('.dock-save__project'), 'shop');
+    asksProject.page.click(asksProject.inRoot('.dock-save__send'));
+    await settled();
+    assert.deepEqual(asksProject.page.sentMessages.at(-1), { pinroundDock: 'save-draft', value: { reportTitle: 'Total is wrong', project: 'shop' } });
+
+    const draftMade = await dockWithCapturesWaiting({ ...WAITING, needsTitle: false });
+    draftMade.page.click(draftMade.buttonNamed(TEXTS.saveDraft));
+    assert.deepEqual([panelOf(draftMade.inRoot).hasTitle, panelOf(draftMade.inRoot).hasProject], [false, false]);
+    assert.equal(draftMade.root.activeElement, draftMade.inRoot('.dock-save__send'));
+});
+
+test('Keep testing and Escape close the panel and give focus back to Save draft, and Escape there ends no pinning', async () => {
+    const { page, root, inRoot, buttonNamed } = await dockWithCapturesWaiting();
+    const save = buttonNamed(TEXTS.saveDraft);
+    page.click(save);
+    page.click(inRoot('.dock-save__keep'));
+    assert.deepEqual([panelOf(inRoot).isOpen, root.activeElement, save.getAttribute('aria-expanded')], [false, save, 'false']);
+
+    page.keydown(page.document.body, 'p');
+    page.click(inRoot('.surface'), { clientX: 100, clientY: 100 });
+    page.keydown(inRoot('.note-field'), 'Escape');
+    page.click(save);
+    page.keydown(inRoot('.dock-save__title'), 'Escape');
+
+    assert.deepEqual([panelOf(inRoot).isOpen, root.activeElement, inRoot('.surface').hidden, root.querySelectorAll('.pin').length], [false, save, false, 1]);
+});
+
+test('Save draft for a draft round or notebook is pressed for nothing and says why in its hint', async () => {
+    const { page, inRoot, buttonNamed } = await dockedPage();
+    const save = buttonNamed(TEXTS.saveDraft);
 
     page.click(save);
-    page.keydown(page.document.body, 'c');
-    await settled();
-    assert.deepEqual(requestsOf(page), ['state', 'save-draft']);
-    assert.equal(save.getAttribute('aria-disabled'), 'true');
 
-    release();
+    assert.deepEqual([save.getAttribute('aria-disabled'), save.title, panelOf(inRoot).isOpen], ['true', TEXTS.saveDraftCannot, false]);
+    assert.deepEqual(requestsOf(page), ['state']);
+});
+
+test('a state with a waiting report the dock cannot read is no state', () => {
+    assert.deepEqual(checkedState({ ...NEW_REPORT_STATE, newReport: undefined }).newReport, null);
+    for (const newReport of [{ ...WAITING, shots: 'all' }, { ...WAITING, needsTitle: 'yes' }, { ...WAITING, shots: [{ pinSpots: [{ x_pct: 120, y_pct: 10 }] }] }, { ...WAITING, shots: Array.from({ length: 11 }, () => ({ pinSpots: [] })) }]) {
+        assert.equal(checkedState({ ...NEW_REPORT_STATE, newReport }), null, JSON.stringify(newReport).slice(0, 60));
+    }
+});
+
+test('the shrunk puck shows the captures waiting and opens the dock again; a drag of it moves it and opens nothing', async () => {
+    const { storage } = fakeBrowser();
+    const { page, inRoot } = await dockedPage({ storage: storage.local, answer: async () => ({ state: NEW_REPORT_STATE }) });
+    const puck = inRoot('.dock-handle');
+    page.keydown(page.document.body, 'h');
+    assert.deepEqual([puck.hidden, puck.getAttribute('aria-label'), puck.querySelector('.dock__count').hidden, puck.querySelector('.dock__count').textContent], [false, 'Open the pinround dock, 2 captures', false, '2']);
+
+    puck.box = { left: 1226, top: 377, width: 46, height: 46 };
+    page.dispatch(puck, 'pointerdown', { button: 0, pointerId: 1, clientX: 1249, clientY: 400 });
+    page.dispatch(puck, 'pointermove', { pointerId: 1, clientX: 100, clientY: 100 });
+    page.dispatch(puck, 'pointerup', { pointerId: 1, clientX: 100, clientY: 100 });
+    page.click(puck);
     await settled();
-    await settled();
-    assert.deepEqual([save.getAttribute('aria-disabled'), buttonNamed(TEXTS.capture).getAttribute('aria-disabled')], ['true', 'false']);
-    page.click(save);
-    await settled();
-    assert.deepEqual(requestsOf(page), ['state', 'save-draft'], 'A Save draft with nothing to save asks nothing.');
+    assert.deepEqual([inRoot('.dock').hidden, (await loadPlace(storage.local, SHOP_HOST)).side], [true, 'left'], 'The drag moved the puck to the left and the click after it opened nothing.');
+
+    page.dispatch(puck, 'pointerdown', { button: 0, pointerId: 2, clientX: 30, clientY: 100 });
+    page.dispatch(puck, 'pointerup', { pointerId: 2, clientX: 31, clientY: 101 });
+    page.click(puck);
+    assert.equal(inRoot('.dock').hidden, false, 'A press that barely moved is a click.');
 });
 
 test('picking a target asks the extension to remember it', async () => {
@@ -480,7 +628,7 @@ test('with the dock open, Escape and a saved capture drop the pins and end pinni
     const { page, host, root, inRoot } = await dockedPage();
     page.keydown(page.document.body, 'p');
     page.click(inRoot('.surface'), { clientX: 0, clientY: 0 });
-    page.keydown(inRoot('textarea'), 'Escape');
+    page.keydown(inRoot('.note-field'), 'Escape');
     assert.equal(root.querySelectorAll('.pin').length, 1);
 
     page.keydown(inRoot('.surface'), 'Escape');
@@ -531,40 +679,59 @@ test('a capture takes the whole overlay out of the picture and puts it back as i
     assert.equal(root.activeElement, inRoot('.surface'));
 });
 
-/** A person's click on the pinning surface at `point` (CSS px), the note typed in the editor it opens, then Escape. */
+/** A person's click on the pinning surface at `point` (CSS px), the note typed in the form it opens, then Escape. */
 function dropPinWithNote(page, inRoot, [clientX, clientY], note) {
     page.click(inRoot('.surface'), { clientX, clientY });
-    page.typeInto(inRoot('textarea'), note);
-    page.keydown(inRoot('textarea'), 'Escape');
+    page.typeInto(inRoot('.note-field'), note);
+    page.keydown(inRoot('.note-field'), 'Escape');
+}
+
+/** A person's click on the pin with this number, then on Remove in the note form it opens. */
+function removePinByForm(page, root, inRoot, pinNumber) {
+    page.click(root.querySelectorAll('.pin')[pinNumber - 1]);
+    page.click(inRoot('.note-editor__remove'));
 }
 
 const pinNamesOf = (root) => root.querySelectorAll('.pin').map((pin) => pin.getAttribute('aria-label'));
-const removeNamesOf = (root) => root.querySelectorAll('.pin-remove').map((remove) => remove.getAttribute('aria-label'));
 /** The pins the overlay hands a capture, as plain data from the page's realm. */
 const capturedPinsOf = async (page) => JSON.parse(JSON.stringify(await page.evaluate('globalThis.pinroundOverlay.hideForCapture()')));
 
-test('each pin has a Remove beside it that removes that pin only, the rest renumber, and a click the page makes removes nothing', async () => {
+test('a click on a pin chooses it with a ring and opens its note form under it, with Remove for that pin only; a click the page makes removes nothing', async () => {
     const { page, root, inRoot } = await dockedPage();
     page.keydown(page.document.body, 'p');
     dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
     dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
     dropPinWithNote(page, inRoot, [960, 600], 'Total is wrong');
-    assert.deepEqual(removeNamesOf(root), ['Remove pin 1', 'Remove pin 2', 'Remove pin 3']);
-    // Remove sits on the side facing the middle, so a pin at the page's left edge keeps it on screen; the middle goes right.
-    assert.deepEqual(root.querySelectorAll('.pin-remove').map((remove) => [remove.textContent, remove.tabIndex, remove.style.left, remove.style.top, remove.classList.contains('pin-remove--right')]), [
-        ['×', -1, '25%', '25%', true],
-        ['×', -1, '50%', '50%', true],
-        ['×', -1, '75%', '75%', false],
-    ]);
+    assert.deepEqual(root.querySelectorAll('.pin__note').map((label) => [label.textContent, label.hidden]), [['Price is wrong', false], ['Logo is cut off', false], ['Total is wrong', false]], 'A pin with a note shows it beside it.');
+    assert.deepEqual(root.querySelectorAll('.pin').map((pin) => pin.classList.contains('pin--selected')), [false, false, false]);
 
-    page.click(root.querySelectorAll('.pin-remove')[1], { isTrusted: false });
-    assert.deepEqual(pinNamesOf(root), ['Pin 1: Price is wrong', 'Pin 2: Logo is cut off', 'Pin 3: Total is wrong']);
+    const second = root.querySelectorAll('.pin')[1];
+    page.click(second);
+    assert.deepEqual([second.classList.contains('pin--selected'), second.querySelector('.pin__note').hidden, inRoot('.note-editor').hidden], [true, true, false]);
+    assert.deepEqual([inRoot('.note-field').value, inRoot('.note-field').getAttribute('aria-label'), inRoot('.note-field').placeholder], ['Logo is cut off', 'Note for pin 2', 'What is wrong here?']);
+    assert.deepEqual([inRoot('.note-editor').style.left, inRoot('.note-editor').style.top, inRoot('.note-editor').classList.contains('note-editor--above')], ['50%', '50%', false], 'The form sits just below its pin.');
+    assert.equal(root.activeElement, inRoot('.note-field'));
+    assert.equal(inRoot('.note-editor__remove').getAttribute('aria-label'), 'Remove pin 2');
 
-    page.click(root.querySelectorAll('.pin-remove')[1]);
+    page.click(inRoot('.note-editor__remove'), { isTrusted: false });
+    assert.equal(pinNamesOf(root).length, 3);
+
+    page.click(inRoot('.note-editor__remove'));
 
     assert.deepEqual(pinNamesOf(root), ['Pin 1: Price is wrong', 'Pin 2: Total is wrong']);
-    assert.deepEqual(removeNamesOf(root), ['Remove pin 1', 'Remove pin 2']);
+    assert.equal(inRoot('.note-editor').hidden, true);
     assert.deepEqual(await capturedPinsOf(page), [{ x_pct: 25, y_pct: 25, note: 'Price is wrong' }, { x_pct: 75, y_pct: 75, note: 'Total is wrong' }]);
+});
+
+test('Save keeps the note and drops the ring, and a pin near the bottom opens its form above it', async () => {
+    const { page, root, inRoot } = await dockedPage();
+    page.keydown(page.document.body, 'p');
+    page.click(inRoot('.surface'), { clientX: 640, clientY: 720 });
+    assert.equal(inRoot('.note-editor').classList.contains('note-editor--above'), true);
+    page.typeInto(inRoot('.note-field'), 'Footer overlaps');
+    page.click(inRoot('.note-editor__save'));
+
+    assert.deepEqual([pinNamesOf(root), inRoot('.note-editor').hidden, inRoot('.pin').classList.contains('pin--selected')], [['Pin 1: Footer overlaps'], true, false]);
 });
 
 test('Delete or Backspace on a focused pin removes it, and the same keys typed in the page\'s own field remove nothing', async () => {
@@ -602,7 +769,7 @@ test('"Clear N pins" counts the pins on the page, removes them all with an open 
     dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
     dropPinWithNote(page, inRoot, [960, 600], 'Total is wrong');
     assert.equal(clear.textContent, 'Clear 3 pins');
-    page.click(root.querySelectorAll('.pin-remove')[0]);
+    removePinByForm(page, root, inRoot, 1);
     assert.equal(clear.textContent, 'Clear 2 pins');
     page.click(inRoot('.surface'), { clientX: 100, clientY: 100 });
     assert.deepEqual([clear.textContent, inRoot('.note-editor').hidden], ['Clear 3 pins', false]);
@@ -613,7 +780,7 @@ test('"Clear N pins" counts the pins on the page, removes them all with an open 
     clear.focus();
     page.click(clear);
 
-    assert.deepEqual([pinNamesOf(root), removeNamesOf(root), clear.hidden, inRoot('.note-editor').hidden], [[], [], true, true]);
+    assert.deepEqual([pinNamesOf(root), clear.hidden, inRoot('.note-editor').hidden], [[], true, true]);
     assert.equal(inRoot('.surface').hidden, false, 'Pinning stays on.');
     assert.equal(root.activeElement, inRoot('.surface'));
     assert.deepEqual(await capturedPinsOf(page), []);
@@ -648,8 +815,9 @@ test('with pinning off, the last pin removed by Delete or by Remove leaves focus
     assert.equal(root.activeElement, first);
 
     // A click on a button focuses it in Chrome.
-    root.querySelector('.pin-remove').focus();
-    page.click(root.querySelector('.pin-remove'));
+    page.click(root.querySelector('.pin'));
+    inRoot('.note-editor__remove').focus();
+    page.click(inRoot('.note-editor__remove'));
 
     assert.deepEqual(pinNamesOf(root), []);
     assert.equal(root.activeElement, buttonNamed(TEXTS.pin));

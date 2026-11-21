@@ -6,6 +6,8 @@ import { MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH, upload } from './capture.js';
 import { CAPTURE_TARGET_KEY, NEW_REPORT, TargetGoneError } from './capture-target.js';
 
 export const NEW_REPORT_KEY = 'pinroundNewReport';
+/** Where the dock's captures wait for Save draft (waiting-captures.js); forgotten with the new report. */
+export const WAITING_CAPTURES_KEY = 'pinroundWaitingCaptures';
 /** Where an earlier version kept upload ids for one "Make the report draft" request; dropped, never sent. */
 export const OLD_REPORT_CAPTURES_KEY = 'pinroundReportCaptures';
 const PROJECT_KEY_MAX_LENGTH = 20;
@@ -91,7 +93,7 @@ export async function clearNewReport(storage) {
  * again, so nothing one person typed is sent with another token or to another pinround.
  */
 export async function forgetCaptureSession(storage) {
-    await storage.remove([NEW_REPORT_KEY, CAPTURE_TARGET_KEY, OLD_REPORT_CAPTURES_KEY]);
+    await storage.remove([NEW_REPORT_KEY, CAPTURE_TARGET_KEY, OLD_REPORT_CAPTURES_KEY, WAITING_CAPTURES_KEY]);
 }
 
 /**

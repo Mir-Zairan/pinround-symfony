@@ -185,6 +185,10 @@ class FakeElement extends FakeNode {
         return this.#attributes.has(name);
     }
 
+    removeAttribute(name) {
+        this.#attributes.delete(name);
+    }
+
     /** Tag names, `.class`, `[attribute]` and `*` only. */
     matches(selector) {
         if ('*' === selector) {

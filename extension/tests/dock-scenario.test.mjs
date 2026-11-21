@@ -96,7 +96,7 @@ async function pairedBrowser({ allowed = [SHOP_ORIGIN], target = NOTEBOOK_TARGET
     return browser;
 }
 
-const ask = (browser, request, deps = {}) => answerDockRequest(request, SHOP_TAB, { browser, navigator: {}, clock: frozenClock(() => assert.fail('nothing waits')), ...deps });
+const ask = (browser, request, deps = {}) => answerDockRequest(request, SHOP_TAB, { browser, clock: frozenClock(() => assert.fail('nothing waits')), ...deps });
 
 test('scenario answers the chosen notebook\'s scenario, its texts unwrapped and each step\'s Expected written from its check', async () => {
     const browser = await pairedBrowser();
@@ -257,7 +257,7 @@ async function capturingBrowser() {
 
 const screenshotsAddedTo = (pinround, ticketKey) => pinround.requests.filter(([method, path]) => 'POST' === method && `/api/v1/tickets/${ticketKey}/draft/screenshots` === path).map(([, , body]) => body);
 
-test('a capture tagged with a step names the step as its title and the scenario before the page in its summary', async () => {
+test('a capture tagged with a step names the step as its title and the scenario as its summary, and the next capture carries no summary', async () => {
     const browser = await capturingBrowser();
     const pinround = fakePinround({ tickets: TICKETS });
     const apiOf = (settings) => new PinroundApi(settings.origin, settings.token, pinround.fetchFn);
@@ -268,8 +268,8 @@ test('a capture tagged with a step names the step as its title and the scenario 
 
     assert.deepEqual([tagged.message, untagged.message], ['Added to your draft round on SHOP-12. Only you see it.', 'Added to your draft round on SHOP-12. Only you see it.']);
     assert.deepEqual(screenshotsAddedTo(pinround, 'SHOP-12'), [
-        { upload_id: 'upload-1', title: 'Step 2: Look at the total', summary: `Found a problem in "Coupon after tax", step 2. Page: ${SHOP_TAB.url}`, pins: [{ x_pct: 10, y_pct: 20, note: 'Total' }] },
-        { upload_id: 'upload-2', title: 'Acme Foods shop', summary: `Page: ${SHOP_TAB.url}`, pins: [{ x_pct: 10, y_pct: 20, note: 'Total' }] },
+        { upload_id: 'upload-1', title: 'Step 2: Look at the total', summary: 'Found a problem in "Coupon after tax", step 2.', pins: [{ x_pct: 10, y_pct: 20, note: 'Total' }] },
+        { upload_id: 'upload-2', title: 'Acme Foods shop', pins: [{ x_pct: 10, y_pct: 20, note: 'Total' }] },
     ]);
 });
 
