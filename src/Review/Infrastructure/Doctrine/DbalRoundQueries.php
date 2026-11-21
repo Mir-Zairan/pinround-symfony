@@ -18,6 +18,8 @@ use App\Review\Api\ScreenshotChains;
 use App\Review\Api\ScreenshotNotes;
 use App\Review\Api\SharedRoundNotes;
 use App\Review\Api\TicketRounds;
+use App\Review\Application\OpenSharedRound;
+use App\Review\Application\OpenSharedRoundQueries;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\Domain\RoundId;
 use App\Review\Domain\ScreenshotId;
@@ -34,14 +36,15 @@ use Doctrine\DBAL\Connection;
  * The rounds of a ticket from rvw_round, rvw_screenshot and rvw_pin through DBAL, after Ticketing's batch visibility
  * check of the ticket. Each level reads the next one's index ((organization_id, ticket_id, number), (organization_id,
  * round_id, position), (organization_id, screenshot_id, number)) and says whether it has rows below it, so a round with
- * no screenshot or a screenshot with no pin costs no query. accessFactsOf, draftScreenshotOf, openDraftOf,
+ * no screenshot or a screenshot with no pin costs no query. lowestOpenSharedRoundOf reads one rvw_round row and
+ * nothing below it, for the round bar. accessFactsOf, draftScreenshotOf, openDraftOf,
  * openDraftScreenshotsOf, roundNotes and sharedRoundNotes send one query each and make no visibility check: the first
  * two leave the decision to RoundVoter, the next three read only the owner's own draft, and the last leaves it to the caller's TicketVoter and
  * RoundVoter. draftOf reads one draft of its owner with its screenshots and pins, and needs none either. Of a shared
  * round, forTicket and sharedRoundNotes give only the latest try of each screenshot (ADR-0048), to everyone, and
  * draftScreenshotOf finds no earlier try; draftOf and the viewer's unshared draft give every try.
  */
-final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries, RoundsVisibleTo
+final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries, RoundsVisibleTo, OpenSharedRoundQueries
 {
     /** The picture and pin columns of roundNotes and sharedRoundNotes, which screenshotNotesOf reads. */
     private const string NOTE_COLUMNS = 'screenshot.id AS screenshot_id, screenshot.media_id, screenshot.position,'
@@ -145,6 +148,29 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             new \DateTimeImmutable($sharedAt),
             self::text($roundRow['state'], 'state'),
             $this->screenshotsOf($organizationId->toString(), $roundIdsWithScreenshots, [])[$roundId] ?? [],
+        );
+    }
+
+    public function lowestOpenSharedRoundOf(TicketId $ticketId): ?OpenSharedRound
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // Round::isOpenSharedRound's predicate, as DbalRounds::openSharedRoundsOf reads it, without its locks; by
+        // rvw_round_ticket_id_number_key, which gives each shared round of a ticket its own number.
+        $roundRow = $this->connection->fetchAssociative(
+            'SELECT round.number, round.kind, round.owner_id FROM rvw_round AS round'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            ." AND round.kind IN ('review', 'draft') AND round.shared_at IS NOT NULL AND round.deleted_at IS NULL AND round.state = 'open'"
+            .' ORDER BY round.number LIMIT 1',
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString()],
+        );
+        if (false === $roundRow) {
+            return null;
+        }
+
+        return new OpenSharedRound(
+            self::integer($roundRow['number'], 'number'),
+            self::text($roundRow['kind'], 'kind'),
+            new UserId(self::text($roundRow['owner_id'], 'owner_id')),
         );
     }
 

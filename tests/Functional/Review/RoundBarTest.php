@@ -333,6 +333,41 @@ final class RoundBarTest extends WebTestCase
     }
 
     /**
+     * The bar is read on every ticket view and live refresh, so it reads one rvw_round row and no screenshot or pin:
+     * Round 0 holds a pinned screenshot and the open round a shared draft with one.
+     */
+    #[Test]
+    public function theBarReadsOneRoundQueryAndNoScreenshotOrPin(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->addPinnedScreenshotTo($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), 'Mia');
+        $this->addPinnedScreenshotTo($this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT), 'Omar');
+        $this->addTurnRowOf($ticketId, 'Mia');
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->queryCountOf(self::ROUND_BAR_PAGE);
+
+        $debugData = self::getContainer()->get('doctrine.debug_data_holder');
+        $debugData->reset();
+        $this->client->request('GET', self::ROUND_BAR_PAGE, [], [], self::TURBO_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Round 1 is open · Ready for Mia', $this->client->getCrawler()->filter(self::BAR.' .round-bar__text')->text());
+        $reviewSql = [];
+        foreach ($debugData->getData() as $queriesOfOneConnection) {
+            foreach ($queriesOfOneConnection as $query) {
+                self::assertIsString($query['sql']);
+                if (str_contains($query['sql'], 'rvw_')) {
+                    $reviewSql[] = $query['sql'];
+                }
+            }
+        }
+        self::assertCount(1, $reviewSql);
+        self::assertStringContainsString('FROM rvw_round AS round', $reviewSql[0]);
+        self::assertStringNotContainsString('rvw_screenshot', $reviewSql[0]);
+        self::assertStringNotContainsString('rvw_pin', $reviewSql[0]);
+    }
+
+    /**
      * The ticket page loads the bar in an eager frame inside the header's state, which a move's Turbo Stream replaces,
      * so the bar is read again after every move; the page itself reads no round.
      */
