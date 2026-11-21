@@ -166,7 +166,7 @@ test.describe('Screenshots from Claude Code', () => {
     expect(polyglot.includes(scriptBytes), 'the fixture carries the script bytes').toBe(true);
 
     const uploadId = await uploadThroughMcp(request, session, key, polyglot);
-    const added = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId });
+    const added = await addScreenshotOnceProcessed(session, { key, upload_id: uploadId, title: 'Small checkout icon', summary: 'A picture with script bytes after its end.' });
 
     expect(added.isError, added.text).toBe(false);
     expect(added.structured).toMatchObject({ status: 'added' });

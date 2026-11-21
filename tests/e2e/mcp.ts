@@ -98,7 +98,16 @@ export class McpSession {
       data: { jsonrpc: '2.0', id: this.nextId++, method: 'tools/call', params: { name, arguments: toolArguments } },
     });
     expect(answer.status(), await answer.text()).toBe(200);
-    const { result } = (await answer.json()) as { result: { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, unknown> } };
+    // Invalid input (ToolCallOutcome::InvalidInput) is a JSON-RPC error, not a result with isError: GatedToolCallHandler.
+    const body = (await answer.json()) as {
+      result?: { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, unknown> };
+      error?: { code: number; message: string };
+    };
+    expect(body.error, `the JSON-RPC error of tools/call ${name}`).toBeUndefined();
+    if (undefined === body.result) {
+      throw new Error(`tools/call ${name} answered with neither a result nor an error.`);
+    }
+    const result = body.result;
     return { isError: true === result.isError, text: result.content.map((content) => content.text).join('\n'), structured: result.structuredContent ?? {} };
   }
 
