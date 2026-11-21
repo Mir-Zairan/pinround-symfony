@@ -190,7 +190,7 @@
             {# A ticket has one turn (ins_ticket_turn is keyed by ticket), so the people's loads add up without counting a ticket twice. #}
             {% set waitingTicketsTotal = workload.people|reduce((total, person) => total + person.waitingTickets, 0) %}
             <section class="team__column team__column--aside" aria-labelledby="team-people" {{ stimulus_controller('team-people', {shownAtFirst: peopleShownAtFirst, isShowingAll: false}) }}>
-                <h2 class="team__section-title" id="team-people">People <span class="team__count">{{ workload.people|length }}</span> <span class="team__hint">
+                <h2 class="team__section-title" id="team-people">People <span class="team__count">{{ workload.people|length }}</span>{# Keeps the two counts apart in the heading's spoken name. #}<span class="visually-hidden"> {{ workload.people|length == 1 ? 'person' : 'people' }},</span> <span class="team__hint">
                     {%- if waitingTicketsTotal == 0 -%}
                         No open tickets waiting on them
                     {%- elseif waitingTicketsTotal == 1 -%}

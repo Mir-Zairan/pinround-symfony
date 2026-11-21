@@ -220,7 +220,7 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('People 7 60 open tickets waiting on them', $page->filter('#team-people')->text());
+        self::assertSame('People 7 people, 60 open tickets waiting on them', $page->filter('#team-people')->text());
         self::assertSame(
             ['Noor 20 Too much', 'Ben 19 Busy', 'Omar 8 Busy', 'Lena (you) 7', 'Tom 3', 'Zoe 3', 'Pia 0'],
             $page->filter('.team__person-head')->each(static fn (Crawler $head): string => $head->text()),
@@ -316,6 +316,18 @@ final class TeamPageTest extends WebTestCase
     }
 
     #[Test]
+    public function aTeamOfOneSaysPersonNotPeopleInThePeopleTitle(): void
+    {
+        $people = $this->createAcmeFoodsPeople();
+        $this->logIn($this->client, $people['Lena']);
+
+        $page = $this->client->request('GET', '/teams/mobile');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('People 1 person, No open tickets waiting on them', $page->filter('#team-people')->text());
+    }
+
+    #[Test]
     public function aTeamWithNoLoadDrawsEmptyBarsAgainstAMaximumOfOne(): void
     {
         $people = $this->createAcmeFoodsPeople();
@@ -324,7 +336,7 @@ final class TeamPageTest extends WebTestCase
         $page = $this->client->request('GET', '/teams/shop');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('People 2 No open tickets waiting on them', $page->filter('#team-people')->text());
+        self::assertSame('People 2 people, No open tickets waiting on them', $page->filter('#team-people')->text());
         self::assertSame(
             [['Lena 0', '0', '1'], ['Omar (you) 0', '0', '1']],
             $page->filter('.team__person')->each(static fn (Crawler $person): array => [
@@ -340,8 +352,8 @@ final class TeamPageTest extends WebTestCase
      */
     public static function viewersOfOmarsLoad(): iterable
     {
-        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2', ['2', '2'], 'People 2 2 open tickets waiting on them'];
-        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1', ['1', '1'], 'People 2 1 open ticket waiting on them'];
+        yield 'Lena, lead of Shop, counts the team-only ticket' => ['Lena', 'Omar 2', ['2', '2'], 'People 2 people, 2 open tickets waiting on them'];
+        yield 'Raj, a Manager with no team role, does not' => ['Raj', 'Omar 1', ['1', '1'], 'People 2 people, 1 open ticket waiting on them'];
     }
 
     /**

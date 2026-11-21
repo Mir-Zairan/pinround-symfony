@@ -257,10 +257,9 @@ test.describe('as a member who is not the lead', () => {
     expect(loads.length).toBeGreaterThan(1);
     const total = loads.reduce((sum, load) => sum + load, 0);
     expect(total).toBeGreaterThan(1);
-    await expect(page.getByRole('heading', { name: /^People / })).toHaveText(
-      `People ${loads.length} ${total} open tickets waiting on them`,
-    );
-    expect(await seriousViolations(page)).toEqual([]);
+    const title = page.getByRole('heading', { name: /^People / });
+    // Hidden words keep the two counts apart when the title is read out.
+    await expect(title).toHaveAccessibleName(`People ${loads.length} people, ${total} open tickets waiting on them`);    expect(await seriousViolations(page)).toEqual([]);
   });
 
   test('the page offers no Add a team step and no x on steps', async ({ page }) => {

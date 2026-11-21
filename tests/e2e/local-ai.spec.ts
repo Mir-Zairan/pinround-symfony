@@ -467,9 +467,18 @@ test.describe('a person whose organization runs AI on laptops', () => {
 
       await checkAgain(sheet);
       await expect.poll(() => heldRequests.length).toBe(2);
-      await answerWithModels(heldRequests[1], page, []);
+      await heldRequests[1].abort('connectionrefused');
+      await expect(statusLine(sheet)).toHaveText('pinround could not reach Ollama on this laptop.', { useInnerText: true });
       await expect(chipState(page)).toHaveText('Local AI: not found');
       expect(await chipSign(page), 'not found').toBe('"!"');
+
+      // Ollama answers, but with no model whose name pinround can use: the no-model state, which shows the same sign.
+      await checkAgain(sheet);
+      await expect.poll(() => heldRequests.length).toBe(3);
+      await answerWithModels(heldRequests[2], page, [installedModel('My Model:latest', 'llama', '3.2B')]);
+      await expect(statusLine(sheet)).toHaveText('Ollama runs, but it has no model yet. Do step 2.', { useInnerText: true });
+      await expect(chipState(page)).toHaveText('Local AI: not found');
+      expect(await chipSign(page), 'no model').toBe('"!"');
     });
   });
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Tests\Functional\Identity\LogsInUsers;
+use App\Web\UI\Component\ButtonVariant;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
@@ -24,11 +25,20 @@ final class ComponentGalleryTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
         self::assertSame(['Button', 'Chip', 'Segmented control', 'Tag', 'AI chip', 'Status pill', 'Switch', 'Avatar', 'Avatar stack', 'Card', 'Empty state', 'Toast', 'Dialog', 'Share this round?', 'Menu', 'Person picker', 'Show tickets of…', 'Give SHOP-12 to…', 'Your next step box', 'Your next step', 'Move to Needs input', 'Queue bar', 'Screenshot with pins', 'Screenshot with pins you place', 'Screenshot with pins already placed', 'Screenshot being processed', 'Screenshot that could not be processed', 'Screenshot editor', 'Progress dots', 'Screenshot upload'], $crawler->filter('h2')->each(static fn ($heading): string => $heading->text()));
-        // 4 variants x 2 sizes x (normal, disabled, link), plus the buttons of the examples further down the page.
-        self::assertCount(53, $crawler->filter('main .btn'));
-        self::assertCount(11, $crawler->filter('main a.btn[href]'));
-        self::assertCount(4, $crawler->filter('main button.btn.btn-sm[disabled]'));
+        // 5 variants x 2 sizes x (normal, disabled, link), plus the buttons of the examples further down the page.
+        self::assertCount(59, $crawler->filter('main .btn'));
+        self::assertCount(13, $crawler->filter('main a.btn[href]'));
+        self::assertCount(5, $crawler->filter('main button.btn.btn-sm[disabled]'));
         self::assertCount(14, $crawler->filter('main button.btn.btn-text:not([disabled])'));
+        self::assertSame(
+            ['Danger', 'Save', 'Start', 'Danger', 'Save', 'Start'],
+            $crawler->filter('#gallery-button ~ .gallery-panel .btn-danger')->each(static fn ($button): string => $button->text()),
+        );
+        // Every variant the Button takes is on the page, so a new one cannot ship unseen.
+        self::assertSame(
+            array_map(static fn (ButtonVariant $variant): string => $variant->value, ButtonVariant::cases()),
+            array_values(array_unique($crawler->filter('#gallery-button ~ .gallery-panel div.gallery-row:first-of-type .btn')->each(static fn ($button): string => strtolower($button->text())))),
+        );
     }
 
     #[Test]

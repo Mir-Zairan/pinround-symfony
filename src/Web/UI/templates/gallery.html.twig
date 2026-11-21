@@ -19,17 +19,17 @@
             <div class="gallery-panel">
                 <h3>Size {{ buttonSize }}</h3>
                 <div class="gallery-row">
-                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text'] %}
+                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text', 'danger'] %}
                         <twig:Button variant="{{ buttonVariant }}" size="{{ buttonSize }}">{{ buttonVariant|capitalize }}</twig:Button>
                     {% endfor %}
                 </div>
                 <div class="gallery-row">
-                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text'] %}
+                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text', 'danger'] %}
                         <twig:Button variant="{{ buttonVariant }}" size="{{ buttonSize }}" disabled>Save</twig:Button>
                     {% endfor %}
                 </div>
                 <div class="gallery-row">
-                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text'] %}
+                    {% for buttonVariant in ['filled', 'tonal', 'outline', 'text', 'danger'] %}
                         <twig:Button variant="{{ buttonVariant }}" size="{{ buttonSize }}" href="{{ path('web_home') }}">Start</twig:Button>
                     {% endfor %}
                 </div>

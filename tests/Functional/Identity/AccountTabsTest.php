@@ -12,7 +12,7 @@ use Zenstruck\Foundry\Test\Factories;
 
 /**
  * The tab rail between Profile, Security and API tokens (P14.T17 step 6): the same three tabs on each page, the page's own
- * one marked current, through the real firewall over HTTPS.
+ * one marked current, drawn by the SegmentedControl component, through the real firewall over HTTPS.
  */
 final class AccountTabsTest extends WebTestCase
 {
@@ -45,5 +45,7 @@ final class AccountTabsTest extends WebTestCase
             $tabs->each(static fn (Crawler $tab): array => [$tab->text(), $tab->attr('href')]),
         );
         self::assertSame([$currentLabel], $tabs->filter('[aria-current="page"]')->each(static fn (Crawler $tab): string => $tab->text()));
+        // The design system's SegmentedControl in link mode, not a rail of its own.
+        self::assertSame(3, $page->filter('main nav[aria-label="Your account"] > .seg-group[role="group"][aria-label="Your account"] > a.seg')->count());
     }
 }
