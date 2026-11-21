@@ -800,8 +800,8 @@ final class TicketListTest extends WebTestCase
 
     /**
      * A filter change reloads only the list frame: the answer is that frame alone, with the list's own queries and
-     * neither the menu's teams, the toolbar's people nor the rail, which the whole page reads (people from the cache
-     * when warm).
+     * neither the menu's teams and badge, the toolbar's people nor the rail, which the whole page reads (people from
+     * the cache when warm).
      */
     #[Test]
     public function aFrameRequestGetsOnlyTheListFrameAndRunsOnlyTheListsQueries(): void
@@ -830,8 +830,10 @@ final class TicketListTest extends WebTestCase
         self::assertSame([1, 1], [self::countMatching('/FROM idn_user WHERE id = ANY/', $pageQueries), self::countMatching('/FROM idn_user WHERE id = ANY/', $frameQueries)]);
         // The header's Local AI chip reads the AI settings; a frame has no header.
         self::assertSame([1, 0], [self::countMatching("/data->'ai'/", $pageQueries), self::countMatching("/data->'ai'/", $frameQueries)]);
-        // The menu's team names, the rail's three and the chip's AI settings.
-        self::assertCount(\count($pageQueries) - 5, $frameQueries);
+        // The menu's My reports badge; a frame has no menu.
+        self::assertSame([1, 0], [self::countMatching('/AS questions_waiting FROM ins_ticket_turn/', $pageQueries), self::countMatching('/AS questions_waiting FROM ins_ticket_turn/', $frameQueries)]);
+        // The menu's team names and My reports badge, the rail's three and the chip's AI settings.
+        self::assertCount(\count($pageQueries) - 6, $frameQueries);
     }
 
     /**
