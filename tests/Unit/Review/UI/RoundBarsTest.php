@@ -6,9 +6,8 @@ namespace App\Tests\Unit\Review\UI;
 
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\Roles;
-use App\Review\Api\RoundView;
-use App\Review\Api\TicketRounds;
-use App\Review\Application\RoundsVisibleTo;
+use App\Review\Application\OpenSharedRound;
+use App\Review\Application\OpenSharedRoundQueries;
 use App\Review\UI\RoundBars;
 use App\Review\UI\RoundReadyFor;
 use App\Review\UI\VisibleTicket;
@@ -68,36 +67,35 @@ final class RoundBarsTest extends TestCase
         self::assertNull($bar->readyForLine);
     }
 
+    #[Test]
+    public function aTicketWithNoOpenSharedRoundHasNoBar(): void
+    {
+        self::assertNull(self::roundBars(['Lena Lead'], isRoundOpen: false)->forTicket(self::visibleTicketOf(self::OMAR)));
+    }
+
     /**
      * @param list<string> $lenasDisplayName Identity's name for Lena, if it knows her
      */
-    private static function roundBars(array $lenasDisplayName, string $turnUserId = self::LENA): RoundBars
+    private static function roundBars(array $lenasDisplayName, string $turnUserId = self::LENA, bool $isRoundOpen = true): RoundBars
     {
-        $rounds = [
-            new RoundView('0197a3c0-0000-7000-8000-000000000102', 2, 'review', new UserId(self::MIA), new \DateTimeImmutable('2026-11-05 09:00:00+00:00'), 'open', []),
-            new RoundView('0197a3c0-0000-7000-8000-000000000101', 1, 'review', new UserId(self::MIA), new \DateTimeImmutable('2026-11-04 09:00:00+00:00'), 'closed', []),
-        ];
-        $roundsVisibleTo = new class($rounds) implements RoundsVisibleTo {
+        // Round 2 is the ticket's open review round, while one is open; no other ticket has one.
+        $openRoundsByTicket = $isRoundOpen ? [self::TICKET => new OpenSharedRound(2, 'review', new UserId(self::MIA))] : [];
+        $openSharedRoundQueries = new class($openRoundsByTicket) implements OpenSharedRoundQueries {
             /**
-             * @param list<RoundView> $rounds
+             * @param array<string, OpenSharedRound> $openRoundsByTicket
              */
-            public function __construct(private readonly array $rounds)
+            public function __construct(private readonly array $openRoundsByTicket)
             {
             }
 
-            public function forVisibleTo(TicketId $ticketId, TicketVisibility $viewer): TicketRounds
+            public function lowestOpenSharedRoundOf(TicketId $ticketId): ?OpenSharedRound
             {
-                return new TicketRounds($this->rounds);
-            }
-
-            public function sharedRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView
-            {
-                return array_find($this->rounds, static fn (RoundView $round): bool => $round->number === $number);
+                return $this->openRoundsByTicket[$ticketId->toString()] ?? null;
             }
         };
         $displayNames = [] === $lenasDisplayName ? [] : [self::LENA => $lenasDisplayName[0]];
 
-        return new RoundBars($roundsVisibleTo, new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => $turnUserId]), new NamedUserQueries($displayNames)));
+        return new RoundBars($openSharedRoundQueries, new RoundReadyFor(new InMemoryTurnUserQueries([self::TICKET => $turnUserId]), new NamedUserQueries($displayNames)));
     }
 
     private static function visibleTicketOf(string $viewerId): VisibleTicket
