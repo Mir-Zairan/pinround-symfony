@@ -23,6 +23,7 @@ globalThis.pinroundDock ??= (() => {
         target: 'Put it in',
         noTarget: 'Choose where to put it',
         pin: 'Pin',
+        clearPins: (pinCount) => `Clear ${pinCount} ${1 === pinCount ? 'pin' : 'pins'}`,
         capture: 'Capture',
         play: 'Play',
         saveDraft: 'Save draft',
@@ -55,6 +56,7 @@ globalThis.pinroundDock ??= (() => {
         .dock label { display: grid; gap: 2px; font-size: 12px; }
         .dock select { width: 100%; padding: 4px; border: 1px solid #8a8f98; border-radius: 6px; color: inherit; background: #ffffff; text-overflow: ellipsis; }
         .dock__action { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #2f6fd6; border-radius: 6px; background: #ffffff; color: #1f4fa0; cursor: pointer; }
+        .dock__action[hidden] { display: none; }
         .dock__action[aria-pressed="true"] { background: #2f6fd6; color: #ffffff; }
         .dock__action:disabled { border-color: #c3c7cc; color: #6b7280; cursor: default; }
         .dock kbd { font: 12px/1 system-ui, sans-serif; padding: 2px 4px; border: 1px solid currentColor; border-radius: 4px; opacity: 0.8; }
@@ -160,8 +162,8 @@ globalThis.pinroundDock ??= (() => {
      * @param {ShadowRoot} shadow the overlay's closed root
      * @param {{storage: {get: Function, set: Function}, siteHost: string, viewport: {width: () => number, height: () => number},
      *   onAction: (action: string, value?: string) => void}} options storage is the extension's local storage; onAction hears
-     *   pin, capture, play, save-draft and choose (with the picked value); shrink stays in here. Play's step card goes in
-     *   the answer's stepSlot.
+     *   pin, clear-pins, capture, play, save-draft and choose (with the picked value); shrink stays in here. Play's step
+     *   card goes in the answer's stepSlot.
      */
     function mountDock(shadow, { storage, siteHost, viewport, onAction }) {
         const make = (tag, className, properties = {}) => Object.assign(document.createElement(tag), { className, ...properties });
@@ -203,6 +205,7 @@ globalThis.pinroundDock ??= (() => {
         };
         const pinButton = actionButton(TEXTS.pin, 'P');
         pinButton.setAttribute('aria-pressed', 'false');
+        const clearPinsButton = make('button', 'dock__action dock__clear', { type: 'button', hidden: true });
         const captureButton = actionButton(TEXTS.capture, 'C');
         const playButton = actionButton(TEXTS.play);
         const saveButton = actionButton(TEXTS.saveDraft);
@@ -212,7 +215,7 @@ globalThis.pinroundDock ??= (() => {
         const status = make('p', 'dock__status');
         status.setAttribute('role', 'status');
         const stepSlot = make('div', 'dock__step-slot');
-        dock.append(head, pickerLabel, pinButton, captureButton, playButton, saveButton, shrinkButton, stepSlot, status);
+        dock.append(head, pickerLabel, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton, stepSlot, status);
 
         const handle = make('button', 'dock-handle dock--right', { type: 'button', hidden: true });
         handle.setAttribute('aria-label', TEXTS.open);
@@ -279,6 +282,7 @@ globalThis.pinroundDock ??= (() => {
 
         picker.addEventListener('change', onlyTrusted(() => onAction('choose', picker.value)));
         pinButton.addEventListener('click', onlyTrusted(() => onAction('pin')));
+        clearPinsButton.addEventListener('click', onlyTrusted(() => onAction('clear-pins')));
         captureButton.addEventListener('click', onlyTrusted(() => onAction('capture')));
         playButton.addEventListener('click', onlyTrusted(() => onAction('play')));
         saveButton.addEventListener('click', onlyTrusted(() => onAction('save-draft')));
@@ -346,9 +350,14 @@ globalThis.pinroundDock ??= (() => {
             /** Where the scenario's step card goes (dock-run.js): after Shrink, before the status line. */
             stepSlot,
             /** The dock's focusable controls in Tab order, for the overlay's focus trap while pinning. */
-            focusables: () => (dock.hidden ? [handle] : [grip, picker, pinButton, captureButton, playButton, saveButton, shrinkButton].filter((control) => !control.disabled)),
+            focusables: () => (dock.hidden ? [handle] : [grip, picker, pinButton, clearPinsButton, captureButton, playButton, saveButton, shrinkButton].filter((control) => !control.disabled && !control.hidden)),
             setPinning(isPinning) {
                 pinButton.setAttribute('aria-pressed', String(isPinning));
+            },
+            /** Shows "Clear N pins" for the pins on the page, and hides it while there are none. */
+            setPinCount(pinCount) {
+                clearPinsButton.hidden = 0 === pinCount;
+                clearPinsButton.textContent = TEXTS.clearPins(pinCount);
             },
             setBusy(busy) {
                 isBusy = busy;

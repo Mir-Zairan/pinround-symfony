@@ -11,6 +11,7 @@
 // The same root holds the dock (dock.js) once openDock() is called: one host, one closed root. Pinning is a mode: the
 // tinted surface that takes clicks shows only while it is on; the pins stay on the page between modes. With the dock
 // open, Escape and a saved capture drop the pins and end pinning but keep the dock; without it they remove the host.
+// Each pin has a Remove button beside it, and the dock's "Clear N pins" drops them all without changing the mode.
 // The dock's scenario run (dock-run.js) lives in the extension's local storage, not here, so the step card comes back
 // as it was whenever the dock opens again on a page, after a reload or a navigation too.
 // Injecting this file only defines globalThis.pinroundOverlay: the extension then calls startPinning() or openDock().
@@ -103,6 +104,24 @@
         .pin--left .pin__note { left: auto; right: 50%; }
         .pin--above .pin__note { top: auto; bottom: calc(100% + 8px); }
         .pin:hover .pin__note:not([hidden]), .pin:focus-visible .pin__note:not([hidden]) { display: block; }
+        /* Left of the ring (it reaches 16px from the centre) and above the note (which starts 22px below the centre). */
+        .pin-remove {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 1px solid #ffffff;
+            border-radius: 50%;
+            background: #161d1b;
+            color: #ffffff;
+            font-size: 16px;
+            line-height: 20px;
+            text-align: center;
+            transform: translate(-42px, -2px);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+        .pin-remove:focus-visible { outline: 2px solid #2f6fd6; outline-offset: 2px; }
         .note-editor {
             --shift-x: 20px;
             --shift-y: 20px;
@@ -246,7 +265,7 @@
     // Later is on top: the pins and the note editor over the hint and the status.
     shadow.append(surface, keyboardHelp, hint, status, pinLayer, editor);
 
-    /** @type {Array<{x_pct: number, y_pct: number, note: string, button: HTMLButtonElement, tab: HTMLElement, bubble: HTMLElement}>} */
+    /** @type {Array<{x_pct: number, y_pct: number, note: string, button: HTMLButtonElement, removeButton: HTMLButtonElement, tab: HTMLElement, bubble: HTMLElement}>} */
     const pins = [];
     const crosshairAt = { x_pct: 50, y_pct: 50 };
     /** @type {null|{pin: object, returnFocusTo: HTMLElement}} */
@@ -277,11 +296,14 @@
         pins.forEach((pin, index) => {
             const note = pin.note.trim();
             pin.button.setAttribute('aria-label', rules.accessibleNameOf(index + 1, pin.note));
+            pin.removeButton.setAttribute('aria-label', `Remove pin ${index + 1}`);
+            pin.removeButton.title = `Remove pin ${index + 1}`;
             pin.tab.textContent = String(index + 1);
             pin.bubble.textContent = note;
             pin.bubble.hidden = '' === note;
         });
         hint.hidden = !isPinning || pins.length > 0;
+        dock?.setPinCount(pins.length);
         if (null !== editing) {
             editorCaption.textContent = `Note for pin ${pins.indexOf(editing.pin) + 1}`;
         }
@@ -308,17 +330,56 @@
         }
     }
 
+    // Where focus goes once the control that had it is gone: the surface while pinning, else the dock's Pin button,
+    // never the hidden surface.
+    function focusAfterPinsGone() {
+        if (isPinning) {
+            surface.focus();
+        } else {
+            dock?.focusPinButton();
+        }
+    }
+
+    function takeOffPage(pin) {
+        pin.button.remove();
+        pin.removeButton.remove();
+    }
+
     function removePin(pin) {
+        const hadFocus = null !== shadow.activeElement;
         const index = pins.indexOf(pin);
         pins.splice(index, 1);
-        pin.button.remove();
+        takeOffPage(pin);
         if (editing?.pin === pin) {
             closeEditor();
         }
         labelPins();
         say('');
-        const nextFocus = (pins[index - 1] ?? pins[0])?.button ?? surface;
-        nextFocus.focus();
+        if (!hadFocus) {
+            return;
+        }
+        const neighbour = pins[index - 1] ?? pins[0];
+        if (undefined === neighbour) {
+            focusAfterPinsGone();
+        } else {
+            neighbour.button.focus();
+        }
+    }
+
+    /** "Clear N pins": every pin goes, and pinning stays as it was. */
+    function clearPins() {
+        const hadFocus = null !== shadow.activeElement;
+        if (null !== editing) {
+            closeEditor();
+        }
+        for (const pin of pins.splice(0)) {
+            takeOffPage(pin);
+        }
+        labelPins();
+        say('');
+        if (hadFocus) {
+            focusAfterPinsGone();
+        }
     }
 
     function dropPin(point, returnFocusTo) {
@@ -334,8 +395,12 @@
         const tab = hiddenFromReaders(make('span', 'pin__tab'));
         const bubble = hiddenFromReaders(make('span', 'pin__note'));
         button.append(tab, bubble);
-        const pin = { x_pct: point.x_pct, y_pct: point.y_pct, note: '', button, tab, bubble };
+        // Out of the Tab order, so Tab still goes pin to pin; the keyboard removes a pin with Delete on it.
+        const removeButton = make('button', 'pin-remove', { type: 'button', tabIndex: -1, textContent: '×' });
+        const pin = { x_pct: point.x_pct, y_pct: point.y_pct, note: '', button, removeButton, tab, bubble };
         placeAt(button, pin);
+        placeAt(removeButton, pin);
+        removeButton.addEventListener('click', onlyTrusted(() => removePin(pin)));
         button.addEventListener('click', onlyTrusted(() => openEditor(pin, button)));
         button.addEventListener('keydown', onlyTrusted((event) => {
             if ('Delete' === event.key || 'Backspace' === event.key) {
@@ -344,7 +409,7 @@
             }
         }));
         pins.push(pin);
-        pinLayer.append(button);
+        pinLayer.append(button, removeButton);
         openEditor(pin, returnFocusTo);
     }
 
@@ -380,7 +445,7 @@
             closeEditor();
         }
         for (const pin of pins.splice(0)) {
-            pin.button.remove();
+            takeOffPage(pin);
         }
         say('');
         stopPinning(hadFocus);
@@ -552,6 +617,8 @@
             } else {
                 startPinning();
             }
+        } else if ('clear-pins' === action) {
+            clearPins();
         } else if ('shrink' === action) {
             dock.toggleShrunk();
         } else if ('play' === action) {
@@ -575,6 +642,7 @@
             onAction: runDockAction,
         });
         dock.setPinning(isPinning);
+        dock.setPinCount(pins.length);
         stepCard = runRules.mountStepCard(shadow, dock.stepSlot, {
             onAnswer: answerStep,
             onStop: stopRun,
