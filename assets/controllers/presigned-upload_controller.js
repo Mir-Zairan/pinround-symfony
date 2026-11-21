@@ -17,6 +17,11 @@ import { readUploadStatus, REJECTED_MESSAGE, sleep, statusUrlFor, waitForProcess
 // action drops the picture: it stops the upload or the polling, empties the field, data-media-state and the preview, and
 // fires nothing. resumeProcessing() polls a kept, still pending picture for another 15 s. The markup and the values
 // come from the UploadField component, or from ScreenshotReportField.
+//
+// From the start of an upload until it ends, the element carries data-upload-busy, which tells live-updates to hold
+// the part around it rather than swap it and lose the upload. It ends on failed, rejected, clear(), and on ready or
+// still-processing unless a listener calls preventDefault() on that event: it then takes the picture over and ends
+// the upload with clear() or resumeProcessing(). presigned-upload:idle (no detail) fires as it ends.
 export default class extends Controller {
   static targets = ['input', 'status', 'progress', 'preview', 'mediaId'];
   static values = {
@@ -32,6 +37,8 @@ export default class extends Controller {
     this.isUploading = false;
     this.previewUrl = null;
     this.abortController = null;
+    // Left by an upload in a page Turbo cached and has now restored, with no upload running.
+    delete this.element.dataset.uploadBusy;
   }
 
   disconnect() {
@@ -81,6 +88,7 @@ export default class extends Controller {
     const { signal } = (this.abortController = new AbortController());
     this.mediaIdTarget.value = '';
     this.element.dataset.mediaState = 'uploading';
+    this.#markBusy();
     this.showPreview(file);
     this.showProgress(0);
     this.say(`Uploading ${file.name}…`);
@@ -107,6 +115,7 @@ export default class extends Controller {
       delete this.element.dataset.mediaState;
       this.clearPreview();
       this.say(failure instanceof UploadFailed ? failure.message : 'The upload failed. Try again.');
+      this.#markIdle();
       this.dispatch('failed');
     } finally {
       // An aborted upload was replaced by a newer one, or the page is gone: the newer one owns these.
@@ -126,6 +135,7 @@ export default class extends Controller {
     this.progressTarget.hidden = true;
     this.clearPreview();
     this.say('');
+    this.#markIdle();
   }
 
   // Polls the kept picture again for another 15 s, after presigned-upload:still-processing; fires the same events as the
@@ -136,6 +146,7 @@ export default class extends Controller {
     if (!mediaId || !signal || signal.aborted) {
       return;
     }
+    this.#markBusy();
     try {
       await this.awaitProcessing(mediaId, signal);
     } catch (failure) {
@@ -150,15 +161,34 @@ export default class extends Controller {
     const status = await waitForProcessing((pollSignal) => readUploadStatus(statusUrl, pollSignal), sleep, signal);
     if ('ready' === status) {
       this.element.dataset.mediaState = 'ready';
-      this.dispatch('ready', { detail: { mediaId } });
+      this.#markIdleUnlessTakenOver(this.dispatch('ready', { detail: { mediaId } }));
     } else if ('rejected' === status) {
       this.element.dataset.mediaState = 'rejected';
       this.mediaIdTarget.value = '';
       this.clearPreview();
       this.say(REJECTED_MESSAGE);
+      this.#markIdle();
       this.dispatch('rejected', { detail: { mediaId } });
     } else {
-      this.dispatch('still-processing', { detail: { mediaId } });
+      this.#markIdleUnlessTakenOver(this.dispatch('still-processing', { detail: { mediaId } }));
+    }
+  }
+
+  #markBusy() {
+    this.element.dataset.uploadBusy = '';
+  }
+
+  #markIdle() {
+    if (!('uploadBusy' in this.element.dataset)) {
+      return;
+    }
+    delete this.element.dataset.uploadBusy;
+    this.dispatch('idle');
+  }
+
+  #markIdleUnlessTakenOver(event) {
+    if (!event.defaultPrevented) {
+      this.#markIdle();
     }
   }
 

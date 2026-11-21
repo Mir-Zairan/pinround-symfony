@@ -122,8 +122,9 @@ test('a picture pasted from the clipboard is uploaded like a picked one', async 
   await expect(mediaId).toHaveValue('pasted-media-id');
 });
 
-test('the server refusal text is shown, and the hidden input stays empty', async ({ page }) => {
-  const { input, status, mediaId, preview } = await openUploadField(page);
+test('the server refusal text is shown, the hidden input stays empty and the field is no longer busy', async ({ page }) => {
+  const { field, input, status, mediaId, preview } = await openUploadField(page);
+  const events = await recordEvents(field, ['failed', 'idle']);
   const refused = page.waitForResponse((response) => new URL(response.url()).pathname === '/media/intents');
 
   await input.setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: PNG });
@@ -132,6 +133,8 @@ test('the server refusal text is shown, and the hidden input stays empty', async
   await expect(status).toHaveText('You may not add a file here.');
   await expect(mediaId).toHaveValue('');
   await expect(preview).toBeHidden();
+  await expect(field).not.toHaveAttribute('data-upload-busy');
+  expect(await events()).toEqual([{ name: 'idle' }, { name: 'failed' }]);
 });
 
 test('a refused storage PUT says the file could not be stored and sends no complete call', async ({ page }) => {
@@ -321,16 +324,20 @@ test('the field polls the status URL and, once ready after two polls, marks itse
   const pollCount = await routeStatus(page, (poll) => ({ status: 200, json: { status: poll < 2 ? 'pending' : 'ready' } }));
   await page.clock.install();
   const { field, status, mediaId } = await openUploadField(page, { withStatusRoute: false });
-  const events = await recordEvents(field, ['uploaded', 'ready', 'still-processing']);
+  const events = await recordEvents(field, ['uploaded', 'ready', 'still-processing', 'idle']);
 
   await uploadPng(page, status);
   await expect(field).toHaveAttribute('data-media-state', 'pending');
+  await expect(field).toHaveAttribute('data-upload-busy', '');
   await runClockUntil(page, () => pollCount() >= 2);
 
   await expect(field).toHaveAttribute('data-media-state', 'ready');
+  // No listener took the picture over (preventDefault on ready), so the upload ends with it.
+  await expect(field).not.toHaveAttribute('data-upload-busy');
   expect(await events()).toEqual([
     { name: 'uploaded', mediaId: MEDIA_ID },
     { name: 'ready', mediaId: MEDIA_ID },
+    { name: 'idle' },
   ]);
   await expect(mediaId).toHaveValue(MEDIA_ID);
   expect(pollCount()).toBe(2);
@@ -342,17 +349,18 @@ test('a rejected picture shows the plain message, empties the media id and never
   const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'rejected' } }));
   await page.clock.install();
   const { field, status, mediaId, preview } = await openUploadField(page, { withStatusRoute: false });
-  const events = await recordEvents(field, ['ready', 'rejected', 'still-processing']);
+  const events = await recordEvents(field, ['ready', 'rejected', 'still-processing', 'idle']);
 
   await uploadPng(page, status);
   await runClockUntil(page, () => pollCount() >= 1);
 
   await expect(mediaId).toHaveValue('');
   await expect(field).toHaveAttribute('data-media-state', 'rejected');
+  await expect(field).not.toHaveAttribute('data-upload-busy');
   await expect(preview).toBeHidden();
   await page.clock.runFor(100);
   await expect(status).toHaveText('We could not process this image. Try again.');
-  expect(await events()).toEqual([{ name: 'rejected', mediaId: MEDIA_ID }]);
+  expect(await events()).toEqual([{ name: 'idle' }, { name: 'rejected', mediaId: MEDIA_ID }]);
   expect(pollCount()).toBe(1);
 });
 
@@ -361,17 +369,18 @@ test('after 15 polls still pending it fires still-processing, shows no text, kee
   const pollCount = await routeStatus(page, () => ({ status: 200, json: { status: 'pending' } }));
   await page.clock.install();
   const { field, status, mediaId } = await openUploadField(page, { withStatusRoute: false });
-  const events = await recordEvents(field, ['ready', 'still-processing']);
+  const events = await recordEvents(field, ['ready', 'still-processing', 'idle']);
   await uploadPng(page, status);
 
   await runClockUntil(page, () => pollCount() >= 15);
-  await expect.poll(async () => (await events()).length).toBe(1);
+  await expect.poll(async () => (await events()).length).toBe(2);
   await page.clock.runFor(5000);
   await page.clock.runFor(100);
 
-  expect(await events()).toEqual([{ name: 'still-processing', mediaId: MEDIA_ID }]);
+  expect(await events()).toEqual([{ name: 'still-processing', mediaId: MEDIA_ID }, { name: 'idle' }]);
   await expect(mediaId).toHaveValue(MEDIA_ID);
   await expect(field).toHaveAttribute('data-media-state', 'pending');
+  await expect(field).not.toHaveAttribute('data-upload-busy');
   await expect(status).toHaveText('checkout.png uploaded.');
   await expect(field).not.toContainText('Still processing');
   expect(pollCount()).toBe(15);

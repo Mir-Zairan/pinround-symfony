@@ -1,17 +1,19 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { errors, expect, test, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
+import { drawablePng, MEDIA_ID, routeCompletedUpload } from './media-mocks';
 import { recordCspViolations, spotInLayer } from './pin-spots';
-import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
+import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
 
 // The private draft round (P05.T8, ADR-0017) in a real browser. Omar is the assignee and the owner; Lena, Mia and Sara
 // must not see it. What the server refuses for each role is proven in tests/Functional/Review; here it is proven again
 // through the page and the direct URLs.
 //
 // A picture upload needs the processing worker and a bucket, so the cases with a picture seed it already ready through the
-// dev-only console command (draft-picture.ts) and run on any stack.
+// dev-only console command (draft-picture.ts) and run on any stack. The case of an upload held across a live refresh
+// answers the upload in the browser (media-mocks.ts), so the server refuses the picture it is asked to add.
 
 test.use({ viewport: { width: 1280, height: 900 } });
 // Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one test at a time.
@@ -25,6 +27,52 @@ const COPIED_SHOWN_FOR_MS = 2000;
 const ANIMATION_FRAME_MS = 16;
 const FROZEN_AT = new Date('2026-03-14T10:00:00Z');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const HUB_PATH = '/.well-known/mercure';
+// As in live-updates.spec.ts: a signal shows within 3 s, and one within RefreshTicketPagesHandler's 2 s window of the
+// last (the ticket's creation counts) is sent one window later.
+const SHOWS_WITHIN_MS = 3000;
+const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
+
+/** Whether request is a fetch of the ticket page, which only a live-updates signal sends. */
+function isPageFetch(request: Request, key: string): boolean {
+  return new URL(request.url()).pathname === `/t/${key}` && request.resourceType() === 'fetch';
+}
+
+/**
+ * Waits for the signal of the ticket's creation, which may reach the page only after it opened, and resolves once the
+ * page has fetched it, or after SHOWS_WITHIN_MS with none. Started before the page opens, so later signals come from
+ * the test's own changes.
+ */
+async function settleCreationSignal(page: Page, key: string): Promise<void> {
+  let creationFetch: Request;
+  try {
+    creationFetch = await page.waitForRequest((sent) => isPageFetch(sent, key), { timeout: SHOWS_WITHIN_MS });
+  } catch (error) {
+    if (error instanceof errors.TimeoutError) {
+      return;
+    }
+    throw error;
+  }
+  const response = await creationFetch.response();
+  await response?.finished();
+  await nextTaskOf(page);
+}
+
+/** Resolves once the page has run a task queued after now, so the script's work on an answer already read is done. */
+async function nextTaskOf(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
+
+/** Every load of the Rounds section's frame from now on. */
+function recordRoundsLoads(page: Page, key: string): Request[] {
+  const loads: Request[] = [];
+  page.on('request', (request) => {
+    if ('GET' === request.method() && new URL(request.url()).pathname === `/t/${key}/rounds`) {
+      loads.push(request);
+    }
+  });
+  return loads;
+}
 
 async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
   const key = await makeTicketForOmar(browser, 'Draft round check on the checkout banner');
@@ -363,6 +411,62 @@ test.describe('Draft round', () => {
     await page.reload({ waitUntil: 'networkidle' });
     await expect(page.getByLabel('Note for pin 1')).toHaveValue('Kept after a refused delete');
     expect(events, 'one pin save after the refusal, none more').toEqual(['delete', 'setPins']);
+    await context.close();
+  });
+
+  test('an upload Omar started holds a live refresh of the Rounds section until its picture is added', async ({ browser }) => {
+    test.setTimeout(60_000);
+    const key = await makeTicketForOmar(browser, 'Draft upload outlasts a refresh of the rounds');
+    const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
+    const creationSignalSettled = settleCreationSignal(page, key);
+    const streamOpened = page.waitForResponse((response) => new URL(response.url()).pathname === HUB_PATH);
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    expect((await streamOpened).status()).toBe(200);
+    await creationSignalSettled;
+    await page.getByRole('button', { name: 'Start a draft round' }).click();
+    const card = page.locator('article.round-card--private');
+    await expect(card.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await page.waitForLoadState('networkidle');
+
+    const picture = drawablePng(400, 240);
+    await routeCompletedUpload(page, 'intent-held-by-refresh', picture.length);
+    let releaseStatus = () => {};
+    const statusReleased = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    // Without the hold the refresh drops the editor, which aborts this poll; the answer then has no request to go to.
+    await page.route('**/media/*/status', async (route) => {
+      await statusReleased;
+      await route.fulfill({ status: 200, json: { status: 'ready' } }).catch(() => {});
+    });
+    const roundsLoads = recordRoundsLoads(page, key);
+    const firstPoll = page.waitForRequest((request) => /^\/media\/[^/]+\/status$/.test(new URL(request.url()).pathname));
+    await card.locator('input[type="file"]').setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: picture });
+    await firstPoll;
+    await expect(card.locator('[data-upload-busy]')).toHaveCount(1);
+
+    const lena = await openAs(browser, LENA_STORAGE_STATE);
+    await openThread(lena.page, key);
+    const omarsRefresh = page.waitForRequest((request) => isPageFetch(request, key), { timeout: COALESCED_SHOWS_WITHIN_MS });
+    await composerBody(lena.page).fill('The banner still covers the coupon box on a narrow window.');
+    await threadFrame(lena.page).locator('form.thread__composer button[type="submit"]').click();
+    await expect(lena.page.locator(TOAST_REGION)).toHaveText('Comment added.');
+    const refreshAnswer = await (await omarsRefresh).response();
+    await refreshAnswer?.finished();
+    await nextTaskOf(page);
+    expect(roundsLoads, 'the Rounds section is held while the upload waits for its picture').toEqual([]);
+    await expect(card.getByText('No screenshots yet.')).toBeVisible();
+
+    const added = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/addScreenshot'));
+    releaseStatus();
+    const addAnswer = await added;
+    expect(addAnswer.request().postData() ?? '').toContain(MEDIA_ID);
+    expect(addAnswer.status()).toBe(200);
+    // The picture is only mocked in the browser, so the server refuses it; that answer proves the add reached it.
+    expect(await addAnswer.text()).toContain('Add a screenshot you uploaded yourself.');
+    await expect(card.locator('[data-upload-busy]')).toHaveCount(0);
+    await expect.poll(() => roundsLoads.length, { message: 'the held Rounds section loads again once the upload ended' }).toBeGreaterThan(0);
+    await lena.context.close();
     await context.close();
   });
 });
