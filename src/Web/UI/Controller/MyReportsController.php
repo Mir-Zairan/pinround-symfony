@@ -30,7 +30,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * Moving, with Done folded below them. The groups sort the page they are on, HomeQueries::MY_REPORTS_PER_PAGE reports
  * newest first; "Show more" opens the next page by its keyset cursor (MyReportsCursorParameter). Each report is a card
  * (ReportCards). Its queries do not grow with the page: one read of the reports, one count for the intro line over all
- * pages (MyReportsCounts::totalsOf, none for an empty page), and the cards' batch of names and cached steps.
+ * pages (MyReportsCounts::totalsOf, none for an empty page), and the cards' batches of open questions, names and pin
+ * progress, and cached steps.
  */
 final class MyReportsController extends AbstractController
 {

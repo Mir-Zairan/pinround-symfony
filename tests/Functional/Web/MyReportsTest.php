@@ -66,7 +66,8 @@ final class MyReportsTest extends WebTestCase
     {
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
-                foreach (['ins_ticket_turn', 'tkt_ticket', 'wf_step'] as $table) {
+                // rvw_round has no key to tkt_ticket, so it goes by itself, with its pictures, pins and check items.
+                foreach (['rvw_round', 'ins_ticket_turn', 'tkt_ticket', 'wf_step'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
 
@@ -212,6 +213,45 @@ final class MyReportsTest extends WebTestCase
             ]),
         );
         self::assertSame(['progress-dots__stage progress-dots__stage--passed', 'progress-dots__stage progress-dots__stage--current progress-dots__stage--waiting', 'progress-dots__stage progress-dots__stage--later', 'progress-dots__stage progress-dots__stage--later'], $cards->eq(0)->filter('.progress-dots__stage')->each(static fn (Crawler $stage): string => (string) $stage->attr('class')));
+    }
+
+    /**
+     * SHOP-1 waits on Mia's answer to Lena's two-line question and is checked by a checklist of two pins, one OK; SHOP-2
+     * waits on Mia, but its thread's open question is to Lena; SHOP-3 waits on Mia with no question in its thread;
+     * SHOP-4 is building, with a checklist of one open pin and a closed findings round, all OK, over it.
+     */
+    #[Test]
+    public function aCardQuotesTheQuestionToTheViewerWithItsAskerAndShowsItsPinProgress(): void
+    {
+        $first = $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $second = $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $this->addReport('Mia', 'SHOP-3', '2026-09-03 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $fourth = $this->addReport('Mia', 'SHOP-4', '2026-09-04 09:00:00', '2026-11-05 09:00:00', turn: ['Omar', 'build']);
+        $this->addQuestion($first, 'Lena', 'Mia', "Which order was it?\r\nThe one from May?");
+        $this->addQuestion($second, 'Omar', 'Lena', 'Did Mia see it too?');
+        $this->addChecklist($first, ['ok', 'fixed']);
+        $this->addChecklist($fourth, ['open'], closedFindings: ['ok', 'ok']);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        $cards = $page->filter('.my-reports__card');
+        self::assertCount(4, $cards);
+        self::assertSame(
+            [
+                ['SHOP-3', 'Mia', 'A question waits for your answer', null],
+                ['SHOP-2', 'Mia', 'A question waits for your answer', null],
+                ['SHOP-1', 'Lena', 'Lena asks: “Which order was it? The one from May?”', '1 of 2 pins OK'],
+                ['SHOP-4', 'Omar', 'Omar builds it', '0 of 1 pin OK'],
+            ],
+            $cards->each(static fn (Crawler $card): array => [
+                $card->filter('.my-reports__key')->text(),
+                $card->filter('.my-reports__avatar')->attr('aria-label'),
+                $card->filter('.my-reports__now')->text(),
+                $card->filter('.my-reports__pins')->count() > 0 ? $card->filter('.my-reports__pins')->text() : null,
+            ]),
+        );
     }
 
     /**
@@ -393,15 +433,19 @@ final class MyReportsTest extends WebTestCase
     #[Test]
     public function myReportsRunsTheSameQueriesForTwoReportsAndForSixty(): void
     {
-        $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
-        $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-10-01 09:00:00');
+        $first = $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
+        $second = $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-10-01 09:00:00');
+        $this->addQuestion($first, 'Lena', 'Mia', 'Which order was it?');
+        $this->addChecklist($second, ['ok', 'open']);
         $this->logIn($this->client, $this->people['Mia']);
         // The first request skips the user refresh every later one pays.
         $this->queriesOf(self::MY_REPORTS);
         $twoReportsQueries = $this->queriesOf(self::MY_REPORTS);
         self::assertCount(2, $this->client->getCrawler()->filter('.my-reports__key'));
+        self::assertSame(['1 of 2 pins OK'], self::textsOf($this->client->getCrawler(), '.my-reports__pins'));
         for ($number = 3; $number <= 60; ++$number) {
-            $this->addReport(
+            $isQuestionToMia = 0 !== $number % 5 && 2 === $number % 4 && 0 === $number % 7;
+            $ticketId = $this->addReport(
                 'Mia',
                 'SHOP-'.$number,
                 \sprintf('2026-09-%02d 09:00:00', 1 + $number % 28),
@@ -409,12 +453,21 @@ final class MyReportsTest extends WebTestCase
                 closedAt: 0 === $number % 5 ? '2026-11-05 09:00:00' : null,
                 turn: 0 === $number % 5 ? null : [['Lena', 'Omar', 'Mia', 'Raj'][$number % 4], 0 === $number % 7 ? 'answer' : 'build'],
             );
+            if ($isQuestionToMia) {
+                $this->addQuestion($ticketId, ['Lena', 'Omar', 'Raj'][$number % 3], 'Mia', 'Question '.$number.'?');
+            }
+            if (0 === $number % 4) {
+                $this->addChecklist($ticketId, ['ok', 'fixed', 'ok']);
+            }
         }
 
         $sixtyReportsQueries = $this->queriesOf(self::MY_REPORTS);
 
-        self::assertCount(50, $this->client->getCrawler()->filter('.my-reports__key'));
-        self::assertGreaterThan(1, $this->client->getCrawler()->filter('.my-reports__card .my-reports__avatar')->count(), 'the cards name their turn people');
+        $sixtyReportsPage = $this->client->getCrawler();
+        self::assertCount(50, $sixtyReportsPage->filter('.my-reports__key'));
+        self::assertGreaterThan(1, $sixtyReportsPage->filter('.my-reports__card .my-reports__avatar')->count(), 'the cards name their turn people');
+        self::assertGreaterThan(1, $sixtyReportsPage->filter('.my-reports__pins')->count(), 'the cards show their pin progress');
+        self::assertGreaterThan(1, \count(array_filter(self::textsOf($sixtyReportsPage, '.my-reports__now'), static fn (string $now): bool => str_contains($now, ' asks: “'))), 'the cards quote their questions');
         self::assertNotSame([], $twoReportsQueries);
         self::assertSame(\count($twoReportsQueries), \count($sixtyReportsQueries));
     }
@@ -502,6 +555,66 @@ final class MyReportsTest extends WebTestCase
         }
 
         return $ticketId;
+    }
+
+    /**
+     * An open question in the thread of an Acme Foods ticket.
+     */
+    private function addQuestion(string $ticketId, string $asker, string $askedPerson, string $body): void
+    {
+        $values = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $ticketId, $this->people[$asker]->id()->toString(), $this->people[$askedPerson]->id()->toString(), $body];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO cnv_message (organization_id, id, ticket_id, author_id, kind, to_user_id, body, created_at)
+             VALUES (?, ?, ?, ?, 'question', ?, ?, '2026-11-05 09:00:00+00')",
+            $values,
+        ));
+    }
+
+    /**
+     * Round 0 of an Acme Foods ticket with one picture and a pin per check item, its checklist round, and when
+     * $closedFindings has items, a closed findings round over it.
+     *
+     * @param list<string> $itemStates     the checklist's items' states (open, fixed, ok, not_fixed)
+     * @param list<string> $closedFindings the closed findings round's items' states
+     */
+    private function addChecklist(string $ticketId, array $itemStates, array $closedFindings = []): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $lenaId = $this->people['Lena']->id()->toString();
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $ticketId, $lenaId, $itemStates, $closedFindings): int {
+            $addRound = static function (string $kind, int $number, string $state) use ($migrator, $organizationId, $ticketId, $lenaId): string {
+                $roundId = Uuid::v7()->toRfc4122();
+                $migrator->insert('rvw_round', [
+                    'organization_id' => $organizationId, 'id' => $roundId, 'ticket_id' => $ticketId, 'owner_id' => $lenaId, 'kind' => $kind,
+                    'number' => $number, 'shared_at' => '2026-11-01 09:00:00+00', 'state' => $state, 'version' => 1, 'created_at' => '2026-11-01 09:00:00+00',
+                ]);
+
+                return $roundId;
+            };
+            $screenshotId = Uuid::v7()->toRfc4122();
+            $migrator->insert('rvw_screenshot', [
+                'organization_id' => $organizationId, 'id' => $screenshotId, 'round_id' => $addRound('report', 0, 'open'), 'media_id' => Uuid::v7()->toRfc4122(),
+                'position' => 0, 'created_at' => '2026-11-01 09:00:00+00',
+            ]);
+            $pinNumber = 1;
+            foreach (array_filter([1 => $itemStates, 2 => $closedFindings]) as $number => $states) {
+                $roundId = 1 === $number ? $addRound('checklist', 1, 'open') : $addRound('draft', 2, 'closed');
+                foreach ($states as $state) {
+                    $pinId = Uuid::v7()->toRfc4122();
+                    $migrator->insert('rvw_pin', [
+                        'organization_id' => $organizationId, 'id' => $pinId, 'screenshot_id' => $screenshotId, 'number' => $pinNumber++, 'x_pct' => '40.00',
+                        'y_pct' => '60.00', 'note' => 'Looks off', 'source' => 'human', 'author_id' => $lenaId, 'created_at' => '2026-11-01 09:00:00+00',
+                    ]);
+                    $migrator->insert('rvw_check_item', [
+                        'organization_id' => $organizationId, 'id' => Uuid::v7()->toRfc4122(), 'round_id' => $roundId, 'pin_id' => $pinId, 'state' => $state,
+                        'created_at' => '2026-11-01 09:00:00+00',
+                        ...('open' === $state ? [] : ['changed_by' => $lenaId, 'changed_at' => '2026-11-01 09:00:00+00']),
+                    ]);
+                }
+            }
+
+            return 0;
+        });
     }
 
     /**
