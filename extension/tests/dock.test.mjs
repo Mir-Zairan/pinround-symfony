@@ -372,3 +372,145 @@ test('a capture takes the whole overlay out of the picture and puts it back as i
     page.evaluate('globalThis.pinroundOverlay.show()');
     assert.equal(root.activeElement, inRoot('.surface'));
 });
+
+/** A person's click on the pinning surface at `point` (CSS px), the note typed in the editor it opens, then Escape. */
+function dropPinWithNote(page, inRoot, [clientX, clientY], note) {
+    page.click(inRoot('.surface'), { clientX, clientY });
+    page.typeInto(inRoot('textarea'), note);
+    page.keydown(inRoot('textarea'), 'Escape');
+}
+
+const pinNamesOf = (root) => root.querySelectorAll('.pin').map((pin) => pin.getAttribute('aria-label'));
+const removeNamesOf = (root) => root.querySelectorAll('.pin-remove').map((remove) => remove.getAttribute('aria-label'));
+/** The pins the overlay hands a capture, as plain data from the page's realm. */
+const capturedPinsOf = async (page) => JSON.parse(JSON.stringify(await page.evaluate('globalThis.pinroundOverlay.hideForCapture()')));
+
+test('each pin has a Remove beside it that removes that pin only, the rest renumber, and a click the page makes removes nothing', async () => {
+    const { page, root, inRoot } = await dockedPage();
+    page.keydown(page.document.body, 'p');
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
+    dropPinWithNote(page, inRoot, [960, 600], 'Total is wrong');
+    assert.deepEqual(removeNamesOf(root), ['Remove pin 1', 'Remove pin 2', 'Remove pin 3']);
+    assert.deepEqual(root.querySelectorAll('.pin-remove').map((remove) => [remove.textContent, remove.tabIndex, remove.style.left, remove.style.top]), [
+        ['×', -1, '25%', '25%'],
+        ['×', -1, '50%', '50%'],
+        ['×', -1, '75%', '75%'],
+    ]);
+
+    page.click(root.querySelectorAll('.pin-remove')[1], { isTrusted: false });
+    assert.deepEqual(pinNamesOf(root), ['Pin 1: Price is wrong', 'Pin 2: Logo is cut off', 'Pin 3: Total is wrong']);
+
+    page.click(root.querySelectorAll('.pin-remove')[1]);
+
+    assert.deepEqual(pinNamesOf(root), ['Pin 1: Price is wrong', 'Pin 2: Total is wrong']);
+    assert.deepEqual(removeNamesOf(root), ['Remove pin 1', 'Remove pin 2']);
+    assert.deepEqual(await capturedPinsOf(page), [{ x_pct: 25, y_pct: 25, note: 'Price is wrong' }, { x_pct: 75, y_pct: 75, note: 'Total is wrong' }]);
+});
+
+test('Delete or Backspace on a focused pin removes it, and the same keys typed in the page\'s own field remove nothing', async () => {
+    const { page, root, inRoot } = await dockedPage();
+    const pageField = page.element('input', { type: 'text' });
+    page.keydown(page.document.body, 'p');
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
+
+    pageField.focus();
+    page.keydown(pageField, 'Delete');
+    page.keydown(pageField, 'Backspace');
+    const [first, second] = root.querySelectorAll('.pin');
+    page.keydown(second, 'Delete', { isTrusted: false });
+    assert.deepEqual(pinNamesOf(root), ['Pin 1: Price is wrong', 'Pin 2: Logo is cut off']);
+
+    second.focus();
+    page.keydown(second, 'Delete');
+    assert.deepEqual(pinNamesOf(root), ['Pin 1: Price is wrong']);
+    assert.equal(root.activeElement, first, 'Focus goes to the pin before it.');
+
+    page.keydown(first, 'Backspace');
+    assert.deepEqual(pinNamesOf(root), []);
+    assert.equal(root.activeElement, inRoot('.surface'), 'While pinning, the last pin gone leaves focus on the surface.');
+});
+
+test('"Clear N pins" counts the pins on the page, removes them all with an open note, keeps pinning on, and hides at none', async () => {
+    const { page, root, inRoot } = await dockedPage();
+    const clear = inRoot('.dock__clear');
+    assert.equal(clear.hidden, true, 'No pins, no Clear.');
+    page.keydown(page.document.body, 'p');
+
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    assert.deepEqual([clear.hidden, clear.textContent], [false, 'Clear 1 pin']);
+    dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
+    dropPinWithNote(page, inRoot, [960, 600], 'Total is wrong');
+    assert.equal(clear.textContent, 'Clear 3 pins');
+    page.click(root.querySelectorAll('.pin-remove')[0]);
+    assert.equal(clear.textContent, 'Clear 2 pins');
+    page.click(inRoot('.surface'), { clientX: 100, clientY: 100 });
+    assert.deepEqual([clear.textContent, inRoot('.note-editor').hidden], ['Clear 3 pins', false]);
+
+    page.click(clear, { isTrusted: false });
+    assert.equal(pinNamesOf(root).length, 3, 'A click the page makes clears nothing.');
+
+    clear.focus();
+    page.click(clear);
+
+    assert.deepEqual([pinNamesOf(root), removeNamesOf(root), clear.hidden, inRoot('.note-editor').hidden], [[], [], true, true]);
+    assert.equal(inRoot('.surface').hidden, false, 'Pinning stays on.');
+    assert.equal(root.activeElement, inRoot('.surface'));
+    assert.deepEqual(await capturedPinsOf(page), []);
+});
+
+test('pins dropped before the dock opened are counted on its Clear button', async () => {
+    const page = fakePage({ siteHost: SHOP_HOST, viewport: VIEWPORT, storage: fakeBrowser().storage.local, sendMessage: async () => ({ state: STATE }) });
+    page.inject(...OVERLAY_FILES);
+    page.evaluate('globalThis.pinroundOverlay.startPinning()');
+    const root = page.closedRootOf(page.document.querySelector('pinround-overlay'));
+    const inRoot = (selector) => root.querySelector(selector);
+    inRoot('.surface').box = { left: 0, top: 0, width: VIEWPORT.width, height: VIEWPORT.height };
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
+
+    await page.evaluate('globalThis.pinroundOverlay.openDock()');
+
+    assert.deepEqual([inRoot('.dock__clear').hidden, inRoot('.dock__clear').textContent], [false, 'Clear 2 pins']);
+});
+
+test('with pinning off, the last pin removed by Delete or by Remove leaves focus on the Pin button, never on the hidden surface', async () => {
+    const { page, root, inRoot, buttonNamed } = await dockedPage();
+    page.keydown(page.document.body, 'p');
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
+    page.keydown(inRoot('.surface'), 'p');
+    assert.equal(inRoot('.surface').hidden, true);
+
+    const [first, second] = root.querySelectorAll('.pin');
+    second.focus();
+    page.keydown(second, 'Delete');
+    assert.equal(root.activeElement, first);
+
+    // A click on a button focuses it in Chrome.
+    root.querySelector('.pin-remove').focus();
+    page.click(root.querySelector('.pin-remove'));
+
+    assert.deepEqual(pinNamesOf(root), []);
+    assert.equal(root.activeElement, buttonNamed(TEXTS.pin));
+    assert.equal(inRoot('.dock__clear').hidden, true);
+
+    page.keydown(page.document.body, 'p');
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    page.keydown(inRoot('.surface'), 'p');
+    inRoot('.dock__clear').focus();
+    page.click(inRoot('.dock__clear'));
+    assert.equal(root.activeElement, buttonNamed(TEXTS.pin), 'Clear while not pinning leaves focus on Pin too.');
+});
+
+test('the focus trap lets Tab and Shift+Tab move on from Clear as from any dock button in the middle', async () => {
+    const { page, inRoot } = await dockedPage();
+    page.keydown(page.document.body, 'p');
+    dropPinWithNote(page, inRoot, [320, 200], 'Price is wrong');
+    const clear = inRoot('.dock__clear');
+    clear.focus();
+
+    assert.equal(page.keydown(clear, 'Tab', { shiftKey: true }).defaultPrevented, false, 'Shift+Tab goes back to Pin, not round to the end.');
+    assert.equal(page.keydown(clear, 'Tab').defaultPrevented, false);
+});

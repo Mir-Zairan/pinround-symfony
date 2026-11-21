@@ -83,6 +83,17 @@ class FakeNode {
         return this.querySelectorAll(selector)[0] ?? null;
     }
 
+    /** Elements with every class of the space-separated list, as Chrome's; no class at all matches none. */
+    getElementsByClassName(classNames) {
+        const wanted = String(classNames).split(/\s+/).filter((name) => '' !== name);
+
+        return 0 === wanted.length ? [] : [...this.descendants()].filter((element) => wanted.every((name) => element.classList.contains(name)));
+    }
+
+    getElementsByTagName(tagName) {
+        return [...this.descendants()].filter((element) => '*' === tagName || element.tagName === String(tagName).toUpperCase());
+    }
+
     get isConnected() {
         let at = this;
         while (null !== at.parentNode) {
@@ -411,6 +422,18 @@ export function fakePage({ siteHost = 'shop.acme-foods.example', href = `https:/
         /** A person's key press where focus is: the page's own element, or inside a root. */
         keydown: (target, key, init = {}) => dispatch(target, 'keydown', { key, ...init }),
         click: (target, init = {}) => dispatch(target, 'click', init),
+        /** Typing at a field's end as Chrome sends it: beforeinput, then (not cancelled) the value and input; no maxLength. */
+        typeInto(field, text) {
+            field.selectionStart = field.value.length;
+            field.selectionEnd = field.value.length;
+            if (dispatch(field, 'beforeinput', { inputType: 'insertText', data: text }).defaultPrevented) {
+                return;
+            }
+            field.value = `${field.value}${text}`;
+            field.selectionStart = field.value.length;
+            field.selectionEnd = field.value.length;
+            dispatch(field, 'input', { inputType: 'insertText', data: text });
+        },
         element(tagName, properties = {}) {
             const element = Object.assign(document.createElement(tagName), properties);
             document.body.append(element);

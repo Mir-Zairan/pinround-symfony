@@ -323,6 +323,42 @@ test('the step card lives in the overlay\'s closed root, where the page\'s DOM c
     assert.deepEqual(page.document.querySelectorAll('*').map((element) => element.tagName), ['HTML', 'BODY', 'PINROUND-OVERLAY']);
 });
 
+test('the page\'s DOM finds no dock, step card, pin, Remove or note, and a click on any of them shows the page only the overlay\'s host', async () => {
+    const note = 'Logo is cut off';
+    const { storage } = fakeBrowser();
+    const { play, page, host, root, inRoot } = await playingPage({ storage: storage.local });
+    await play();
+    inRoot('.surface').box = { left: 0, top: 0, width: 1280, height: 800 };
+    page.keydown(page.document.body, 'p');
+    page.click(inRoot('.surface'), { clientX: 320, clientY: 200 });
+    page.typeInto(inRoot('textarea'), note);
+    page.keydown(inRoot('textarea'), 'Escape');
+    assert.deepEqual([inRoot('.pin').getAttribute('aria-label'), inRoot('.dock-step').hidden], [`Pin 1: ${note}`, false]);
+
+    for (const className of ['dock', 'dock-handle', 'dock__clear', 'dock__status', 'dock-step', 'dock-step__do', 'surface', 'pin', 'pin-remove', 'pin__note', 'note-editor']) {
+        assert.notEqual(root.querySelector(`.${className}`), null, `The overlay holds a .${className}.`);
+        assert.equal(page.document.querySelector(`.${className}`), null, className);
+        assert.deepEqual(page.document.getElementsByClassName(className), [], className);
+    }
+    assert.deepEqual(page.document.getElementsByTagName('*').map((element) => element.tagName), ['HTML', 'BODY', 'PINROUND-OVERLAY']);
+    assert.deepEqual([host.shadowRoot, host.children, page.document.documentElement.textContent], [null, [], ''], 'Neither the note nor the step\'s text is the page\'s text.');
+
+    const heard = [];
+    const nameOf = (node) => node.tagName ?? (node === page.document ? '#document' : 'window');
+    for (const listening of [page.window, page.document]) {
+        listening.addEventListener('click', (event) => heard.push([nameOf(event.target), event.composedPath().map(nameOf)]), { capture: true });
+    }
+    page.document.addEventListener('click', () => heard.push('bubbled to the page'));
+    const clicked = ['.dock-step__title', '.dock__grip', '.pin', 'textarea', '.pin-remove'];
+    for (const selector of clicked) {
+        page.click(inRoot(selector));
+    }
+
+    const seenByPage = ['PINROUND-OVERLAY', ['PINROUND-OVERLAY', 'HTML', '#document', 'window']];
+    assert.deepEqual(heard, clicked.flatMap(() => [seenByPage, seenByPage]));
+    assert.deepEqual(root.querySelectorAll('.pin'), [], 'The clicks reached the overlay: the last one removed the pin.');
+});
+
 test('a press on a step another tab has answered shows where the run is now and records nothing', async () => {
     const { storage } = fakeBrowser();
     const here = await playingPage({ storage: storage.local });
