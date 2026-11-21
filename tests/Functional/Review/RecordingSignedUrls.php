@@ -12,7 +12,8 @@ use App\SharedKernel\Domain\OrganizationId;
 
 /**
  * Like SignedVariantUrls: refuses a variant other than view or thumb, more than MAX_MEDIA_IDS ids and an organization
- * that is not the tenant's, leaves out another organization's and an unknown id, answers by the id in lowercase, and signs a ready picture for the start of $at's minute. Records every
+ * that is not the tenant's, leaves out another organization's and an unknown id, answers by the id in lowercase, and signs a ready picture for the start of $at's minute, its 1600 × 900 view's thumb
+ * at 480 × 270. Records every
  * list of ids, the variant and the signing time it is asked for.
  */
 final class RecordingSignedUrls implements SignedUrls
@@ -47,7 +48,9 @@ final class RecordingSignedUrls implements SignedUrls
                     continue;
                 }
                 $images[$id] = match ($state) {
-                    MediaImageStatus::Ready => MediaImage::ready($id, 'https://storage.test/'.$variant.'/'.$id.'?at='.$signedAt, 1600, 900),
+                    MediaImageStatus::Ready => 'thumb' === $variant
+                        ? MediaImage::ready($id, 'https://storage.test/thumb/'.$id.'?at='.$signedAt, 480, 270)
+                        : MediaImage::ready($id, 'https://storage.test/view/'.$id.'?at='.$signedAt, 1600, 900),
                     MediaImageStatus::Pending => MediaImage::pending($id),
                     MediaImageStatus::Rejected => MediaImage::rejected($id, 'We could not process this image. Try again.'),
                 };

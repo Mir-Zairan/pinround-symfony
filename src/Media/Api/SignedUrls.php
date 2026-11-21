@@ -25,16 +25,18 @@ interface SignedUrls
      *
      * @param list<string> $mediaIds at most MAX_MEDIA_IDS; a malformed, unknown or another organization's id is left
      *                               out of the answer, and an id given twice is answered once
-     * @param string       $variant  "view" (at most 1920 px wide) or "thumb" (at most 480 px wide)
+     * @param string       $variant  "view" (at most 1920 px wide) or "thumb" (at most 480 px wide); a ready picture
+     *                               stored with no thumb answers its view for "thumb"
      *
-     * @return array<string, MediaImage> by media id in lowercase, in the order of $mediaIds; width and height are
-     *                                   known only for a ready "view"
+     * @return array<string, MediaImage> by media id in lowercase, in the order of $mediaIds; a ready one has the width
+     *                                   and height of the variant its URL shows, the thumb's worked out from the
+     *                                   view's (within a pixel of the file's)
      *
      * @throws \InvalidArgumentException when $variant is unknown or $mediaIds holds more than MAX_MEDIA_IDS entries,
      *                                   before any read
      * @throws \LogicException           when the request has no tenant or its tenant is another organization, before
      *                                   any read; when no transaction is open; or when a ready media object has no
-     *                                   $variant stored
+     *                                   view stored
      */
     public function forVariants(OrganizationId $organizationId, array $mediaIds, string $variant, \DateTimeImmutable $at): array;
 }

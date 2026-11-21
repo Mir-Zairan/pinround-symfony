@@ -24,18 +24,27 @@ use App\Ticketing\Api\TicketVisibility;
 
 /**
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
- * names in one batch and signs the pictures shown in one query per SignedUrls::MAX_MEDIA_IDS pictures, whatever the
- * number of rounds. On the ticket only the report and the viewer's own unshared draft are cards with pictures, the
- * report's at most MAX_PICTURES_PER_CARD. The checklist round is a card of its rows. Every review round and shared draft
- * is a one-line row that opens its own page and signs no picture; a findings round keeps its check items under its row
- * (ChecklistCards, read only when the ticket has a checklist round or a shared draft). The unshared draft's card shows
- * every picture (the domain caps them), so its editor can reach each one, as one screenshot per chain of tries with its
- * earlier tries (ADR-0048). forDraft builds one draft's card alone, shared or not, with its pictures.
+ * names in one batch and signs the pictures shown in one query per variant and SignedUrls::MAX_MEDIA_IDS pictures,
+ * whatever the number of rounds. On the ticket only the report and the viewer's own unshared draft are cards with
+ * pictures, the report's at most MAX_PICTURES_PER_CARD and as thumbs. The checklist round is a card of its rows. Every
+ * review round and shared draft is a one-line row that opens its own page and signs no picture; a findings round keeps
+ * its check items under its row (ChecklistCards, read only when the ticket has a checklist round or a shared draft).
+ * The unshared draft's card shows every picture (the domain caps them), so its editor can reach each one, as one
+ * screenshot per chain of tries with its earlier tries (ADR-0048). forDraft builds one draft's card alone, shared or
+ * not, with its pictures.
  */
 final readonly class RoundCards
 {
     public const string UNKNOWN_OWNER = 'a former member';
     public const string VARIANT = 'view';
+    /** The report's pictures on the ticket and a round page's strip: at most 480 px wide, signed with their size. */
+    public const string THUMB_VARIANT = 'thumb';
+
+    /**
+     * The most CSS pixels high a report picture is drawn on the ticket, its width scaled with it. A 4:3 thumb is exactly
+     * this high, so only a taller shot, such as a phone's, is drawn smaller.
+     */
+    public const int THUMBNAIL_MAX_HEIGHT = 360;
 
     /**
      * The "For Claude Code" box of the viewer's own unshared draft: the line to give Claude Code, with the ticket's key,
@@ -96,16 +105,16 @@ final readonly class RoundCards
         }
 
         $ownerNames = $this->memberNameQueries->displayNamesOf($organizationId, self::ownersOf($rounds));
-        $images = $this->imagesOf($organizationId, array_values(array_filter($rounds, static fn (RoundView $round): bool => !self::isRow($round))), $now);
+        $imagesByVariant = $this->imagesOf($organizationId, array_values(array_filter($rounds, static fn (RoundView $round): bool => !self::isRow($round))), $now);
         $checklists = $this->checklistCards->forRounds($organizationId, $ticketId, self::idsOfRoundsWithItems($rounds));
 
         return new RoundsSectionView(
-            array_map(function (RoundView $round) use ($ownerNames, $assigneeId, $images, $checklists): RoundCard {
+            array_map(function (RoundView $round) use ($ownerNames, $assigneeId, $imagesByVariant, $checklists): RoundCard {
                 $ownerName = $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER;
 
                 return self::isRow($round)
                     ? self::rowOf($round, $ownerName, $assigneeId, $checklists[$round->id] ?? null)
-                    : $this->cardOf($round, $ownerName, $assigneeId, $images, $checklists[$round->id] ?? null);
+                    : $this->cardOf($round, $ownerName, $assigneeId, $imagesByVariant[self::variantOf($round)] ?? [], $checklists[$round->id] ?? null);
             }, $rounds),
             $ticketRounds->olderRoundsNotShown,
         );
@@ -127,7 +136,7 @@ final readonly class RoundCards
             ? self::UNKNOWN_OWNER
             : ($this->memberNameQueries->displayNamesOf($organizationId, [$draft->ownerId])[$draft->ownerId->toString()] ?? self::UNKNOWN_OWNER);
 
-        return $this->cardOf($draft, $ownerName, $assigneeId, $this->imagesOf($organizationId, [$draft], $now));
+        return $this->cardOf($draft, $ownerName, $assigneeId, $this->imagesOf($organizationId, [$draft], $now)[self::variantOf($draft)] ?? []);
     }
 
     /**
@@ -261,7 +270,7 @@ final readonly class RoundCards
         $tryCount = \count($tries);
         $latestTry = $tries[$tryCount - 1];
         if (RoundView::DRAFT !== $round->kind) {
-            return new RoundCardScreenshot($latestTry->id, self::screenshotViewOf($round, $latestTry, $number, $images));
+            return new RoundCardScreenshot($latestTry->id, self::thumbnailOf(self::screenshotViewOf($round, $latestTry, $number, $images)));
         }
         $earlierTries = [];
         foreach (\array_slice($tries, 0, -1) as $index => $earlierTry) {
@@ -369,6 +378,29 @@ final readonly class RoundCards
         return new ScreenshotView($domId, null, null, null, $altText, $title, $summary, $pins, MediaImageStatus::Pending === $status ? MediaImageStatus::Pending : MediaImageStatus::Rejected);
     }
 
+    /**
+     * The report's picture drawn no higher than THUMBNAIL_MAX_HEIGHT, its width scaled with it so the pins, placed in
+     * percent of the picture, stay on their spots; review.css narrows it to the column, never wider.
+     */
+    private static function thumbnailOf(ScreenshotView $view): ScreenshotView
+    {
+        if (null === $view->width || null === $view->height || $view->height <= self::THUMBNAIL_MAX_HEIGHT) {
+            return $view;
+        }
+        $drawnWidth = max(1, (int) round($view->width * self::THUMBNAIL_MAX_HEIGHT / $view->height));
+
+        return new ScreenshotView($view->domId, $view->imageUrl, $drawnWidth, self::THUMBNAIL_MAX_HEIGHT, $view->altText, $view->title, $view->summary, $view->pins, $view->status);
+    }
+
+    /**
+     * The report's pictures are signed as thumbs, each round's own pictures as views: their pins are placed and checked
+     * on the full picture.
+     */
+    private static function variantOf(RoundView $round): string
+    {
+        return self::REPORT === $round->kind ? self::THUMB_VARIANT : self::VARIANT;
+    }
+
     private static function pinViewOf(RoundPinView $pin): PinView
     {
         return new PinView($pin->number, $pin->xPercent, $pin->yPercent, $pin->note, self::AI === $pin->source);
@@ -422,11 +454,12 @@ final readonly class RoundCards
     /**
      * @param list<RoundView> $rounds
      *
-     * @return array<string, MediaImage> by media id
+     * @return array<string, array<string, MediaImage>> by variant (variantOf), then by media id; one query per variant
+     *                                                  and SignedUrls::MAX_MEDIA_IDS pictures
      */
     private function imagesOf(OrganizationId $organizationId, array $rounds, \DateTimeImmutable $now): array
     {
-        $mediaIds = [];
+        $mediaIdsByVariant = [];
         foreach ($rounds as $round) {
             if (!$this->showsPictures($round)) {
                 continue;
@@ -435,15 +468,18 @@ final readonly class RoundCards
             $chains = self::shownChainsOf($round);
             foreach (null === $pictureLimit ? $chains : \array_slice($chains, 0, $pictureLimit) as $tries) {
                 foreach ($tries as $screenshot) {
-                    $mediaIds[$screenshot->mediaId] = true;
+                    $mediaIdsByVariant[self::variantOf($round)][$screenshot->mediaId] = true;
                 }
             }
         }
-        $images = [];
-        foreach (array_chunk(array_keys($mediaIds), SignedUrls::MAX_MEDIA_IDS) as $mediaIdsOfOneCall) {
-            $images += $this->signedUrls->forVariants($organizationId, $mediaIdsOfOneCall, self::VARIANT, $now);
+        $imagesByVariant = [];
+        foreach ($mediaIdsByVariant as $variant => $mediaIds) {
+            $imagesByVariant[$variant] = [];
+            foreach (array_chunk(array_keys($mediaIds), SignedUrls::MAX_MEDIA_IDS) as $mediaIdsOfOneCall) {
+                $imagesByVariant[$variant] += $this->signedUrls->forVariants($organizationId, $mediaIdsOfOneCall, $variant, $now);
+            }
         }
 
-        return $images;
+        return $imagesByVariant;
     }
 }

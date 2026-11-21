@@ -25,8 +25,9 @@ final readonly class ScreenshotView
     /**
      * @param string        $domId    a lowercase id for this screenshot's elements, unique on the page
      * @param string|null   $imageUrl what the picture is read from; only when ready, and then required
-     * @param int|null      $width    the picture's pixel width; required when ready
-     * @param int|null      $height   the picture's pixel height; required when ready
+     * @param int|null      $width    the width to draw the picture at, in pixels: its own or smaller in its aspect
+     *                                ratio (RoundCards::THUMBNAIL_MAX_HEIGHT); required when ready
+     * @param int|null      $height   the height to draw the picture at, as $width; required when ready
      * @param list<PinView> $pins
      */
     public function __construct(

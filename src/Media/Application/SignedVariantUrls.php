@@ -6,6 +6,7 @@ namespace App\Media\Application;
 
 use App\Media\Api\MediaImage;
 use App\Media\Api\SignedUrls;
+use App\Media\Application\Processing\ImageEncoder;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaObjects;
@@ -83,14 +84,42 @@ final readonly class SignedVariantUrls implements SignedUrls
         return match ($mediaObject->status()) {
             MediaStatus::Pending => MediaImage::pending($mediaId),
             MediaStatus::Rejected => MediaImage::rejected($mediaId, $mediaObject->rejectReason() ?? throw new \LogicException('A rejected media object has a reason.')),
-            MediaStatus::Ready => MediaImage::ready(
-                $mediaId,
-                $this->mediaUrlSigner->forGet($this->storageKeyOf($mediaObject, $variant), $at),
-                // The stored size is the view's; the thumb's own is not kept.
-                MediaVariant::View === $variant ? $mediaObject->width() : null,
-                MediaVariant::View === $variant ? $mediaObject->height() : null,
-            ),
+            MediaStatus::Ready => $this->readyImageOf($mediaObject, self::shownVariantOf($mediaObject, $variant), $at),
         };
+    }
+
+    /**
+     * The variant asked for, or the view when a thumb is asked for and none is stored: a smaller picture is an
+     * optimisation, so a missing one shows the view rather than no picture.
+     */
+    private static function shownVariantOf(MediaObject $mediaObject, MediaVariant $variant): MediaVariant
+    {
+        return MediaVariant::Thumb === $variant && !isset($mediaObject->variants()[MediaVariant::Thumb->value]) ? MediaVariant::View : $variant;
+    }
+
+    private function readyImageOf(MediaObject $mediaObject, MediaVariant $variant, \DateTimeImmutable $at): MediaImage
+    {
+        [$width, $height] = self::sizeOf($mediaObject, $variant);
+
+        return MediaImage::ready($mediaObject->id()->toString(), $this->mediaUrlSigner->forGet($this->storageKeyOf($mediaObject, $variant), $at), $width, $height);
+    }
+
+    /**
+     * Only the view's size is stored. The thumb is encoded from the same original by ImageEncoder's rule (scaled down
+     * to THUMB_MAX_WIDTH, never up, aspect ratio kept), so its size follows from the view's, within a pixel of rounding.
+     *
+     * @return array{int|null, int|null}
+     */
+    private static function sizeOf(MediaObject $mediaObject, MediaVariant $variant): array
+    {
+        $viewWidth = $mediaObject->width();
+        $viewHeight = $mediaObject->height();
+        if (MediaVariant::View === $variant || null === $viewWidth || null === $viewHeight) {
+            return [$viewWidth, $viewHeight];
+        }
+        $thumbWidth = min($viewWidth, ImageEncoder::THUMB_MAX_WIDTH);
+
+        return [$thumbWidth, max(1, (int) round($viewHeight * $thumbWidth / $viewWidth))];
     }
 
     /**

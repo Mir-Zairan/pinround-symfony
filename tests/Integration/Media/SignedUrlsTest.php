@@ -95,6 +95,41 @@ final class SignedUrlsTest extends KernelTestCase
         self::assertSame(1, $queryCount);
     }
 
+    /**
+     * The thumb is the view scaled down to ImageEncoder::THUMB_MAX_WIDTH, never up: a wide shot, a phone shot whose
+     * height rounds to the nearest pixel, a view narrower than the thumb's width, and a picture stored with no thumb.
+     */
+    #[Test]
+    public function eachThumbIsSizedFromItsViewInTheSameOneQuery(): void
+    {
+        $wide = '0197a3c0-0000-7000-8000-0000000f5221';
+        $phone = '0197a3c0-0000-7000-8000-0000000f5222';
+        $narrow = '0197a3c0-0000-7000-8000-0000000f5223';
+        $withoutThumb = '0197a3c0-0000-7000-8000-0000000f5224';
+        $this->addMedia(self::ACME_FOODS, $wide, 'ready', 1920, 960);
+        $this->addMedia(self::ACME_FOODS, $phone, 'ready', 1170, 2532);
+        $this->addMedia(self::ACME_FOODS, $narrow, 'ready', 320, 200);
+        $this->addMedia(self::ACME_FOODS, $withoutThumb, 'ready', 640, 400, hasThumb: false);
+        $debugData = $this->debugData();
+
+        [$images, $queryCount] = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($wide, $phone, $narrow, $withoutThumb, $debugData): array {
+            $debugData->reset();
+            $images = $this->signedUrls()->forVariants(new OrganizationId(self::ACME_FOODS), [$wide, $phone, $narrow, $withoutThumb, self::ACME_PENDING], 'thumb', new \DateTimeImmutable(self::SIGNED_AT));
+
+            return [$images, self::queryCountOf($debugData)];
+        });
+
+        self::assertSame(
+            [$wide => [480, 240], $phone => [480, 1039], $narrow => [320, 200], $withoutThumb => [640, 400], self::ACME_PENDING => [null, null]],
+            array_map(static fn (MediaImage $image): array => [$image->width, $image->height], $images),
+        );
+        self::assertSame(
+            [$wide => 'thumb.webp', $phone => 'thumb.webp', $narrow => 'thumb.webp', $withoutThumb => 'view.webp'],
+            array_map(static fn (MediaImage $image): string => basename((string) parse_url((string) $image->url, \PHP_URL_PATH)), array_filter($images, static fn (MediaImage $image): bool => null !== $image->url)),
+        );
+        self::assertSame(1, $queryCount);
+    }
+
     #[Test]
     public function rowLevelSecurityAloneLeavesOutAnotherOrganizationsReadyPictureWithTheTenantFilterOff(): void
     {
@@ -118,12 +153,20 @@ final class SignedUrlsTest extends KernelTestCase
         return $this->signedUrls()->forVariants(new OrganizationId(self::ACME_FOODS), $mediaIds, 'view', new \DateTimeImmutable(self::SIGNED_AT));
     }
 
-    private function addMedia(string $organizationId, string $mediaId, string $status): void
+    /**
+     * @param int $viewWidth  of a ready picture's view, in pixels
+     * @param int $viewHeight of a ready picture's view, in pixels
+     */
+    private function addMedia(string $organizationId, string $mediaId, string $status, int $viewWidth = 1280, int $viewHeight = 800, bool $hasThumb = true): void
     {
-        $this->transactions()->committedAs($organizationId, function () use ($organizationId, $mediaId, $status): void {
+        $this->transactions()->committedAs($organizationId, function () use ($organizationId, $mediaId, $status, $viewWidth, $viewHeight, $hasThumb): void {
             $mediaObject = MediaObject::upload(new MediaId($mediaId), new OrganizationId($organizationId), 'uploads/'.$organizationId.'/'.$mediaId, 'image/png', 2048, new UserId(self::MIA), new \DateTimeImmutable('2026-04-07 09:00:00 UTC'));
             if ('ready' === $status) {
-                $mediaObject->markReady(hash('sha256', $mediaId), 1280, 800, ['view' => 'media/'.$mediaId.'/view.webp', 'thumb' => 'media/'.$mediaId.'/thumb.webp']);
+                $variants = ['view' => 'media/'.$mediaId.'/view.webp'];
+                if ($hasThumb) {
+                    $variants['thumb'] = 'media/'.$mediaId.'/thumb.webp';
+                }
+                $mediaObject->markReady(hash('sha256', $mediaId), $viewWidth, $viewHeight, $variants);
             }
             if ('rejected' === $status) {
                 $mediaObject->reject(MediaRejectReason::Unreadable->value);

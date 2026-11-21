@@ -55,9 +55,6 @@ final readonly class RoundPages
     public const string NO_AREAS = 'This round has no screen areas.';
     public const string NO_SCREENSHOTS = 'This round has no screenshots.';
 
-    /** The strip's small pictures, at most 480 px wide; the shown screenshot is signed as RoundCards::VARIANT. */
-    public const string THUMB_VARIANT = 'thumb';
-
     /** ReviewRoundView's state of a round that still takes verdicts. */
     private const string OPEN_ROUND = 'open';
 
@@ -238,7 +235,7 @@ final readonly class RoundPages
     {
         $images = [];
         foreach (array_chunk(array_values(array_unique($mediaIds)), SignedUrls::MAX_MEDIA_IDS) as $mediaIdsOfOneCall) {
-            $images += $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, $mediaIdsOfOneCall, self::THUMB_VARIANT, $now);
+            $images += $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, $mediaIdsOfOneCall, RoundCards::THUMB_VARIANT, $now);
         }
 
         return $images;
