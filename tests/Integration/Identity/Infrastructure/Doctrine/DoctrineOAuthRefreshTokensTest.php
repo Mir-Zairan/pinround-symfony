@@ -20,6 +20,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * DoctrineOAuthRefreshTokens on the real idn_oauth_refresh_token table as pinround_app, each call in its own committed
@@ -257,6 +258,74 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
         self::assertSame('2027-03-15 12:00:00', $this->rowOf(self::ACME_FOODS, $untraded->id())['revoked_at']);
     }
 
+    /**
+     * A rotation and a revocation of one family on two app connections at once. The test holds the traded token's row
+     * until the rotation waits on it, then until the revocation waits too, then lets go. Without the family lock the
+     * revocation's UPDATE waited on the same row and, its snapshot older than the rotation's insert, left the new token
+     * live; with it the revocation waits for the whole rotation and revokes both tokens.
+     */
+    #[Test]
+    public function aFamilyRevokedWhileARotationAddsItsNextTokenKeepsNoTokenLive(): void
+    {
+        $traded = $this->add($this->issue(self::ACME_FOODS));
+        $changes = [];
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        $this->migrator()->beginTransaction();
+        try {
+            self::assertSame([$traded->id()], $this->migrator()->fetchFirstColumn('SELECT id FROM idn_oauth_refresh_token WHERE organization_id = ? AND id = ? FOR UPDATE', [self::ACME_FOODS, $traded->id()]));
+            $changes['rotation'] = $this->startChange('rotate', bin2hex($traded->tokenHash()), self::CLIENT_ID, $this->at('+1 hour')->format(\DATE_ATOM));
+            $this->waitUntilWaiting(1, $changes);
+            $changes['revocation'] = $this->startChange('revoke', $traded->familyId(), $this->at('+1 hour')->format(\DATE_ATOM));
+            $this->waitUntilWaiting(2, $changes);
+        } finally {
+            $this->migrator()->rollBack();
+            $this->tenantContext()->reset();
+        }
+
+        $outcomes = [];
+        foreach ($changes as $name => $change) {
+            $change->wait();
+            self::assertTrue($change->isSuccessful(), $name.': '.$change->getErrorOutput());
+            $outcomes[$name] = $change->getOutput();
+        }
+        self::assertSame(['rotation' => 'won', 'revocation' => '1'], $outcomes);
+        self::assertSame(
+            [['used' => true, 'revoked' => true], ['used' => false, 'revoked' => true]],
+            $this->transactions()->committedAs(self::ACME_FOODS, fn (): array => $this->connection()->fetchAllAssociative(
+                'SELECT used_at IS NOT NULL AS used, revoked_at IS NOT NULL AS revoked FROM idn_oauth_refresh_token'
+                .' WHERE organization_id = ? AND family_id = ? ORDER BY used_at IS NULL, id',
+                [self::ACME_FOODS, $traded->familyId()],
+            )),
+        );
+    }
+
+    #[Test]
+    public function aFamilyIsChangedOnlyInAnOpenTransaction(): void
+    {
+        $token = $this->add($this->issue(self::ACME_FOODS));
+        $next = $this->issue(self::ACME_FOODS, $token->familyId(), '+1 hour');
+        $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            foreach ([
+                'add' => fn () => $this->refreshTokens()->add($next),
+                'markUsed' => fn () => $this->refreshTokens()->markUsed($token->tokenHash(), self::CLIENT_ID, $this->at('+1 hour')),
+                'revokeFamily' => fn () => $this->refreshTokens()->revokeFamily($token->familyId(), $this->at('+1 hour')),
+            ] as $call => $withoutTransaction) {
+                try {
+                    $withoutTransaction();
+                    self::fail($call.' ran without a transaction.');
+                } catch (\LogicException $refusal) {
+                    self::assertSame('A refresh token family is changed only in an open transaction; none is open.', $refusal->getMessage(), $call);
+                }
+            }
+        } finally {
+            $this->tenantContext()->clear();
+        }
+
+        self::assertSame(1, $this->countAs(self::ACME_FOODS));
+        self::assertSame(['used_at' => null, 'revoked_at' => null], array_intersect_key($this->rowOf(self::ACME_FOODS, $token->id()), ['used_at' => true, 'revoked_at' => true]));
+    }
+
     #[Test]
     public function everyCallButNextIdentityAndTheResolverNeedsATenant(): void
     {
@@ -372,6 +441,39 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
     private function markUsedAs(string $organizationId, string $tokenHash, string $clientId, \DateTimeImmutable $at): ?OAuthRefreshToken
     {
         return $this->transactions()->committedAs($organizationId, fn (): ?OAuthRefreshToken => $this->refreshTokens()->markUsed($tokenHash, $clientId, $at));
+    }
+
+    private function startChange(string $change, string ...$arguments): Process
+    {
+        $process = new Process([\PHP_BINARY, \dirname(__DIR__, 2).'/change-oauth-refresh-family.php', $change, self::ACME_FOODS, ...$arguments]);
+        $process->start();
+
+        return $process;
+    }
+
+    /**
+     * Polls pg_locks, which every role may read, on the app's connection outside the held transaction, counting only
+     * sessions of this database, as other test databases share the server. Fails when a change ends first, such as on
+     * a boot error, or when they are not waiting within 30 seconds.
+     *
+     * @param array<string, Process> $changes
+     */
+    private function waitUntilWaiting(int $expectedWaiting, array $changes): void
+    {
+        $deadline = microtime(true) + 30;
+        while (microtime(true) < $deadline) {
+            foreach ($changes as $name => $change) {
+                self::assertTrue($change->isRunning(), 'the '.$name.' ended before it waited: '.$change->getOutput().$change->getErrorOutput());
+            }
+            $waiting = $this->connection()->fetchOne(
+                'SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE NOT l.granted AND a.datname = current_database()',
+            );
+            if ($expectedWaiting === $waiting) {
+                return;
+            }
+            usleep(20_000);
+        }
+        self::fail(\sprintf('%d changes did not wait within 30 seconds.', $expectedWaiting));
     }
 
     private function at(string $afterIssue): \DateTimeImmutable

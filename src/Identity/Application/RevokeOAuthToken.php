@@ -62,10 +62,23 @@ final readonly class RevokeOAuthToken
     }
 
     /**
-     * Revokes every token of the refresh token's family and the access tokens of the family that may still work. Runs in
-     * the caller's transaction, which must be open under the token's organization as tenant.
+     * Revokes every token of the family and the access tokens of the family that may still work, when a used refresh
+     * token or code came back: nobody asked, so no event names the owner as actor (RevokeApiToken::bySystem()). Runs in
+     * the caller's transaction, which must be open under the family's organization as tenant.
+     *
+     * @throws \LogicException when no tenant is set, or no transaction is open
      */
-    public function revokeFamilyOf(OAuthRefreshToken $refreshToken, \DateTimeImmutable $now): void
+    public function revokeFamilyBySystem(string $familyId, \DateTimeImmutable $now): void
+    {
+        foreach ($this->refreshTokens->revokeFamily($familyId, $now) as $accessTokenId) {
+            $this->revokeApiToken->bySystem($accessTokenId, $now);
+        }
+    }
+
+    /**
+     * The client signs its person out, so ApiTokenRevoked names the owner as actor, as the tokens page does.
+     */
+    private function signOutFamilyOf(OAuthRefreshToken $refreshToken, \DateTimeImmutable $now): void
     {
         foreach ($this->refreshTokens->revokeFamily($refreshToken->familyId(), $now) as $accessTokenId) {
             try {
@@ -85,7 +98,7 @@ final readonly class RevokeOAuthToken
         $this->inTenant($organizationId, function () use ($tokenHash, $client, $now): void {
             $refreshToken = $this->refreshTokens->byHash($tokenHash);
             if (null !== $refreshToken && hash_equals($refreshToken->clientId(), $client->clientId())) {
-                $this->revokeFamilyOf($refreshToken, $now);
+                $this->signOutFamilyOf($refreshToken, $now);
             }
         });
     }

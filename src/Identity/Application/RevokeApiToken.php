@@ -12,7 +12,8 @@ use App\SharedKernel\Domain\UserId;
 /**
  * A person revokes one of their own personal access tokens, or an Admin any token of the organization (P09.T1,
  * ADR-0021); it stops working at once. Only tokens of the tenant are found, and for a person only their own: the owner
- * never changes, so the check before the conditional revoke holds.
+ * never changes, so the check before the conditional revoke holds. The token endpoint stops OAuth access tokens with
+ * bySystem().
  * Its write and ApiTokenRevoked, for the audit log, share the caller's transaction (RequestTransaction on the web).
  */
 final readonly class RevokeApiToken
@@ -38,6 +39,21 @@ final readonly class RevokeApiToken
         $this->events->publish(new ApiTokenRevoked($token->organizationId()->toString(), $token->id(), $ownerId->toString(), $ownerId->toString(), $now));
 
         return true;
+    }
+
+    /**
+     * The token endpoint stops an OAuth access token that nobody revoked: one a refresh replaced, or one of a family
+     * revoked when a used refresh token or code came back (ADR-0050). ApiTokenRevoked names a person as actor, so none
+     * is published; the audit log would otherwise say the owner revoked it.
+     *
+     * @return bool true when this call revoked it; false when $tokenId is not a UUID, no token of the tenant has it, as
+     *              after the retention job purged it, or it was revoked already
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function bySystem(string $tokenId, \DateTimeImmutable $now): bool
+    {
+        return $this->tokens->revoke($tokenId, $now);
     }
 
     /**

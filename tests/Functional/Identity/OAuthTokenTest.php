@@ -142,16 +142,43 @@ final class OAuthTokenTest extends WebTestCase
         self::assertSame(['access' => 0, 'refresh' => 0], $this->tokenRowsOf($acmeFoods));
     }
 
+    /**
+     * RFC 6749 section 4.1.2: a code that comes back is refused, and the tokens issued with it stop, as either the
+     * client or a thief holds a copy. The tokens of another code are left alone.
+     */
     #[Test]
-    public function aCodeIsTradedOnceAndNeverAgain(): void
+    public function aCodeThatComesBackIsRefusedAndStopsTheTokensIssuedWithIt(): void
     {
         [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
         $code = $this->issueCode($omar, $acmeFoods);
-        $this->requestTokens($this->codeTrade($code));
+        $first = $this->requestTokens($this->codeTrade($code));
+        $otherCode = $this->requestTokens($this->codeTrade($this->issueCode($omar, $acmeFoods)));
+        self::assertSame(200, $this->probe(self::stringOf($first, 'access_token')));
+
+        $this->assertTokenRequestRefused($this->codeTrade($code), 'invalid_grant', ExchangeOAuthAuthorizationCode::UNUSABLE_CODE, 'reused');
+
+        self::assertSame(401, $this->probe(self::stringOf($first, 'access_token')));
+        $this->assertTokenRequestRefused(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($first, 'refresh_token'), 'client_id' => $this->clientId], 'invalid_grant', RefreshOAuthTokens::UNUSABLE_REFRESH_TOKEN, 'the refresh token of the replayed code');
+        self::assertSame(['access' => 2, 'refresh' => 2], $this->tokenRowsOf($acmeFoods));
+        self::assertSame(200, $this->probe(self::stringOf($otherCode, 'access_token')));
+        $this->requestTokens(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($otherCode, 'refresh_token'), 'client_id' => $this->clientId]);
+    }
+
+    /**
+     * A refused trade uses the code up and issues nothing, so a replay of it has nothing to stop and is refused alike.
+     */
+    #[Test]
+    public function aCodeThatComesBackAfterARefusedTradeIsRefusedAndIssuesNothing(): void
+    {
+        [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
+        $code = $this->issueCode($omar, $acmeFoods);
+        $kept = $this->requestTokens($this->codeTrade($this->issueCode($omar, $acmeFoods)));
+        $this->assertTokenRequestRefused(['code_verifier' => str_repeat('a', 43)] + $this->codeTrade($code), 'invalid_grant', ExchangeOAuthAuthorizationCode::WRONG_VERIFIER, 'a wrong verifier');
 
         $this->assertTokenRequestRefused($this->codeTrade($code), 'invalid_grant', ExchangeOAuthAuthorizationCode::UNUSABLE_CODE, 'reused');
 
         self::assertSame(['access' => 1, 'refresh' => 1], $this->tokenRowsOf($acmeFoods));
+        self::assertSame(200, $this->probe(self::stringOf($kept, 'access_token')));
     }
 
     /**
@@ -272,6 +299,31 @@ final class OAuthTokenTest extends WebTestCase
         self::assertSame(['access' => 3, 'refresh' => 3], $this->tokenRowsOf($acmeFoods));
         self::assertSame(200, $this->probe(self::stringOf($otherFamily, 'access_token')));
         $this->requestTokens(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($otherFamily, 'refresh_token'), 'client_id' => $this->clientId]);
+    }
+
+    /**
+     * The audit log records ApiTokenIssued and ApiTokenRevoked with the person as actor. A connect and a sign-out are
+     * the person's; the hourly rotation and a reuse detection are nobody's, so they publish neither.
+     */
+    #[Test]
+    public function onlyTheConnectAndTheSignOutPublishTokenEventsNeverARotationOrAReuse(): void
+    {
+        [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
+        $first = $this->requestTokens($this->codeTrade($this->issueCode($omar, $acmeFoods)));
+        self::assertSame(['ApiTokenIssued'], $this->tokenEventsOf($acmeFoods), 'the connect');
+
+        $second = $this->requestTokens(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($first, 'refresh_token'), 'client_id' => $this->clientId]);
+        self::assertSame(401, $this->probe(self::stringOf($first, 'access_token')));
+        self::assertSame(['ApiTokenIssued'], $this->tokenEventsOf($acmeFoods), 'the rotation');
+
+        $this->assertTokenRequestRefused(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($first, 'refresh_token'), 'client_id' => $this->clientId], 'invalid_grant', RefreshOAuthTokens::UNUSABLE_REFRESH_TOKEN, 'reused');
+        self::assertSame(401, $this->probe(self::stringOf($second, 'access_token')));
+        self::assertSame(['ApiTokenIssued'], $this->tokenEventsOf($acmeFoods), 'the reuse');
+
+        $other = $this->requestTokens($this->codeTrade($this->issueCode($omar, $acmeFoods)));
+        $this->revoke(['token' => self::stringOf($other, 'refresh_token'), 'client_id' => $this->clientId]);
+        self::assertSame(401, $this->probe(self::stringOf($other, 'access_token')));
+        self::assertSame(['ApiTokenIssued', 'ApiTokenIssued', 'ApiTokenRevoked'], $this->tokenEventsOf($acmeFoods), 'the sign-out');
     }
 
     #[Test]
@@ -512,6 +564,30 @@ final class OAuthTokenTest extends WebTestCase
         self::assertIsInt($counts['refresh']);
 
         return ['access' => $counts['access'], 'refresh' => $counts['refresh']];
+    }
+
+    /**
+     * @return list<string> the short names of the ApiTokenIssued and ApiTokenRevoked events waiting in the outbox for
+     *                      the organization, in the order they were published
+     */
+    private function tokenEventsOf(OrganizationId $organizationId): array
+    {
+        $bodies = $this->readAs($organizationId, static fn (Connection $migrator): array => $migrator->fetchFirstColumn(
+            "SELECT body FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0 ORDER BY id",
+            [$organizationId->toString()],
+        ));
+        $events = [];
+        foreach ($bodies as $body) {
+            self::assertIsString($body);
+            foreach (['ApiTokenIssued', 'ApiTokenRevoked'] as $event) {
+                // The class name right after its namespace backslash, which the body may hold escaped or not.
+                if (str_contains($body, '\\'.$event)) {
+                    $events[] = $event;
+                }
+            }
+        }
+
+        return $events;
     }
 
     /**

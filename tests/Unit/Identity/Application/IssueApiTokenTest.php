@@ -91,6 +91,41 @@ final class IssueApiTokenTest extends TestCase
         self::assertSame([], $this->events->publishedEvents);
     }
 
+    /**
+     * A refresh replaces the access token every hour; nobody acted, so the audit log must not say the person made one.
+     */
+    #[Test]
+    public function aRenewedOAuthAccessTokenIsAddedUnderTheLockAndPublishesNothing(): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+
+        $renewed = $this->renewForOmar($tokens);
+
+        self::assertSame(['lockIssuingFor', 'countLiveOf', 'add'], $tokens->calls);
+        self::assertSame([$renewed->token()->id()], $tokens->ids());
+        self::assertSame('Claude', $renewed->token()->name());
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    #[Test]
+    public function aRenewalOverTheCapIsRefusedAndAddsNothing(): void
+    {
+        $tokens = $this->tokensOfAcmeFoods();
+        $this->seedLiveTokens($tokens, self::ACME_FOODS, self::OMAR, IssueApiToken::MAX_LIVE_TOKENS_PER_USER);
+        $idsBefore = $tokens->ids();
+
+        try {
+            $this->renewForOmar($tokens);
+            self::fail('A 21st live token was renewed.');
+        } catch (TooManyApiTokens $refusal) {
+            self::assertSame('You have 20 tokens that still work. Revoke one before you make another.', $refusal->getMessage());
+        }
+
+        self::assertSame(['lockIssuingFor', 'countLiveOf'], $tokens->calls);
+        self::assertSame($idsBefore, $tokens->ids());
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
     #[Test]
     public function revokedExpiredAndOtherPeoplesOrOrganizationsTokensLeaveRoomUnderTheCap(): void
     {
@@ -303,6 +338,12 @@ final class IssueApiTokenTest extends TestCase
         $issue = new IssueApiToken($tokens, new HmacApiTokenHashing(self::PEPPER), $this->events);
 
         return $issue(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), $name, ApiTokenScope::claudeCodeDefaults(), 30, new \DateTimeImmutable(self::NOW));
+    }
+
+    private function renewForOmar(InMemoryApiTokens $tokens): IssuedApiToken
+    {
+        return new IssueApiToken($tokens, new HmacApiTokenHashing(self::PEPPER), $this->events)
+            ->renewForOAuthClient(new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), 'Claude', [ApiTokenScope::Read], new \DateTimeImmutable(self::NOW));
     }
 
     private function tokensOfAcmeFoods(): InMemoryApiTokens

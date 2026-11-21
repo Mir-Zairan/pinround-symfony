@@ -9,7 +9,9 @@ use App\SharedKernel\Domain\OrganizationId;
 /**
  * OAuth refresh tokens of the organization of the current transaction, but organizationOfToken(), which runs before
  * any tenant is known. Every write needs an open transaction under the token's organization as tenant, so it commits
- * or rolls back with the access token issued beside it.
+ * or rolls back with the access token issued beside it, and first locks the token's family to the end of that
+ * transaction: a rotation, a revocation and the exchange that starts a family never interleave, so a revocation
+ * finds every token a rotation added before it.
  */
 interface OAuthRefreshTokens
 {
@@ -19,23 +21,23 @@ interface OAuthRefreshTokens
     public function nextIdentity(): string;
 
     /**
-     * Saves the token at once, in the caller's transaction.
+     * Saves the token at once, in the caller's transaction, under its family's lock.
      *
-     * @throws \LogicException when no tenant is set
+     * @throws \LogicException when no tenant is set, or no transaction is open
      */
     public function add(OAuthRefreshToken $token): void;
 
     /**
      * Marks the tenant's token with this hash as used at $at, in one conditional UPDATE: only when it was issued to
-     * $clientId, is neither used nor revoked and expires after $at. Of two calls at once the second waits on the row
-     * lock of the first and then finds it used.
+     * $clientId, is neither used nor revoked and expires after $at. The token's family is locked first, so of two
+     * calls at once the second waits for the first's transaction and then finds it used.
      *
      * @param string $tokenHash ApiTokenHashing::hash() of the presented token
      *
      * @return OAuthRefreshToken|null the token as this call marked it; null when no token of the tenant matches, and
      *                                then nothing is changed
      *
-     * @throws \LogicException when no tenant is set
+     * @throws \LogicException when no tenant is set, or no transaction is open
      */
     public function markUsed(#[\SensitiveParameter] string $tokenHash, string $clientId, \DateTimeImmutable $at): ?OAuthRefreshToken;
 
@@ -59,13 +61,14 @@ interface OAuthRefreshTokens
     public function byAccessTokenId(string $accessTokenId): ?OAuthRefreshToken;
 
     /**
-     * Revokes every token of the family not revoked yet, in one conditional UPDATE, so a second call changes nothing.
+     * Revokes every token of the family not revoked yet, in one conditional UPDATE after the family's lock, so a second
+     * call changes nothing and a rotation running at the same time either ends before it or finds its token revoked.
      * Tokens already loaded keep their old revokedAt.
      *
      * @return list<string> the access token ids of the tokens this call revoked that were never traded: the only access
      *                      tokens of the family that may still work, as a trade revokes the access token issued before
      *
-     * @throws \LogicException when no tenant is set
+     * @throws \LogicException when no tenant is set, or no transaction is open
      */
     public function revokeFamily(string $familyId, \DateTimeImmutable $revokedAt): array;
 

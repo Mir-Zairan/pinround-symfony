@@ -258,6 +258,37 @@ final class RevokeApiTokenTest extends TestCase
         self::assertSame([], $this->events->publishedEvents);
     }
 
+    /**
+     * A refresh replacing the access token, or reuse detection revoking a family: nobody acted, so the audit log must
+     * not say the owner revoked it.
+     */
+    #[Test]
+    public function theSystemRevokesAnyTokenOfTheTenantOnceAndPublishesNothing(): void
+    {
+        self::assertTrue($this->revokeBySystem(self::LENAS_TOKEN));
+        self::assertFalse($this->revokeBySystem(self::LENAS_TOKEN));
+
+        self::assertSame([], $this->liveIdsOf(self::LENA));
+        self::assertSame([self::OMARS_TOKEN], $this->liveIdsOf(self::OMAR));
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    #[Test]
+    public function theSystemRevokesNoTokenOfAnotherOrganizationNorAMalformedId(): void
+    {
+        self::assertFalse($this->revokeBySystem(self::OMARS_TOKEN_AT_BETA));
+        self::assertFalse($this->revokeBySystem('not-a-uuid'));
+
+        self::assertSame([self::OMARS_TOKEN], $this->liveIdsOf(self::OMAR));
+        self::assertSame([self::LENAS_TOKEN], $this->liveIdsOf(self::LENA));
+        self::assertSame([], $this->events->publishedEvents);
+    }
+
+    private function revokeBySystem(string $tokenId): bool
+    {
+        return new RevokeApiToken($this->tokens, $this->events)->bySystem($tokenId, new \DateTimeImmutable(self::NOW));
+    }
+
     private function revokeAsOmar(string $tokenId): bool
     {
         return new RevokeApiToken($this->tokens, $this->events)(new UserId(self::OMAR), $tokenId, new \DateTimeImmutable(self::NOW));
