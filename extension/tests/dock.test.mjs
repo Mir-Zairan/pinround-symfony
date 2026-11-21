@@ -249,13 +249,29 @@ test('Letter keys turned on again makes P, C and H on the page act, and a change
     assert.deepEqual(await pageKeysPressed(page, inRoot), NOTHING_DONE);
 });
 
-test('a storage that cannot read the setting leaves Letter keys on, as at first', async () => {
+test('a storage that cannot read the setting keeps Letter keys off for the page, as the person may have turned them off', async () => {
     const { storage } = fakeBrowser();
     const refusing = { ...storage.local, get: async () => { throw new Error('Extension context invalidated.'); } };
     const { page, inRoot, buttonNamed } = await dockedPage({ storage: refusing });
+    const letterKeys = buttonNamed(TEXTS.letterKeys);
 
-    assert.equal(buttonNamed(TEXTS.letterKeys).getAttribute('aria-pressed'), 'true');
-    assert.equal((await pageKeysPressed(page, inRoot)).isPinning, true);
+    assert.deepEqual([letterKeys.getAttribute('aria-pressed'), letterKeys.querySelector('.dock__switch').textContent], ['false', TEXTS.switchedOff]);
+    assert.deepEqual(await pageKeysPressed(page, inRoot), NOTHING_DONE);
+});
+
+test('Letter keys says On or Off in words beside the fill, hidden from readers that hear aria-pressed', async () => {
+    const { storage } = fakeBrowser();
+    const { page, buttonNamed } = await dockedPage({ storage: storage.local });
+    const letterKeys = buttonNamed(TEXTS.letterKeys);
+    const state = letterKeys.querySelector('.dock__switch');
+    assert.deepEqual([state.textContent, state.getAttribute('aria-hidden')], [TEXTS.switchedOn, 'true']);
+
+    page.click(letterKeys);
+    assert.equal(state.textContent, TEXTS.switchedOff);
+
+    await storage.local.set({ [LETTER_KEYS_KEY]: true });
+    await settled();
+    assert.equal(state.textContent, TEXTS.switchedOn, 'A change made in another tab shows in words too.');
 });
 
 test('while a request runs, Capture, Save draft and the picker keep focus and stay in the Tab order, and a press on them asks nothing and says why', async () => {
@@ -534,10 +550,11 @@ test('each pin has a Remove beside it that removes that pin only, the rest renum
     dropPinWithNote(page, inRoot, [640, 400], 'Logo is cut off');
     dropPinWithNote(page, inRoot, [960, 600], 'Total is wrong');
     assert.deepEqual(removeNamesOf(root), ['Remove pin 1', 'Remove pin 2', 'Remove pin 3']);
-    assert.deepEqual(root.querySelectorAll('.pin-remove').map((remove) => [remove.textContent, remove.tabIndex, remove.style.left, remove.style.top]), [
-        ['×', -1, '25%', '25%'],
-        ['×', -1, '50%', '50%'],
-        ['×', -1, '75%', '75%'],
+    // Remove sits on the side facing the middle, so a pin at the page's left edge keeps it on screen; the middle goes right.
+    assert.deepEqual(root.querySelectorAll('.pin-remove').map((remove) => [remove.textContent, remove.tabIndex, remove.style.left, remove.style.top, remove.classList.contains('pin-remove--right')]), [
+        ['×', -1, '25%', '25%', true],
+        ['×', -1, '50%', '50%', true],
+        ['×', -1, '75%', '75%', false],
     ]);
 
     page.click(root.querySelectorAll('.pin-remove')[1], { isTrusted: false });

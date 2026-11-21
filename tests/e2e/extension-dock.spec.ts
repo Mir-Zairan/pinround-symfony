@@ -154,6 +154,32 @@ test('a tester pins, removes a pin, captures twice and saves one report draft fr
   expect(extensionPagesOf(context)).toEqual([]);
 });
 
+test('a pin dropped at the left or right edge of the page keeps its Remove button fully on screen', async ({ context, testPage }) => {
+  await answerPinroundApi(context);
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await openDockAndClosePopup(context, testPage, popup);
+  const viewport = testPage.viewportSize();
+  if (viewport === null) {
+    throw new Error('The test page has no viewport size.');
+  }
+
+  await testPage.keyboard.press('p');
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
+  await dropPin(testPage, inspector, [0, 300], 'Menu is cut off', 1);
+  // Above the dock, which sits halfway down the right edge.
+  await dropPin(testPage, inspector, [viewport.width - 1, 100], 'Basket is cut off', 2);
+
+  for (const name of ['Remove pin 1', 'Remove pin 2']) {
+    const { backendNodeId } = await inspector.node('button', name);
+    const boxes = backendNodeId === undefined ? null : await inspector.boxesOf(backendNodeId);
+    expect(boxes, name).not.toBeNull();
+    expect(boxes?.border.left, name).toBeGreaterThanOrEqual(0);
+    expect(boxes?.border.right, name).toBeLessThanOrEqual(viewport.width);
+  }
+  await clickOverlayButton(inspector, testPage, 'Remove pin 1');
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Basket is cut off']);
+});
+
 test('with Letter keys off, P on the page does nothing while P in the dock still pins, and turned on again P on the page pins', async ({ context, testPage }) => {
   await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);

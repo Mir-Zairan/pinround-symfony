@@ -32,6 +32,8 @@ globalThis.pinroundDock ??= (() => {
         shrink: 'Shrink',
         letterKeys: 'Letter keys',
         letterKeysHint: 'While on, P, C and H work anywhere on the page. Off, they work only in the dock.',
+        switchedOn: 'On',
+        switchedOff: 'Off',
         busy: 'Still working on the last request. Try again when it is done.',
         open: 'Open the dock',
         notAnswered: 'The extension did not answer. Open its popup and try again.',
@@ -69,6 +71,7 @@ globalThis.pinroundDock ??= (() => {
         .dock__action[aria-pressed="true"] kbd { opacity: 1; }
         .dock__count { min-width: 20px; padding: 0 6px; border-radius: 10px; background: #161d1b; color: #ffffff; font-size: 12px; line-height: 20px; text-align: center; }
         .dock__count[hidden] { display: none; }
+        .dock__switch { font-size: 12px; font-weight: 700; }
         .dock__status { margin: 0; font-size: 12px; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
         .dock__status:empty { display: none; }
         .dock__status--error { color: #a3221a; }
@@ -226,6 +229,10 @@ globalThis.pinroundDock ??= (() => {
         const shrinkButton = actionButton(TEXTS.shrink, 'H');
         const letterKeysButton = actionButton(TEXTS.letterKeys);
         letterKeysButton.title = TEXTS.letterKeysHint;
+        // The state in words as well as in the fill (WCAG 1.4.1); aria-pressed already says it, so readers skip the word.
+        const letterKeysState = make('span', 'dock__switch');
+        letterKeysState.setAttribute('aria-hidden', 'true');
+        letterKeysButton.append(letterKeysState);
         const status = make('p', 'dock__status');
         status.setAttribute('role', 'status');
         const stepSlot = make('div', 'dock__step-slot');
@@ -287,6 +294,7 @@ globalThis.pinroundDock ??= (() => {
         function showLetterKeys(areOn) {
             areLetterKeysOn = areOn;
             letterKeysButton.setAttribute('aria-pressed', String(areOn));
+            letterKeysState.textContent = areOn ? TEXTS.switchedOn : TEXTS.switchedOff;
         }
 
         function toggleLetterKeys() {
@@ -400,11 +408,12 @@ globalThis.pinroundDock ??= (() => {
         });
         const ready = Promise.all([
             loadPlace(storage, siteHost).then(applyPlace, () => undefined),
-            loadLetterKeys(storage).then(showLetterKeys, () => showLetterKeys(true)),
+            // A setting that cannot be read may be the person's "off", so the keys stay off for this page.
+            loadLetterKeys(storage).then(showLetterKeys, () => showLetterKeys(false)),
         ]).then(() => undefined);
 
         return {
-            /** Resolves once the site's stored place and the Letter keys switch are applied, or their defaults when storage refused. */
+            /** Resolves once the site's stored place and the Letter keys switch are applied; when storage refused, the default place and the keys off. */
             ready,
             /** Where the scenario's step card goes (dock-run.js): after Shrink, before the status line. */
             stepSlot,

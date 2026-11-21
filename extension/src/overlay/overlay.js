@@ -102,9 +102,11 @@
             overflow-wrap: anywhere;
         }
         .pin--left .pin__note { left: auto; right: 50%; }
+        .pin--left .pin__tab { right: auto; left: -12px; }
         .pin--above .pin__note { top: auto; bottom: calc(100% + 8px); }
         .pin:hover .pin__note:not([hidden]), .pin:focus-visible .pin__note:not([hidden]) { display: block; }
-        /* Left of the ring (it reaches 16px from the centre) and above the note (which starts 22px below the centre). */
+        /* Beside the ring (it reaches 16px from the centre) on the side facing the middle of the page, so a pin at an
+           edge keeps it on screen, and above the note (which starts 22px below the centre). */
         .pin-remove {
             position: absolute;
             width: 24px;
@@ -121,6 +123,7 @@
             pointer-events: auto;
             cursor: pointer;
         }
+        .pin-remove--right { transform: translate(18px, -2px); }
         .pin-remove:focus-visible { outline: 2px solid #2f6fd6; outline-offset: 2px; }
         .note-editor {
             --shift-x: 20px;
@@ -172,7 +175,7 @@
         element.style.top = `${point.y_pct}%`;
     };
     const toPercentRange = (value) => Math.min(100, Math.max(0, value));
-    // The same sides for the note editor and a pin's note bubble, so neither runs off the viewport.
+    // The same sides for the note editor and a pin's note bubble, number tab and Remove, so none runs off the viewport.
     const opensLeft = (point) => point.x_pct > 50;
     const opensAbove = (point) => point.y_pct > 50;
     const onlyTrusted = (handler) => (event) => {
@@ -397,6 +400,7 @@
         button.append(tab, bubble);
         // Out of the Tab order, so Tab still goes pin to pin; the keyboard removes a pin with Delete on it.
         const removeButton = make('button', 'pin-remove', { type: 'button', tabIndex: -1, textContent: '×' });
+        removeButton.classList.toggle('pin-remove--right', !opensLeft(point));
         const pin = { x_pct: point.x_pct, y_pct: point.y_pct, note: '', button, removeButton, tab, bubble };
         placeAt(button, pin);
         placeAt(removeButton, pin);
