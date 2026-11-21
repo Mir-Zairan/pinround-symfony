@@ -20,10 +20,12 @@ final readonly class RoundView
      * @param list<RoundScreenshotView> $screenshots     by the position of each one's chain's first try (ADR-0048), then by
      *                                                   position, so a chain's tries stand together in the order they were
      *                                                   taken; none for a checklist or review round, which is not loaded with
-     *                                                   them, nor for a shared draft read for the ticket page's rows
+     *                                                   them (but for a review round read as the round before another), nor
+     *                                                   for a shared draft read for the ticket page's rows
      * @param int|null                  $screenshotCount the latest try of each screenshot the round holds, from 0, counted
      *                                                   by the query whether or not the screenshots are loaded; null from a
-     *                                                   read of one round (draftOf, sharedRoundOf), which counts none
+     *                                                   read of one round (draftOf, sharedRoundOf, previousHandOffRoundOf),
+     *                                                   which counts none
      */
     public function __construct(
         public string $id,

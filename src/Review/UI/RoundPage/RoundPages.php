@@ -36,8 +36,8 @@ use App\Ticketing\Api\TicketPageView;
  *
  * Its reads do not grow with the screenshots or pins: two signing calls (the shown pictures, then every small picture,
  * one more per SignedUrls::MAX_MEDIA_IDS of them), for a round without areas other than a review round, RoundsVisibleTo's
- * read of the one round whose screenshots it shows, and, on an open hand-off round, RoundReadyFor's reads of who it is
- * ready for.
+ * read of the one round whose screenshots it shows, for a shared draft its read of the hand-off round before it, whose
+ * pictures are the Befores, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
  */
 final readonly class RoundPages
 {
@@ -123,6 +123,7 @@ final readonly class RoundPages
             return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::SCREENSHOTS_STRIP_LABEL, [], null, null, null, self::NO_SCREENSHOTS);
         }
         $thumbs = $this->screenshotThumbsOf($ticket, $screenshots, $shownIndex, $now);
+        $previousRound = RoundView::DRAFT === $round->kind ? $this->roundsVisibleTo->previousHandOffRoundOf($ticket->id, $visible->visibility, $round->number) : null;
 
         return new RoundPage(
             $ticket->key,
@@ -132,7 +133,7 @@ final readonly class RoundPages
             self::SCREENSHOTS_STRIP_LABEL,
             $thumbs,
             ScreenshotPager::over($thumbs),
-            $this->shownScreenshotOf($ticket, $picturesRound, $screenshots[$shownIndex], $shownIndex + 1, $now),
+            $this->shownScreenshotOf($ticket, $picturesRound, $screenshots[$shownIndex], $shownIndex + 1, $previousRound, $now),
             null,
             self::NO_SCREENSHOTS,
         );
@@ -235,18 +236,30 @@ final readonly class RoundPages
     }
 
     /**
-     * @param int $number from 1, its place in the strip
+     * No data ties a chain to one of an earlier round (a retake stays in its own draft, ADR-0048), so the Before of
+     * "Screenshot N" is "Screenshot N" of the previous hand-off round, the way the review seed pairs areas by position;
+     * a chain numbered past that round's last one is new and stands alone.
+     *
+     * @param int            $number        from 1, its place in the strip
+     * @param RoundView|null $previousRound the hand-off round shared before a shared draft, with its latest tries; null
+     *                                      for Round 0, a checklist round and Round 1
      */
-    private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, \DateTimeImmutable $now): ShownScreenshot
+    private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, ?RoundView $previousRound, \DateTimeImmutable $now): ShownScreenshot
     {
-        $images = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$screenshot->mediaId], RoundCards::VARIANT, $now);
+        $beforeScreenshot = null === $previousRound ? null : (RoundCards::shownChainsOf($previousRound)[$number - 1][0] ?? null);
+        $mediaIds = null === $beforeScreenshot ? [$screenshot->mediaId] : [$screenshot->mediaId, $beforeScreenshot->mediaId];
+        $images = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, array_values(array_unique($mediaIds)), RoundCards::VARIANT, $now);
+        $after = RoundCards::screenshotViewOf($picturesRound, $screenshot, $number, $images);
+        if (null === $previousRound || null === $beforeScreenshot) {
+            return new ShownScreenshot(\sprintf('Screenshot %d', $number), null, null, $after, null);
+        }
 
         return new ShownScreenshot(
             \sprintf('Screenshot %d', $number),
-            null,
-            null,
-            RoundCards::screenshotViewOf($picturesRound, $screenshot, $number, $images),
-            null,
+            RoundCards::screenshotViewOf($previousRound, $beforeScreenshot, $number, $images),
+            \sprintf('Before · round %d', $previousRound->number ?? 0),
+            $after,
+            \sprintf('After · round %d', $picturesRound->number ?? 0),
         );
     }
 

@@ -554,6 +554,11 @@ final class RoundsFrameTest extends WebTestCase
             {
                 return $this->round;
             }
+
+            public function previousHandOffRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView
+            {
+                return null;
+            }
         };
         $roundCards = new RoundCards($roundsWithNoCount, self::getContainer()->get(MemberNameQueries::class), self::getContainer()->get(SignedUrls::class), self::getContainer()->get(ChecklistCards::class));
         $transactions = new TenantTransactions(self::getContainer()->get(EntityManagerInterface::class), self::getContainer()->get(TenantContext::class));
