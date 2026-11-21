@@ -24,8 +24,9 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
  * DoctrineApiTokens on the real idn_api_token table as pinround_app. The tokens are committed in two organizations, as
- * the resolver and the tenant checks need rows another transaction can see, and removed through the migrator. Every
- * time is fixed; the live tokens are dated ahead of the database clock that resolve_api_token reads.
+ * the resolver and the tenant checks need rows another transaction can see, and removed through the migrator. Omar is a
+ * member of both organizations and Lena of Acme Foods, as resolve_api_token finds only a member's token. Every time is
+ * fixed; the live tokens are dated ahead of the database clock that resolve_api_token reads.
  */
 final class DoctrineApiTokensTest extends KernelTestCase
 {
@@ -43,6 +44,7 @@ final class DoctrineApiTokensTest extends KernelTestCase
     private const string OMAR_WITHIN_A_SECOND = '0197a3c0-0000-7000-8000-000000000ce8';
     private const string OMAR_NOTEBOOKS = '0197a3c0-0000-7000-8000-000000000ce9';
     private const string OMAR_REFUSED_SCOPE = '0197a3c0-0000-7000-8000-000000000cea';
+    private const string LENA_AT_BETA = '0197a3c0-0000-7000-8000-000000000ceb';
     private const string PEPPER = 'integration-test-pepper-of-32-bytes-or-more';
     private const string ISSUED_AT = '2099-03-15 10:00:00 UTC';
 
@@ -52,6 +54,12 @@ final class DoctrineApiTokensTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->removeTokensOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->removeMembershipsOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->addMembership(self::ACME_FOODS, self::OMAR);
+            $this->addMembership(self::ACME_FOODS, self::LENA);
+        });
+        $this->transactions()->committedAs(self::BETA_BAKERY, fn () => $this->addMembership(self::BETA_BAKERY, self::OMAR));
         $issuedAt = new \DateTimeImmutable(self::ISSUED_AT);
         // Added out of order, so the list order cannot come from the insert order.
         $this->transactions()->committedAs(self::ACME_FOODS, function () use ($issuedAt): void {
@@ -68,6 +76,7 @@ final class DoctrineApiTokensTest extends KernelTestCase
     {
         self::getContainer()->get('doctrine')->resetManager();
         $this->removeTokensOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->removeMembershipsOf(self::ACME_FOODS, self::BETA_BAKERY);
         parent::tearDown();
     }
 
@@ -553,6 +562,39 @@ final class DoctrineApiTokensTest extends KernelTestCase
         self::assertSame(self::OMAR_SAME_SECOND, $this->tokens()->ownerOfLiveToken($this->hashOf(self::OMAR_SAME_SECOND))?->tokenId);
     }
 
+    /**
+     * Omar leaves Acme Foods and stays in Beta Bakery, and Lena stays in Acme Foods: only Omar's Acme Foods tokens
+     * stop, and their rows stay as they were.
+     */
+    #[Test]
+    public function aLeaversTokensOfTheOrganizationTheyLeftAreNoLongerResolvedAndKeepTheirRows(): void
+    {
+        $rowsOf = fn (): array => $this->asAcmeFoods(fn (): array => $this->connection()->fetchAllAssociative(
+            'SELECT id, user_id, revoked_at, last_used_at FROM idn_api_token WHERE user_id = ? ORDER BY id',
+            [self::OMAR],
+        ));
+        self::assertSame(self::OMAR_LIVE, $this->tokens()->ownerOfLiveToken($this->hashOf(self::OMAR_LIVE))?->tokenId);
+        $rowsBefore = $rowsOf();
+        self::assertCount(4, $rowsBefore);
+
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->removeMembership(self::ACME_FOODS, self::OMAR));
+
+        self::assertNull($this->tokens()->ownerOfLiveToken($this->hashOf(self::OMAR_LIVE)));
+        self::assertNull($this->tokens()->ownerOfLiveToken($this->hashOf(self::OMAR_SAME_SECOND)));
+        self::assertSame(self::OMAR_AT_BETA, $this->tokens()->ownerOfLiveToken($this->hashOf(self::OMAR_AT_BETA))?->tokenId);
+        self::assertSame(self::LENA_AT_ACME, $this->tokens()->ownerOfLiveToken($this->hashOf(self::LENA_AT_ACME))?->tokenId);
+        self::assertSame($rowsBefore, $rowsOf());
+    }
+
+    #[Test]
+    public function aTokenOfAPersonWhoWasNeverAMemberOfItsOrganizationIsNotResolved(): void
+    {
+        $this->transactions()->committedAs(self::BETA_BAKERY, fn () => $this->add(self::LENA_AT_BETA, self::BETA_BAKERY, self::LENA, new \DateTimeImmutable(self::ISSUED_AT)));
+
+        self::assertNull($this->tokens()->ownerOfLiveToken($this->hashOf(self::LENA_AT_BETA)));
+        self::assertSame(self::LENA_AT_ACME, $this->tokens()->ownerOfLiveToken($this->hashOf(self::LENA_AT_ACME))?->tokenId);
+    }
+
     #[Test]
     public function eachOrganizationSeesOnlyItsOwnTokenRowsAndNoneWithoutATenant(): void
     {
@@ -632,6 +674,29 @@ final class DoctrineApiTokensTest extends KernelTestCase
         $issued = ApiToken::issue($id, new OrganizationId($organizationId), new UserId($userId), 'Claude Code', ApiTokenScope::claudeCodeDefaults(), new HmacApiTokenHashing(self::PEPPER), $issuedAt, $lifetimeDays);
         $this->tokens()->add($issued->token());
         $this->plainTokens[$id] = $issued->reveal();
+    }
+
+    private function addMembership(string $organizationId, string $userId): void
+    {
+        $this->connection()->executeStatement(
+            "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2099-03-01 10:00:00+00')",
+            [$organizationId, $userId],
+        );
+    }
+
+    /**
+     * As a person leaves: their membership row is deleted.
+     */
+    private function removeMembership(string $organizationId, string $userId): void
+    {
+        self::assertSame(1, $this->connection()->executeStatement('DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?', [$organizationId, $userId]));
+    }
+
+    private function removeMembershipsOf(string ...$organizationIds): void
+    {
+        foreach ($organizationIds as $organizationId) {
+            $this->transactions()->committedAs($organizationId, fn (): int|string => $this->connection()->executeStatement('DELETE FROM org_membership WHERE organization_id = ?', [$organizationId]));
+        }
     }
 
     /**

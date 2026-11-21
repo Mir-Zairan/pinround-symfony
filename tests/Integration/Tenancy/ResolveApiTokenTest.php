@@ -21,7 +21,8 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 /**
  * resolve_api_token on real idn_api_token rows, called as pinround_app before any tenant is known, as the token
  * authenticator does (data-model.md › Lookups before the tenant is known). The database clock decides expiry, so the
- * live tokens are dated far ahead and the expired one far back.
+ * live tokens are dated far ahead and the expired one far back. Omar is a member of Acme Foods and Mia of Beta Bakery,
+ * so only the revocation or the expiry refuses the revoked and the expired token.
  */
 final class ResolveApiTokenTest extends KernelTestCase
 {
@@ -41,7 +42,10 @@ final class ResolveApiTokenTest extends KernelTestCase
     protected function setUp(): void
     {
         $this->removeTokensOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->removeMembershipsOf(self::ACME_FOODS, self::BETA_BAKERY);
         $future = new \DateTimeImmutable('2099-01-01 10:00:00 UTC');
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->addMembership(self::ACME_FOODS, self::OMAR));
+        $this->transactions()->committedAs(self::BETA_BAKERY, fn (): int|string => $this->addMembership(self::BETA_BAKERY, self::MIA));
         $this->transactions()->committedAs(self::ACME_FOODS, function () use ($future): void {
             $this->add(self::LIVE_AT_ACME, self::ACME_FOODS, self::OMAR, $future);
             $this->add(self::REVOKED, self::ACME_FOODS, self::OMAR, $future);
@@ -55,6 +59,7 @@ final class ResolveApiTokenTest extends KernelTestCase
     {
         self::getContainer()->get('doctrine')->resetManager();
         $this->removeTokensOf(self::ACME_FOODS, self::BETA_BAKERY);
+        $this->removeMembershipsOf(self::ACME_FOODS, self::BETA_BAKERY);
         parent::tearDown();
     }
 
@@ -81,6 +86,18 @@ final class ResolveApiTokenTest extends KernelTestCase
     public function anExpiredTokenGetsNoRow(): void
     {
         self::assertSame([], $this->resolve($this->hashes[self::EXPIRED]));
+    }
+
+    #[Test]
+    public function theTokenOfAPersonWhoLeftItsOrganizationGetsNoRow(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): int|string => $this->connection()->executeStatement(
+            'DELETE FROM org_membership WHERE organization_id = ? AND user_id = ?',
+            [self::ACME_FOODS, self::OMAR],
+        ));
+
+        self::assertSame([], $this->resolve($this->hashes[self::LIVE_AT_ACME]));
+        self::assertSame([['token_id' => self::LIVE_AT_BETA, 'organization_id' => self::BETA_BAKERY, 'user_id' => self::MIA]], $this->resolve($this->hashes[self::LIVE_AT_BETA]));
     }
 
     #[Test]
@@ -113,6 +130,21 @@ final class ResolveApiTokenTest extends KernelTestCase
         $issued = ApiToken::issue($id, new OrganizationId($organizationId), new UserId($userId), 'Claude Code', [ApiTokenScope::Read], new HmacApiTokenHashing(self::PEPPER), $issuedAt);
         $this->tokens()->add($issued->token());
         $this->hashes[$id] = $issued->token()->tokenHash();
+    }
+
+    private function addMembership(string $organizationId, string $userId): int|string
+    {
+        return $this->connection()->executeStatement(
+            "INSERT INTO org_membership (organization_id, user_id, org_roles, joined_at) VALUES (?, ?, '{}', '2099-01-01 09:00:00+00')",
+            [$organizationId, $userId],
+        );
+    }
+
+    private function removeMembershipsOf(string ...$organizationIds): void
+    {
+        foreach ($organizationIds as $organizationId) {
+            $this->transactions()->committedAs($organizationId, fn (): int|string => $this->connection()->executeStatement('DELETE FROM org_membership WHERE organization_id = ?', [$organizationId]));
+        }
     }
 
     /**

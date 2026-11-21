@@ -906,7 +906,8 @@ final class DatabaseRolesTest extends KernelTestCase
 
     /**
      * resolve_api_token runs as its owner pinround_resolver with a fixed search_path; besides that owner only the app
-     * may call it, and it returns the ids of a token that is neither revoked nor expired.
+     * may call it, and it returns the ids of a token that is neither revoked nor expired and whose person is still a
+     * member of its organization (Version20261121193200).
      */
     #[Test]
     public function theApiTokenResolverReturnsOnlyTheIdsOfALiveToken(): void
@@ -921,7 +922,8 @@ final class DatabaseRolesTest extends KernelTestCase
                 'arguments' => 'p_token_hash bytea',
                 'result' => 'TABLE(token_id uuid, organization_id uuid, user_id uuid)',
                 'body' => 'SELECT t.id, t.organization_id, t.user_id FROM public.idn_api_token t'
-                    .' WHERE t.token_hash = p_token_hash AND t.revoked_at IS NULL AND t.expires_at > now()',
+                    .' WHERE t.token_hash = p_token_hash AND t.revoked_at IS NULL AND t.expires_at > now()'
+                    .' AND EXISTS (SELECT 1 FROM public.org_membership m WHERE m.organization_id = t.organization_id AND m.user_id = t.user_id)',
             ],
             $connection->fetchAssociative(
                 "SELECT p.proowner::regrole::text AS owner, p.prosecdef AS is_security_definer, p.proconfig::text AS config,

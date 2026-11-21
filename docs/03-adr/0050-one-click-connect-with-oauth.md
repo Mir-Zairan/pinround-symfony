@@ -13,7 +13,7 @@ with a consent page instead of a pasted token. Pasted personal access tokens kee
   - [Consequences](#consequences) — what gets easier and what it costs.
 - [Confirmation](#confirmation) — the tests of P14.T20.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — the trade-offs.
-- [Decided at acceptance](#decided-at-acceptance) — the product owner's answers on step-up, clients and storage.
+- [Decided at acceptance](#decided-at-acceptance) — the product owner's answers on step-up, clients and storage, and the note on leavers' personal tokens.
 - [More information](#more-information) — related ADRs, requirements, revisit triggers.
 
 ## Status
@@ -154,6 +154,11 @@ The product owner answered on 2026-11-21:
 - **Client registration.** Clients register themselves (dynamic client registration), public clients with PKCE only;
   a Claude connector cannot wait for an admin.
 - **Token storage.** Hashes only, as for personal access tokens.
+
+Note, 2026-11-21: the product owner decided that a leaver's personal access tokens are refused too, not only the OAuth
+tokens of "One organization per grant". `resolve_api_token` finds a token only while its person still has a membership
+row in the token's organization, so every token a person holds stops at their next request once they leave; the token
+rows stay until the retention job purges them.
 
 ## More information
 
