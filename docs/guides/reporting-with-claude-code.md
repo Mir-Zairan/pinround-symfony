@@ -4,7 +4,7 @@ How to let Claude Code check a problem in an app, keep the evidence, and file it
 
 ## Index
 - [What it does](#what-it-does) — the prompt `report_while_investigating` in a few lines
-- [What you need](#what-you-need) — the token and its three scopes
+- [What you need](#what-you-need) — sign-in or a token, and the token's three scopes
 - [Start a check](#start-a-check) — how to call the prompt, and example prompts
 - [While Claude Code checks](#while-claude-code-checks) — the evidence log, pictures, titles, summaries and pins
 - [At the end](#at-the-end) — `find_tickets`, the three choices, the uploads, and Send
@@ -27,8 +27,8 @@ pinround's MCP server offers a prompt named `report_while_investigating`. It tel
 The prompt's text is in [report_while_investigating.v1.md](../../src/AgentApi/Infrastructure/Prompt/report_while_investigating.v1.md). Connecting Claude Code to pinround is in [claude-code.md](claude-code.md).
 
 ## What you need
-- Claude Code connected to pinround, as [claude-code.md](claude-code.md) says.
-- A token with the scopes for the targets you want. Make it on **API tokens** (`/me/tokens`).
+- Claude Code connected to pinround, as [claude-code.md](claude-code.md) says: by signing in on pinround's consent page ([ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)) or with a token.
+- A token with the scopes for the targets you want. Make it on **API tokens** (`/me/tokens`). Making it asks for a login from the last 10 minutes and two-step login; a local `dev` demo with the demo switch on skips only the two-step login ([ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md), [claude-code.md › What you need](claude-code.md#what-you-need)).
 
 | Scope | Ticked by default | Needed for |
 |---|---|---|
@@ -101,7 +101,7 @@ flowchart TD
 
 **A report draft is not a ticket.** Only you see it. Open it at the `url` Claude Code gives you (or under `/report-drafts`). Check the title, the detail, and each picture's title, summary and pin notes, then press **Send**. While a picture still shows "Processing…", wait a moment and reload: Send waits until every picture is ready. After Send, pinround opens the new ticket. Its Round 0 holds the pictures and pins, for example "Round 0 · Report · by Omar · 3 pins".
 
-**A draft round stays private** until you share it in pinround, as any draft round.
+**A draft round stays private** until you share it in pinround, as any draft round. A share waits while another shared round on the ticket is still open, and a draft with no screenshots cannot be shared ([ADR-0048](../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md)).
 
 **A picture for a report draft that exists already** goes up with `create_report_upload` for the draft's project, the PUT, then `add_report_screenshot` with the draft's id as `report`, the `upload_id`, the title, the summary and the pins. Over MCP it needs the title and the summary, as `create_report`, `add_screenshot` and `add_notebook_screenshot` do; a call without either, or with a blank one, is refused and adds nothing.
 
@@ -124,7 +124,7 @@ Then say what else matters, for example "Start with the checkout total." With it
 
 1. Reads `get_round_notes` for SHOP-88 and tells you, pin by pin, what it is going to fix.
 2. Fixes one screenshot at a time and, right after each fix, takes the retake: the same screen, now fixed. It saves it in the evidence log at that moment, with the try it answers, a title, a summary, pins on what changed, and whether it thinks each pin is fixed.
-3. Uploads nothing until you ask. Then it calls `list_draft_screenshots`, and for each retake `create_upload`, the PUT and `add_screenshot` with `retake_of`, so the retake becomes the next try of its screenshot in your draft round.
+3. Uploads nothing until you ask. Then it calls `list_draft_screenshots`, and for each retake `create_upload`, the PUT and `add_screenshot` with `retake_of`, so the retake becomes the next try of its screenshot in your draft round, up to 5 tries ([ADR-0048](../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md)).
 4. Tells you which pins it thinks are fixed. You mark each pin "Fixed on try N" or "Still wrong" in pinround yourself; no tool marks a pin, sends a round or moves the ticket.
 
 The prompt needs a token with `read`, and the uploads `rounds:write`. It renders only for a ticket you may see: a malformed key, such as `shop-88`, is "The arguments do not match this prompt: …", and an unknown key or a ticket you may not see is "Not found", alike. The prompt's text is in [fix_my_round_notes.v1.md](../../src/AgentApi/Infrastructure/Prompt/fix_my_round_notes.v1.md).
@@ -204,6 +204,7 @@ A refused call saves nothing. Claude Code tells you the message in plain words. 
 | "Not found. It does not exist, or you may not see it." | A wrong project key or ticket key, or an upload begun for another target. |
 | "A picture was rejected: …" | The file is not a PNG, JPEG or WebP pinround can read, or it is too big. Capture it again. |
 | "An upload expired before the report was made. …" | Begin a new upload with `create_report_upload`. |
+| "This screenshot already has 5 tries. Remove one before you add another." | A retake with `retake_of` was the sixth try of that screenshot. |
 | "The arguments do not match this prompt: …" | A prompt was started with a wrong argument, for example `fix_my_round_notes` without a ticket key or with a malformed one. |
 
 The other answers (401, 429 and more) are in [claude-code.md › When a call is refused](claude-code.md#when-a-call-is-refused).

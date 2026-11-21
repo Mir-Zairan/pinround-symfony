@@ -350,7 +350,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 ## Definition of done
 - [ ] All P14 tasks ticked; the three journeys of the [outcome](#outcome) pass in Playwright.
 - [ ] The UI check of every page at 1440×900 and 390×844 finds no high or medium problem.
-- [ ] ADR-0048, 0049 and 0050 accepted (done 2026-11-21); FR, guides, config and ADR index updated with their Index.
+- [x] ADR-0048, 0049 and 0050 accepted (done 2026-11-21); FR, guides, config and ADR index updated with their Index.
 - [ ] Quality gates green: `composer test`, `composer phpstan`, `composer deptrac`, `composer cs`, `composer audit`.
 
 ## Hand-off notes
@@ -426,3 +426,4 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (T20, connected apps): `idn_oauth_refresh_token.family_created_at` (`Version20261122020000`) holds when a connection started, on every token of its family, so the lists read a connection from its live token alone. The retention job (P11) may purge traded refresh tokens without changing the connected apps lists.
 - 2026-11-21 (T20, connected apps): on Admin › People, End connection's accessible label is "End connection: <owner>’s <app>", so each button says whose connection it ends; on `/me/tokens` it is "End connection of <app>".
 - 2026-11-21 (docs): the Definition of done line on ADR-0048, 0049 and 0050 stays open: FR names only ADR-0050 (FR-RND-21); FR-RND-19 (tries) and FR-RND-20 (one open round per ticket) are not written yet and no requirement names ADR-0048 or ADR-0049; [reporting-with-claude-code.md](../guides/reporting-with-claude-code.md) names none of the three. The ADR index, [config.md](../operations/config.md) (ADR-0049) and the other two guides (ADR-0049, ADR-0050) do.
+- 2026-11-21 (docs, closes the note above): FR-RND-19 (tries) and FR-RND-20 (one open shared round per ticket) are written from ADR-0048 and T5/T6, with FR-RND-11 and FR-RND-12 pointing at FR-RND-20 and the RND Index row now FR-RND-01…21. ADR-0049 gets no FR of its own: it is dev tooling, and the FR file lists none; FR-ID-03 names it as the one dev-only exception. [reporting-with-claude-code.md](../guides/reporting-with-claude-code.md) links ADR-0050 (sign-in), ADR-0049 (making a token) and ADR-0048 (sharing, tries, the sixth-try refusal). The Definition of done line on the three ADRs is ticked.

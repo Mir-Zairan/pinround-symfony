@@ -12,7 +12,7 @@ The contract of what pinround shall do. Phase plans cite these IDs; tests prove 
 - [INT — Intake and checks](#int--intake-and-checks): report a problem, duplicates, check reasons, checker, visibility (FR-INT-01…15).
 - [CNV — Conversation](#cnv--conversation): comments, questions, answers, replies, resolve (FR-CNV-01…08).
 - [PNG — Pings and notifications](#png--pings-and-notifications): ping, limits, grouping, bell, auto-clear, quiet hours, live updates (FR-PNG-01…11).
-- [RND — Screenshots, pins and rounds](#rnd--screenshots-pins-and-rounds): uploads, pins, Round 0/1, review rounds, draft rounds, findings, live pins, one-click connect (FR-RND-01…18, 21).
+- [RND — Screenshots, pins and rounds](#rnd--screenshots-pins-and-rounds): uploads, pins, Round 0/1, review rounds, draft rounds, findings, live pins, tries, one open round per ticket, one-click connect (FR-RND-01…21).
 - [HOME — Home page](#home--home-page): headline, needs-you score, groups, pings, focus chips, admin card (FR-HOME-01…11).
 - [MINE — My reports](#mine--my-reports): parcel tracking, groups, inline answer, menu (FR-MINE-01…08).
 - [MGR — Manager overview](#mgr--manager-overview): teams at a glance (FR-MGR-01…04).
@@ -52,7 +52,7 @@ An admin shall invite a person by email. The link is single-use and expires afte
 - Accept: pending invites are listed as "Invited · not joined yet" and count in the admin alerts.
 
 **FR-ID-03 — Two-step login (TOTP)** · Must · Prototype: not shown
-Users can turn on TOTP codes. Users with the Admin role must have it on before they can open admin pages.
+Users can turn on TOTP codes. Users with the Admin role must have it on before they can open admin pages. The one exception is dev tooling, not a product feature: on a local `dev` demo, `PINROUND_DEMO_SKIP_2FA` skips two-step login, and the app refuses to boot with it in any other environment ([ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md), [config.md](../operations/config.md)).
 - Accept: an admin without TOTP is sent to set it up when opening any admin page.
 - Accept: 10 one-time recovery codes are shown once at setup.
 
@@ -496,10 +496,10 @@ The assignee of an open ticket, or the person whose turn it is ([FR-RND-17](#rnd
 Only the owner sees an unshared draft (not admins, not the lead). The owner's personal access token with scope `read` can read it through MCP.
 
 **FR-RND-11 — Hand-off dialog** · Must · Prototype: dialog "Share your draft round?"
-When the owner does an action that moves the ticket to another step while an unshared draft with screenshots exists, ask: "Share and move to <step>" (becomes "Round N · self-check by Omar", visible to all who see the ticket), "Keep private and move", or Cancel. Asked once per draft.
+When the owner does an action that moves the ticket to another step while an unshared draft with screenshots exists, ask: "Share and move to <step>" (becomes "Round N · self-check by Omar", visible to all who see the ticket), "Keep private and move", or Cancel. Asked once per draft. When sharing is refused, it offers only "Keep private and move" and the reason ([FR-RND-20](#rnd--screenshots-pins-and-rounds)).
 
 **FR-RND-12 — Share now and delete** · Must · Prototype: draft buttons
-"Share with the team now" shares without moving; "Delete draft" removes it (and its files after retention).
+"Share with the team now" shares without moving; "Delete draft" removes it (and its files after retention). A share is refused while another shared round on the ticket is open, or when the draft has no screenshots ([FR-RND-20](#rnd--screenshots-pins-and-rounds)).
 - Accept: a shared draft is read-only for everyone, including its owner. N in "Round N" is the next free round number of the ticket.
 
 **FR-RND-13 — For Claude Code box** · Should · 🏁 · Prototype: draft "For Claude Code"
@@ -531,8 +531,25 @@ The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)) has "Pin 
 - Accept: captures on several pages end in one report draft, in order, up to 10.
 - Accept: with no title and no summary nothing extra is shown and nothing is required.
 
+**FR-RND-19 — Tries of a screenshot** · Should · Prototype: none (product owner's decision, 2026-11-20)
+In a draft round ([FR-RND-09](#rnd--screenshots-pins-and-rounds)) a retake is the next try of the same screenshot: it neither overwrites it nor adds a screenshot or a round, so a round number counts hand-offs, not tries ([ADR-0048](../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md)). `add_screenshot` ([FR-MCP-05](#mcp--mcp-server-and-agent-api)) and the REST draft screenshot call take an optional `retake_of`; the extension's draft round target offers "Retake of screenshot N". The draft shows the latest try of each screenshot with "Try 2 of 2" and a switch to earlier tries. Pins stay on the try they were put on; a pin on an earlier try can be marked "Fixed on try N" or "Still wrong". A screenshot keeps at most 5 tries. On share the team sees one screenshot per chain, the latest try; earlier tries stay with the owner and are deleted with the draft. A shared round's "before" is the "after" of the hand-off round shared just before it, paired by screenshot number (product owner, 2026-11-21).
+- Accept: a retake with `retake_of` shows as try 2 of the same screenshot; the try-1 pins stay on try 1.
+- Accept: a sixth try is refused with "This screenshot already has 5 tries. Remove one before you add another.", and nothing is stored.
+- Accept: a `retake_of` that points at another round, another person's draft or another organization answers 404, and nothing is stored.
+- Accept: after share the round has one screenshot per chain, the latest try.
+
+**FR-RND-20 — One open shared round per ticket** · Should · Prototype: none (product owner's decisions, 2026-11-20 and 2026-11-21)
+A ticket has at most one open shared round ([ADR-0048](../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md)). A shared round is a hand-off numbered from 1: a review round or a round shared from a draft. Round 0 and the checklist round never block a share.
+- **When it closes.** A round shared at a hand-off is ready for the person whose turn it is next. It closes when the person whose turn it is moves the ticket on with a move-on verb, any verb that is not lead-only ("Approve code", "Pass it", "Needs changes", "Input given · go on" and the others); the verb is its verdict. A move by anyone else leaves it open. The lead-only verbs "Put on hold", "Move to another step…" and "Go on" never close it, whoever uses them; after such a move, whoever's turn it is now closes it when they move the ticket on. A findings round ([FR-RND-17](#rnd--screenshots-pins-and-rounds)) closes when the assignee moves the ticket on, also with "Keep private and move", or when the assignee shares the next round.
+- **Share rules, on every path.** A share is refused while another shared round on the ticket is open, unless the same move closes that round first; then the share takes the next number, in one transaction. A draft with no screenshots is refused: "Add a screenshot before you share." A refused draft stays unshared and unnumbered. The hand-off dialog ([FR-RND-11](#rnd--screenshots-pins-and-rounds)) then offers only "Keep private and move", with a reason that names who gives the verdict, for example "Round 2 is still open. Mia gives a verdict first." An MCP or REST call that shares answers the refusal as a 4xx with the reason. Anyone may keep a private draft meanwhile; only sharing waits.
+- **Old open rounds.** A ticket that already has more than one open shared round keeps them, with no data change; every share on it is refused until they close. The next move-on verb by the person whose turn it is closes every one that is not a findings round; a findings round closes on the assignee's move, as above.
+- Accept: a share while another round is open, or of a draft with no screenshots, is refused with the reason, and the draft stays unshared and unnumbered.
+- Accept: of two shares at the same moment, exactly one wins.
+- Accept: Round 2 is ready for Lena, who is lead and reviewer: her "Put on hold" leaves it open and a share is still refused; back in Code review, her "Approve code" closes it.
+- Accept: Mia's "Needs changes" with a draft closes Round 2 and shares "Round 3 · findings by Mia" in the same move.
+
 **FR-RND-21 — One-click connect** · Should · Prototype: none (product owner's decision, 2026-11-21)
-The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)), Claude Code and a Claude custom connector connect to pinround through a consent page, with no pasted token (OAuth 2.1, authorization code with PKCE, [ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)). The consent page shows the app's name, the host it sends the person back to and what each scope lets it do; the person picks one organization they are a member of and presses **Allow** or **Deny**. It asks for the same recent password and two-step login as making a token ([FR-ID-05](#id--identity-and-access)). The tokens act as the person, with their permissions and the asked scopes, in the picked organization only: an access token works for 1 hour, a refresh token is replaced at each use. Pasted personal access tokens keep working. FR-RND-19 and FR-RND-20 are kept for the tries and the one open round per ticket of phase 14.
+The browser extension ([FR-RND-15](#rnd--screenshots-pins-and-rounds)), Claude Code and a Claude custom connector connect to pinround through a consent page, with no pasted token (OAuth 2.1, authorization code with PKCE, [ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)). The consent page shows the app's name, the host it sends the person back to and what each scope lets it do; the person picks one organization they are a member of and presses **Allow** or **Deny**. It asks for the same recent password and two-step login as making a token ([FR-ID-05](#id--identity-and-access)). The tokens act as the person, with their permissions and the asked scopes, in the picked organization only: an access token works for 1 hour, a refresh token is replaced at each use. Pasted personal access tokens keep working.
 - Accept: the extension connects without a pasted token, and its calls use the issued token.
 - Accept: a consent posted with the id of an organization the person is not a member of gets 404, and no code is issued; a token of Acme Foods answers not found for another organization's data.
 - Accept: the extension's "Sign out" revokes its tokens, and a revoked token is refused at once; a refresh token used twice, or a code used twice, revokes every token issued from that consent.
