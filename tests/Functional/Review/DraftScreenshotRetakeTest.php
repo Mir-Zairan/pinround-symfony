@@ -195,7 +195,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
      * "Before = the earlier After" (ADR-0048): Round 1 is Omar's draft with screenshot A retaken once, shared and then
      * closed; Round 2 is his next draft with a new A' (Screenshot 1), retaken after he added the new screen B
      * (Screenshot 2). Mia sees A' compared with Round 1's latest try of A, never its first try nor A''s; B is new, so
-     * it stands alone, and Round 1 has no round before it. Someone of another organization gets 404.
+     * it stands alone, and Round 1 has no round before it, as the ticket has no report. Someone of another organization gets 404.
      */
     #[Test]
     public function theNextSharedRoundComparesEachScreenshotWithTheSameNumberedLatestTryOfTheRoundBefore(): void
@@ -239,7 +239,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame([], $page->filter(self::CAPTION)->each(static fn (Crawler $caption): string => $caption->text()), 'Round 1 has no round before it.');
+        self::assertSame([], $page->filter(self::CAPTION)->each(static fn (Crawler $caption): string => $caption->text()), 'Round 1 has no round before it, and the ticket has no report.');
         self::assertCount(0, $page->filter(self::BEFORE_SIDE));
         self::assertSame([self::RETAKE_TITLE], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
 
@@ -346,7 +346,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus?side=before');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(0, $page->filter(self::FOCUS_SIDES), 'Round 1 has no round before it.');
+        self::assertCount(0, $page->filter(self::FOCUS_SIDES), 'Round 1 has no round before it, and the ticket has no report.');
         self::assertSame(self::RETAKE_TITLE, $page->filter(self::FOCUS_IMAGE)->attr('alt'));
         self::assertSame($this->viewPathOf($roundOneRetake), parse_url((string) $page->filter(self::FOCUS_IMAGE)->attr('src'), \PHP_URL_PATH));
         self::assertSame(

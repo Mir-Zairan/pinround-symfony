@@ -28,7 +28,9 @@ them, also when the lead is the person the round is ready for; after a lead-only
 the round when they move the ticket on; and the confirmation test for a lead who is also the reviewer. The product
 owner confirmed two more points on 2026-11-21, also before merge: "Input given · go on" and "Move on to <next core
 step>" used by the person whose turn it is close an open round; and any move-on hand-off that closes the open round may
-share the mover's draft in the same move, close first, then number.
+share the mover's draft in the same move, close first, then number. Amended 2026-11-21 before merge: with no earlier
+hand-off round, Round 0's screenshots are the Befores (product owner, to match the phase 14 outcome that a first shared
+draft's round page shows Before and After).
 
 It supersedes in part:
 
@@ -89,12 +91,14 @@ changes no data that people already saw.
 - A screenshot keeps at most **5 tries**. A sixth is refused with a plain message, and nothing is stored.
 - Pins stay on the try they were put on.
 - **Share copies the latest try** of each screenshot into the shared round. Earlier tries stay with the owner and are
-  deleted with the draft. The team sees one screenshot per chain, and its "before" is the earlier round's "after".
+  deleted with the draft. The team sees one screenshot per chain, and its "before" is the earlier round's "after"; with
+  no earlier shared draft or review round, the report's (Round 0's) same-numbered screenshot (amended 2026-11-21).
 - The existing caps stay: 50 screenshots per round, 10 per report draft, title 120, summary 600, note 1,000.
 
 **Which rounds count.** A *shared round* here is a round shared from a draft, or a review round: a hand-off with a
 number from 1. Round 0 (the report) and the checklist round are not hand-offs. They never block a share, and this ADR
-does not close them.
+does not close them. Round 0 still gives the Befores of the first shared draft (amended 2026-11-21); the checklist round
+never does.
 
 **When a shared round closes.**
 

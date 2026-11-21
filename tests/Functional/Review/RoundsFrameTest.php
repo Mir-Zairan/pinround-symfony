@@ -555,9 +555,12 @@ final class RoundsFrameTest extends WebTestCase
                 return $this->round;
             }
 
+            /** As the real read: its one round when it is a hand-off round or the report numbered below $number. */
             public function previousHandOffRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView
             {
-                return null;
+                $isHandOffOrReport = \in_array($this->round->kind, ['review', 'draft', 'report'], true);
+
+                return $isHandOffOrReport && $number >= 1 && null !== $this->round->number && $this->round->number < $number ? $this->round : null;
             }
         };
         $roundCards = new RoundCards($roundsWithNoCount, self::getContainer()->get(MemberNameQueries::class), self::getContainer()->get(SignedUrls::class), self::getContainer()->get(ChecklistCards::class));

@@ -52,9 +52,10 @@ final class FocusPageScreenshotsTest extends WebTestCase
     private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => RoundsSection::FRAME_ID];
     /**
      * Fewer than the round page's (RoundPageScreenshotsTest::DRAFT_PAGE_QUERIES): no move-on buttons, no "Ready for"
-     * header and no strip of small pictures to sign. Measured, and the same for 2 and 6 screenshots.
+     * header and no strip of small pictures to sign. Measured, and the same for 2 and 6 screenshots; the report's read as
+     * the first shared draft's Befores (four queries, ADR-0048 amended 2026-11-21) raised it from 24.
      */
-    private const int DRAFT_FOCUS_QUERIES = 24;
+    private const int DRAFT_FOCUS_QUERIES = 28;
 
     private KernelBrowser $client;
 
@@ -146,6 +147,42 @@ final class FocusPageScreenshotsTest extends WebTestCase
         $next = $page->filter('.focus-review__next');
         self::assertSame('true', $next->attr('aria-disabled'), 'There is no screenshot after the last.');
         self::assertNull($next->attr('href'));
+    }
+
+    /**
+     * The full screen of Omar's first shared draft offers the same Before as its round page, the report's same-numbered
+     * picture with its own pins; Screenshot 2 is numbered past the report's last and has none, even when the address
+     * asks for it.
+     */
+    #[Test]
+    public function aFirstSharedDraftsFullScreenSwitchesToTheReportsSameNumberedPicture(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->seedRoundOfScreenshots($ticketId, 0, 'report', 'Mia', 'Report shot ', [1]);
+        $this->seedSharedDraft($ticketId, 1, 'Draft shot ', [2, 0]);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::DRAFT_FOCUS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            [['After', '/t/SHOP-1/rounds/1/focus?screenshot=1&side=after'], ['Before', '/t/SHOP-1/rounds/1/focus?screenshot=1&side=before']],
+            $page->filter('.focus-review__sides a')->each(static fn (Crawler $link): array => [$link->text(), (string) $link->attr('href')]),
+        );
+        self::assertSame('After, round 1: Draft shot 0', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
+        self::assertCount(2, $page->filter('.focus-review__picture button.pin'));
+
+        $page = $this->client->request('GET', self::DRAFT_FOCUS.'?side=before');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Before, round 0: Report shot 0', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
+        self::assertSame(['Note 1'], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()), 'The Before walks the report picture\'s own pin.');
+
+        $page = $this->client->request('GET', self::DRAFT_FOCUS.'?'.RoundController::SCREENSHOT_PARAMETER.'=2&side=before');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.focus-review__sides'), 'The report has no Screenshot 2.');
+        self::assertSame('Draft shot 1', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
     }
 
     #[Test]
@@ -381,18 +418,23 @@ final class FocusPageScreenshotsTest extends WebTestCase
     }
 
     /**
-     * The page's reads do not grow with the screenshots or the pins: a shared draft with two screenshots of one pin each,
-     * then one with six of three pins each, read the same number of queries.
+     * The page's reads do not grow with the screenshots or the pins: a first shared draft with two screenshots of one
+     * pin each after a report with as many, then one with six of three pins each after a report with as many, read the
+     * same number of queries, the report's read for the Befores included.
      */
     #[Test]
     public function aSharedDraftsFullScreenReadsTheSameNumberOfQueriesWhateverTheNumberOfScreenshotsAndPins(): void
     {
-        $this->seedSharedDraft($this->addTicket('SHOP-1'), 1, 'Draft shot ', [1, 1]);
+        $firstTicketId = $this->addTicket('SHOP-1');
+        $this->seedRoundOfScreenshots($firstTicketId, 0, 'report', 'Mia', 'Report shot ', [1, 1]);
+        $this->seedSharedDraft($firstTicketId, 1, 'Draft shot ', [1, 1]);
         $this->logIn($this->client, $this->people['Omar']);
         $this->queryCountOf(self::DRAFT_FOCUS);
         $twoScreenshotsQueryCount = $this->queryCountOf(self::DRAFT_FOCUS);
 
-        $this->seedSharedDraft($this->addTicket('SHOP-2', 'all', 2), 1, 'Draft shot ', [3, 3, 3, 3, 3, 3]);
+        $secondTicketId = $this->addTicket('SHOP-2', 'all', 2);
+        $this->seedRoundOfScreenshots($secondTicketId, 0, 'report', 'Mia', 'Report shot ', [3, 3, 3, 3, 3, 3]);
+        $this->seedSharedDraft($secondTicketId, 1, 'Draft shot ', [3, 3, 3, 3, 3, 3]);
         $this->queryCountOf('/t/SHOP-2/rounds/1/focus?screenshot=2');
         $sixScreenshotsQueryCount = $this->queryCountOf('/t/SHOP-2/rounds/1/focus?screenshot=2');
 

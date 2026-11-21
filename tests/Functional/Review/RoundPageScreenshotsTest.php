@@ -55,9 +55,11 @@ final class RoundPageScreenshotsTest extends WebTestCase
      * RoundsVisibleTo::sharedRoundOf: its visibility check, the round, its screenshots and their pins. The open draft's
      * move-on buttons' read of the saved turn raised it from 27 (task 8e), but Omar shared this draft outside a move, so
      * his own move never closes it and his page skips that read (HandOffRound, task 16l). The header's read of whose
-     * turn it is (RoundReadyFor), as Omar's own draft is no findings round, raised it from 27.
+     * turn it is (RoundReadyFor), as Omar's own draft is no findings round, raised it from 27. The report's read as the
+     * first shared draft's Befores through RoundsVisibleTo::previousHandOffRoundOf (its visibility check, the round, its
+     * screenshots and their pins; ADR-0048, amended 2026-11-21) raised it from 28.
      */
-    private const int DRAFT_PAGE_QUERIES = 28;
+    private const int DRAFT_PAGE_QUERIES = 32;
 
     private KernelBrowser $client;
 
@@ -325,6 +327,37 @@ final class RoundPageScreenshotsTest extends WebTestCase
     }
 
     /**
+     * Omar's first shared draft has no hand-off round before it, so its Befores are the report's (ADR-0048, amended
+     * 2026-11-21): Screenshot 1 is compared with the report's Screenshot 1 and its shown pins, offering Side by side,
+     * Before and After; Screenshot 2 is numbered past the report's last, so it stands alone.
+     */
+    #[Test]
+    public function aFirstSharedDraftComparesEachScreenshotWithTheReportsSameNumberedPicture(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->seedRoundOfScreenshots($ticketId, 0, 'report', 'Mia', 'Report shot ', [2]);
+        $this->seedSharedDraft($ticketId, 1, 'Draft shot ', [1, 0]);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::DRAFT_PAGE);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Before · round 0', 'After · round 1'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
+        self::assertSame(['Side by side', 'Before', 'After'], $page->filter('.round-compare-control button.seg')->each(static fn (Crawler $option): string => $option->text()));
+        $before = $page->filter('.round-compare__side--before');
+        self::assertSame(['Report shot 0'], $before->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+        self::assertCount(2, $before->filter('button.pin'), 'The report picture\'s two pins, not its dismissed AI guess.');
+        self::assertSame(['Draft shot 0'], $page->filter('.round-compare__side--after .screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+
+        $page = $this->client->request('GET', self::DRAFT_PAGE.'?'.RoundController::SCREENSHOT_PARAMETER.'=2');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()), 'The report has no Screenshot 2.');
+        self::assertCount(0, $page->filter('.round-compare-control, .round-compare__side--before'));
+        self::assertSame(['Draft shot 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+    }
+
+    /**
      * RoundsVisibleTo lists only the newest RoundQueries::MAX_NUMBERED_ROUNDS numbered rounds; the round page reads the
      * one round asked for, so a shared draft older than those still shows its screenshots.
      */
@@ -347,18 +380,23 @@ final class RoundPageScreenshotsTest extends WebTestCase
     }
 
     /**
-     * The page's reads do not grow with the screenshots or the pins: a shared draft with two screenshots of one pin each,
-     * then one with six of three pins each, read the same number of queries.
+     * The page's reads do not grow with the screenshots or the pins: a first shared draft with two screenshots of one
+     * pin each after a report with as many, then one with six of three pins each after a report with as many, read the
+     * same number of queries, the report's read for the Befores included.
      */
     #[Test]
     public function aSharedDraftsPageReadsTheSameNumberOfQueriesWhateverTheNumberOfScreenshotsAndPins(): void
     {
-        $this->seedSharedDraft($this->addTicket('SHOP-1'), 1, 'Draft shot ', [1, 1]);
+        $firstTicketId = $this->addTicket('SHOP-1');
+        $this->seedRoundOfScreenshots($firstTicketId, 0, 'report', 'Mia', 'Report shot ', [1, 1]);
+        $this->seedSharedDraft($firstTicketId, 1, 'Draft shot ', [1, 1]);
         $this->logIn($this->client, $this->people['Omar']);
         $this->queryCountOf(self::DRAFT_PAGE);
         $twoScreenshotsQueryCount = $this->queryCountOf(self::DRAFT_PAGE);
 
-        $this->seedSharedDraft($this->addTicket('SHOP-2', 'all', 2), 1, 'Draft shot ', [3, 3, 3, 3, 3, 3]);
+        $secondTicketId = $this->addTicket('SHOP-2', 'all', 2);
+        $this->seedRoundOfScreenshots($secondTicketId, 0, 'report', 'Mia', 'Report shot ', [3, 3, 3, 3, 3, 3]);
+        $this->seedSharedDraft($secondTicketId, 1, 'Draft shot ', [3, 3, 3, 3, 3, 3]);
         $this->queryCountOf('/t/SHOP-2/rounds/1?screenshot=2');
         $sixScreenshotsQueryCount = $this->queryCountOf('/t/SHOP-2/rounds/1?screenshot=2');
 

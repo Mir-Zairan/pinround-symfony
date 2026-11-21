@@ -160,15 +160,16 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
         if (!$viewer->organizationId()->equals($organizationId)) {
             throw new \InvalidArgumentException('The ticket visibility given is not one of the tenant\'s organization.');
         }
-        if ($number < 2 || [] === $this->ticketQueries->visibleTicketIdsOf($viewer, [$ticketId])) {
+        if ($number < 1 || [] === $this->ticketQueries->visibleTicketIdsOf($viewer, [$ticketId])) {
             return null;
         }
 
-        // By rvw_round_ticket_id_number_key, walked down from $number; Round::isOpenSharedRound's kinds, open or closed.
+        // By rvw_round_ticket_id_number_key, walked down from $number; Round::isOpenSharedRound's kinds, open or closed,
+        // and the report, which is always Round 0, so it is taken only when no hand-off round is shared before $number.
         $roundRow = $this->connection->fetchAssociative(
             'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state FROM rvw_round AS round'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
-            ." AND round.number < :number AND round.kind IN ('review', 'draft')"
+            ." AND round.number < :number AND round.kind IN ('review', 'draft', 'report')"
             .' AND round.shared_at IS NOT NULL AND round.deleted_at IS NULL'
             .' ORDER BY round.number DESC LIMIT 1',
             ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'number' => $number],
