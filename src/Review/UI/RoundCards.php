@@ -237,7 +237,7 @@ final readonly class RoundCards
     /**
      * @return list<PinView> the pins of a screenshot but the AI's that were dismissed
      */
-    private static function shownPinsOf(RoundScreenshotView $screenshot): array
+    public static function shownPinsOf(RoundScreenshotView $screenshot): array
     {
         $pins = [];
         foreach ($screenshot->pins as $pin) {
@@ -261,7 +261,7 @@ final readonly class RoundCards
         $tryCount = \count($tries);
         $latestTry = $tries[$tryCount - 1];
         if (RoundView::DRAFT !== $round->kind) {
-            return new RoundCardScreenshot($latestTry->id, $this->screenshotViewOf($round, $latestTry, $number, $images));
+            return new RoundCardScreenshot($latestTry->id, self::screenshotViewOf($round, $latestTry, $number, $images));
         }
         $earlierTries = [];
         foreach (\array_slice($tries, 0, -1) as $index => $earlierTry) {
@@ -286,7 +286,7 @@ final readonly class RoundCards
 
         return new RoundCardScreenshot(
             $screenshot->id,
-            $this->screenshotViewOf($round, $screenshot, $number, $images),
+            self::screenshotViewOf($round, $screenshot, $number, $images),
             \sprintf('Screenshot %d', $number),
             $verdictLabel,
             $verdictClass,
@@ -327,7 +327,7 @@ final readonly class RoundCards
      * @param int                       $number the "Screenshot n" of its chain, from 1
      * @param array<string, MediaImage> $images by media id
      */
-    private function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, int $number, array $images): ScreenshotView
+    public static function screenshotViewOf(RoundView $round, RoundScreenshotView $screenshot, int $number, array $images): ScreenshotView
     {
         $altText = $screenshot->title ?? \sprintf('Screenshot %d of %s', $number, $round->isUnsharedDraft() ? 'your draft round' : 'round '.($round->number ?? 0));
 
@@ -337,12 +337,13 @@ final readonly class RoundCards
     /**
      * The owner's unshared draft shows each chain with every try (ADR-0048). Any other round shows what the team sees,
      * the latest try of each chain, each as a chain of its own: RoundQueries lists only those for a shared round on the
-     * ticket, but every try for its owner's draftOf.
+     * ticket, but every try for its owner's draftOf. The round page numbers its screenshots from here, so its "2 of 3"
+     * is the card's "Screenshot 2".
      *
      * @return list<non-empty-list<RoundScreenshotView>> by their first try's position, as RoundView lists them; each
      *                                                   chain's tries by position, the latest last
      */
-    private static function shownChainsOf(RoundView $round): array
+    public static function shownChainsOf(RoundView $round): array
     {
         $chains = ScreenshotChains::of($round->screenshots);
         if ($round->isUnsharedDraft()) {

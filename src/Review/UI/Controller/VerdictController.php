@@ -35,9 +35,9 @@ use Symfony\UX\Turbo\TurboBundle;
 /**
  * The verdicts of the review round page's side panel (P05.T7, review-round.md, Side panel): Fixed, Still wrong and
  * Undo on an earlier pin, and Save verdict on a screen area. None moves the ticket. A saved verdict answers a Turbo
- * form with a stream that shows the area's tab and side panel again with the toast, and any other form with a redirect
- * to the area's tab with the toast flashed. A refusal changes nothing and answers with its toast the same two ways, as
- * a 403 or 422 stream. A form of the full-screen review (FOCUS_SIDE_FIELD) gets a redirect back to it either way, and
+ * form with a stream that shows each area's state in the strip and the side panel again with the toast, and any other
+ * form with a redirect to the area on the round page with the toast flashed. A refusal changes nothing and answers with
+ * its toast the same two ways, as a 403 or 422 stream. A form of the full-screen review (FOCUS_SIDE_FIELD) gets a redirect back to it either way, and
  * a saved one reads nothing more for the round page.
  *
  * Without the request transaction, as DraftRoundController: each action runs in a transaction of its own, so a refused
@@ -294,8 +294,8 @@ final class VerdictController extends AbstractController
     }
 
     /**
-     * @param array{position: int, tabs: list<AreaTab>, panel: RoundPanel} $roundPage the area's tab and side panel
-     *                                                                                after the change
+     * @param array{position: int, tabs: list<AreaTab>, panel: RoundPanel} $roundPage every area's state and the side
+     *                                                                                panel after the change
      */
     private function respondToSaved(Request $request, string $key, int $number, string $toast, array $roundPage, string $focusedControlId): Response
     {
@@ -313,7 +313,6 @@ final class VerdictController extends AbstractController
                 'ticketKey' => $key,
                 'verdictCsrfId' => self::csrfIdOf($key),
                 'roundNumber' => $number,
-                'areaParameter' => RoundController::AREA_PARAMETER,
                 'ticketRoute' => RoundsController::TICKET_ROUTE,
             ],
             new Response(null, Response::HTTP_OK, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),

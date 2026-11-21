@@ -1,7 +1,8 @@
 {% extends '@Web/base.html.twig' %}
 
-{#- One round of a ticket (RoundController). The tabs are links ("?area=N"), so a tab works without JavaScript; only the
-    compare control needs the compare Stimulus controller, and it stays hidden without it. -#}
+{#- One round of a ticket (RoundController), one screenshot at a time. The strip's thumbs and the pager's Back and Next are
+    links ("?area=N" for a screen area, "?screenshot=N" otherwise), so they work without JavaScript; screenshot-pager
+    adds the arrow keys, and only the compare control needs the compare Stimulus controller, staying hidden without it. -#}
 
 {% block title %}Round {{ roundNumber }} · {{ page.ticketKey }} · pinround{% endblock %}
 
@@ -11,44 +12,58 @@
 {% endblock %}
 
 {% block main %}
-    {% set selected = page.selected %}
-    <article class="ticket round-page" data-controller="compare" data-compare-mode="both">
+    {% set shown = page.shown %}
+    {% set roundPath = {key: page.ticketKey, number: roundNumber} %}
+    <article class="ticket round-page" data-controller="compare screenshot-pager" data-compare-mode="both" data-action="keydown@document->screenshot-pager#follow">
         <header class="round-page__header">
             <twig:Button variant="text" href="{{ path(ticketRoute, {key: page.ticketKey}) }}" class="ticket__back"><span aria-hidden="true">&lt;</span> Back to {{ page.ticketKey }}</twig:Button>
             <p class="round-page__ticket"><span class="round-page__key">{{ page.ticketKey }}</span> · <a href="{{ path(ticketRoute, {key: page.ticketKey}) }}">{{ page.ticketTitle }}</a></p>
             <h1 class="round-page__title">{{ page.title }}<span class="round-page__detail"> · {{ page.detail }}</span></h1>
-            {% if selected is not null %}
+            {% if shown is not null and (shown.before is not null or page.panel is not null) %}
                 <div class="round-page__tools">
-                    <twig:SegmentedControl label="Compare" :options="{both: 'Side by side', before: 'Before', after: 'After'}" selected="both" class="round-compare-control" hidden data-compare-target="control" data-action="click->compare#choose" />
-                    <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, {key: page.ticketKey, number: roundNumber, (areaParameter): page.panel.areaPosition}) }}" class="round-page__full-screen">Full screen</twig:Button>
+                    {% if shown.before is not null %}
+                        <twig:SegmentedControl label="Compare" :options="{both: 'Side by side', before: 'Before', after: 'After'}" selected="both" class="round-compare-control" hidden data-compare-target="control" data-action="click->compare#choose" />
+                    {% endif %}
+                    {% if page.panel is not null %}
+                        <twig:Button variant="outline" size="sm" href="{{ path(focusRoute, roundPath|merge({(areaParameter): page.panel.areaPosition})) }}" class="round-page__full-screen">Full screen</twig:Button>
+                    {% endif %}
                 </div>
             {% endif %}
         </header>
 
-        {% if selected is null %}
-            <twig:EmptyState message="This round has no screen areas." />
+        {% if shown is null or page.pager is null %}
+            <twig:EmptyState message="{{ page.emptyMessage }}" />
         {% else %}
-            {{ include('@Review/_area_tabs.html.twig', {tabs: page.tabs}) }}
+            {{ include('@Review/_screenshot_strip.html.twig') }}
 
-            <div class="round-page__body">
-                <section class="round-compare" aria-label="Pictures of {{ selected.name }}">
-                    {% if selected.before is not null %}
+            {% set pager = page.pager %}
+            <nav class="screenshot-pager" aria-label="Move between screenshots">
+                <twig:Button variant="outline" size="sm" href="{{ path(roundRoute, roundPath|merge(pager.backParameters ?? {})) }}" :disabled="pager.backParameters is null" class="screenshot-pager__back" rel="prev" data-screenshot-pager-target="back"><span aria-hidden="true">&lt;</span> Back</twig:Button>
+                <p class="screenshot-pager__position">{{ pager.positionLabel }}</p>
+                <twig:Button variant="outline" size="sm" href="{{ path(roundRoute, roundPath|merge(pager.nextParameters ?? {})) }}" :disabled="pager.nextParameters is null" class="screenshot-pager__next" rel="next" data-screenshot-pager-target="next">Next <span aria-hidden="true">&gt;</span></twig:Button>
+            </nav>
+
+            <div class="round-page__body{% if page.panel is null %} round-page__body--alone{% endif %}">
+                <section class="round-compare" aria-label="Pictures of {{ shown.name }}">
+                    {% if shown.before is not null %}
                         <figure class="round-compare__side round-compare__side--before">
-                            <figcaption class="round-compare__caption">{{ selected.beforeCaption }}</figcaption>
-                            <twig:Screenshot :view="selected.before" :headingLevel="3" />
-                            <twig:PinList :view="selected.before" />
+                            <figcaption class="round-compare__caption">{{ shown.beforeCaption }}</figcaption>
+                            <twig:Screenshot :view="shown.before" :headingLevel="3" />
+                            <twig:PinList :view="shown.before" />
                         </figure>
-                    {% else %}
-                        <p class="round-compare__side round-compare__side--before round-compare__none">There is no earlier picture of this place.</p>
                     {% endif %}
                     <figure class="round-compare__side round-compare__side--after">
-                        <figcaption class="round-compare__caption">{{ selected.afterCaption }}</figcaption>
-                        <twig:Screenshot :view="selected.after" :headingLevel="3" />
-                        <twig:PinList :view="selected.after" />
+                        {% if shown.afterCaption is not null %}
+                            <figcaption class="round-compare__caption">{{ shown.afterCaption }}</figcaption>
+                        {% endif %}
+                        <twig:Screenshot :view="shown.after" :headingLevel="3" />
+                        <twig:PinList :view="shown.after" />
                     </figure>
                 </section>
 
-                {{ include('@Review/_round_panel.html.twig', {panel: page.panel}) }}
+                {% if page.panel is not null %}
+                    {{ include('@Review/_round_panel.html.twig', {panel: page.panel}) }}
+                {% endif %}
             </div>
         {% endif %}
     </article>
