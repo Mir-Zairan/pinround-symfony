@@ -162,7 +162,10 @@ test('a click outside closes the menu, and a menu link opens its page', async ({
   await mainMenu(page).getByRole('link', { name: 'Tickets', exact: true }).click();
 
   await expect(page).toHaveURL(/\/tickets$/);
-  await expect(mainMenu(page).getByRole('link', { name: 'Tickets', exact: true, includeHidden: true })).toHaveAttribute('aria-current', 'page');
+  // The new page opens with the menu closed, so the nav itself is hidden from the role query too.
+  const closedMainMenu = page.getByRole('navigation', { name: 'Main', includeHidden: true });
+  await expect(closedMainMenu).toBeHidden();
+  await expect(closedMainMenu.getByRole('link', { name: 'Tickets', exact: true, includeHidden: true })).toHaveAttribute('aria-current', 'page');
 });
 
 test('on Tickets the heading comes first, then a Filters button that shows and hides the rail and the toolbar', async ({ page }) => {

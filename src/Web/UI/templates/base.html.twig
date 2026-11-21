@@ -44,9 +44,9 @@
                 </a>
                 {#- Below 600px the button opens this same nav as a panel; from 600px the button is hidden and the closed class
                     does nothing (shell.css). Closed from the first paint, so nothing jumps when the controller connects. -#}
-                <div class="site-header__menu" {{ stimulus_controller('menu', {}, {closed: 'site-header__nav--closed'}) }} data-action="focusout->menu#closeOnFocusLeave">
+                <div class="site-header__menu" {{ stimulus_controller('main-menu', {}, {closed: 'site-header__nav--closed'}) }} data-action="focusout->main-menu#closeOnFocusLeave">
                     <button type="button" class="icon-btn site-header__menu-button" aria-expanded="false" aria-controls="main-nav"
-                        {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#triggerKey click@window->menu#closeOnOutsideClick">
+                        {{ stimulus_target('main-menu', 'trigger') }} data-action="main-menu#toggle keydown->main-menu#triggerKey click@window->main-menu#closeOnOutsideClick">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                             <path d="M4 7h16M4 12h16M4 17h16"/>
                         </svg>
@@ -54,7 +54,7 @@
                     </button>
                     {# An item whose page no phase has built yet is inert text, not a dead link (MainMenu). #}
                     <nav id="main-nav" class="site-header__nav site-header__nav--closed" aria-label="Main"
-                        {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#closeOnEscape">
+                        {{ stimulus_target('main-menu', 'list') }} data-action="keydown->main-menu#closeOnEscape">
                         {% for item in main_menu() %}
                             {% if item.isGroup %}
                                 {# A disclosure of links, as the avatar menu is. #}
@@ -79,7 +79,7 @@
                                     </div>
                                 </div>
                             {% elseif item.isPageBuilt %}
-                                <a class="nav" href="{{ item.url }}"{% if item.isCurrent %} aria-current="page"{% endif %} {{ stimulus_target('menu', 'item') }}>{{ item.label }}
+                                <a class="nav" href="{{ item.url }}"{% if item.isCurrent %} aria-current="page"{% endif %} {{ stimulus_target('main-menu', 'item') }}>{{ item.label }}
                                     {%- if item.badgeCount > 0 %} <span class="nav__badge"><span class="visually-hidden">, </span>{{ item.badgeCount|number_format }}<span class="visually-hidden"> {{ item.badgeCount == 1 ? 'needs' : 'need' }} your answer</span></span>{% endif -%}
                                 </a>
                             {% else %}

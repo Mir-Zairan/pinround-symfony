@@ -90,6 +90,11 @@ final class MainMenuTest extends WebTestCase
             $menu->filter('a')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href').('page' === $link->attr('aria-current') ? ' (current)' : '')),
         );
         self::assertCount(2, $menu->filter('.nav-menu__list > a.menu__item[data-menu-target="item"]'), 'the team links are the disclosure\'s items');
+        // Stimulus gives an event from inside a nested controller only to the inner one when both share a name, so the
+        // phone menu around the Teams disclosure needs its own name to hear the second Escape.
+        self::assertSame(['menu'], $menu->filter('[data-controller]')->each(static fn (Crawler $controller): ?string => $controller->attr('data-controller')));
+        self::assertSame('main-menu', $page->filter('header .site-header__menu')->attr('data-controller'));
+        self::assertCount(0, $menu->filter('div.nav-menu [data-main-menu-target]'), 'the outer menu takes none of the Teams disclosure\'s parts');
 
         self::assertCount(0, $menu->filter('span.nav--not-built, span.menu__item--not-built, [tabindex]'));
 

@@ -62,21 +62,21 @@ final class HomePageShellTest extends WebTestCase
         $page = $this->openHome();
         self::assertResponseStatusCodeSame(200);
 
-        $holder = $page->filter('header .site-header__menu[data-controller="menu"]');
+        $holder = $page->filter('header .site-header__menu[data-controller="main-menu"]');
         self::assertCount(1, $holder);
-        self::assertSame('site-header__nav--closed', $holder->attr('data-menu-closed-class'));
-        $button = $holder->filter('button[type="button"][aria-expanded="false"][aria-controls="main-nav"][data-menu-target="trigger"]');
+        self::assertSame('site-header__nav--closed', $holder->attr('data-main-menu-closed-class'));
+        $button = $holder->filter('button[type="button"][aria-expanded="false"][aria-controls="main-nav"][data-main-menu-target="trigger"]');
         self::assertCount(1, $button);
         self::assertSame('Menu', trim($button->text()));
 
         // One nav for every width: the button opens the same MainMenu items, never a second list.
         self::assertCount(1, $page->filter('nav[aria-label="Main"]'));
-        $nav = $holder->filter('nav#main-nav[aria-label="Main"][data-menu-target="list"]');
+        $nav = $holder->filter('nav#main-nav[aria-label="Main"][data-main-menu-target="list"]');
         self::assertCount(1, $nav);
         self::assertContains('site-header__nav--closed', explode(' ', (string) $nav->attr('class')));
         // [hidden] would hide it at every width (base.css), the desktop row included.
         self::assertNull($nav->attr('hidden'));
-        self::assertSame(['Home'], $nav->filter('a.nav[data-menu-target="item"]')->each(static fn (Crawler $link): string => $link->text()));
+        self::assertSame(['Home'], $nav->filter('a.nav[data-main-menu-target="item"]')->each(static fn (Crawler $link): string => $link->text()));
     }
 
     #[Test]

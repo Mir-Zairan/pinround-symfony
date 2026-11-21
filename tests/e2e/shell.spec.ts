@@ -8,6 +8,8 @@ test.use({ storageState: LENA_STORAGE_STATE });
 
 const LIGHT_SURFACE = 'rgb(244, 251, 248)';
 const DARK_SURFACE = 'rgb(14, 21, 19)';
+// Wide enough for the longest count each one shows in a seeded run (three digits).
+const FIXED_COUNT_WIDTHS = { '.home__section-note': '160px', '.nav__badge': '40px' };
 
 async function seriousViolations(page: Page): Promise<string[]> {
   const { violations } = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
@@ -45,6 +47,16 @@ for (const scheme of ['light', 'dark'] as const) {
         '.home__also-waiting',
         '.toast',
       ].map((selector) => page.locator(selector));
+      // A mask takes the size of the count under it, so "top 10 of 59" growing to "of 66" moved the mask's edge. The
+      // counts get a fixed width through the CSSOM, which the CSP allows where an injected stylesheet (stylePath) is blocked.
+      for (const [selector, width] of Object.entries(FIXED_COUNT_WIDTHS)) {
+        await page.locator(selector).evaluateAll((counts, fixedWidth) => {
+          for (const count of counts as HTMLElement[]) {
+            count.style.flex = 'none';
+            count.style.width = fixedWidth;
+          }
+        }, width);
+      }
       await expect(page).toHaveScreenshot(`shell-${scheme}.png`, { mask: changingRegions });
     });
   });
