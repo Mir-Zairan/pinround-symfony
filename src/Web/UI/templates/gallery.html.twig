@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="{{ asset('styles/gallery.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/ticket.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/screenshot-editor.css') }}">
 {% endblock %}
 
 {% block main %}
@@ -265,6 +266,22 @@
     <section class="gallery-section" aria-labelledby="gallery-rejected-screenshot-heading">
         <h2 id="gallery-rejected-screenshot-heading">Screenshot that could not be processed</h2>
         <twig:ScreenshotExample status="rejected" />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-screenshot-editor-heading">
+        <h2 id="gallery-screenshot-editor-heading">Screenshot editor</h2>
+        <twig:ScreenshotEditorExample />
+    </section>
+
+    <section class="gallery-section" aria-labelledby="gallery-progress-dots-heading">
+        <h2 id="gallery-progress-dots-heading">Progress dots</h2>
+        {% set reportStages = ['Reported', 'Building', 'Checking', 'Done'] %}
+        <div class="gallery-panel">
+            <twig:ProgressDots :labels="reportStages" :current="1" />
+            <twig:ProgressDots :labels="reportStages" :current="2" />
+            <twig:ProgressDots :labels="reportStages" :current="3" :isWaiting="true" />
+            <twig:ProgressDots :labels="reportStages" :current="4" />
+        </div>
     </section>
 
     <section class="gallery-section" aria-labelledby="gallery-upload-heading">

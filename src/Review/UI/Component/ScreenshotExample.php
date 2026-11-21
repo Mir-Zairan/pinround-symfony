@@ -19,7 +19,8 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
 #[AsTwigComponent(name: 'ScreenshotExample', template: '@Review/components/ScreenshotExample.html.twig')]
 final class ScreenshotExample
 {
-    private const string PICTURE = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">'
+    /** The made-up checkout page every gallery screenshot shows, the screenshot editor's too. */
+    public const string PICTURE = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">'
         .'<rect width="800" height="450" fill="#e9efec"/><rect width="800" height="64" fill="#d3dcd8"/>'
         .'<rect x="40" y="110" width="440" height="40" rx="8" fill="#ffffff"/>'
         .'<rect x="40" y="180" width="440" height="40" rx="8" fill="#ffffff"/>'
