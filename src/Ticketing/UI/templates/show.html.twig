@@ -73,8 +73,8 @@
                 {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
                 {{ component('ThreadFrame', {key: ticket.key}) }}
 
-                {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. -#}
-                {{ component('RoundsSection', {key: ticket.key}) }}
+                {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. ticket__rounds puts it under the Your next step box on a phone (ticket.css). -#}
+                {{ component('RoundsSection', {key: ticket.key, class: 'ticket__rounds'}) }}
             </div>
 
             <aside class="ticket__aside">

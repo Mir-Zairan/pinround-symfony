@@ -702,6 +702,32 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
+     * ticket.css puts the Your next step box above the Rounds on a phone by dropping the columns' boxes and ordering
+     * their parts: the Rounds by ticket__rounds, every aside part after the box by its own class. So the Rounds must be
+     * a child of the main column with that class, and the aside must hold the box first and only parts the rule moves.
+     */
+    #[Test]
+    public function theMarkupCarriesTheHooksThatPutTheNextStepBoxAboveTheRoundsOnAPhone(): void
+    {
+        $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'todo', 'assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        $rounds = $page->filter('.ticket__columns > .ticket__main > .ticket__rounds');
+        self::assertCount(1, $rounds);
+        self::assertSame('ticket-rounds-heading', $rounds->attr('aria-labelledby'));
+        self::assertSame(
+            ['ticket__next-step', 'ticket__people', 'ticket__activity', 'ticket__section'],
+            $page->filter('.ticket__columns > .ticket__aside')->children()->each(static fn (Crawler $part): string => preg_replace('/^.*?\b(ticket__[a-z-]+)\b.*$/', '$1', (string) $part->attr('class')) ?? self::fail('The class of an aside part could not be read.')),
+        );
+        self::assertSame(TicketPageParts::NEXT_STEP_ID, $page->filter('.ticket__aside > .ticket__next-step')->attr('id'));
+        self::assertCount(1, $page->filter('.next-step-box'), 'One Your next step box, which the phone rule moves, not a second copy.');
+        self::assertCount(1, $page->filter('.ticket__next-step > .next-step-box'));
+    }
+
+    /**
      * Omar reported the ticket and has it, Mia reviews it; Lena, who looks, and Raj have no part in it, so they are not
      * offered although both are members.
      */
