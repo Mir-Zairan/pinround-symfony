@@ -225,7 +225,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
   3. Update [claude-code.md](../guides/claude-code.md) and [reporting-with-claude-code.md](../guides/reporting-with-claude-code.md).
 - **Acceptance:**
   - [x] An extension capture of a page whose address has `?token=…` stores the address without the query (extension test). (`extension/tests/page-context.test.mjs`: "a capture of a page whose address has ?token=… sends the address without the query"; `tests/e2e/extension-capture-target.spec.ts` › "the title and summary start from the page, its title cleaned and its address without credentials, query or fragment, and stay editable")
-  - [ ] An MCP call without a summary is refused with the reason, and nothing is stored.
+  - [x] An MCP call without a summary is refused with the reason, and nothing is stored. (`tests/Functional/AgentApi/Tool/AddScreenshotTest::aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndNothingIsWrittenOrCompleted`: a missing or blank title or summary is invalid input naming the field, no picture is written and the upload stays unused; twins `CreateReportTest::aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndNoDraftIsMadeOrUploadUsed` and `AddNotebookScreenshotTest::aPictureWithoutATitleOrSummaryIsInvalidInputNamingItAndTheNotebookAndUploadStayAsTheyWere`)
   - [x] Test with a page title that has CRLF, a BOM and multibyte text. (`extension/tests/page-context.test.mjs`: "page text loses its control characters, BOM and direction overrides, and its white space collapses"; the same e2e test, whose page title has a BOM, CRLF, U+2028 and German and Japanese text)
 - **Size:** M
 
@@ -380,3 +380,5 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 - 2026-11-21 (P14.T11): MCP create_report, add_screenshot and add_notebook_screenshot require a picture's title and summary through `ToolCallGate::callOverMcp`; /api/v1 keeps them optional. Functional tests for the refusal are still owed, so the criterion "An MCP call without a summary is refused with the reason, and nothing is stored" stays open.
 - 2026-11-21 (P14.T15, page part): /my-reports in Web UI; groups per page of 50; malformed ?after= is 404; cards, dots, intro and badge are still to build.
 - 2026-11-21 (P14.T15): the My reports query is proved in `DbalMyReportsRowsTest` (RLS, reporter filter, ties, 300-report keyset walk). Two P07.T6 criteria are ticked there (team-only report listed for its reporter; first 50 and "Show more"); the progress-dots and two-buttons criteria stay open until the cards are built.
+- 2026-11-21: MCP create_report/add_screenshot/add_notebook_screenshot require a picture's title and summary through ToolCallGate::callOverMcp; /api/v1 keeps them optional.
+- 2026-11-21 (P14.T15 cards): cards, dots, intro and badge built; question text with asker and pin progress are 15f; Answer links to the ticket until P07.T7.
