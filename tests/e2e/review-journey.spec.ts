@@ -126,14 +126,15 @@ test('Mia reports with pins, Omar shares a pinned draft on hand-off, and Mia rev
     await context.close();
   });
 
-  await test.step('Mia sees the shared round with Omar\'s picture and pin', async () => {
+  // The shared round is one row on the ticket page (P14.T7); its picture and pin show on the round page (P14.T8).
+  await test.step('Mia sees the shared round as a row that opens its page', async () => {
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
     const rounds = await openRounds(page, key);
-    const shared = rounds.locator('article.round-card').filter({ has: page.getByRole('heading', { name: /^Round \d+ · self-check by Omar$/, level: 3 }) });
+    const shared = rounds.locator('article.round-card--row').filter({ has: page.getByRole('heading', { name: /^Round \d+ · self-check by Omar · (open|closed) · 1 screenshot$/, level: 3 }) });
     await expect(shared).toBeVisible();
     await expect(rounds.getByText('PRIVATE', { exact: true })).toHaveCount(0);
-    await expect(shared.getByRole('list', { name: 'Pins' }).getByText(DRAFT_PIN_NOTE)).toBeVisible();
-    await expectPictureLoaded(shared.locator('img.screenshot__image'));
+    await expect(shared.getByRole('link', { name: 'Open round' })).toHaveAttribute('href', /\/rounds\/\d+$/);
+    await expect(shared.locator('img.screenshot__image')).toHaveCount(0);
     await context.close();
   });
 

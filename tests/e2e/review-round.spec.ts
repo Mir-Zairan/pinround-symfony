@@ -47,7 +47,7 @@ test('Mia opens the round from the Rounds section, switches area tabs and compar
   const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
   await page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
-  const card = page.locator('article.round-card').filter({ has: page.getByRole('heading', { level: 3, name: `Round ${roundNumber} · Review · by Omar` }) });
+  const card = page.locator('article.round-card--row').filter({ has: page.getByRole('heading', { level: 3, name: new RegExp(`^Round ${roundNumber} · review by Omar · (open|closed)$`) }) });
   await card.getByRole('link', { name: 'Open round' }).click();
   await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/${roundNumber}$`));
   await page.waitForLoadState('networkidle');

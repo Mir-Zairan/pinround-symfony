@@ -8,8 +8,8 @@ use App\Review\UI\Checklist\ChecklistCard;
 
 /**
  * One round as the ticket page's Rounds section shows it: a heading line, an optional status line, and, for the report
- * and for drafts, its screenshots with their pins. The checklist round shows its rows, and a findings round its check
- * items under its screenshots; a review round is a compact row that opens its own page.
+ * and for drafts, its screenshots with their pins. The checklist round shows its rows. A review round and a shared draft
+ * are one-line rows that open their own page; a findings round's check items stay under its row.
  */
 final readonly class RoundCard
 {
@@ -27,8 +27,11 @@ final readonly class RoundCard
      * @param string                    $roundId             the round's id, which the private draft's Share and Delete forms post to
      * @param ChecklistCard|null        $checklist           the checklist round's rows, which the card shows in place of its header; null
      *                                                       for every other round
-     * @param ChecklistCard|null        $findingsChecklist   a findings round's check items, which the card shows under its pictures;
+     * @param ChecklistCard|null        $findingsChecklist   a findings round's check items, which show under its row or pictures;
      *                                                       null for every other round
+     * @param bool                      $isRow               a later round shown as one line, for example
+     *                                                       "Round 2 · review by Lena · open"; false for the report, the
+     *                                                       checklist and the viewer's own unshared draft
      */
     public function __construct(
         public string $roundId,
@@ -44,6 +47,7 @@ final readonly class RoundCard
         public ?int $number = null,
         public ?ChecklistCard $checklist = null,
         public ?ChecklistCard $findingsChecklist = null,
+        public bool $isRow = false,
     ) {
     }
 }

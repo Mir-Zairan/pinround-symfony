@@ -434,8 +434,8 @@ final class DraftRoundEditorTriesTest extends WebTestCase
 
     /**
      * Mia's chain A has its first try at 0 and its retake at 3, with B at 1 and C at 2 between them: her draft numbers
-     * the chains 1, 2, 3 by their first tries, the shared card Omar sees keeps those numbers though A's latest try is
-     * stored last, and the findings checklist labels each pin with the number of its picture on the card.
+     * the chains 1, 2, 3 by their first tries. Shared, it is a row of 3 screenshots for Omar, and the findings checklist
+     * under it labels each pin with its chain's number though A's latest try is stored last.
      */
     #[Test]
     public function aRetakenScreenshotKeepsItsNumberOnShareAndTheFindingsChecklistLabelsItsPinsWithIt(): void
@@ -461,8 +461,10 @@ final class DraftRoundEditorTriesTest extends WebTestCase
         self::assertResponseStatusCodeSame(303);
 
         $this->logIn($this->client, $this->people['Omar']);
-        self::assertSame($expectedCard, $this->screenshotsOnTheCardOf($this->miasDraft), 'The shared round Omar sees.');
-        $checklist = new Crawler((string) $this->client->getResponse()->getContent())->filter('div#checklist-'.$this->miasDraft.' .checklist__row');
+        self::assertSame([], $this->screenshotsOnTheCardOf($this->miasDraft), 'The shared round Omar sees is a row (P14.T7).');
+        $sharedRow = new Crawler((string) $this->client->getResponse()->getContent())->filter('#round-'.$this->miasDraft);
+        self::assertSame('Round 1 · findings by Mia · open · 3 screenshots', $sharedRow->filter('.round-card__headline')->text(), 'A retake counts with its first try, as one screenshot.');
+        $checklist = $sharedRow->filter('div#checklist-'.$this->miasDraft.' .checklist__row');
         self::assertSame(
             [['Screenshot 1 · pin 1', 'Still cut off on the retake'], ['Screenshot 2 · pin 1', 'The basket badge']],
             $checklist->each(static fn (Crawler $row): array => [$row->filter('.checklist__pin')->text(), $row->filter('.checklist__note')->text()]),

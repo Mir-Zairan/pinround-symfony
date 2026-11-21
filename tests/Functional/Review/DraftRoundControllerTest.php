@@ -478,17 +478,17 @@ final class DraftRoundControllerTest extends WebTestCase
 
         $frame = $this->frame();
         $card = $frame->filter('#round-'.$draft);
-        self::assertSame('Round 1 · self-check by Omar', $card->filter('.round-card__headline')->text());
-        self::assertSame('1 of 1 look right', $card->filter('.round-card__status')->text());
+        self::assertSame('Round 1 · self-check by Omar · open · 1 screenshot', $card->filter('.round-card__headline')->text());
+        self::assertSame('/t/SHOP-1/rounds/1', $card->filter('a.round-card__open')->attr('href'));
         self::assertCount(0, $card->filter('form, .claude-code-box, .round-card__private'), 'A shared round is read-only.');
         self::assertCount(1, $frame->filter(self::ROUNDS.' form.rounds__start'), 'Omar has no unshared draft any more, so he may start one.');
 
         $this->logIn($this->client, $this->people['Lena']);
         self::assertSame(
-            ['Round 0 · Report · by Mia · 0 pins', 'Round 1 · self-check by Omar'],
+            ['Round 0 · Report · by Mia · 0 pins', 'Round 1 · self-check by Omar · open · 1 screenshot'],
             $this->frame()->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
-        self::assertStringContainsString(self::OMAR_DRAFT_SHOT, (string) $this->client->getResponse()->getContent());
+        self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' article#round-'.$draft.'.round-card--row'), 'Lena sees the shared round as a row that opens its page.');
     }
 
     #[Test]
@@ -820,7 +820,7 @@ final class DraftRoundControllerTest extends WebTestCase
 
         $this->logIn($this->client, $this->people['Lena']);
         $frame = $this->frame();
-        self::assertSame(['Round 1 · self-check by Omar'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
+        self::assertSame(['Round 1 · self-check by Omar · open · no screenshots'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
         self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' form'));
     }
 
@@ -835,7 +835,7 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach (['Omar' => $omarsDraft, 'Lena' => $lenasDraft] as $owner => $ownDraft) {
             $this->logIn($this->client, $this->people[$owner]);
             $frame = $this->frame();
-            self::assertSame(['Round 1 · findings by Mia', 'Draft round · only you can see this'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $owner.' sees their own draft and the shared round.');
+            self::assertSame(['Round 1 · findings by Mia · open · no screenshots', 'Draft round · only you can see this'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $owner.' sees their own draft and the shared round.');
             self::assertCount(1, $frame->filter(self::ROUNDS.' .claude-code-box'), $owner);
             self::assertCount(1, $frame->filter('#round-'.$ownDraft.' .claude-code-box'), $owner);
         }
@@ -843,7 +843,7 @@ final class DraftRoundControllerTest extends WebTestCase
         foreach (['Mia', 'Raj', 'Sara'] as $person) {
             $this->logIn($this->client, $this->people[$person]);
             $frame = $this->frame();
-            self::assertSame(['Round 1 · findings by Mia'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person.' sees the shared round only.');
+            self::assertSame(['Round 1 · findings by Mia · open · no screenshots'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person.' sees the shared round only.');
             self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' [data-controller="copy-text"]'), $person.': a shared round has no box, not even for its owner.');
             self::assertStringNotContainsString('Read my pinround notes', (string) $this->client->getResponse()->getContent(), $person);
         }
