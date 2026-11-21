@@ -936,6 +936,7 @@ textarea.screenshot-report__input {
 .screenshot-thumb__image {
   display: block;
   width: 100%;
+  height: auto;
   aspect-ratio: 16 / 10;
   border-radius: calc(var(--radius-input) / 2);
   background: var(--s-highest);
