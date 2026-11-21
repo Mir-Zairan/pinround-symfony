@@ -33,8 +33,19 @@ for (const scheme of ['light', 'dark'] as const) {
     test(`shell looks the same as the ${scheme} baseline`, async ({ page }) => {
       test.skip(!!process.env.CI, 'Baselines come from a developer machine and CI fonts render differently; run make e2e locally.');
       await openShell(page);
-      // Home's date line changes every day, and the bell's count grows with the pings other specs send Lena.
-      await expect(page).toHaveScreenshot(`shell-${scheme}.png`, { mask: [page.locator('.home__date'), page.locator('.bell__trigger')] });
+      // Home's date line changes every day; the counts and the Needs you list grow with what other specs do as Lena
+      // (pings, reports, tickets), and a toast one of them flashed can still show on her shared session.
+      const changingRegions = [
+        '.home__date',
+        '.bell__trigger',
+        '.nav__badge',
+        '.home__title',
+        '.home__section-note',
+        '.home__needs',
+        '.home__also-waiting',
+        '.toast',
+      ].map((selector) => page.locator(selector));
+      await expect(page).toHaveScreenshot(`shell-${scheme}.png`, { mask: changingRegions });
     });
   });
 }
