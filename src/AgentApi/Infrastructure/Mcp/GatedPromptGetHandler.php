@@ -13,6 +13,7 @@ use Mcp\Schema\Enum\Role;
 use Mcp\Schema\JsonRpc\Error;
 use Mcp\Schema\JsonRpc\Request;
 use Mcp\Schema\JsonRpc\Response;
+use Mcp\Schema\PromptArgument;
 use Mcp\Schema\Request\GetPromptRequest;
 use Mcp\Schema\Result\GetPromptResult;
 use Mcp\Server\Handler\Request\RequestHandlerInterface;
@@ -24,11 +25,14 @@ use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
  * Answers every prompts/get of the MCP server, as GatedToolCallHandler answers every tools/call: the bundle tags it
  * mcp.request_handler, and the SDK asks the tagged handlers before its own GetPromptHandler, which so never runs. A
  * request reaches it only past the api_token firewall, ToolCallLimiter and McpSessionBinding, like a tool call; any
- * valid token may read any AgentPrompt, which holds no data of the organization.
+ * valid token may read an AgentPrompt that takes no arguments, which holds no data of the organization. A prompt that
+ * takes arguments decides itself which token and which values it renders for.
  *
- * The answer is one user message whose text is the named prompt's file, unchanged. An unknown name gets an
- * invalid-params error and no audit row; every other request one row with the prompt's name and the outcome, never its
- * text. The prompt is answered only once its "ok" row is written. Holds no state (ADR-0008).
+ * The answer is one user message whose text is the named prompt's file, with its arguments filled in. An unknown name
+ * gets an invalid-params error and no audit row. Arguments the definition does not list, a value that is not text, a
+ * required one left out, and any ToolRefusal of the prompt get an invalid-params error with the refusal's message and a
+ * row with its outcome. Every request but an unknown name writes one row with the prompt's name and the outcome, never
+ * its arguments or its text. The prompt is answered only once its "ok" row is written. Holds no state (ADR-0008).
  *
  * @implements RequestHandlerInterface<GetPromptResult>
  */
@@ -37,6 +41,10 @@ final readonly class GatedPromptGetHandler implements RequestHandlerInterface
     public const string UNKNOWN_PROMPT = 'There is no prompt of that name. Call prompts/list to see the prompts.';
     public const string TAKES_NO_ARGUMENTS = 'This prompt takes no arguments.';
     public const string PROMPT_FAILED = 'The prompt could not be read. Try again later.';
+    /** Filled with the listed names, joined by '", "'; each is a ToolRefusal::invalidPromptArguments problem. */
+    public const string TAKES_ONLY = 'it takes only "%s".';
+    public const string MUST_BE_TEXT = '"%s" must be text.';
+    public const string IS_REQUIRED = '"%s" is required.';
 
     /**
      * @param iterable<AgentPrompt> $prompts AgentPromptLoader refuses two of one name, so a name finds one prompt
@@ -79,14 +87,20 @@ final readonly class GatedPromptGetHandler implements RequestHandlerInterface
         $definition = $prompt->definition();
         $promptName = $definition->name;
 
-        if ([] !== ($request->arguments ?? [])) {
+        $arguments = $request->arguments ?? [];
+        $listedArguments = $definition->arguments ?? [];
+        if ([] === $listedArguments && [] !== $arguments) {
             $this->toolCallAuditor->recordPromptRead($access, $userId, $promptName, ToolCallOutcome::InvalidInput);
 
             return Error::forInvalidParams(self::TAKES_NO_ARGUMENTS, $request->getId());
         }
 
         try {
-            $text = $prompt->text();
+            $text = $prompt->text(self::listedArgumentsOf($listedArguments, $arguments));
+        } catch (ToolRefusal $refusal) {
+            $this->toolCallAuditor->recordPromptRead($access, $userId, $promptName, $refusal->outcome);
+
+            return Error::forInvalidParams($refusal->getMessage(), $request->getId());
         } catch (\Throwable $failure) {
             $this->logger->error('An MCP prompt could not be read.', ['exception_class' => $failure::class]);
             $this->toolCallAuditor->recordPromptRead($access, $userId, $promptName, ToolCallOutcome::Error);
@@ -99,6 +113,37 @@ final readonly class GatedPromptGetHandler implements RequestHandlerInterface
             [new PromptMessage(Role::User, new TextContent($text))],
             $definition->description,
         ));
+    }
+
+    /**
+     * @param array<PromptArgument> $listedArguments what the prompt's definition lists
+     * @param array<mixed>          $arguments       what the client sent, unchecked
+     *
+     * @return array<string, string> the arguments, each a listed name with text
+     *
+     * @throws ToolRefusal invalid input, for a name the definition does not list, a value that is not text, or a
+     *                     required argument left out; the message names only listed arguments
+     */
+    private static function listedArgumentsOf(array $listedArguments, array $arguments): array
+    {
+        $listedNames = array_map(static fn (PromptArgument $argument): string => $argument->name, $listedArguments);
+        $checkedArguments = [];
+        foreach ($arguments as $name => $value) {
+            if (!\is_string($name) || !\in_array($name, $listedNames, true)) {
+                throw ToolRefusal::invalidPromptArguments(\sprintf(self::TAKES_ONLY, implode('", "', $listedNames)));
+            }
+            if (!\is_string($value)) {
+                throw ToolRefusal::invalidPromptArguments(\sprintf(self::MUST_BE_TEXT, $name));
+            }
+            $checkedArguments[$name] = $value;
+        }
+        foreach ($listedArguments as $argument) {
+            if (true === $argument->required && !\array_key_exists($argument->name, $checkedArguments)) {
+                throw ToolRefusal::invalidPromptArguments(\sprintf(self::IS_REQUIRED, $argument->name));
+            }
+        }
+
+        return $checkedArguments;
     }
 
     private function promptNamed(string $name): ?AgentPrompt

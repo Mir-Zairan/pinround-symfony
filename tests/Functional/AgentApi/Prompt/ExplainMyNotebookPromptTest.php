@@ -6,6 +6,7 @@ namespace App\Tests\Functional\AgentApi\Prompt;
 
 use App\AgentApi\Infrastructure\Mcp\GatedPromptGetHandler;
 use App\AgentApi\Infrastructure\Prompt\ExplainMyNotebookPrompt;
+use App\AgentApi\Infrastructure\Prompt\FixMyRoundNotesPrompt;
 use App\AgentApi\Infrastructure\Prompt\ReportWhileInvestigatingPrompt;
 use App\Identity\Domain\ApiTokenScope;
 use App\Identity\Infrastructure\Security\TokenAuthenticator;
@@ -71,6 +72,12 @@ final class ExplainMyNotebookPromptTest extends WebTestCase
                 'name' => ExplainMyNotebookPrompt::NAME,
                 'title' => 'Explain my notebook',
                 'description' => new ExplainMyNotebookPrompt()->definition()->description,
+            ],
+            [
+                'name' => FixMyRoundNotesPrompt::NAME,
+                'title' => 'Fix my round notes',
+                'description' => FixMyRoundNotesPrompt::DESCRIPTION,
+                'arguments' => [['name' => FixMyRoundNotesPrompt::KEY_ARGUMENT, 'description' => 'The ticket key, for example SHOP-12.', 'required' => true]],
             ],
             [
                 'name' => ReportWhileInvestigatingPrompt::NAME,

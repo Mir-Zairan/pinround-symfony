@@ -34,7 +34,10 @@ final readonly class ExplainMyNotebookPrompt implements AgentPrompt
         );
     }
 
-    public function text(): string
+    /**
+     * @param array<string, string> $arguments always empty: definition() lists none, so GatedPromptGetHandler refuses any
+     */
+    public function text(array $arguments = []): string
     {
         return VersionedPromptFile::read($this->promptDirectory, self::VERSION);
     }

@@ -8,6 +8,8 @@ mcp:
         pinround:
             name: pinround
             version: '1.0.0'
+            # The capture rule (P14.T12), in the initialize result of every session.
+            instructions: !php/const App\AgentApi\Infrastructure\Mcp\McpServerInstructions::TEXT
             # Our tools are AgentTools, which AgentToolLoader registers, not #[McpTool] services, and the bundle refuses a
             # namespace pattern that matches no #[McpTool] service, so this stays '*'. A vendor #[McpTool] service could
             # still appear in tools/list, but never run: GatedToolCallHandler answers every tools/call and knows only
