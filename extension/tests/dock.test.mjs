@@ -307,17 +307,15 @@ test('Save draft is pressed only for a draft it can save, and a second press whi
     assert.deepEqual([save.disabled, buttonNamed(TEXTS.capture).disabled], [true, false]);
 });
 
-test('picking a target asks the extension to remember it, and Play says where scenarios play for now', async () => {
-    const { page, inRoot, buttonNamed } = await dockedPage();
+test('picking a target asks the extension to remember it', async () => {
+    const { page, inRoot } = await dockedPage();
     const picker = inRoot('select');
     picker.value = 'new-report';
 
     page.dispatch(picker, 'change', { bubbles: false, composed: false });
-    page.click(buttonNamed(TEXTS.play));
     await settled();
 
     assert.deepEqual(page.sentMessages.slice(1), [{ pinroundDock: 'choose', value: 'new-report' }]);
-    assert.equal(inRoot('.dock__status').textContent, 'Play scenarios from the extension\'s popup for now.');
 });
 
 test('with the dock open, Escape and a saved capture drop the pins and end pinning but keep the dock', async () => {

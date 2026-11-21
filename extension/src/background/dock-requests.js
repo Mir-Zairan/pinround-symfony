@@ -8,8 +8,12 @@ import { CHOOSE_TARGET_FIRST, NEW_REPORT, TargetGoneError, choiceValueOf, forget
 import { captureToTarget } from '../capture/capture-to-target.js';
 import { REPORT_KEPT_IN_PINROUND, REPORT_OPENED, finishNewReport, loadNewReport } from '../capture/new-report.js';
 import { browserNameAndVersion, pageContext } from '../capture/page-context.js';
+import { SYSTEM_CLOCK } from '../player/step-runner.js';
+import { openStartPage, scenarioToPlay, taggedCaptureTexts } from './dock-scenario.js';
 
-export const DOCK_ACTIONS = Object.freeze(['state', 'choose', 'capture', 'save-draft']);
+const runRules = globalThis.pinroundDockRun;
+
+export const DOCK_ACTIONS = Object.freeze(['state', 'choose', 'capture', 'save-draft', 'scenario', 'open-start']);
 
 export const DOCK_TEXTS = Object.freeze({
     notPaired: 'Connect the extension to your pinround first: open its options.',
@@ -35,11 +39,14 @@ export function isDockRequest(message) {
  * @param {{pinroundDock: string, value?: unknown}} request
  * @param {{id?: number, url?: string, title?: string, width?: number, height?: number}} tab the tab whose dock asked,
  *   as Chrome names the sender
- * @param {{browser: object, navigator: object, apiOf?: (settings: {origin: string, token: string}) => PinroundApi}} deps
- * @returns {Promise<DockAnswer>} never rejects: a refusal is an answer with isError
+ * @param {{browser: object, navigator: object, apiOf?: (settings: {origin: string, token: string}) => PinroundApi,
+ *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} deps the clock, in ms, times the wait for the
+ *   start page to load; the system's by default
+ * @returns {Promise<DockAnswer>} never rejects: a refusal is an answer with isError. A scenario request answers
+ *   {scenario} (dock-scenario.js) instead of a state
  */
-export async function answerDockRequest(request, tab, { browser, navigator, apiOf = (settings) => new PinroundApi(settings.origin, settings.token) }) {
-    if (!DOCK_ACTIONS.includes(request.pinroundDock) || !Number.isInteger(tab?.id)) {
+export async function answerDockRequest(request, tab, { browser, navigator, apiOf = (settings) => new PinroundApi(settings.origin, settings.token), clock = SYSTEM_CLOCK }) {
+    if (!DOCK_ACTIONS.includes(request.pinroundDock) || !Number.isInteger(tab?.id) || !isReadableValue(request)) {
         return { message: DOCK_TEXTS.unknownRequest, isError: true };
     }
     const settings = await loadSettings(browser.storage.local).catch(() => undefined);
@@ -56,10 +63,16 @@ export async function answerDockRequest(request, tab, { browser, navigator, apiO
             return await choose(api, session, request.value);
         }
         if ('capture' === request.pinroundDock) {
-            return await capture({ api, browser, session, tab, navigator });
+            return await capture({ api, browser, session, tab, navigator, stepTag: runRules.checkedTag(request.value ?? null) });
         }
         if ('save-draft' === request.pinroundDock) {
             return await saveDraft(api, browser, session, settings.origin);
+        }
+        if ('scenario' === request.pinroundDock) {
+            return await scenarioToPlay({ api, browser, session, pinroundOrigin: settings.origin }, request.value);
+        }
+        if ('open-start' === request.pinroundDock) {
+            return await openStartPage({ browser, tab, pinroundOrigin: settings.origin, clock }, request.value);
         }
 
         return await stateAnswer(api, session);
@@ -71,6 +84,25 @@ export async function answerDockRequest(request, tab, { browser, navigator, apiO
 
         return { message: error instanceof Error ? error.message : DOCK_TEXTS.failed, isError: true, ...(undefined === state ? {} : { state }) };
     }
+}
+
+/**
+ * Whether the request's value is one its action takes: a step tag or none for a capture, a scenario's index for a
+ * scenario, a web address within the run's cap for open-start. The dock's own script sends them, but the value is
+ * checked before anything acts on it.
+ */
+function isReadableValue({ pinroundDock: action, value }) {
+    if ('capture' === action) {
+        return undefined === value || null === value || null !== runRules.checkedTag(value);
+    }
+    if ('scenario' === action) {
+        return Number.isInteger(value) && value >= 0 && value < runRules.MAX_SCENARIOS;
+    }
+    if ('open-start' === action) {
+        return 'string' === typeof value && value.length <= runRules.URL_MAX_LENGTH;
+    }
+
+    return true;
 }
 
 async function stateAnswer(api, session) {
@@ -137,7 +169,8 @@ async function choose(api, session, value) {
     return stateAnswer(api, session);
 }
 
-async function capture({ api, browser, session, tab, navigator }) {
+/** stepTag, from the dock's run, names the step "Found a problem" was pressed on; null for a plain capture. */
+async function capture({ api, browser, session, tab, navigator, stepTag }) {
     const target = await loadCaptureTarget(session);
     if (null === target) {
         return { message: CHOOSE_TARGET_FIRST, isError: true, state: await dockState(api, session) };
@@ -146,7 +179,9 @@ async function capture({ api, browser, session, tab, navigator }) {
     const newReport = await loadNewReport(session);
     const typed = { project: newReport.project, reportTitle: newReport.reportTitle };
     const { title, summary } = pageContext(tab, await browserNameAndVersion(navigator).catch(() => ''));
-    const message = await captureToTarget({ api, browser, storage: session, tabId: tab.id, target, typed, texts: captureTexts(title, summary) });
+    const pageTexts = captureTexts(title, summary);
+    const texts = null === stepTag ? pageTexts : taggedCaptureTexts(pageTexts, stepTag);
+    const message = await captureToTarget({ api, browser, storage: session, tabId: tab.id, target, typed, texts });
 
     return { message, state: await dockState(api, session) };
 }
