@@ -27,6 +27,7 @@ use Zenstruck\Foundry\Test\Factories;
  */
 final class TicketListTest extends WebTestCase
 {
+    use AssertsFiltersPanelMarkup;
     use CreatesAcmeFoodsTeams;
     use CreatesTeams;
     use Factories;
@@ -112,6 +113,18 @@ final class TicketListTest extends WebTestCase
         );
         self::assertSame('Blocker', $page->filter('[data-group="wait"] .tickets__priority--urgent')->text());
         self::assertSame('Assigned to Omar', $page->filter('[data-ticket-key="SHOP-2"] .av')->attr('title'));
+    }
+
+    #[Test]
+    public function theRailAndTheToolbarSitInAFiltersPanelBeforeTheHeadingThatStartsClosedByAClass(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', self::TICKETS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertFiltersPanelComesFirstAndStartsClosedByAClass($page);
     }
 
     #[Test]

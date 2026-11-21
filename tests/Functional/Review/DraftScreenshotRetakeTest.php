@@ -259,6 +259,43 @@ final class DraftScreenshotRetakeTest extends WebTestCase
     }
 
     /**
+     * A review round is a hand-off too: Round 1 is Lena's review with two "after" pictures, stored out of position order,
+     * the first with her pin, a kept AI pin and a dismissed AI suggestion. Omar's draft shared as Round 2 compares its
+     * Screenshot 1 with that first picture, showing every pin but the dismissed one; the second picture is not shown.
+     */
+    #[Test]
+    public function aSharedDraftAfterAReviewRoundComparesWithTheReviewsFirstPictureAndItsShownPins(): void
+    {
+        $reviewRound = $this->addRound($this->ticketId, 1, 'review', 'Lena', '2026-11-05 09:00:00+00');
+        $this->addScreenshot($reviewRound, $this->addMedia('ready', 'Lena'), 1, 'Review second picture', null);
+        $reviewFirst = $this->addScreenshot($reviewRound, $this->addMedia('ready', 'Lena'), 0, 'Review first picture', null);
+        $this->addPin($reviewFirst, 1, '20.00', '30.00', 'Lena review note', 'Lena');
+        $this->addPin($reviewFirst, 2, '40.00', '50.00', 'Kept AI note', 'Lena', 'ai', 'kept');
+        $this->addPin($reviewFirst, 3, '60.00', '70.00', 'Dismissed AI note', 'Lena', 'ai', 'dismissed');
+        $this->closeRound($reviewRound);
+        $draft = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);
+        $draftShot = $this->addScreenshot($draft, $this->addMedia('ready', 'Omar'), 0, self::NEXT_FIRST_TRY_TITLE, null);
+        $this->addPin($draftShot, 1, '15.00', '25.00', self::NEXT_FIRST_TRY_NOTE, 'Omar');
+        $this->shareDraft($draft);
+
+        $this->logIn($this->client, $this->people['Mia']);
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Before · round 1', 'After · round 2'], $page->filter(self::CAPTION)->each(static fn (Crawler $caption): string => $caption->text()));
+        $before = $page->filter(self::BEFORE_SIDE);
+        self::assertSame(['Review first picture'], $before->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+        self::assertStringContainsString('Lena review note', $before->text());
+        self::assertStringContainsString('Kept AI note', $before->text());
+        self::assertStringNotContainsString('Dismissed AI note', $before->text());
+        $after = $page->filter(self::AFTER_SIDE);
+        self::assertSame([self::NEXT_FIRST_TRY_TITLE], $after->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringNotContainsString('Review second picture', $content);
+        self::assertStringNotContainsString('Dismissed AI note', $content);
+    }
+
+    /**
      * The full-screen review of Round 2 offers the same Before as its round page: Screenshot 1 switches to Round 1's
      * latest try of A with that try's own pin, and the walk keeps the side; the new screen B and Round 1 have none, even
      * when the address asks for it.

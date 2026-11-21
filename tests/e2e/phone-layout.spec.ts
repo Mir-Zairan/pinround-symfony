@@ -53,6 +53,45 @@ function projectRail(page: Page) {
   return page.getByRole('navigation', { name: 'Projects' });
 }
 
+type TicketsRegion = 'filters button' | 'rail' | 'toolbar' | 'view' | 'list' | 'other';
+
+/**
+ * The parts of the tickets page Tab reaches from the top of the page, each named once per visit, up to the first stop in
+ * the list. Stops outside main (the skip link, the site header) are left out.
+ */
+async function ticketsRegionsInTabOrder(page: Page, maxPresses: number): Promise<TicketsRegion[]> {
+  const regions: TicketsRegion[] = [];
+  for (let press = 0; press < maxPresses; press++) {
+    await page.keyboard.press('Tab');
+    const region = await page.evaluate((): TicketsRegion | null => {
+      const focused = document.activeElement;
+      if (null === focused || null === focused.closest('main')) {
+        return null;
+      }
+      if (null !== focused.closest('.tickets__filters-button')) {
+        return 'filters button';
+      }
+      if (null !== focused.closest('nav.project-rail')) {
+        return 'rail';
+      }
+      if (null !== focused.closest('.ticket-filters')) {
+        return 'toolbar';
+      }
+      if (null !== focused.closest('.tickets__header')) {
+        return 'view';
+      }
+      return null !== focused.closest('.tickets__list-frame') ? 'list' : 'other';
+    });
+    if (null !== region && regions[regions.length - 1] !== region) {
+      regions.push(region);
+    }
+    if ('list' === region) {
+      return regions;
+    }
+  }
+  throw new Error(`Tab did not reach the list in ${maxPresses} presses; it went through ${regions.join(', ')}.`);
+}
+
 async function tabTo(page: Page, target: ReturnType<Page['locator']>, maxPresses: number): Promise<void> {
   for (let press = 0; press < maxPresses; press++) {
     await page.keyboard.press('Tab');
@@ -208,6 +247,19 @@ test('Whose turn? also shows its heading before the Filters button', async ({ pa
   await expect(projectRail(page)).toBeVisible();
 });
 
+test('on the phone the List / Whose turn? switch sits under the Filters button, so Tab goes Filters, switch, list as shown', async ({ page }) => {
+  await openTicketsWithRows(page);
+  const heading = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+  const filters = (await filtersButton(page).boundingBox())!;
+  const viewSwitch = (await page.getByRole('group', { name: 'View' }).boundingBox())!;
+  const firstRow = (await page.locator('.tickets__rows:not([hidden]) .tickets__row').first().boundingBox())!;
+  expect(heading.y + heading.height).toBeLessThanOrEqual(filters.y);
+  expect(filters.y + filters.height).toBeLessThanOrEqual(viewSwitch.y);
+  expect(viewSwitch.y + viewSwitch.height).toBeLessThanOrEqual(firstRow.y);
+
+  expect(await ticketsRegionsInTabOrder(page, 30)).toEqual(['filters button', 'view', 'list']);
+});
+
 test('the phone tickets list with its filters open has no serious accessibility violations', async ({ page }) => {
   await openTicketsWithRows(page);
   await filtersButton(page).click();
@@ -268,5 +320,30 @@ test.describe('at 1440x900', () => {
     expect(rail.x + rail.width).toBeLessThanOrEqual(search.x);
     expect(rail.x + rail.width).toBeLessThanOrEqual(heading.x);
     expect(search.y + search.height).toBeLessThanOrEqual(heading.y);
+  });
+
+  test('Tab goes rail, toolbar, List / Whose turn? switch, then the list, as the page shows them', async ({ page }) => {
+    await openTicketsWithRows(page);
+
+    expect(await ticketsRegionsInTabOrder(page, 80)).toEqual(['rail', 'toolbar', 'view', 'list']);
+  });
+});
+
+// Between the phone and the two-column layout (tickets.css, 600px to 52em) the rail stacks on top in one column.
+test.describe('at 700x900', () => {
+  test.use({ viewport: { width: 700, height: 900 } });
+
+  test('Tickets shows no Filters button and stacks the rail, the toolbar and the heading, which Tab follows', async ({ page }) => {
+    await openTicketsWithRows(page);
+
+    await expect(filtersButton(page)).toBeHidden();
+    await expect(projectRail(page)).toBeVisible();
+    await expect(searchField(page)).toBeVisible();
+    const rail = (await projectRail(page).boundingBox())!;
+    const search = (await searchField(page).boundingBox())!;
+    const heading = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    expect(rail.y + rail.height).toBeLessThanOrEqual(search.y);
+    expect(search.y + search.height).toBeLessThanOrEqual(heading.y);
+    expect(await ticketsRegionsInTabOrder(page, 80)).toEqual(['rail', 'toolbar', 'view', 'list']);
   });
 });
