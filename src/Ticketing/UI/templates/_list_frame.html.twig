@@ -1,5 +1,5 @@
 {# The list frame alone, as the whole page holds it and as a Turbo frame request gets it. Links inside leave the page (_top) unless a nested frame owns them. #}
-        <turbo-frame id="ticket-list-frame" target="_top" {{ stimulus_target('ticket-list', 'frame') }}>
+        <turbo-frame id="ticket-list-frame" class="tickets__list-frame" target="_top" {{ stimulus_target('ticket-list', 'frame') }}>
         {# "Show more" is a link inside a Turbo frame named by the page it opens; the response holds a frame of the same id around that page's rows, so only they replace the link. Without script the link opens the whole page. #}
         <div class="tickets__results" id="ticket-list-results" data-total-line="{{ totalLine }}">
             {% for group in groups %}

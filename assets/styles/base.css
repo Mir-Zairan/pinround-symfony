@@ -12,6 +12,14 @@ html {
   scroll-padding-top: var(--header-height-max);
 }
 
+/* Below 600px the nav sits behind the menu button (shell.css): one row, or two on a 360px screen that also shows the
+   Local AI chip (8 + 40 + 4 + 40 + 8 + 1 = 101px), plus the same headroom. */
+@media (max-width: 599.98px) {
+  html {
+    --header-height-max: 112px;
+  }
+}
+
 body {
   margin: 0;
   background: var(--surface);

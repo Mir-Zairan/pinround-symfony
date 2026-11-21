@@ -171,6 +171,9 @@ test.describe('at 360 px', () => {
 
   test('the toolbar and the rail do not make the page scroll sideways', async ({ page }) => {
     await openTickets(page, '/tickets?project=SHOP&done=1');
+    // Below 600px they wait behind the Filters button (phone-layout.spec.ts).
+    await page.getByRole('main').getByRole('button', { name: 'Filters', exact: true }).click();
+    await expect(page.getByRole('navigation', { name: 'Projects' })).toBeVisible();
 
     const { scrollWidth, clientWidth } = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,

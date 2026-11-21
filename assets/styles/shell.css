@@ -57,6 +57,87 @@
   flex: 1;
 }
 
+/* Only a holder for the menu controller: from 600px the nav sits in the header's row as if the holder were not there. */
+.site-header__menu {
+  display: contents;
+}
+
+/* Two classes, so .icon-btn's display, later in this file, does not show it from 600px. */
+.site-header__menu > .site-header__menu-button {
+  display: none;
+  cursor: pointer;
+}
+
+/*
+ * The phone header (P14.T16): one row of logo mark, menu button, "Report a problem", bell and avatar, at most 64px tall
+ * at 390px. The nav opens under it as a panel from the menu button. Wrapping stays on as a last resort, so a 360px screen
+ * that also shows the Local AI chip gets a second row rather than a sideways scroll.
+ */
+@media (max-width: 599.98px) {
+  .site-header__inner {
+    min-height: 56px;
+    padding-left: 16px;
+    padding-right: 16px;
+    gap: 4px;
+  }
+
+  .logo__word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .site-header__menu > .site-header__menu-button {
+    display: inline-grid;
+  }
+
+  .site-header__menu-button[aria-expanded="true"] {
+    background: var(--s-high);
+  }
+
+  .site-header__nav {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 16px;
+    right: 16px;
+    z-index: 20;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+    padding: 6px;
+    border-radius: 12px;
+    background: var(--s-c);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+  }
+
+  .site-header__nav.site-header__nav--closed {
+    display: none;
+  }
+
+  .site-header__nav .nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  /* The Teams group opens inside the panel, in its flow, instead of as a second floating list. */
+  .site-header__nav .menu.nav-menu {
+    display: block;
+  }
+
+  .site-header__nav .menu__list.nav-menu__list {
+    position: static;
+    min-width: 0;
+    padding: 0 0 0 16px;
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 .logo__mark {
   fill: var(--primary);
 }

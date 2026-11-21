@@ -12,6 +12,26 @@
   cursor: pointer;
 }
 
+/* Below 600px the header is one row (shell.css), so the chip shows its dot alone; its state line stays its name. */
+@media (max-width: 599.98px) {
+  .local-ai__chip {
+    position: relative;
+    justify-content: center;
+    width: 40px;
+    padding: 0;
+  }
+
+  .local-ai__chip [data-states] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
 .local-ai__dot {
   flex: none;
   width: 8px;
