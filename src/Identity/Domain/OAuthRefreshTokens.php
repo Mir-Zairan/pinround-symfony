@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Identity\Domain;
 
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 
 /**
  * OAuth refresh tokens of the organization of the current transaction, but organizationOfToken(), which runs before
@@ -59,6 +60,15 @@ interface OAuthRefreshTokens
      * @throws \LogicException when no tenant is set
      */
     public function byAccessTokenId(string $accessTokenId): ?OAuthRefreshToken;
+
+    /**
+     * The person the tenant's family belongs to, whether it is live, revoked or expired.
+     *
+     * @return UserId|null null when $familyId is not a UUID or no token of the tenant has it
+     *
+     * @throws \LogicException when no tenant is set
+     */
+    public function ownerOfFamily(string $familyId): ?UserId;
 
     /**
      * Revokes every token of the family not revoked yet, in one conditional UPDATE after the family's lock, so a second

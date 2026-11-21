@@ -8,6 +8,7 @@ use App\Identity\Domain\OAuthRefreshToken;
 use App\Identity\Domain\OAuthRefreshTokens;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Uid\Uuid;
@@ -37,6 +38,9 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
 
     private const string REVOKE_FAMILY = 'UPDATE idn_oauth_refresh_token SET revoked_at = ?'
         .' WHERE organization_id = ? AND family_id = ? AND revoked_at IS NULL RETURNING access_token_id::text, used_at IS NULL AS untraded';
+
+    // Every token of a family has the same person; served by idn_oauth_refresh_token_family_id_idx.
+    private const string OWNER_OF_FAMILY = 'SELECT user_id::text FROM idn_oauth_refresh_token WHERE organization_id = ? AND family_id = ? LIMIT 1';
 
     private const string RESOLVE = 'SELECT organization_id FROM resolve_oauth_refresh_token(?)';
 
@@ -104,6 +108,17 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
         }
 
         return $this->entityManager->getRepository(OAuthRefreshToken::class)->findOneBy(['organizationId' => $organizationId, 'accessTokenId' => strtolower($accessTokenId)]);
+    }
+
+    public function ownerOfFamily(string $familyId): ?UserId
+    {
+        $organizationId = $this->tenantContext->require()->toString();
+        if (!Uuid::isValid($familyId)) {
+            return null;
+        }
+        $userId = $this->entityManager->getConnection()->fetchOne(self::OWNER_OF_FAMILY, [$organizationId, strtolower($familyId)]);
+
+        return \is_string($userId) ? new UserId($userId) : null;
     }
 
     public function revokeFamily(string $familyId, \DateTimeImmutable $revokedAt): array
