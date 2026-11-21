@@ -65,6 +65,8 @@
             {{ include('@Ticketing/_ticket_state.html.twig') }}
         </header>
 
+        {#- The parts in the order a phone shows them, so keyboard focus follows what people see (WCAG 2.4.3): the main
+            column, the Your next step box, the Rounds, the aside. ticket.css puts them in two columns on a wide screen. -#}
         <div class="ticket__columns">
             <div class="ticket__main">
                 {#- Assist's component, embedded by name: Ticketing's UI may not use Assist's Api (deptrac). -#}
@@ -72,13 +74,14 @@
 
                 {#- Conversation's component, embedded by name: Ticketing's UI may not use Conversation's Api (deptrac). -#}
                 {{ component('ThreadFrame', {key: ticket.key}) }}
-
-                {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. ticket__rounds puts it under the Your next step box on a phone (ticket.css). -#}
-                {{ component('RoundsSection', {key: ticket.key, class: 'ticket__rounds'}) }}
             </div>
 
+            {{ include('@Ticketing/_next_step.html.twig') }}
+
+            {#- Review's component, embedded by name: Ticketing's UI may not use Review's Api (deptrac). It passes the key only: the lazy frame's own request decides who may see the rounds. -#}
+            {{ component('RoundsSection', {key: ticket.key, class: 'ticket__rounds'}) }}
+
             <aside class="ticket__aside">
-                {{ include('@Ticketing/_next_step.html.twig') }}
                 {{ include('@Ticketing/_people.html.twig') }}
                 {{ include('@Ticketing/_activity.html.twig') }}
                 <section class="ticket__section" aria-labelledby="ticket-details-heading">

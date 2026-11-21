@@ -661,7 +661,7 @@ final class TicketPageTest extends WebTestCase
         $page = $this->client->request('GET', '/t/'.$key);
 
         self::assertResponseStatusCodeSame(200);
-        $box = $page->filter('.ticket__aside .next-step-box');
+        $box = $page->filter('.ticket__columns > .ticket__next-step > .next-step-box');
         self::assertCount(1, $box);
         self::assertNotSame('', trim($box->filter('.next-step-box__sentence')->text()));
         self::assertSame(
@@ -702,29 +702,42 @@ final class TicketPageTest extends WebTestCase
     }
 
     /**
-     * ticket.css puts the Your next step box above the Rounds on a phone by dropping the columns' boxes and ordering
-     * their parts: the Rounds by ticket__rounds, every aside part after the box by its own class. So the Rounds must be
-     * a child of the main column with that class, and the aside must hold the box first and only parts the rule moves.
+     * @return iterable<string, array{string}>
+     */
+    public static function viewersWhoseTurnItIsOrNot(): iterable
+    {
+        yield 'Omar, whose turn it is' => ['Omar'];
+        yield 'Mia, a viewer whose turn it is not' => ['Mia'];
+    }
+
+    /**
+     * Keyboard focus follows the markup (WCAG 2.4.3), and on a phone the Your next step box shows above the Rounds
+     * (P14.T7). So the markup holds the columns' parts in that order and ticket.css places them with grid areas on a
+     * wide screen, never with order: the main column, the box, the Rounds, then the aside.
      */
     #[Test]
-    public function theMarkupCarriesTheHooksThatPutTheNextStepBoxAboveTheRoundsOnAPhone(): void
+    #[DataProvider('viewersWhoseTurnItIsOrNot')]
+    public function theNextStepBoxComesBeforeTheRoundsInTheMarkup(string $viewer): void
     {
         $key = $this->addTicket('Cart total shows the wrong sum', ['core' => 'todo', 'assignee' => 'Omar']);
-        $this->logIn($this->client, $this->people['Lena']);
+        $this->logIn($this->client, $this->people[$viewer]);
 
         $page = $this->client->request('GET', '/t/'.$key);
 
         self::assertResponseStatusCodeSame(200);
-        $rounds = $page->filter('.ticket__columns > .ticket__main > .ticket__rounds');
-        self::assertCount(1, $rounds);
-        self::assertSame('ticket-rounds-heading', $rounds->attr('aria-labelledby'));
         self::assertSame(
-            ['ticket__next-step', 'ticket__people', 'ticket__activity', 'ticket__section'],
+            ['ticket__main', 'ticket__next-step', 'ticket__rounds', 'ticket__aside'],
+            $page->filter('.ticket__columns')->children()->each(static fn (Crawler $part): string => preg_match('/\bticket__(main|next-step|rounds|aside)\b/', (string) $part->attr('class'), $match) > 0 ? $match[0] : self::fail('A part of the columns has none of the classes ticket.css places: '.$part->attr('class'))),
+        );
+        self::assertSame(TicketPageParts::NEXT_STEP_ID, $page->filter('.ticket__columns > .ticket__next-step')->attr('id'));
+        self::assertSame('ticket-rounds-heading', $page->filter('.ticket__columns > .ticket__rounds')->attr('aria-labelledby'));
+        self::assertCount(1, $page->filter('.next-step-box'), 'One Your next step box, not a second copy.');
+        self::assertCount(1, $page->filter('.ticket__next-step > .next-step-box'));
+        self::assertSame(
+            ['ticket__people', 'ticket__activity', 'ticket__section'],
             $page->filter('.ticket__columns > .ticket__aside')->children()->each(static fn (Crawler $part): string => preg_replace('/^.*?\b(ticket__[a-z-]+)\b.*$/', '$1', (string) $part->attr('class')) ?? self::fail('The class of an aside part could not be read.')),
         );
-        self::assertSame(TicketPageParts::NEXT_STEP_ID, $page->filter('.ticket__aside > .ticket__next-step')->attr('id'));
-        self::assertCount(1, $page->filter('.next-step-box'), 'One Your next step box, which the phone rule moves, not a second copy.');
-        self::assertCount(1, $page->filter('.ticket__next-step > .next-step-box'));
+        self::assertCount(0, $page->filter('.ticket__main .ticket__rounds, .ticket__aside .next-step-box'));
     }
 
     /**
@@ -1256,7 +1269,7 @@ final class TicketPageTest extends WebTestCase
         $pageQueryCount = $this->queryCountOf('/t/'.$key) - $shellQueryCount;
 
         self::assertSame('Lena reviews the code', $this->turnLineOf($this->client->getCrawler(), 'now'));
-        self::assertCount(1, $this->client->getCrawler()->filter('.ticket__aside .next-step-box'));
+        self::assertCount(1, $this->client->getCrawler()->filter('.ticket__columns > .ticket__next-step > .next-step-box'));
         self::assertCount(0, $this->client->getCrawler()->filter('details.next-step-box__move-to, dialog:not([id^="ping-"])'));
         self::assertSame(6, $pageQueryCount);
     }

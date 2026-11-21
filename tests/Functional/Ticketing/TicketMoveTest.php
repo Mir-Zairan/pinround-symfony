@@ -888,7 +888,7 @@ final class TicketMoveTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $page->filter('header.ticket__header #'.TicketPageParts::STATE_ID.' .pill'));
-        self::assertCount(1, $page->filter('.ticket__aside #'.TicketPageParts::NEXT_STEP_ID.' .next-step-box'));
+        self::assertCount(1, $page->filter('.ticket__columns > #'.TicketPageParts::NEXT_STEP_ID.' > .next-step-box'));
         self::assertCount(1, $page->filter('#'.self::TOAST_REGION_ID.'[role="status"]'));
     }
 
