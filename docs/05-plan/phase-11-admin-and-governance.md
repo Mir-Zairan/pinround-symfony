@@ -194,3 +194,4 @@ NFR-SEC-01, NFR-SEC-04, NFR-SEC-05, NFR-PRIV-03, NFR-PRIV-04, NFR-PRIV-05, NFR-U
 ## Hand-off notes
 - Phase 12 runs the ASVS review and load tests; list here any admin page that was slow or any audit gap you accepted.
 - 2026-11-20 (plan change): [P14.T3](phase-14-tester-feedback.md#p14t3--menu-admin-area-and-links-that-work) builds the smallest admin shell (route for the menu, tab rail with People and AI, a read-only people list). P11.T1 extends that shell instead of starting a new one; P11.T2 adds editing to the people list.
+- 2026-11-22 (from the P14 UI check, medium): Admin › People shows no Admin/Manager chips, no team role per team and no Deactivate yet; P11.T2 adds them.

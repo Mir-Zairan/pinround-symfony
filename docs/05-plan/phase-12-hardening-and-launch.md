@@ -216,3 +216,4 @@ FR check (regression only): all FR IDs through the e2e suite.
 ## Hand-off notes
 - After launch: keep the restore drill quarterly, the dependency updates weekly, and the k6 smoke in CI.
 - Write here the measured numbers (p95 per route, RTO, data loss) so the next team can see the baseline.
+- 2026-11-22 (from the P14 UI check, medium): pinround has no error pages of its own yet; a 404 or 500 shows Symfony's default page, and the CSP blocks its inline style, so it shows unstyled. Add pinround error pages (layout, plain words, no inline style) with the security headers work.

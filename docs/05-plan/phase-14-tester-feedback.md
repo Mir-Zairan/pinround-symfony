@@ -349,7 +349,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 
 ## Definition of done
 - [x] All P14 tasks ticked; the three journeys of the [outcome](#outcome) pass in Playwright. (2026-11-22, on 9419a195: Mia's dock journey `extension-dock.spec.ts`, Omar's try 2 from Claude Code `draft-tries.spec.ts` + `mcp-upload.spec.ts`, Lena's round bar and round page `round-page.spec.ts`, with `extension-journey.spec.ts`: 19 passed; `review-journey.spec.ts` with `E2E_MEDIA_PIPELINE=1` passed on its second run, see the hand-off note on the Rounds refresh race)
-- [ ] The UI check of every page at 1440×900 and 390×844 finds no high or medium problem.
+- [x] The UI check of every page at 1440×900 and 390×844 finds no high or medium problem. (2026-11-21: 33 routes, 64 states, 128 shots; no high; the five P14 mediums fixed in 0f28ec24 and 80e3a6f3 and proved by `focus-review`, `report-draft-editor`, `main-menu`, `shell` and `phone-layout` specs. Product owner's call 2026-11-22: tick it, as the three other mediums belong to other phases and are handed off: pinround error pages to P12, Teams at a glance counts to P07, admin roles on People to P11.T2)
 - [x] ADR-0048, 0049 and 0050 accepted (done 2026-11-21); FR, guides, config and ADR index updated with their Index.
 - [x] Quality gates green: `composer test`, `composer phpstan`, `composer deptrac`, `composer cs`, `composer audit` (2026-11-22, `make qa` on 9419a195: 13157 tests OK, phpstan no errors, deptrac 0 violations, cs and Rector clean, no audit advisories).
 
