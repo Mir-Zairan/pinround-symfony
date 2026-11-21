@@ -12,7 +12,8 @@ use App\Media\Application\Processing\UndecodableImage;
 use App\Media\Domain\UploadPolicy;
 
 /**
- * ImageEncoder as the contract states it, for a box without libvips: it decodes only what ImageFixtures builds (each
+ * ImageEncoder as the contract states it, for a box without libvips: it decodes only what ImageFixtures builds, and 8-bit
+ * RGB and RGBA PNGs such as the demo seed's screenshots (each
  * format's structure is read on its own, not by the header reader under test), ignores bytes after the end of the
  * image as libpng, libjpeg and libwebp do, refuses what does not decode fully as the stated format or has more pixels
  * than UploadPolicy::MAX_PIXELS, and answers two lossless WebPs of the contract's sizes: scaled down to the maximum
@@ -20,6 +21,9 @@ use App\Media\Domain\UploadPolicy;
  */
 final class FakeImageEncoder implements ImageEncoder
 {
+    /** The bytes per pixel of each PNG colour type the fake decodes: grey, RGB and RGBA. */
+    private const array PNG_CHANNELS = [0 => 1, 2 => 3, 6 => 4];
+
     /** How often encode() was called, refused calls included. */
     public int $encodeCount = 0;
 
@@ -61,6 +65,7 @@ final class FakeImageEncoder implements ImageEncoder
         }
         $offset = 8;
         $width = $height = 0;
+        $channels = 1;
         $pixelData = '';
         while (true) {
             $header = substr($bytes, $offset, 8);
@@ -85,9 +90,11 @@ final class FakeImageEncoder implements ImageEncoder
                     throw new UndecodableImage();
                 }
                 $ihdr = unpack('Nwidth/Nheight/Cdepth/Ccolor/Ccompression/Cfilter/Cinterlace', $data);
-                if (false === $ihdr || [8, 0, 0, 0, 0] !== [$ihdr['depth'], $ihdr['color'], $ihdr['compression'], $ihdr['filter'], $ihdr['interlace']]) {
+                // 8-bit grey, as ImageFixtures builds them, or 8-bit RGB and RGBA, as a browser's screenshot is.
+                if (false === $ihdr || 8 !== $ihdr['depth'] || !isset(self::PNG_CHANNELS[$ihdr['color']]) || [0, 0, 0] !== [$ihdr['compression'], $ihdr['filter'], $ihdr['interlace']]) {
                     throw new UndecodableImage();
                 }
+                $channels = self::PNG_CHANNELS[$ihdr['color']];
                 $width = $ihdr['width'];
                 $height = $ihdr['height'];
                 if ($width < 1 || $height < 1 || $width * $height > UploadPolicy::MAX_PIXELS) {
@@ -101,7 +108,7 @@ final class FakeImageEncoder implements ImageEncoder
         }
 
         $pixels = 0 === $width ? false : @gzuncompress($pixelData);
-        if (false === $pixels || \strlen($pixels) !== $height * ($width + 1)) {
+        if (false === $pixels || \strlen($pixels) !== $height * ($width * $channels + 1)) {
             throw new UndecodableImage();
         }
 

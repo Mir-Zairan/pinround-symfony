@@ -531,6 +531,7 @@ when@test:
         # MinIO (CI's functional job); SeedPictureFileTest runs SeedPictureFile on the dev stack's MinIO.
         test.media_seed_files:
             class: App\Tests\Unit\Media\Application\Processing\InMemoryMediaFiles
+            public: true
         test.media_seed_ready_variants:
             class: App\Media\Application\Processing\ReadyVariants
             arguments:

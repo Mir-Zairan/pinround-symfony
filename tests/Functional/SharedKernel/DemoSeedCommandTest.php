@@ -359,16 +359,18 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertSame(Command::SUCCESS, $first->getStatusCode());
         self::assertStringContainsString('Tickets: created 41, kept 0.', $first->getDisplay());
         self::assertSame(['backlog', 'todo', 'progress', 'review', 'test', 'input', 'hold', 'done'], $afterFirstRun[0]);
-        self::assertSame([41, 3, 5], \array_slice($afterFirstRun, 1, 3));
+        // The 41 tickets and SeedShowcaseTickets' three, all bugs, so the types and priorities are SeedDemoTickets' own.
+        self::assertSame([44, 3, 5], \array_slice($afterFirstRun, 1, 3));
         self::assertGreaterThan(0, $afterFirstRun[4]);
         self::assertLessThan(41, $afterFirstRun[4]);
         self::assertGreaterThan(0, $afterFirstRun[5]);
         self::assertLessThan(41, $afterFirstRun[5]);
-        // The five done tickets are nobody's turn, so they hold no turn row.
-        self::assertSame([41, 36, 5], \array_slice($afterFirstRun, 6, 3));
-        // The rail's stored counts follow the seed's raw step and visibility moves: both visibilities, five done.
+        // The six done tickets (five and the showcase's search ticket) are nobody's turn, so they hold no turn row. The
+        // showcase tickets were reported and then moved 11 times through TicketCommands, each with its history row.
+        self::assertSame([55, 38, 6], \array_slice($afterFirstRun, 6, 3));
+        // The rail's stored counts follow the seed's raw step and visibility moves: both visibilities, six done.
         self::assertCount(2, $afterFirstRun[10]);
-        self::assertSame(5, array_sum(array_column($afterFirstRun[10], 2)));
+        self::assertSame(6, array_sum(array_column($afterFirstRun[10], 2)));
         self::assertSame($afterFirstRun[10], $afterFirstRun[9]);
         self::assertStringContainsString('Tickets: created 0, kept 41.', $second->getDisplay());
         self::assertSame($afterFirstRun, $ticketFacts());
