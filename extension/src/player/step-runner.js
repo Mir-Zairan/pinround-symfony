@@ -26,7 +26,7 @@ export class StepRefusal extends Error {}
 
 const PAGE_STEP_TYPES = new Set(['click', 'type', 'select', 'wait_for', 'expect_text', 'expect_visible']);
 
-const SYSTEM_CLOCK = Object.freeze({
+export const SYSTEM_CLOCK = Object.freeze({
     now: () => Date.now(),
     wait: (ms) => new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -181,7 +181,7 @@ async function runInPage(browser, tabId, step, clock, pageRefusalOf) {
 }
 
 /** The tab once its status is complete, looking every LOAD_POLL_MS, or null when it is still loading at the deadline. */
-async function loadedTab(browser, tabId, clock, deadline) {
+export async function loadedTab(browser, tabId, clock, deadline) {
     for (;;) {
         const tab = await browser.tabs.get(tabId);
         if ('complete' === tab.status) {

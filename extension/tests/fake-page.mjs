@@ -282,10 +282,11 @@ class FakeStyleSheet {
 }
 
 /**
- * @param {{siteHost?: string, viewport?: {width: number, height: number}, storage: object,
- *   sendMessage?: (message: object) => Promise<unknown>}} options storage stands in for chrome.storage.local
+ * @param {{siteHost?: string, href?: string, viewport?: {width: number, height: number}, storage: object,
+ *   sendMessage?: (message: object) => Promise<unknown>}} options storage stands in for chrome.storage.local; href is the
+ *   page's address, https://<siteHost>/ by default. The isolated world has URL and crypto, as Chrome's has.
  */
-export function fakePage({ siteHost = 'shop.acme-foods.example', viewport = { width: 1280, height: 800 }, storage, sendMessage = async () => undefined }) {
+export function fakePage({ siteHost = 'shop.acme-foods.example', href = `https://${siteHost}/`, viewport = { width: 1280, height: 800 }, storage, sendMessage = async () => undefined }) {
     const page = { shadowRoots: new Map(), focused: null };
     const document = new FakeDocument(page);
     page.document = document;
@@ -293,7 +294,9 @@ export function fakePage({ siteHost = 'shop.acme-foods.example', viewport = { wi
     const sentMessages = [];
     const context = vm.createContext({
         document,
-        location: { host: siteHost },
+        location: { host: siteHost, href },
+        URL,
+        crypto,
         innerWidth: viewport.width,
         innerHeight: viewport.height,
         CSSStyleSheet: FakeStyleSheet,

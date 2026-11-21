@@ -160,7 +160,8 @@ globalThis.pinroundDock ??= (() => {
      * @param {ShadowRoot} shadow the overlay's closed root
      * @param {{storage: {get: Function, set: Function}, siteHost: string, viewport: {width: () => number, height: () => number},
      *   onAction: (action: string, value?: string) => void}} options storage is the extension's local storage; onAction hears
-     *   pin, capture, play, save-draft and choose (with the picked value); shrink stays in here
+     *   pin, capture, play, save-draft and choose (with the picked value); shrink stays in here. Play's step card goes in
+     *   the answer's stepSlot.
      */
     function mountDock(shadow, { storage, siteHost, viewport, onAction }) {
         const make = (tag, className, properties = {}) => Object.assign(document.createElement(tag), { className, ...properties });
@@ -210,7 +211,8 @@ globalThis.pinroundDock ??= (() => {
         const shrinkButton = actionButton(TEXTS.shrink, 'H');
         const status = make('p', 'dock__status');
         status.setAttribute('role', 'status');
-        dock.append(head, pickerLabel, pinButton, captureButton, playButton, saveButton, shrinkButton, status);
+        const stepSlot = make('div', 'dock__step-slot');
+        dock.append(head, pickerLabel, pinButton, captureButton, playButton, saveButton, shrinkButton, stepSlot, status);
 
         const handle = make('button', 'dock-handle dock--right', { type: 'button', hidden: true });
         handle.setAttribute('aria-label', TEXTS.open);
@@ -341,6 +343,8 @@ globalThis.pinroundDock ??= (() => {
         return {
             /** Resolves once the site's stored place is applied, or the default kept when storage refused. */
             ready,
+            /** Where the scenario's step card goes (dock-run.js): after Shrink, before the status line. */
+            stepSlot,
             /** The dock's focusable controls in Tab order, for the overlay's focus trap while pinning. */
             focusables: () => (dock.hidden ? [handle] : [grip, picker, pinButton, captureButton, playButton, saveButton, shrinkButton].filter((control) => !control.disabled)),
             setPinning(isPinning) {
@@ -372,6 +376,7 @@ globalThis.pinroundDock ??= (() => {
             },
             say,
             toggleShrunk,
+            isShrunk: () => dock.hidden,
             focusPinButton: () => (dock.hidden ? handle : pinButton).focus(),
         };
     }

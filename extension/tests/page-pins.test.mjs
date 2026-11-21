@@ -57,7 +57,7 @@ test('"Pin this page" injects the pin and dock rules, then the overlay, into the
 
     await openPinOverlay(browser, await activeTabId(browser));
 
-    assert.deepEqual(OVERLAY_FILES, ['src/overlay/pin-rules.js', 'src/overlay/dock.js', 'src/overlay/overlay.js']);
+    assert.deepEqual(OVERLAY_FILES, ['src/overlay/pin-rules.js', 'src/overlay/dock.js', 'src/overlay/dock-run.js', 'src/overlay/overlay.js']);
     assert.deepEqual(browser.injectedFiles, [{ tabId: SHOP_PAGE.id, files: OVERLAY_FILES }]);
     assert.deepEqual(await overlayCallsOf(browser), ['startPinning']);
 });

@@ -4,8 +4,8 @@
 import { checkedPins } from '../overlay/pins.js';
 import { pngOf } from './capture.js';
 
-/** The rules first: overlay.js reads what pin-rules.js and dock.js leave on the global. Paths are from the extension's root. */
-export const OVERLAY_FILES = ['src/overlay/pin-rules.js', 'src/overlay/dock.js', 'src/overlay/overlay.js'];
+/** The rules first: overlay.js reads what pin-rules.js, dock.js and dock-run.js leave on the global. Paths are from the extension's root. */
+export const OVERLAY_FILES = ['src/overlay/pin-rules.js', 'src/overlay/dock.js', 'src/overlay/dock-run.js', 'src/overlay/overlay.js'];
 
 export const CANNOT_PIN_PAGE = 'This page cannot be pinned. Open a web page and try again.';
 export const CANNOT_DOCK_PAGE = 'The dock cannot open on this page. Open a web page and try again.';

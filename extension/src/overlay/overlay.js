@@ -11,6 +11,8 @@
 // The same root holds the dock (dock.js) once openDock() is called: one host, one closed root. Pinning is a mode: the
 // tinted surface that takes clicks shows only while it is on; the pins stay on the page between modes. With the dock
 // open, Escape and a saved capture drop the pins and end pinning but keep the dock; without it they remove the host.
+// The dock's scenario run (dock-run.js) lives in the extension's local storage, not here, so the step card comes back
+// as it was whenever the dock opens again on a page, after a reload or a navigation too.
 // Injecting this file only defines globalThis.pinroundOverlay: the extension then calls startPinning() or openDock().
 (() => {
     if (undefined !== globalThis.pinroundOverlay) {
@@ -18,8 +20,7 @@
     }
     const rules = globalThis.pinroundPinRules;
     const dockRules = globalThis.pinroundDock;
-    // TODO(P14.T19 task 35b): Play opens the scenario player in the dock; until then it says where scenarios play.
-    const PLAY_FROM_POPUP = 'Play scenarios from the extension\'s popup for now.';
+    const runRules = globalThis.pinroundDockRun;
     const ARROW_STEPS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     const SHIFT_STEP_PERCENT = 10;
     // Stopped at the shadow root, so the page's listeners on the way up never hear a key or click meant for a pin; its
@@ -256,6 +257,12 @@
     /** @type {null|ReturnType<typeof dockRules.mountDock>} */
     let dock = null;
     let isAsking = false;
+    /** @type {null|ReturnType<typeof runRules.mountStepCard>} */
+    let stepCard = null;
+    /** The run the card shows, as last read from or written to storage; storage is the truth, another tab may move it. */
+    let run = null;
+    /** True while an answer, a start or a stop of the run is being kept, so a second press cannot overwrite it. */
+    let isKeepingRun = false;
 
     const say = (message) => {
         status.textContent = message;
@@ -385,18 +392,157 @@
      */
     async function askExtension(action, value) {
         if (isAsking) {
-            return;
+            return undefined;
         }
         isAsking = true;
         dock.setBusy(true);
         try {
-            dock.showAnswer(await chrome.runtime.sendMessage({ pinroundDock: action, value }));
+            const answer = await chrome.runtime.sendMessage({ pinroundDock: action, value });
+            dock.showAnswer(answer);
+
+            return answer;
         } catch {
             dock.say(dockRules.TEXTS.notAnswered, true);
+
+            return undefined;
         } finally {
             isAsking = false;
             dock.setBusy(false);
         }
+    }
+
+    // Every change to the stored run waits for the one before, so a capture clearing its tag never writes over an
+    // answer given meanwhile.
+    let runChanges = Promise.resolve();
+    const afterRunChanges = (change) => {
+        const changed = runChanges.then(change);
+        runChanges = changed.catch(() => undefined);
+
+        return changed;
+    };
+
+    function showRun(shownRun) {
+        run = shownRun;
+        stepCard.show(shownRun);
+    }
+
+    /** A press on Play or the card: one at a time, a second press while one is kept is ignored; storage refusing is said. */
+    function keepRunFor(press) {
+        if (isKeepingRun) {
+            return Promise.resolve();
+        }
+        isKeepingRun = true;
+
+        return afterRunChanges(press).catch(() => dock.say(runRules.TEXTS.notKept, true)).finally(() => {
+            isKeepingRun = false;
+        });
+    }
+
+    // getRandomValues, not randomUUID: a content script on a plain http page is no secure context.
+    const newRunId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+    /**
+     * Loads the notebook's scenario from the extension, which refuses it on a host not allowed, keeps it as the run and
+     * shows its first step; the start page opens when the tab is elsewhere. isNext replaces a finished run with the
+     * notebook's next scenario; otherwise an open run is never replaced.
+     */
+    function playScenario(scenarioIndex, isNext) {
+        return keepRunFor(async () => {
+            const stored = await runRules.loadRun(chrome.storage.local);
+            if (isNext ? !runRules.isSameStep(stored, run) : null !== stored) {
+                showRun(stored);
+                dock.say(isNext ? runRules.TEXTS.runMoved : runRules.TEXTS.runOpen, true);
+
+                return;
+            }
+            const answer = await askExtension('scenario', scenarioIndex);
+            if (null === answer || 'object' !== typeof answer || !('scenario' in answer)) {
+                return;
+            }
+            const scenario = runRules.checkedScenario(answer.scenario);
+            if (null === scenario) {
+                dock.say(dockRules.TEXTS.notAnswered, true);
+
+                return;
+            }
+            const started = runRules.startedRun(scenario, newRunId(), stored?.pendingTag ?? null);
+            await runRules.saveRun(chrome.storage.local, started);
+            showRun(started);
+            if (!runRules.isAtAddress(location.href, started.startUrl)) {
+                askExtension('open-start', started.startUrl);
+            }
+        });
+    }
+
+    /** Records the card's step as the person answered it, unless another tab moved the run on or stopped it first. */
+    function answerStep(result) {
+        const answeredStep = run;
+
+        return keepRunFor(async () => {
+            const stored = await runRules.loadRun(chrome.storage.local);
+            if (!runRules.isSameStep(stored, answeredStep)) {
+                showRun(stored);
+                dock.say(null === stored ? runRules.TEXTS.runStopped : runRules.TEXTS.runMoved, true);
+
+                return;
+            }
+            const hadFocus = null !== shadow.activeElement;
+            const answered = runRules.answeredRun(stored, result);
+            await runRules.saveRun(chrome.storage.local, answered);
+            showRun(answered);
+            if ('problem' === result) {
+                dock.say(runRules.TEXTS.problemTagged(answered.pendingTag.stepNumber));
+                startPinning();
+
+                return;
+            }
+            dock.say('');
+            if (hadFocus) {
+                stepCard.focusFirstButton();
+            }
+        });
+    }
+
+    function stopRun() {
+        return keepRunFor(async () => {
+            const hadFocus = null !== shadow.activeElement;
+            await runRules.forgetRun(chrome.storage.local);
+            showRun(null);
+            dock.say('');
+            if (hadFocus) {
+                dock.focusPinButton();
+            }
+        });
+    }
+
+    const isSavedCapture = (answer) => null !== answer && 'object' === typeof answer && 'string' === typeof answer.message && true !== answer.isError;
+
+    /**
+     * Asks for a capture that carries the step "Found a problem" tagged, if one waits; the tag goes once that capture
+     * is saved, so the capture after it, or a retry after a refusal, gets no tag or keeps it.
+     */
+    async function captureWithStepTag() {
+        let tag;
+        try {
+            tag = (await afterRunChanges(() => runRules.loadRun(chrome.storage.local)))?.pendingTag ?? null;
+        } catch {
+            dock.say(runRules.TEXTS.notKept, true);
+
+            return;
+        }
+        const answer = await askExtension('capture', tag ?? undefined);
+        if (null === tag || !isSavedCapture(answer)) {
+            return;
+        }
+        await afterRunChanges(async () => {
+            const stored = await runRules.loadRun(chrome.storage.local);
+            if (null === stored || !runRules.isSameTag(stored.pendingTag, tag)) {
+                return;
+            }
+            const untagged = { ...stored, pendingTag: null };
+            await runRules.saveRun(chrome.storage.local, untagged);
+            showRun(untagged);
+        }).catch(() => dock.say(runRules.TEXTS.notKept, true));
     }
 
     function runDockAction(action, value) {
@@ -409,7 +555,9 @@
         } else if ('shrink' === action) {
             dock.toggleShrunk();
         } else if ('play' === action) {
-            dock.say(PLAY_FROM_POPUP);
+            playScenario(0, false);
+        } else if ('capture' === action) {
+            captureWithStepTag();
         } else {
             askExtension(action, value);
         }
@@ -427,6 +575,13 @@
             onAction: runDockAction,
         });
         dock.setPinning(isPinning);
+        stepCard = runRules.mountStepCard(shadow, dock.stepSlot, {
+            onAnswer: answerStep,
+            onStop: stopRun,
+            onNextScenario: () => playScenario((run?.scenarioIndex ?? -1) + 1, true),
+        });
+        // A run started before a click, a navigation or a reload shows its step again.
+        afterRunChanges(async () => showRun(await runRules.loadRun(chrome.storage.local))).catch(() => dock.say(runRules.TEXTS.notKept, true));
         // Keys typed outside the overlay; the shadow root's own keydown listener below takes the ones inside it.
         document.addEventListener('keydown', onlyTrusted((event) => {
             const action = dockRules.actionOfKey(event);
@@ -449,7 +604,13 @@
     });
 
     // The focusable parts in Tab order, the order they have in the shadow root.
-    const focusOrder = () => [surface, ...pins.map((pin) => pin.button), ...(editor.hidden ? [] : [noteField, saveNoteButton]), ...(null === dock ? [] : dock.focusables())];
+    const focusOrder = () => [
+        surface,
+        ...pins.map((pin) => pin.button),
+        ...(editor.hidden ? [] : [noteField, saveNoteButton]),
+        ...(null === dock ? [] : dock.focusables()),
+        ...(null === stepCard || dock.isShrunk() ? [] : stepCard.focusables()),
+    ];
 
     // Tab and Shift+Tab wrap inside the overlay, so focus never reaches the page's own controls under the tint.
     function keepFocusInside(event) {
