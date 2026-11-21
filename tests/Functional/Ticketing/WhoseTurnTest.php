@@ -859,8 +859,11 @@ final class WhoseTurnTest extends WebTestCase
         self::assertCount(1, $railFrame->filter('turbo-frame#project-rail-frame[target="_top"] nav.project-rail'));
         self::assertCount(0, $railFrame->filter('turbo-frame#ticket-list-frame, .ticket-filters, header, title, .turn__card'));
         $railRead = '/FROM org_team WHERE organization_id = \? AND id = ANY|FROM tkt_project WHERE organization_id = \? AND team_id = ANY|FROM ins_project_counts/';
-        $cardsRead = '/FROM ins_ticket_turn|FROM idn_user WHERE id = ANY/';
+        $cardsRead = '/FROM ins_ticket_turn AS turn|FROM idn_user WHERE id = ANY/';
         self::assertSame([2, 2, 0], [self::countMatching($cardsRead, $pageQueries), self::countMatching($cardsRead, $cardsQueries), self::countMatching($cardsRead, $railQueries)]);
+        // The menu's My reports badge also reads ins_ticket_turn; a frame has no menu.
+        $badgeRead = '/AS questions_waiting FROM ins_ticket_turn/';
+        self::assertSame([1, 0, 0], [self::countMatching($badgeRead, $pageQueries), self::countMatching($badgeRead, $cardsQueries), self::countMatching($badgeRead, $railQueries)]);
         // The menu's team names match the rail's first read, so the page reads it twice.
         self::assertSame([4, 0, 3], [self::countMatching($railRead, $pageQueries), self::countMatching($railRead, $cardsQueries), self::countMatching($railRead, $railQueries)]);
     }
