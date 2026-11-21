@@ -57,10 +57,11 @@ for (const scheme of ['light', 'dark'] as const) {
         }, width);
       }
       // My reports' badge shows only while one of Lena's reports needs her answer, which other specs make or settle,
-      // and a mask cannot hide a badge that is missing: the menu items after it move. The baseline has none.
-      await page.locator('.nav__badge').evaluateAll((badges) => {
-        for (const badge of badges) {
-          badge.remove();
+      // and a mask cannot hide a badge that is missing: the menu items after it move. The demo banner shows only on a
+      // dev stack with PINROUND_DEMO_SKIP_2FA on (ADR-0049) and pushes the whole page down. The baseline has neither.
+      await page.locator('.nav__badge, .demo-mode-banner').evaluateAll((varying) => {
+        for (const element of varying) {
+          element.remove();
         }
       });
       await expect(page).toHaveScreenshot(`shell-${scheme}.png`, { mask: changingRegions });
