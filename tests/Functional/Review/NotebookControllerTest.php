@@ -225,6 +225,7 @@ final class NotebookControllerTest extends WebTestCase
         self::assertSame(0, $page->filter('.screenshot')->count());
         self::assertStringContainsString('No screenshots yet.', $page->filter('section[aria-labelledby=notebook-screenshots-heading]')->text());
         self::assertStringContainsString('No scenarios yet.', $page->filter('section[aria-labelledby=notebook-scenarios-heading]')->text());
+        self::assertSame(1, $page->filter('.report-draft > a.report-draft__back[href="'.self::LIST.'"]')->count(), 'The back link starts at the left edge, as on a report draft.');
     }
 
     /**

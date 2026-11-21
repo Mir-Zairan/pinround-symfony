@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ApiError, NOT_REACHED, OTHER_HOST, PinroundApi } from '../src/shared/api.js';
+import { ApiError, NOT_REACHED, NOT_STORED, OTHER_HOST, PinroundApi } from '../src/shared/api.js';
 
 const ORIGIN = 'https://pinround.acme-foods.example';
 const TOKEN = 'pr_abcdefghijklmnopqrstuvwxyz012345';
@@ -54,6 +54,25 @@ test('a PUT goes only to a put_url pinround answered, once', async () => {
     assert.equal(calls.length, 2);
     assert.equal(calls[1].init.method, 'PUT');
     assert.deepEqual(calls[1].init.headers, { 'Content-Type': 'image/png' });
+});
+
+test('a PUT the storage rejects or refuses says the screenshot could not be stored, not that pinround is unreachable', async () => {
+    const putUrl = 'https://storage.acme-foods.example/pinround/uploads/y?signature=2';
+    const file = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
+    const slotAnswer = [201, { upload_id: 'u2', put_url: putUrl, headers: {} }];
+    const storageThatRejects = async (url, init) => {
+        if ('PUT' === init.method) {
+            throw new TypeError('Failed to fetch');
+        }
+
+        return { ok: true, status: slotAnswer[0], json: async () => slotAnswer[1] };
+    };
+    const rejecting = new PinroundApi(ORIGIN, TOKEN, storageThatRejects);
+    await assert.rejects(rejecting.putFile(await rejecting.call('POST', '/api/v1/uploads', { project: 'SHOP' }), file), (error) => 0 === error.status && NOT_STORED === error.message);
+
+    const { fetchFn } = recordingFetch([slotAnswer, [403, {}]]);
+    const refusing = new PinroundApi(ORIGIN, TOKEN, fetchFn);
+    await assert.rejects(refusing.putFile(await refusing.call('POST', '/api/v1/uploads', { project: 'SHOP' }), file), (error) => 403 === error.status && NOT_STORED === error.message);
 });
 
 test('a refusal carries pinround\'s message and status, and an unreachable server says so', async () => {

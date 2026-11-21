@@ -352,6 +352,54 @@ test('the note bubble shows while the mouse is over a pin that is not selected',
   await expect(bubble).toBeHidden();
 });
 
+test('a click on the selected pin\'s note bubble drops a new pin on the spot under it', async ({ page }) => {
+  const { form, frame, note, marker, field } = await openEditableExample(page);
+  const firstPicture = (await frame.boundingBox())!;
+  await frame.click({ position: { x: firstPicture.width * 0.2, y: firstPicture.height * 0.3 } });
+  await note(1).fill('Check this');
+  const bubble = form.locator('.pin[data-pin-number="1"] .pin__bubble');
+  await expect(bubble).toBeVisible();
+  const picture = (await frame.boundingBox())!;
+  const shown = (await bubble.boundingBox())!;
+  const spot = { x: shown.x + shown.width / 2, y: shown.y + shown.height / 2 };
+
+  await page.mouse.click(spot.x, spot.y);
+
+  await expect(marker(2)).toBeVisible();
+  await expect(marker(2)).toHaveAttribute('aria-pressed', 'true');
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'false');
+  expect(Math.abs(Number(await field('pins[2][x]').inputValue()) - ((spot.x - picture.x) / picture.width) * 100)).toBeLessThanOrEqual(1);
+  expect(Math.abs(Number(await field('pins[2][y]').inputValue()) - ((spot.y - picture.y) / picture.height) * 100)).toBeLessThanOrEqual(1);
+});
+
+test('a click outside the picture and its pins clears the selection; the pin list and Add pin keep one', async ({ page }) => {
+  const { form, frame, addPin, note, marker, status } = await openEditableExample(page);
+  const picture = (await frame.boundingBox())!;
+  await frame.click({ position: { x: picture.width * 0.2, y: picture.height * 0.3 } });
+  await note(1).fill('Check this');
+  const bubble = form.locator('.pin[data-pin-number="1"] .pin__bubble');
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
+
+  await status.click();
+
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'false');
+  await expect(form.locator('.pin-list__item--selected')).toHaveCount(0);
+  await expect(bubble).toBeHidden();
+
+  await note(1).click();
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('heading', { name: 'Component gallery', level: 1 }).click();
+
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'false');
+
+  await addPin.click();
+  await expect(marker(2)).toHaveAttribute('aria-pressed', 'true');
+  await form.getByRole('button', { name: 'Remove pin 2' }).click();
+
+  await expect(marker(2)).toHaveCount(0);
+  await expect(marker(1)).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('a pin ring has no fill, so the field under it stays readable', async ({ page }) => {
   const { form, addPin, frame } = await openEditableExample(page);
   await addPin.click();

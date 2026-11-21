@@ -99,7 +99,7 @@ async function openReportDraft(page: Page, { draftId, mediaIds }: SeededDraft) {
   await routeSeededPictures(page, mediaIds);
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
   await page.goto(`/report-drafts/${draftId}`, { waitUntil: 'networkidle' });
-  const form = page.locator('form.login__form');
+  const form = page.locator('form.report-draft__form');
   const editor = form.locator('#draft-shots');
   const panel = (number: number) => editor.locator(`#draft-shots-panel-${number}`);
   return {
@@ -170,6 +170,16 @@ test.describe('the report draft page', () => {
     await expectShown(draft, 2);
     await expect(draft.pins(2)).toHaveCount(0);
     await expect(draft.panel(2).getByLabel('Picture title · optional')).toHaveValue('');
+  });
+
+  test('the Report drafts back link starts at the left edge of the page, not centred across it', async ({ page }) => {
+    await openReportDraft(page, seedMiasReportDraft(`Back link sits left ${randomUUID().slice(0, 8)}`, FOUR_SCREENSHOTS.slice(0, 1)));
+    const back = (await page.getByRole('link', { name: 'Report drafts', exact: true }).boundingBox())!;
+    const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+
+    expect(back.width).toBeLessThan(title.width / 2);
+    expect(back.x).toBeLessThanOrEqual(title.x);
+    expect(title.x - back.x).toBeLessThanOrEqual(12);
   });
 
   test('switching by thumbnail keeps each screenshot\'s pins and typed notes', async ({ page }) => {

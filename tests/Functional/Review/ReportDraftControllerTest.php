@@ -307,9 +307,30 @@ final class ReportDraftControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
             [['Save changes', null], ['Send', self::LIST.'/'.$draft.'/send']],
-            $page->filter('form.login__form button[type=submit]')->each(static fn ($button): array => [trim($button->text()), $button->attr('formaction')]),
+            $page->filter('form.report-draft__form button[type=submit]')->each(static fn ($button): array => [trim($button->text()), $button->attr('formaction')]),
         );
         self::assertSame(0, $page->filter('form[action$="/send"]')->count(), 'No form of its own posts Send without the fields.');
+    }
+
+    #[Test]
+    public function theDraftPageAndItsRefusalUseTheirOwnClassesNotTheLoginOrSecurityPages(): void
+    {
+        $draft = $this->addDraft('Mia', 'Total is doubled on the cart', [['media_id' => $this->addMedia('ready'), 'title' => null, 'summary' => null, 'pins' => []]]);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $shown = $this->client->request('GET', self::LIST.'/'.$draft);
+        self::assertResponseStatusCodeSame(200);
+        $refused = $this->client->request('POST', self::LIST.'/'.$draft, [...$this->formFields($draft, 1), 'title' => 'Total doubled', 'screenshots' => [['summary' => str_repeat('s', 601)]]]);
+        self::assertResponseStatusCodeSame(422);
+
+        foreach (['shown' => $shown, 'refused' => $refused] as $state => $page) {
+            self::assertSame(1, $page->filter('.report-draft > a.report-draft__back[href="'.self::LIST.'"]')->count(), $state);
+            self::assertSame(1, $page->filter('.report-draft > h1.report-draft__title')->count(), $state);
+            self::assertSame(1, $page->filter('form.report-draft__form input.report-draft__input[name=title]')->count(), $state);
+            self::assertSame(0, $page->filter('[class*="login__"], [class~="security"], [class*="security__"]')->count(), $state);
+            self::assertSame(0, $page->filter('link[href*="login"], link[href*="security"]')->count(), $state);
+        }
+        self::assertSame(ReportDraftRefused::PICTURE_SUMMARY_TOO_LONG, $refused->filter('p.report-draft__error[role=alert]')->text());
     }
 
     #[Test]
@@ -368,7 +389,7 @@ final class ReportDraftControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame(ReportDraftRefused::DRAFT_CHANGED, $page->filter('#report-draft-error')->text());
-        self::assertSame('2', $page->filter('form.login__form input[name=version]')->attr('value'));
+        self::assertSame('2', $page->filter('form.report-draft__form input[name=version]')->attr('value'));
         self::assertSame('Total is doubled at checkout', $page->filter('input[name=title]')->attr('value'));
         self::assertSame('Seen twice.', $page->filter('textarea[name=detail]')->text());
         self::assertSame('The sum line.', $page->filter('textarea[name="screenshots[0][summary]"]')->text());
@@ -396,7 +417,7 @@ final class ReportDraftControllerTest extends WebTestCase
             self::assertResponseStatusCodeSame(422, $reason);
             self::assertSame($reason, $page->filter('#report-draft-error')->text());
             self::assertSame($shownTitle, trim((string) $page->filter('input[name=title]')->attr('value')), $reason);
-            self::assertSame('1', $page->filter('form.login__form input[name=version]')->attr('value'), $reason);
+            self::assertSame('1', $page->filter('form.report-draft__form input[name=version]')->attr('value'), $reason);
             self::assertSame(['Total is doubled on the cart', 1], array_values($this->rowOf('SELECT title, version FROM rvw_report_draft WHERE id = ?', [$draft])), $reason);
             self::assertSame(0, $this->rowCountOf('SELECT count(*) FROM tkt_ticket'), $reason);
         }

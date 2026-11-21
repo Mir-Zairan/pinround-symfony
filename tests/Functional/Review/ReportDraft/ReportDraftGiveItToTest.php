@@ -114,7 +114,7 @@ final class ReportDraftGiveItToTest extends WebTestCase
 
         $draftPage = $this->client->request('GET', self::DRAFTS.'/'.$draft);
         self::assertResponseStatusCodeSame(200);
-        $giveTo = $draftPage->filter('form.login__form fieldset');
+        $giveTo = $draftPage->filter('form.report-draft__form fieldset');
         self::assertSame('Give it to', $giveTo->filter('legend')->text());
         $draftChoices = $this->giveToChoicesOf($giveTo);
 
@@ -140,7 +140,7 @@ final class ReportDraftGiveItToTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFTS.'/'.$draft);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame([['', 'The team'], [$this->people['Omar']->id()->toString(), 'Omar']], $this->giveToChoicesOf($page->filter('form.login__form fieldset')));
+        self::assertSame([['', 'The team'], [$this->people['Omar']->id()->toString(), 'Omar']], $this->giveToChoicesOf($page->filter('form.report-draft__form fieldset')));
     }
 
     /**
@@ -239,7 +239,7 @@ final class ReportDraftGiveItToTest extends WebTestCase
         $omarId = $this->people['Omar']->id()->toString();
         $page = $this->client->request('GET', self::DRAFTS.'/'.$draft);
         self::assertResponseStatusCodeSame(200);
-        self::assertContains([$omarId, 'Omar'], $this->giveToChoicesOf($page->filter('form.login__form fieldset')), 'Omar is offered before he leaves.');
+        self::assertContains([$omarId, 'Omar'], $this->giveToChoicesOf($page->filter('form.report-draft__form fieldset')), 'Omar is offered before he leaves.');
         $parameters = [$this->shop->toString(), $omarId];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement('DELETE FROM org_team_member WHERE team_id = ? AND user_id = ?', $parameters));
 

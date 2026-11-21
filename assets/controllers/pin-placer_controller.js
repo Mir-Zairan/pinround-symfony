@@ -30,10 +30,12 @@ export default class extends Controller {
     this.dragJustEnded = false;
     this.isLimitShown = false;
     this.element.addEventListener('beforeinput', this.onBeforeinput);
+    document.addEventListener('click', this.onDocumentClick);
   }
 
   disconnect() {
     this.element.removeEventListener('beforeinput', this.onBeforeinput);
+    document.removeEventListener('click', this.onDocumentClick);
   }
 
   // Called through an outlet (screenshot-report) when the picture under the pins is removed or replaced.
@@ -66,6 +68,18 @@ export default class extends Controller {
       this.board.noteFieldOf(this.board.selectedNumber)?.focus();
     }
   }
+
+  // A click anywhere but this placer's picture, pins, pin list and Add pin clears the selection, so the selected pin's
+  // bubble no longer covers the picture. On the document, as the click may land outside the placer; it runs after
+  // onClick, so a pin added or selected there stays selected. The event path, not the DOM: Remove pin has already
+  // taken its list item out of the page by now.
+  onDocumentClick = (event) => {
+    const path = event.composedPath();
+    const isKept = path.includes(this.element) && path.some((node) => node instanceof Element && node.matches('.screenshot__frame, .pin-list__item, [data-pin-add]'));
+    if (!isKept && null !== this.board.selectedNumber) {
+      this.board.select(null);
+    }
+  };
 
   onKeydown(event) {
     const marker = event.target.closest('.pin');

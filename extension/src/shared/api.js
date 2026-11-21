@@ -23,6 +23,7 @@ export class ApiError extends Error {
 
 export const NOT_REACHED = 'Could not reach pinround. Check the address and your connection.';
 export const OTHER_HOST = 'The extension only talks to the pinround address you set.';
+export const NOT_STORED = 'The screenshot could not be stored. Try again.';
 export const MISSING_SCOPE = 'missing_scope';
 export const NOT_FOUND = 'not_found';
 export const PAIR_AGAIN = 'pinround does not accept this token any more. Pair the extension again in its options.';
@@ -114,11 +115,13 @@ export class PinroundApi {
         try {
             response = await this.fetchFn(slot.put_url, { method: 'PUT', headers, body: file, credentials: 'omit', redirect: 'error' });
         } catch {
-            throw new ApiError(NOT_REACHED, 0);
+            // pinround answered the slot a moment ago, so a rejected PUT is the storage refusing it (its CORS rule or
+            // certificate, browser-extension.md), not pinround being out of reach.
+            throw new ApiError(NOT_STORED, 0);
         }
         this.issuedPutUrls.delete(slot.put_url);
         if (!response.ok) {
-            throw new ApiError('The screenshot could not be stored. Try again.', response.status);
+            throw new ApiError(NOT_STORED, response.status);
         }
     }
 }
