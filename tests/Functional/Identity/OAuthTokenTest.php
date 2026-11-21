@@ -274,6 +274,31 @@ final class OAuthTokenTest extends WebTestCase
         $this->requestTokens(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($otherFamily, 'refresh_token'), 'client_id' => $this->clientId]);
     }
 
+    /**
+     * The audit log records ApiTokenIssued and ApiTokenRevoked with the person as actor. A connect and a sign-out are
+     * the person's; the hourly rotation and a reuse detection are nobody's, so they publish neither.
+     */
+    #[Test]
+    public function onlyTheConnectAndTheSignOutPublishTokenEventsNeverARotationOrAReuse(): void
+    {
+        [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
+        $first = $this->requestTokens($this->codeTrade($this->issueCode($omar, $acmeFoods)));
+        self::assertSame(['ApiTokenIssued'], $this->tokenEventsOf($acmeFoods), 'the connect');
+
+        $second = $this->requestTokens(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($first, 'refresh_token'), 'client_id' => $this->clientId]);
+        self::assertSame(401, $this->probe(self::stringOf($first, 'access_token')));
+        self::assertSame(['ApiTokenIssued'], $this->tokenEventsOf($acmeFoods), 'the rotation');
+
+        $this->assertTokenRequestRefused(['grant_type' => 'refresh_token', 'refresh_token' => self::stringOf($first, 'refresh_token'), 'client_id' => $this->clientId], 'invalid_grant', RefreshOAuthTokens::UNUSABLE_REFRESH_TOKEN, 'reused');
+        self::assertSame(401, $this->probe(self::stringOf($second, 'access_token')));
+        self::assertSame(['ApiTokenIssued'], $this->tokenEventsOf($acmeFoods), 'the reuse');
+
+        $other = $this->requestTokens($this->codeTrade($this->issueCode($omar, $acmeFoods)));
+        $this->revoke(['token' => self::stringOf($other, 'refresh_token'), 'client_id' => $this->clientId]);
+        self::assertSame(401, $this->probe(self::stringOf($other, 'access_token')));
+        self::assertSame(['ApiTokenIssued', 'ApiTokenIssued', 'ApiTokenRevoked'], $this->tokenEventsOf($acmeFoods), 'the sign-out');
+    }
+
     #[Test]
     public function aRefreshTokenOfAnotherClientUnknownOrAskingForMoreScopesIsRefusedAndIssuesNothing(): void
     {
@@ -512,6 +537,30 @@ final class OAuthTokenTest extends WebTestCase
         self::assertIsInt($counts['refresh']);
 
         return ['access' => $counts['access'], 'refresh' => $counts['refresh']];
+    }
+
+    /**
+     * @return list<string> the short names of the ApiTokenIssued and ApiTokenRevoked events waiting in the outbox for
+     *                      the organization, in the order they were published
+     */
+    private function tokenEventsOf(OrganizationId $organizationId): array
+    {
+        $bodies = $this->readAs($organizationId, static fn (Connection $migrator): array => $migrator->fetchFirstColumn(
+            "SELECT body FROM messenger_outbox WHERE queue_name = 'outbox' AND position(? in body) > 0 ORDER BY id",
+            [$organizationId->toString()],
+        ));
+        $events = [];
+        foreach ($bodies as $body) {
+            self::assertIsString($body);
+            foreach (['ApiTokenIssued', 'ApiTokenRevoked'] as $event) {
+                // The class name right after its namespace backslash, which the body may hold escaped or not.
+                if (str_contains($body, '\\'.$event)) {
+                    $events[] = $event;
+                }
+            }
+        }
+
+        return $events;
     }
 
     /**

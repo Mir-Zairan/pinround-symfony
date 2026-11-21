@@ -19,7 +19,8 @@ use App\SharedKernel\Application\Transactions;
  * is marked used, the access token issued with it is revoked, and a new access token and refresh token of the same
  * family are issued, all in one transaction. A refresh token traded already that comes back is refused and revokes its
  * whole family (RFC 9700 section 4.14.2), as either the client or a thief holds a copy. Once the person has left the
- * organization, the token is not found.
+ * organization, the token is not found. Nobody acts in a rotation or a reuse, so neither publishes an event naming the
+ * person, as the token page's issue and revoke do.
  */
 final readonly class RefreshOAuthTokens
 {
@@ -83,20 +84,16 @@ final readonly class RefreshOAuthTokens
         if (null === $traded) {
             $presented = $this->refreshTokens->byHash($tokenHash);
             if (null !== $presented && null !== $presented->usedAt()) {
-                $this->revokeOAuthToken->revokeFamilyOf($presented, $now);
+                $this->revokeOAuthToken->revokeFamilyBySystem($presented->familyId(), $now);
             }
 
             return null;
         }
         // Thrown inside the transaction, so the token is not used up.
         self::refuseScopeBeyond($traded, $askedScope);
-        try {
-            ($this->revokeApiToken)($traded->userId(), $traded->accessTokenId(), $now);
-        } catch (ApiTokenNotFound) {
-            // The retention job purged it: nothing is left to stop.
-        }
+        $this->revokeApiToken->bySystem($traded->accessTokenId(), $now);
 
-        return ($this->issueOAuthTokenPair)($traded->organizationId(), $traded->userId(), $client, $traded->scopes(), $traded->familyId(), $now);
+        return $this->issueOAuthTokenPair->renewal($traded, $client, $now);
     }
 
     /**

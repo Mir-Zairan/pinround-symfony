@@ -7,6 +7,7 @@ namespace App\Identity\Application;
 use App\Identity\Domain\ApiToken;
 use App\Identity\Domain\ApiTokenHashing;
 use App\Identity\Domain\ApiTokenScope;
+use App\Identity\Domain\IssuedApiToken;
 use App\Identity\Domain\OAuthClient;
 use App\Identity\Domain\OAuthGrantType;
 use App\Identity\Domain\OAuthRefreshToken;
@@ -34,8 +35,8 @@ final readonly class IssueOAuthTokenPair
      * Writes in the caller's transaction, which must be open under $organizationId as tenant.
      *
      * @param list<ApiTokenScope> $scopes   the grant's
-     * @param string              $familyId a new id from OAuthRefreshTokens::nextIdentity() at the code exchange, the
-     *                                      traded token's at a refresh
+     * @param string              $familyId the grant's family: the code's id at the code exchange, so a replayed code
+     *                                      finds the tokens it gave
      *
      * @throws OAuthTokenRefused invalid_grant when the person has IssueApiToken::MAX_LIVE_TOKENS_PER_USER live tokens
      *                           in the organization; nothing is added
@@ -46,16 +47,50 @@ final readonly class IssueOAuthTokenPair
         try {
             $accessToken = $this->issueApiToken->issueForOAuthClient($organizationId, $userId, $client->clientName() ?? self::UNNAMED_CLIENT, $scopes, $now);
         } catch (TooManyApiTokens $refusal) {
-            throw new OAuthTokenRefused(OAuthTokenRefused::INVALID_GRANT, \sprintf('You have %d tokens that still work in this organization. Revoke one on the tokens page, then connect again.', IssueApiToken::MAX_LIVE_TOKENS_PER_USER), $refusal);
+            throw self::tooManyTokens($refusal);
         }
+
+        return $this->pairedWith($accessToken, $client, $familyId, $now);
+    }
+
+    /**
+     * The pair a refresh issues for $traded, in its family and with its grant's scopes, as __invoke() but with no
+     * ApiTokenIssued (IssueApiToken::renewForOAuthClient()). Writes in the caller's transaction, under $traded's
+     * organization as tenant.
+     *
+     * @throws OAuthTokenRefused as __invoke()
+     * @throws \LogicException   as __invoke()
+     */
+    public function renewal(OAuthRefreshToken $traded, OAuthClient $client, \DateTimeImmutable $now): IssuedOAuthTokens
+    {
+        try {
+            $accessToken = $this->issueApiToken->renewForOAuthClient($traded->organizationId(), $traded->userId(), $client->clientName() ?? self::UNNAMED_CLIENT, $traded->scopes(), $now);
+        } catch (TooManyApiTokens $refusal) {
+            throw self::tooManyTokens($refusal);
+        }
+
+        return $this->pairedWith($accessToken, $client, $traded->familyId(), $now);
+    }
+
+    private static function tooManyTokens(TooManyApiTokens $refusal): OAuthTokenRefused
+    {
+        return new OAuthTokenRefused(OAuthTokenRefused::INVALID_GRANT, \sprintf('You have %d tokens that still work in this organization. Revoke one on the tokens page, then connect again.', IssueApiToken::MAX_LIVE_TOKENS_PER_USER), $refusal);
+    }
+
+    /**
+     * Adds the refresh token that names $accessToken.
+     */
+    private function pairedWith(IssuedApiToken $accessToken, OAuthClient $client, string $familyId, \DateTimeImmutable $now): IssuedOAuthTokens
+    {
+        $token = $accessToken->token();
         $refreshToken = OAuthRefreshToken::issue(
             $this->refreshTokens->nextIdentity(),
             $familyId,
-            $organizationId,
-            $userId,
+            $token->organizationId(),
+            $token->userId(),
             $client->clientId(),
-            $scopes,
-            $accessToken->token()->id(),
+            $token->scopes(),
+            $token->id(),
             $this->hashing,
             $now,
         );
@@ -65,7 +100,7 @@ final readonly class IssueOAuthTokenPair
             $accessToken->reveal(),
             \in_array(OAuthGrantType::RefreshToken, $client->grantTypes(), true) ? $refreshToken->reveal() : null,
             ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS,
-            array_map(static fn (ApiTokenScope $scope): string => $scope->value, $accessToken->token()->scopes()),
+            array_map(static fn (ApiTokenScope $scope): string => $scope->value, $token->scopes()),
         );
     }
 }

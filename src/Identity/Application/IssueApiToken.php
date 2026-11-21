@@ -64,6 +64,24 @@ final readonly class IssueApiToken
     }
 
     /**
+     * The access token a refresh issues in place of the one it revokes (ADR-0050), as issueForOAuthClient() but with
+     * no ApiTokenIssued: nobody acted, and the event would tell the audit log the person made a token every hour.
+     *
+     * @param list<ApiTokenScope> $scopes the grant's
+     *
+     * @throws InvalidApiToken  as issueForOAuthClient(); nothing is added
+     * @throws TooManyApiTokens as __invoke(); nothing is added
+     * @throws \LogicException  as __invoke()
+     */
+    public function renewForOAuthClient(OrganizationId $organizationId, UserId $userId, string $clientName, array $scopes, \DateTimeImmutable $now): IssuedApiToken
+    {
+        $issued = ApiToken::issueForOAuthClient($this->tokens->nextIdentity(), $organizationId, $userId, $clientName, $scopes, $this->hashing, $now);
+        $this->addUnderCap($issued->token(), $now);
+
+        return $issued;
+    }
+
+    /**
      * Adds the token under the cap and publishes ApiTokenIssued.
      */
     private function saved(IssuedApiToken $issued, \DateTimeImmutable $now): IssuedApiToken
@@ -71,11 +89,7 @@ final readonly class IssueApiToken
         $token = $issued->token();
         $organizationId = $token->organizationId();
         $userId = $token->userId();
-        $this->tokens->lockIssuingFor($organizationId, $userId);
-        if ($this->tokens->countLiveOf($userId, $now) >= self::MAX_LIVE_TOKENS_PER_USER) {
-            throw new TooManyApiTokens(self::MAX_LIVE_TOKENS_PER_USER);
-        }
-        $this->tokens->add($token);
+        $this->addUnderCap($token, $now);
         $this->events->publish(new ApiTokenIssued(
             $organizationId->toString(),
             $token->id(),
@@ -87,6 +101,18 @@ final readonly class IssueApiToken
         ));
 
         return $issued;
+    }
+
+    /**
+     * @throws TooManyApiTokens when the owner has MAX_LIVE_TOKENS_PER_USER live tokens; nothing is added
+     */
+    private function addUnderCap(ApiToken $token, \DateTimeImmutable $now): void
+    {
+        $this->tokens->lockIssuingFor($token->organizationId(), $token->userId());
+        if ($this->tokens->countLiveOf($token->userId(), $now) >= self::MAX_LIVE_TOKENS_PER_USER) {
+            throw new TooManyApiTokens(self::MAX_LIVE_TOKENS_PER_USER);
+        }
+        $this->tokens->add($token);
     }
 
     /**
