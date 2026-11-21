@@ -79,7 +79,7 @@ final class OAuthConsentLogLeakTest extends WebTestCase
         $client->submit($form);
         self::assertResponseStatusCodeSame(302);
         $location = (string) $client->getResponse()->headers->get('Location');
-        self::assertSame(1, preg_match('~\A'.preg_quote(self::CALLBACK, '~').'\?code=([A-Za-z0-9_-]{43})&state='.$state.'\z~', $location), $location);
+        self::assertMatchesRegularExpression('~\A'.preg_quote(self::CALLBACK, '~').'\?code=([A-Za-z0-9_-]{43})&state='.$state.'\z~', $location, $location);
         $code = substr($location, \strlen(self::CALLBACK.'?code='), 43);
 
         $records = $capturedLogRecords->all();

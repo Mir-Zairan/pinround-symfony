@@ -6,7 +6,6 @@ namespace App\Tests\Functional\Identity;
 
 use App\Identity\Domain\ApiTokenScope;
 use App\Tests\Fixtures\Messaging\CapturedLogRecords;
-use Monolog\LogRecord;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -72,7 +71,7 @@ final class OAuthTokenLogLeakTest extends WebTestCase
         $client->request('POST', '/oauth/revoke', ['token' => $second['refresh_token'], 'client_id' => $clientId]);
         self::assertResponseStatusCodeSame(200);
 
-        $raw = implode("\n", array_map(static fn (LogRecord $record): string => LoginLogLeakTest::textOf($record), $capturedLogRecords->all()));
+        $raw = implode("\n", array_map(LoginLogLeakTest::textOf(...), $capturedLogRecords->all()));
         self::assertStringContainsString($clientId, $raw, 'no record holds the client_id bound beside the hashes, so nothing was checked');
         foreach ([
             'code' => $code,

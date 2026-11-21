@@ -94,7 +94,7 @@ final class OAuthRedirectUriTest extends TestCase
     public function aUriThatBreaksARuleIsRefusedWithThatRule(string $uri, string $rule): void
     {
         $this->expectException(InvalidOAuthRedirectUri::class);
-        $this->expectExceptionMessage($rule);
+        $this->expectExceptionMessageIsOrContains($rule);
 
         new OAuthRedirectUri($uri);
     }
@@ -160,7 +160,7 @@ final class OAuthRedirectUriTest extends TestCase
         self::assertSame($longest, new OAuthRedirectUri($longest)->toString());
 
         $this->expectException(InvalidOAuthRedirectUri::class);
-        $this->expectExceptionMessage('A redirect URI has at most 512 characters.');
+        $this->expectExceptionMessageIsOrContains('A redirect URI has at most 512 characters.');
 
         new OAuthRedirectUri($longest.'a');
     }

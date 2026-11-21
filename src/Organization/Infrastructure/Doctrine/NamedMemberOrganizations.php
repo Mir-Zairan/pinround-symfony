@@ -33,12 +33,6 @@ final readonly class NamedMemberOrganizations implements MemberOrganizations
 
     public function isMember(UserId $userId, OrganizationId $organizationId): bool
     {
-        foreach ($this->membershipQueries->organizationsOf($userId) as $memberOrganizationId) {
-            if ($memberOrganizationId->equals($organizationId)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($this->membershipQueries->organizationsOf($userId), static fn ($memberOrganizationId) => $memberOrganizationId->equals($organizationId));
     }
 }

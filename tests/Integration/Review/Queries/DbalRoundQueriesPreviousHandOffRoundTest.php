@@ -259,7 +259,7 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
         $visibility = TicketVisibility::for(new OrganizationId('0197a3c0-0000-7000-8000-00000030a002'), new UserId(self::MIA), [], true, null);
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('The ticket visibility given is not one of the tenant\'s organization.');
+        $this->expectExceptionMessageIsOrContains('The ticket visibility given is not one of the tenant\'s organization.');
 
         $this->previousHandOffRoundFor(self::TICKET, $visibility, 4);
     }
