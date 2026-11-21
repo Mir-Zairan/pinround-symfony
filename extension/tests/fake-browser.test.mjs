@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, CANNOT_ACCESS_CHROME_URL, CANNOT_ACCESS_PAGE, NEEDS_ACTIVE_TAB, fakeBrowser } from './fake-browser.mjs';
+import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, CANNOT_ACCESS_CHROME_URL, CANNOT_ACCESS_PAGE, FIRST_WINDOW_ID, NEEDS_ACTIVE_TAB, fakeBrowser } from './fake-browser.mjs';
 
-const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true };
-const OTHER_PAGE = { id: 8, url: 'https://news.acme-foods.example/', title: 'Acme Foods news', active: false };
-const SETTINGS_PAGE = { id: 9, url: 'chrome://settings/', title: 'Settings', active: false };
+const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true, windowId: FIRST_WINDOW_ID };
+const OTHER_PAGE = { id: 8, url: 'https://news.acme-foods.example/', title: 'Acme Foods news', active: false, windowId: FIRST_WINDOW_ID };
+const SETTINGS_PAGE = { id: 9, url: 'chrome://settings/', title: 'Settings', active: false, windowId: FIRST_WINDOW_ID };
 const SHOP_ORIGIN = 'https://shop.acme-foods.example';
 const ORDER_PLACED_AT = new Date('2026-03-14T09:30:00Z');
 
@@ -123,6 +123,26 @@ test('captureVisibleTab works with <all_urls> on a web page and refuses on a chr
 
     await browser.tabs.create({ url: 'chrome://version/' });
     await assert.rejects(browser.tabs.captureVisibleTab({ format: 'png' }), { message: ACTIVE_TAB_NOT_IN_EFFECT });
+});
+
+test('each window has its own active tab: captureVisibleTab takes the named window\'s, query\'s currentWindow and getLastFocused follow the window the person shows a tab in', async () => {
+    const browser = fakeBrowser({ tabs: [SHOP_PAGE, { ...SETTINGS_PAGE, windowId: 2, active: true }], hostOrigins: [ALL_URLS] });
+    assert.deepEqual(await browser.windows.getLastFocused(), { id: FIRST_WINDOW_ID, focused: true });
+    assert.deepEqual((await browser.tabs.query({ active: true, currentWindow: true })).map((tab) => tab.id), [SHOP_PAGE.id]);
+    assert.deepEqual((await browser.tabs.query({ active: true })).map((tab) => tab.id), [SHOP_PAGE.id, SETTINGS_PAGE.id]);
+    assert.match(await browser.tabs.captureVisibleTab(FIRST_WINDOW_ID, { format: 'png' }), /^data:image\/png;base64,/);
+    await assert.rejects(browser.tabs.captureVisibleTab(2, { format: 'png' }), { message: ACTIVE_TAB_NOT_IN_EFFECT });
+    await assert.rejects(browser.tabs.captureVisibleTab(5, { format: 'png' }), { message: 'No window with id: 5.' });
+
+    browser.showTab(SETTINGS_PAGE.id);
+
+    assert.deepEqual(await browser.windows.getLastFocused(), { id: 2, focused: true });
+    assert.deepEqual((await browser.tabs.query({ active: true, currentWindow: true })).map((tab) => tab.id), [SETTINGS_PAGE.id]);
+    assert.equal((await browser.tabs.get(SHOP_PAGE.id)).active, true, 'Showing a tab in another window leaves this window\'s active tab.');
+    await assert.rejects(browser.tabs.captureVisibleTab({ format: 'png' }), { message: ACTIVE_TAB_NOT_IN_EFFECT });
+    const opened = (await browser.tabs.create({ url: 'https://news.acme-foods.example/' }));
+    assert.equal(opened.windowId, 2);
+    assert.equal((await browser.tabs.get(SETTINGS_PAGE.id)).active, false);
 });
 
 test('executeScript answers [{ result }] like Chrome, with the arguments and the result copied', async () => {
@@ -292,7 +312,7 @@ test('a host permission keeps reaching the tab after it navigates within that or
 test('tabs.query filters on active and hides the address of a tab the extension may not reach', async () => {
     const browser = fakeBrowser({ tabs: [SHOP_PAGE, OTHER_PAGE] });
 
-    assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [{ id: SHOP_PAGE.id, active: true, status: 'complete' }]);
+    assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [{ id: SHOP_PAGE.id, active: true, status: 'complete', windowId: FIRST_WINDOW_ID }]);
     browser.clickIcon(SHOP_PAGE.id);
     assert.deepEqual(await browser.tabs.query({ active: true, currentWindow: true }), [{ ...SHOP_PAGE, status: 'complete' }]);
     assert.deepEqual((await browser.tabs.query({})).map((tab) => tab.id), [SHOP_PAGE.id, OTHER_PAGE.id]);
@@ -316,7 +336,7 @@ test('tabs.get answers the tab with its status, hides an address out of reach, r
     const browser = fakeBrowser({ tabs: [SHOP_PAGE, { ...OTHER_PAGE, status: 'loading' }], hostOrigins: [SHOP_ORIGIN] });
 
     assert.deepEqual(await browser.tabs.get(SHOP_PAGE.id), { ...SHOP_PAGE, status: 'complete' });
-    assert.deepEqual(await browser.tabs.get(OTHER_PAGE.id), { id: OTHER_PAGE.id, active: false, status: 'loading' });
+    assert.deepEqual(await browser.tabs.get(OTHER_PAGE.id), { id: OTHER_PAGE.id, active: false, status: 'loading', windowId: FIRST_WINDOW_ID });
     await assert.rejects(browser.tabs.get(99), { message: 'No tab with id: 99.' });
     assert.throws(() => browser.tabs.get('7'), { name: 'TypeError', message: 'Error in invocation of tabs.get(integer tabId, optional function callback): No matching signature.' });
 });
@@ -359,7 +379,7 @@ test('tabs.update to another origin keeps activeTab on the old page while it loa
     assert.deepEqual(answered, { ...SHOP_PAGE, status: 'loading', pendingUrl: 'https://bank.acme-foods.example/' });
     assert.equal(await resultOf(browser, { target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), 'reached');
     browser.finishLoading(SHOP_PAGE.id);
-    assert.deepEqual(await browser.tabs.get(SHOP_PAGE.id), { id: SHOP_PAGE.id, active: true, status: 'complete' });
+    assert.deepEqual(await browser.tabs.get(SHOP_PAGE.id), { id: SHOP_PAGE.id, active: true, status: 'complete', windowId: FIRST_WINDOW_ID });
     await assert.rejects(browser.scripting.executeScript({ target: { tabId: SHOP_PAGE.id }, func: () => 'reached' }), { message: CANNOT_ACCESS_PAGE });
     await assert.rejects(browser.tabs.update(99, { url: SHOP_PAGE.url }), { message: 'No tab with id: 99.' });
     assert.throws(() => browser.tabs.update('7', { url: SHOP_PAGE.url }), {

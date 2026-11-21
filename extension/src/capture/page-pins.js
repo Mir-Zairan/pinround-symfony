@@ -9,6 +9,7 @@ export const OVERLAY_FILES = ['src/overlay/pin-rules.js', 'src/overlay/dock.js',
 
 export const CANNOT_PIN_PAGE = 'This page cannot be pinned. Open a web page and try again.';
 export const CANNOT_DOCK_PAGE = 'The dock cannot open on this page. Open a web page and try again.';
+export const PAGE_NOT_ON_SCREEN = 'The page is no longer on screen, so nothing was captured. Go back to it and capture again.';
 
 /** @returns {Promise<number>} the id of the tab the popup was opened on */
 export async function activeTabId(browser) {
@@ -45,13 +46,16 @@ export async function closePinOverlay(browser, tabId) {
 }
 
 /**
- * The visible tab as a PNG, taken while the tab's overlay is out of the page, with the overlay's pins in percent of
- * that picture. The overlay comes back afterwards, also when the capture or the pins are refused.
+ * The tab as a PNG, taken while the tab's overlay is out of the page, with the overlay's pins in percent of that
+ * picture. The overlay comes back afterwards, also when the capture or the pins are refused. Chrome captures what a
+ * window shows, so the tab must be the shown one of the window the person is in, before and after the capture: a
+ * person who switched tabs while the capture was on its way would otherwise send another page with this one's pins.
  *
  * @returns {Promise<{file: Blob, pins: Array<{x_pct: number, y_pct: number, note: string}>}>}
- * @throws {Error} with the pin rules' refusal, or Chrome's when the tab cannot be captured
+ * @throws {Error} PAGE_NOT_ON_SCREEN, the pin rules' refusal, or Chrome's when the tab cannot be captured
  */
 export async function capturePinnedTab(browser, tabId) {
+    const windowId = await windowShowing(browser, tabId);
     let injections;
     try {
         injections = await browser.scripting.executeScript({
@@ -65,12 +69,12 @@ export async function capturePinnedTab(browser, tabId) {
             throw error;
         }
 
-        return { file: await visibleTabPng(browser), pins: [] };
+        return { file: await shownTabPng(browser, tabId, windowId), pins: [] };
     }
     try {
         const pins = checkedPins(injections[0]?.result);
 
-        return { file: await visibleTabPng(browser), pins };
+        return { file: await shownTabPng(browser, tabId, windowId), pins };
     } finally {
         // Only a page that went away mid-capture refuses; the pins stay in its state for the next "Pin this page".
         await browser.scripting.executeScript({ target: { tabId }, func: () => globalThis.pinroundOverlay?.show() }).catch(() => undefined);
@@ -79,4 +83,35 @@ export async function capturePinnedTab(browser, tabId) {
 
 const isOutOfReach = (error) => error instanceof Error && error.message.startsWith('Cannot access ');
 
-const visibleTabPng = async (browser) => pngOf(await browser.tabs.captureVisibleTab({ format: 'png' }));
+/** @returns {Promise<number|null>} the window the tab shows in as the active tab of the person's window, else null */
+async function shownWindowIdOf(browser, tabId) {
+    const tab = await browser.tabs.get(tabId);
+    const personWindow = await browser.windows.getLastFocused();
+
+    return tab.active && tab.windowId === personWindow.id ? tab.windowId : null;
+}
+
+async function windowShowing(browser, tabId) {
+    const windowId = await shownWindowIdOf(browser, tabId);
+    if (null === windowId) {
+        throw new Error(PAGE_NOT_ON_SCREEN);
+    }
+
+    return windowId;
+}
+
+/**
+ * The window's picture, kept only when the tab is still the one it shows once Chrome answered: a switch meanwhile
+ * throws the picture away, and is also what a refusal of Chrome's then meant (activeTab stays with the tab).
+ */
+async function shownTabPng(browser, tabId, windowId) {
+    const { dataUrl, refusal } = await browser.tabs.captureVisibleTab(windowId, { format: 'png' }).then((taken) => ({ dataUrl: taken }), (error) => ({ refusal: error }));
+    if (windowId !== await shownWindowIdOf(browser, tabId)) {
+        throw new Error(PAGE_NOT_ON_SCREEN);
+    }
+    if (undefined !== refusal) {
+        throw refusal;
+    }
+
+    return pngOf(dataUrl);
+}

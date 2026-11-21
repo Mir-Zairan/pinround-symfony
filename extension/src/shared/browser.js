@@ -14,11 +14,12 @@ export const browser = {
     storage: { local: storageArea('local'), session: storageArea('session') },
     tabs: {
         query: (queryInfo) => chrome.tabs.query(queryInfo),
-        captureVisibleTab: (options) => chrome.tabs.captureVisibleTab(options),
+        captureVisibleTab: (windowId, options) => chrome.tabs.captureVisibleTab(windowId, options),
         create: (properties) => chrome.tabs.create(properties),
         get: (tabId) => chrome.tabs.get(tabId),
         update: (tabId, properties) => chrome.tabs.update(tabId, properties),
     },
+    windows: { getLastFocused: () => chrome.windows.getLastFocused() },
     runtime: {
         openOptionsPage: () => chrome.runtime.openOptionsPage(),
         onMessage: { addListener: (listener) => chrome.runtime.onMessage.addListener(listener) },

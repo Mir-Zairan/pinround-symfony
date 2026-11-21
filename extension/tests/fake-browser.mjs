@@ -8,7 +8,10 @@
 // the extension's root as refusalOfInjectedFile reads them, each refusal with Chrome's message. Only documented:
 // storage answers {} for a missing key; and, as Playwright cannot click the toolbar icon that grants it, activeTab
 // reaches only the tab whose icon was clicked and keeps it after a navigation within the origin but not to another. A
-// `files` injection is recorded, not run: the page scope has no document. One window only. Proved by
+// `files` injection is recorded, not run: the page scope has no document. Only documented too: each window has one
+// active tab; captureVisibleTab takes an optional window id before its options, captures that window's active tab
+// (the last focused window's when none is given) and rejects a window id that names no window; windows.getLastFocused
+// answers the window the person was last in, which an extension popup does not change. Proved by
 // tests/e2e/extension-player.spec.ts: tabs.get and tabs.update answer the tab with Chrome's status, and update's with the
 // old url and the new one as pendingUrl until the load ends, with the old document still in reach until the new page
 // commits (its activeTab grant too, only documented); a missing tab rejects, an id that is no integer throws at
@@ -22,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 export const ALL_URLS = '<all_urls>';
+export const FIRST_WINDOW_ID = 1;
 export const CANNOT_ACCESS_PAGE = 'Cannot access contents of the page. Extension manifest must request permission to access the respective host.';
 export const CANNOT_ACCESS_CHROME_URL = 'Cannot access a chrome:// URL';
 export const NEEDS_ACTIVE_TAB = "Either the '<all_urls>' or 'activeTab' permission is required.";
@@ -185,12 +189,14 @@ const isChromeUrl = (url) => url.startsWith('chrome://');
 const isWebUrl = (url) => ['http:', 'https:'].includes(new URL(url).protocol);
 
 /**
- * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean, status?: string}>, hostOrigins?: string[]}} options
- *   the open tabs, at most one of them active, each loaded unless its status says 'loading', and the manifest's host
- *   permissions: origins such as 'https://shop.acme-foods.example', or ALL_URLS for every web page
+ * @param {{tabs?: Array<{id: number, url: string, title?: string, active?: boolean, status?: string, windowId?: number}>, hostOrigins?: string[]}} options
+ *   the open tabs, at most one of them active in each window (FIRST_WINDOW_ID unless windowId says otherwise), each
+ *   loaded unless its status says 'loading', and the manifest's host permissions: origins such as
+ *   'https://shop.acme-foods.example', or ALL_URLS for every web page. The person is in the first tab's window.
  */
 export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
-    const openTabs = tabs.map((tab) => ({ active: false, status: 'complete', ...structuredClone(tab) }));
+    const openTabs = tabs.map((tab) => ({ active: false, status: 'complete', windowId: FIRST_WINDOW_ID, ...structuredClone(tab) }));
+    let lastFocusedWindowId = openTabs[0]?.windowId ?? FIRST_WINDOW_ID;
     const hostOriginSet = new Set(hostOrigins);
     const hasAllUrls = hostOriginSet.has(ALL_URLS);
     const activeTabGrants = new Set();
@@ -204,7 +210,12 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
     const tabOf = (tabId) => openTabs.find((tab) => tab.id === tabId);
     const mayReach = (tab) => !isChromeUrl(tab.url)
         && (activeTabGrants.has(tab.id) || hostOriginSet.has(new URL(tab.url).origin) || (hasAllUrls && isWebUrl(tab.url)));
-    const activate = (tabId) => openTabs.forEach((tab) => { tab.active = tab.id === tabId; });
+    const activate = (tabId) => {
+        const { windowId } = tabOf(tabId);
+        openTabs.filter((tab) => tab.windowId === windowId).forEach((tab) => { tab.active = tab.id === tabId; });
+        lastFocusedWindowId = windowId;
+    };
+    const isInWindowQueried = (tab, queryInfo) => !(true === queryInfo.currentWindow || true === queryInfo.lastFocusedWindow) || tab.windowId === lastFocusedWindowId;
     const asSeen = (tab) => {
         if (mayReach(tab)) {
             return structuredClone(tab);
@@ -274,10 +285,16 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
                     throw new Error(`The fake browser does not model the query key ${unmodelled.join(', ')}.`);
                 }
 
-                return openTabs.filter((tab) => undefined === queryInfo.active || tab.active === queryInfo.active).map(asSeen);
+                return openTabs.filter((tab) => (undefined === queryInfo.active || tab.active === queryInfo.active) && isInWindowQueried(tab, queryInfo)).map(asSeen);
             },
-            async captureVisibleTab(options = {}) {
-                const active = openTabs.find((tab) => tab.active);
+            async captureVisibleTab(windowIdOrOptions, maybeOptions) {
+                const hasWindowId = Number.isInteger(windowIdOrOptions);
+                const windowId = hasWindowId ? windowIdOrOptions : lastFocusedWindowId;
+                const options = (hasWindowId ? maybeOptions : windowIdOrOptions) ?? {};
+                if (hasWindowId && !openTabs.some((tab) => tab.windowId === windowId)) {
+                    throw new Error(`No window with id: ${windowId}.`);
+                }
+                const active = openTabs.find((tab) => tab.active && tab.windowId === windowId);
                 if (undefined === active || !(activeTabGrants.has(active.id) || hasAllUrls)) {
                     throw new Error(NEEDS_ACTIVE_TAB);
                 }
@@ -288,7 +305,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
                 return 'png' === options.format ? `data:image/png;base64,${ONE_PIXEL_PNG}` : `data:image/jpeg;base64,${EMPTY_JPEG}`;
             },
             async create({ url, active = true }) {
-                const tab = { id: nextTabId, url, active: false };
+                const tab = { id: nextTabId, url, active: false, windowId: lastFocusedWindowId };
                 nextTabId += 1;
                 openTabs.push(tab);
                 if (active) {
@@ -317,6 +334,11 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
 
                     return asSeen(tab);
                 });
+            },
+        },
+        windows: {
+            async getLastFocused() {
+                return { id: lastFocusedWindowId, focused: true };
             },
         },
         runtime: {
@@ -371,6 +393,10 @@ export function fakeBrowser({ tabs = [], hostOrigins = [] } = {}) {
             }
             activate(tabId);
             activeTabGrants.add(tabId);
+        },
+        /** The person clicks the tab's title: it becomes the active one of its window, and that window the focused one. */
+        showTab(tabId) {
+            activate(tabId);
         },
         /** A link's or form's navigation: a new document, loading until finishLoading; leaving the origin ends activeTab. */
         navigate(tabId, url) {
