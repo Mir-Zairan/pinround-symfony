@@ -65,7 +65,7 @@ final class OAuthClient
         ));
 
         return new self(
-            rtrim(strtr(base64_encode(random_bytes(self::CLIENT_ID_RANDOM_BYTES)), '+/', '-_'), '='),
+            RandomToken::base64Url(self::CLIENT_ID_RANDOM_BYTES),
             null === $clientName ? null : self::checkedClientName($clientName),
             $checkedRedirectUris,
             $grantTypeValues,

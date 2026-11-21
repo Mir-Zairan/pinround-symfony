@@ -114,7 +114,7 @@ final class ApiToken implements TenantOwned
         if ([] === $scopes) {
             throw new InvalidApiToken('Choose at least one thing the token may do.');
         }
-        $randomPart = rtrim(strtr(base64_encode(random_bytes(self::RANDOM_BYTES)), '+/', '-_'), '=');
+        $randomPart = RandomToken::base64Url(self::RANDOM_BYTES);
         $plainToken = self::PLAIN_PREFIX.$randomPart;
         // In the order of the cases, so the same choice is always stored the same way.
         $scopeValues = array_values(array_map(
@@ -188,6 +188,16 @@ final class ApiToken implements TenantOwned
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    /**
+     * Whether a person made the token on the tokens page, not an OAuth grant (ADR-0050). No column marks the kind: a
+     * personal token lives at least a day and an OAuth access token OAUTH_ACCESS_LIFETIME_SECONDS, and ApiTokens'
+     * queries tell them apart by the same lifetime.
+     */
+    public function isPersonal(): bool
+    {
+        return $this->expiresAt->getTimestamp() - $this->createdAt->getTimestamp() > self::OAUTH_ACCESS_LIFETIME_SECONDS;
     }
 
     /**

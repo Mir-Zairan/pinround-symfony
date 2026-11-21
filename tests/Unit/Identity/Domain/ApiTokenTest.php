@@ -218,6 +218,20 @@ final class ApiTokenTest extends TestCase
     }
 
     /**
+     * The shortest personal token lives a day; issued in Berlin across a clock change, it still lives 24 hours.
+     */
+    #[Test]
+    public function aPersonalTokenOfAnyLifetimeIsPersonalAndAnOAuthAccessTokenIsNot(): void
+    {
+        $beforeClockChange = new \DateTimeImmutable('2027-03-27 12:00:00', new \DateTimeZone('Europe/Berlin'));
+        $accessToken = ApiToken::issueForOAuthClient(self::TOKEN_ID, new OrganizationId(self::ACME_FOODS), new UserId(self::OMAR), 'Claude Code', [ApiTokenScope::Read], new HmacApiTokenHashing(self::PEPPER), new \DateTimeImmutable(self::ISSUED_AT));
+
+        self::assertTrue(self::issue(issuedAt: $beforeClockChange, lifetimeDays: 1)->token()->isPersonal());
+        self::assertTrue(self::issue(lifetimeDays: ApiToken::MAX_LIFETIME_DAYS)->token()->isPersonal());
+        self::assertFalse($accessToken->token()->isPersonal());
+    }
+
+    /**
      * @param list<ApiTokenScope> $scopes
      */
     private static function issue(string $name = 'Claude Code', array $scopes = [ApiTokenScope::Read], ?\DateTimeImmutable $issuedAt = null, int $lifetimeDays = ApiToken::DEFAULT_LIFETIME_DAYS): IssuedApiToken

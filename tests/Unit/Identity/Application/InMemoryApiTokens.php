@@ -17,7 +17,7 @@ use Symfony\Component\Uid\Uuid;
  * Tokens of every organization as idn_api_token keeps them, read in one transaction under $tenant as DoctrineApiTokens
  * reads them: only the tenant's rows, (organization, id) and the hash unique, live counted by the given time, a revoke
  * and an expiry warning written once, and a token read as stored, its revocation, last use and warning included, as a
- * fresh entity manager loads it. Stricter than the real one in one way: countLiveOf() refuses unless lockIssuingFor() took that
+ * fresh entity manager loads it. Stricter than the real one in one way: either count refuses unless lockIssuingFor() took that
  * person's lock earlier in the transaction, so a count read ahead of the lock fails the test instead of passing.
  */
 final class InMemoryApiTokens implements ApiTokens
@@ -39,7 +39,7 @@ final class InMemoryApiTokens implements ApiTokens
 
     private int $issuedIds = 0;
 
-    /** @var list<string> the calls of lockIssuingFor, countLiveOf and add, in order */
+    /** @var list<string> the calls of lockIssuingFor, the two counts and add, in order */
     public array $calls = [];
 
     /**
@@ -103,15 +103,15 @@ final class InMemoryApiTokens implements ApiTokens
     public function countLiveOf(UserId $userId, \DateTimeImmutable $at): int
     {
         $this->calls[] = 'countLiveOf';
-        $tenant = $this->requireTenant();
-        if (!isset($this->heldIssuingLocks[self::lockKey($tenant, $userId)])) {
-            throw new \LogicException('Live tokens were counted before the issuing lock of the person was taken.');
-        }
 
-        return \count(array_filter(
-            $this->tenantTokens(),
-            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, self::cutToSecond($at)),
-        ));
+        return \count($this->liveOfUnderLock($userId, $at));
+    }
+
+    public function countLivePersonalOf(UserId $userId, \DateTimeImmutable $at): int
+    {
+        $this->calls[] = 'countLivePersonalOf';
+
+        return \count(array_filter($this->liveOfUnderLock($userId, $at), self::isPersonal(...)));
     }
 
     public function byIdForOwner(string $id, UserId $ownerId): ?ApiToken
@@ -145,7 +145,7 @@ final class InMemoryApiTokens implements ApiTokens
         $after = null === $afterExpiresAt || null === $afterId ? null : [self::cutToSecond($afterExpiresAt), strtolower($afterId)];
         $tokens = array_values(array_filter(
             $this->tenantTokens(),
-            fn (ApiToken $token): bool => $this->isLive($token, self::cutToSecond($at))
+            fn (ApiToken $token): bool => $this->isLive($token, self::cutToSecond($at)) && self::isPersonal($token)
                 && (null === $after || [self::cutToSecond($token->expiresAt()), strtolower($token->id())] > $after),
         ));
         usort($tokens, static fn (ApiToken $a, ApiToken $b): int => [self::cutToSecond($a->expiresAt()), strtolower($a->id())] <=> [self::cutToSecond($b->expiresAt()), strtolower($b->id())]);
@@ -155,7 +155,7 @@ final class InMemoryApiTokens implements ApiTokens
 
     public function forUser(UserId $userId): array
     {
-        $tokens = array_values(array_filter($this->tenantTokens(), static fn (ApiToken $token): bool => $token->userId()->equals($userId)));
+        $tokens = array_values(array_filter($this->tenantTokens(), static fn (ApiToken $token): bool => $token->userId()->equals($userId) && self::isPersonal($token)));
         usort($tokens, self::newestFirst(...));
 
         return \array_slice($tokens, 0, self::MAX_LISTED_TOKENS);
@@ -165,7 +165,7 @@ final class InMemoryApiTokens implements ApiTokens
     {
         $tokens = array_values(array_filter(
             $this->tenantTokens(),
-            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, self::cutToSecond($at)),
+            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, self::cutToSecond($at)) && self::isPersonal($token),
         ));
         usort($tokens, self::newestFirst(...));
 
@@ -247,6 +247,30 @@ final class InMemoryApiTokens implements ApiTokens
             }
         }
         $this->rows[$rowKey] = $token;
+    }
+
+    /**
+     * @return list<ApiToken> the user's live tokens in the tenant
+     */
+    private function liveOfUnderLock(UserId $userId, \DateTimeImmutable $at): array
+    {
+        $tenant = $this->requireTenant();
+        if (!isset($this->heldIssuingLocks[self::lockKey($tenant, $userId)])) {
+            throw new \LogicException('Live tokens were counted before the issuing lock of the person was taken.');
+        }
+
+        return array_values(array_filter(
+            $this->tenantTokens(),
+            fn (ApiToken $token): bool => $token->userId()->equals($userId) && $this->isLive($token, self::cutToSecond($at)),
+        ));
+    }
+
+    /**
+     * As DoctrineApiTokens tells the kinds apart: by the stored times, each to the second.
+     */
+    private static function isPersonal(ApiToken $token): bool
+    {
+        return self::cutToSecond($token->expiresAt())->getTimestamp() - self::cutToSecond($token->createdAt())->getTimestamp() > ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS;
     }
 
     private function isLive(ApiToken $token, \DateTimeImmutable $at): bool

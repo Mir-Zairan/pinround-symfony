@@ -17,7 +17,7 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * A person makes a personal access token for Claude Code or the browser plugin (P09.T1, ADR-0021), at most
- * MAX_LIVE_TOKENS_PER_USER that still work per person and organization. Its write and ApiTokenIssued, for the audit
+ * MAX_LIVE_TOKENS_PER_USER personal ones that still work per person and organization. Its write and ApiTokenIssued, for the audit
  * log, share the caller's transaction (RequestTransaction on the web), which must be open under $organizationId as
  * tenant: the cap's lock lasts until it ends.
  */
@@ -36,8 +36,8 @@ final readonly class IssueApiToken
      * @return IssuedApiToken the token, saved, and its plain text, to show once
      *
      * @throws InvalidApiToken  when ApiToken::issue() refuses the name, scopes or lifetime; nothing is added
-     * @throws TooManyApiTokens when the user has MAX_LIVE_TOKENS_PER_USER tokens in the organization that are neither
-     *                          revoked nor expired at $now; nothing is added
+     * @throws TooManyApiTokens when the user has MAX_LIVE_TOKENS_PER_USER personal tokens in the organization that are
+     *                          neither revoked nor expired at $now; nothing is added
      * @throws \LogicException  when no transaction is open, or $organizationId is not the tenant
      */
     public function __invoke(OrganizationId $organizationId, UserId $userId, string $name, array $scopes, int $lifetimeDays, \DateTimeImmutable $now): IssuedApiToken
@@ -47,7 +47,8 @@ final readonly class IssueApiToken
 
     /**
      * The access token of an OAuth grant (ADR-0050), named after the client, lasting
-     * ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS; it counts towards MAX_LIVE_TOKENS_PER_USER as any other token.
+     * ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS. It is refused at MAX_LIVE_TOKENS_PER_USER live tokens of both kinds,
+     * while it never counts towards the cap of a personal token.
      *
      * @param string              $clientName the client's name, or a stand-in for a client without one
      * @param list<ApiTokenScope> $scopes     the grant's
@@ -55,7 +56,8 @@ final readonly class IssueApiToken
      * @return IssuedApiToken the token, saved, and its plain text, to hand to the client once
      *
      * @throws InvalidApiToken  when ApiToken::issueForOAuthClient() refuses the name or scopes; nothing is added
-     * @throws TooManyApiTokens as __invoke(); nothing is added
+     * @throws TooManyApiTokens when the user has MAX_LIVE_TOKENS_PER_USER tokens of both kinds in the organization that
+     *                          are neither revoked nor expired at $now; nothing is added
      * @throws \LogicException  as __invoke()
      */
     public function issueForOAuthClient(OrganizationId $organizationId, UserId $userId, string $clientName, array $scopes, \DateTimeImmutable $now): IssuedApiToken
@@ -70,7 +72,7 @@ final readonly class IssueApiToken
      * @param list<ApiTokenScope> $scopes the grant's
      *
      * @throws InvalidApiToken  as issueForOAuthClient(); nothing is added
-     * @throws TooManyApiTokens as __invoke(); nothing is added
+     * @throws TooManyApiTokens as issueForOAuthClient(); nothing is added
      * @throws \LogicException  as __invoke()
      */
     public function renewForOAuthClient(OrganizationId $organizationId, UserId $userId, string $clientName, array $scopes, \DateTimeImmutable $now): IssuedApiToken
@@ -104,12 +106,17 @@ final readonly class IssueApiToken
     }
 
     /**
-     * @throws TooManyApiTokens when the owner has MAX_LIVE_TOKENS_PER_USER live tokens; nothing is added
+     * @throws TooManyApiTokens when the owner has MAX_LIVE_TOKENS_PER_USER live tokens that count; nothing is added
      */
     private function addUnderCap(ApiToken $token, \DateTimeImmutable $now): void
     {
         $this->tokens->lockIssuingFor($token->organizationId(), $token->userId());
-        if ($this->tokens->countLiveOf($token->userId(), $now) >= self::MAX_LIVE_TOKENS_PER_USER) {
+        // A personal token counts personal ones only, so an hour of OAuth connections never blocks one on the tokens
+        // page; an OAuth access token counts every live token, which keeps a person's tokens bounded all the same.
+        $liveTokens = $token->isPersonal()
+            ? $this->tokens->countLivePersonalOf($token->userId(), $now)
+            : $this->tokens->countLiveOf($token->userId(), $now);
+        if ($liveTokens >= self::MAX_LIVE_TOKENS_PER_USER) {
             throw new TooManyApiTokens(self::MAX_LIVE_TOKENS_PER_USER);
         }
         $this->tokens->add($token);

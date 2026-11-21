@@ -84,7 +84,7 @@ final class OAuthRefreshToken implements TenantOwned
         if ([] === $scopes) {
             throw new \InvalidArgumentException('A refresh token grants at least one scope.');
         }
-        $plainToken = self::PLAIN_PREFIX.rtrim(strtr(base64_encode(random_bytes(self::RANDOM_BYTES)), '+/', '-_'), '=');
+        $plainToken = self::PLAIN_PREFIX.RandomToken::base64Url(self::RANDOM_BYTES);
         // In the order of the cases, so the same choice is always stored the same way.
         $scopeValues = array_values(array_map(
             static fn (ApiTokenScope $scope): string => $scope->value,

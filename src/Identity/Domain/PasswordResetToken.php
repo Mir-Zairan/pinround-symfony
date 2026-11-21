@@ -21,7 +21,7 @@ final readonly class PasswordResetToken
      */
     public static function generate(): self
     {
-        return new self(rtrim(strtr(base64_encode(random_bytes(self::RANDOM_BYTES)), '+/', '-_'), '='));
+        return new self(RandomToken::base64Url(self::RANDOM_BYTES));
     }
 
     /**

@@ -56,6 +56,12 @@ final readonly class DoctrineApiTokens implements ApiTokens
     private const string COUNT_LIVE = 'SELECT count(*) FROM idn_api_token'
         .' WHERE organization_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?';
 
+    // ApiToken::isPersonal() in SQL.
+    private const string PERSONAL_ONLY = " AND expires_at - created_at > interval '".ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS." seconds'";
+
+    // As PERSONAL_ONLY, in DQL: DATE_ADD of seconds is created_at plus an interval on PostgreSQL.
+    private const string PERSONAL_ONLY_DQL = ' AND t.expiresAt > DATE_ADD(t.createdAt, '.ApiToken::OAUTH_ACCESS_LIFETIME_SECONDS.", 'second')";
+
     // The columns keep whole seconds, and PostgreSQL rounds a fraction; cutting it here keeps "now" from moving ahead.
     private const string TIMESTAMP_FORMAT = 'Y-m-d H:i:sP';
 
@@ -90,7 +96,17 @@ final readonly class DoctrineApiTokens implements ApiTokens
 
     public function countLiveOf(UserId $userId, \DateTimeImmutable $at): int
     {
-        $liveTokens = $this->entityManager->getConnection()->fetchOne(self::COUNT_LIVE, [
+        return $this->countLive(self::COUNT_LIVE, $userId, $at);
+    }
+
+    public function countLivePersonalOf(UserId $userId, \DateTimeImmutable $at): int
+    {
+        return $this->countLive(self::COUNT_LIVE.self::PERSONAL_ONLY, $userId, $at);
+    }
+
+    private function countLive(string $countQuery, UserId $userId, \DateTimeImmutable $at): int
+    {
+        $liveTokens = $this->entityManager->getConnection()->fetchOne($countQuery, [
             $this->tenantContext->require()->toString(),
             $userId->toString(),
             $at->format(self::TIMESTAMP_FORMAT),
@@ -132,7 +148,7 @@ final readonly class DoctrineApiTokens implements ApiTokens
         $organizationId = $this->tenantContext->require();
         $query = $this->entityManager->createQuery(
             'SELECT t FROM '.ApiToken::class.' t WHERE t.organizationId = :organizationId'
-            .' AND t.revokedAt IS NULL AND t.expiresAt > :at'
+            .' AND t.revokedAt IS NULL AND t.expiresAt > :at'.self::PERSONAL_ONLY_DQL
             .(null === $afterExpiresAt ? '' : ' AND (t.expiresAt > :afterExpiresAt OR (t.expiresAt = :afterExpiresAt AND t.id > :afterId))')
             .' ORDER BY t.expiresAt ASC, t.id ASC',
         )
@@ -153,7 +169,7 @@ final readonly class DoctrineApiTokens implements ApiTokens
     {
         /** @var list<ApiToken> $tokens */
         $tokens = $this->entityManager->createQuery(
-            'SELECT t FROM '.ApiToken::class.' t WHERE t.userId = :userId ORDER BY t.createdAt DESC, t.id DESC',
+            'SELECT t FROM '.ApiToken::class.' t WHERE t.userId = :userId'.self::PERSONAL_ONLY_DQL.' ORDER BY t.createdAt DESC, t.id DESC',
         )
             ->setParameter('userId', $userId->toString())
             ->setMaxResults(self::MAX_LISTED_TOKENS)
@@ -169,7 +185,7 @@ final readonly class DoctrineApiTokens implements ApiTokens
         /** @var list<ApiToken> $tokens */
         $tokens = $this->entityManager->createQuery(
             'SELECT t FROM '.ApiToken::class.' t WHERE t.organizationId = :organizationId AND t.userId = :userId'
-            .' AND t.revokedAt IS NULL AND t.expiresAt > :at ORDER BY t.createdAt DESC, t.id DESC',
+            .' AND t.revokedAt IS NULL AND t.expiresAt > :at'.self::PERSONAL_ONLY_DQL.' ORDER BY t.createdAt DESC, t.id DESC',
         )
             ->setParameter('organizationId', $organizationId->toString())
             ->setParameter('userId', $userId->toString())
