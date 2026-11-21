@@ -7,6 +7,7 @@ AI builds in minutes what used to take days. The person who has to check it firs
 ## Index
 - [Why pinround](#why-pinround): what each ticket shows, and for whom
 - [How it works](#how-it-works): the five steps from screenshot to verdict
+- [Run it in 5 minutes](#run-it-in-5-minutes): one command, then log in
 - [Built with](#built-with): Symfony AI, MCP, Symfony 8.1, PostgreSQL, the extension
 - [See it in action on the demo shop](#see-it-in-action-on-the-demo-shop): setup with or without Claude Code, demo people
 - [Try the loop](#try-the-loop): report, fix, hand over and test one bug
@@ -32,6 +33,16 @@ Every fix and every feature has its own ticket, and the ticket shows what was bu
 
 AI only suggests and uploads. A person decides every verdict, and a report becomes a ticket only when a person presses **Send**.
 
+## Run it in 5 minutes
+You need Docker with Compose v2 (Docker Desktop on macOS or Windows with WSL 2), `make` and `git`. Ports 80 and 443 must be free.
+
+```bash
+git clone https://github.com/Mir-Zairan/pinround-symfony.git && cd pinround-symfony
+make demo
+```
+
+It pulls ready-made images, starts pinround and loads the demo people and their tickets: 3 minutes 45 seconds on an empty Docker. Then open https://localhost, accept the browser's warning about the local certificate once, and log in as `mia@acme-foods.example` (tester), `omar@acme-foods.example` (developer) or `lena@acme-foods.example` (lead). The password: `grep DEMO_PASSWORD .env.dev.local`. Stop with `make down`. [More](docs/guides/demo.md).
+
 ## Built with
 - **Symfony AI** (`symfony/ai-platform`): **Summarize with AI** and **Check with AI**, through Hugging Face (the default), Anthropic, or Ollama on the person's laptop.
 - **MCP** (`mcp/sdk` with `symfony/mcp-bundle`): pinround's own MCP server at `/mcp`, with 18 tools and 3 prompts for Claude Code, and sign-in with OAuth 2.1 and PKCE.
@@ -46,6 +57,8 @@ The repo bundles `demo-shop/`, a small shop with 4 planted bugs ([answers](demo-
 ```bash
 git clone https://github.com/Mir-Zairan/pinround-symfony.git && cd pinround-symfony
 ```
+
+For the whole loop, with the browser extension and Claude Code on the bundled shop:
 
 **With Claude Code (about 15 minutes):** run `claude`, type `/pinround-setup` and follow it. It runs every machine step and stops only for what you must click.
 

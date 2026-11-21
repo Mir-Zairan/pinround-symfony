@@ -83,3 +83,4 @@ Chosen option: **build from pinned source**, because it keeps the ADR-0011 choic
 
 - Related: [ADR-0011](0011-screenshot-storage-and-processing.md), [ADR-0030](0030-deployment-model.md).
 - Revisit when: upstream publishes signed images again, or a build fails twice in a row because of upstream changes.
+- 2026-11-22: `make demo` pulls an image built from this same pinned source and published by us at `ghcr.io/mir-zairan/pinround-minio`, by digest, and tags it `pinround-minio:dev`; compose itself still never pulls it. The build stays the source of truth and `make up` still builds. How to publish a new one: [guides/demo.md](../guides/demo.md).
