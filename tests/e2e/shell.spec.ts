@@ -9,7 +9,7 @@ test.use({ storageState: LENA_STORAGE_STATE });
 const LIGHT_SURFACE = 'rgb(244, 251, 248)';
 const DARK_SURFACE = 'rgb(14, 21, 19)';
 // Wide enough for the longest count each one shows in a seeded run (three digits).
-const FIXED_COUNT_WIDTHS = { '.home__section-note': '160px', '.nav__badge': '40px' };
+const FIXED_COUNT_WIDTHS = { '.home__section-note': '160px' };
 
 async function seriousViolations(page: Page): Promise<string[]> {
   const { violations } = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze();
@@ -40,7 +40,6 @@ for (const scheme of ['light', 'dark'] as const) {
       const changingRegions = [
         '.home__date',
         '.bell__trigger',
-        '.nav__badge',
         '.home__title',
         '.home__section-note',
         '.home__needs',
@@ -57,6 +56,13 @@ for (const scheme of ['light', 'dark'] as const) {
           }
         }, width);
       }
+      // My reports' badge shows only while one of Lena's reports needs her answer, which other specs make or settle,
+      // and a mask cannot hide a badge that is missing: the menu items after it move. The baseline has none.
+      await page.locator('.nav__badge').evaluateAll((badges) => {
+        for (const badge of badges) {
+          badge.remove();
+        }
+      });
       await expect(page).toHaveScreenshot(`shell-${scheme}.png`, { mask: changingRegions });
     });
   });
