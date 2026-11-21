@@ -18,7 +18,8 @@
 #   ai-status             say which cloud AI keys the app has and test them, and whether Ollama here is ready for pinround
 #   demo-mode <on|off>    turn the dev-only switch that skips two-step login on or off (PINROUND_DEMO_SKIP_2FA), restart
 #   demo                  a first look in about 5 minutes: ready-made images where they fit this machine, demo mode on,
-#                         the stack, the demo people and their tickets, then the address and who to log in as
+#                         the stack, the demo people and their tickets, the certificate for Claude Code (as trust-ca),
+#                         then the address and who to log in as
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -499,6 +500,9 @@ cmd_demo() {
     compose up -d --wait > /dev/null || fail 'a service did not start; run: make logs'
     echo 'Loading the demo people and their tickets.'
     make --no-print-directory seed > /dev/null || fail 'the demo data did not load; run: make seed'
+    # Claude Code (Node) trusts https://localhost only with this file in NODE_EXTRA_CA_CERTS; it is harmless without it.
+    cmd_trust_ca > /dev/null 2>&1 && ok "Claude Code can trust https://localhost with NODE_EXTRA_CA_CERTS=$ca_file" \
+        || missing 'the local certificate was not copied for Claude Code' "run: $0 trust-ca"
     echo
     echo "Ready: open $(base_url) (your browser warns about the local certificate once: choose to continue)."
     echo 'Log in as mia@acme-foods.example (tester), omar@acme-foods.example (developer) or lena@acme-foods.example (lead).'

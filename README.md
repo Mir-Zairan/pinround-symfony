@@ -9,8 +9,7 @@ AI builds in minutes what used to take days. The person who has to check it firs
 - [How it works](#how-it-works): the five steps from screenshot to verdict
 - [Run it in 5 minutes](#run-it-in-5-minutes): one command, then log in
 - [Built with](#built-with): Symfony AI, MCP, Symfony 8.1, PostgreSQL, the extension
-- [See it in action on the demo shop](#see-it-in-action-on-the-demo-shop): setup with or without Claude Code, demo people
-- [Try the loop](#try-the-loop): report, fix, hand over and test one bug
+- [Try the loop](#try-the-loop): the shop, the extension and Claude Code, then report, fix and hand over one bug
 - [What pinround does today](#what-pinround-does-today): the features built so far
 - [Coming next](#coming-next): the next phases
 - [Good to know](#good-to-know): sample data, start and stop, guides
@@ -53,25 +52,13 @@ It pulls ready-made images, starts pinround and loads the demo people and their 
 - **Chrome extension** in plain JavaScript (Manifest V3).
 - **Checks:** PHPUnit, Playwright, PHPStan at max level, Deptrac module rules, PHP CS Fixer and Rector.
 
-## See it in action on the demo shop
-The repo bundles `demo-shop/`, a small shop with 4 planted bugs ([answers](demo-shop/BUGS.md)). You need Docker with Compose v2, `make`, `git`, Node 22+, Chrome and [Claude Code](https://docs.claude.com/en/docs/claude-code/overview).
+## Try the loop
+Report a bug in the bundled shop, fix it with Claude Code and hand it over, as the three demo people. `demo-shop/` has 4 planted bugs ([answers](demo-shop/BUGS.md)).
 
-```bash
-git clone https://github.com/Mir-Zairan/pinround-symfony.git && cd pinround-symfony
-```
-
-For the whole loop, with the browser extension and Claude Code on the bundled shop:
-
-**With Claude Code (about 15 minutes):** run `claude`, type `/pinround-setup` and follow it. It runs every machine step and stops only for what you must click.
-
-**Without Claude Code:** run the same steps by hand. `S=.claude/skills/pinround-setup/pinround-setup.sh`
-1. `$S stack`: starts pinround and loads the demo people (first run: 5–6 minutes).
-2. `$S demo-mode on`: skips two-step login on this laptop, so you need no authenticator app.
-3. `$S trust-ca`: lets Claude Code trust pinround's local HTTPS certificate.
-4. In Chrome, open `chrome://extensions`, turn on **Developer mode**, **Load unpacked** › pick `extension/`. Then run `$S extension <its 32-letter id>`.
-5. In the extension's options: **Connect to pinround** with `https://localhost`, log in as Mia, **Allow**. Under **Allowed hosts**, add `http://localhost:8090`.
-6. `make demo-shop`, then open http://localhost:8090.
-7. Connect Claude Code (needed for the AI steps):
+**Before you start** (after `make demo`, about 5 minutes; you also need Node 20+, Chrome and [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)). Or run `claude` in this folder and type `/pinround-setup`: it does the machine steps and stops only for what you must click.
+1. **The shop:** `make demo-shop`, then open http://localhost:8090.
+2. **The extension:** in Chrome open `chrome://extensions`, turn on **Developer mode**, **Load unpacked** › pick `extension/`. In its options, **Connect to pinround** with `https://localhost`, log in as Mia, **Allow**. Under **Allowed hosts**, add `http://localhost:8090`.
+3. **Claude Code** (for the AI steps): it signs in, no token needed.
    ```bash
    cd demo-shop
    claude mcp add --transport http pinround https://localhost/mcp
@@ -79,19 +66,8 @@ For the whole loop, with the browser extension and Claude Code on the bundled sh
    ```
    In Claude Code, type `/mcp`, pick `pinround` › authenticate, log in as Omar, **Allow**.
 
-`$S check` says what is ready and what is missing. Open pinround at https://localhost.
+All demo people (`@acme-foods.example`): Mia (tester), Omar (developer), Lena (lead), Sara (admin), Raj (manager), one password: `grep DEMO_PASSWORD .env.dev.local`.
 
-| Person | Email | Role |
-|---|---|---|
-| Mia | `mia@acme-foods.example` | tester |
-| Lena | `lena@acme-foods.example` | lead |
-| Omar | `omar@acme-foods.example` | developer |
-| Sara | `sara@acme-foods.example` | admin |
-| Raj | `raj@acme-foods.example` | manager |
-
-All use one password: `grep DEMO_PASSWORD .env.dev.local`
-
-## Try the loop
 **1. Report a problem**, as Mia. On the shop, add the same product twice: the total is wrong.
 - **Extension:** click it › **A new report** › project `SHOP` › **Capture this page** › **Done**. In the draft pinround opens, pin the wrong total and press **Send**.
 - **Claude Code:** run `/mcp__pinround__report_while_investigating` and say "Check the cart total at http://localhost:8090". It keeps the evidence and files a report draft; you press **Send**. This needs a token with `reports:write` ([how](docs/guides/claude-code.md#1-make-a-token)).
@@ -128,6 +104,7 @@ Put the bugs back with `git restore demo-shop/src`.
 - **Three tickets that show the loop:** setup also adds three `SHOP` bugs of the demo shop with real screenshots: "Search finds nothing for Bread with a capital B" (done), "Cart total disappears after a discount code" (waiting for Mia in Testing) and "Orders filter leaves out the last order" (back with Omar after Mia found a new order missing). Open their rounds to see Before and After with pins and verdicts.
 - **Home is mostly empty** until P07 is built. Your tickets are under **Tickets**.
 - **Start or stop later:** `make up` / `make down`. A port is taken? Set another in `.env.local`, for example `HTTPS_PORT=8443`.
+- **Beyond the demo:** `make up` builds and starts the same stack for development ([step by step](docs/guides/demo.md#set-up-step-by-step)). A deployment for a team is not ready yet: that is the launch phase (P12); the settings are in [config.md](docs/operations/config.md).
 - **Guides:** [Claude Code](docs/guides/claude-code.md) · [Reporting with Claude Code](docs/guides/reporting-with-claude-code.md) · [Browser extension](docs/guides/browser-extension.md)
 
 ## Working on pinround
