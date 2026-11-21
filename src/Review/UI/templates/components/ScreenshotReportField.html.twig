@@ -34,7 +34,7 @@
     <input type="hidden" name="screenshot_media_id" value="{{ this.mediaId }}" data-presigned-upload-target="mediaId">
 
     {% if this.usesScreenshotEditor %}
-        <div class="screenshot-report__picture" data-screenshot-report-target="picture"{% if not this.hasPicture %} hidden{% endif %}>
+        <div class="screenshot-report__picture" data-screenshot-report-target="picture"{% if not this.showsEditorPictureArea %} hidden{% endif %}>
             <twig:ScreenshotEditor :screenshots="this.editorItems" :fieldId="this.editorId" :canAdd="false" :notePlaceholder="this.notePlaceholder" :describedBy="this.error is null ? null : this.errorId" />
             <p class="screenshot-report__count" data-screenshot-report-target="count">{{ this.pinCountText }}</p>
         </div>

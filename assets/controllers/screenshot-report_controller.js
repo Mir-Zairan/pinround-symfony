@@ -9,7 +9,8 @@ import { isSubmitHeldFor, WAITING_MESSAGE } from '../review/submit_hold.js';
 // form's submit and sends it once presigned-upload:ready fires; after presigned-upload:still-processing it lets the
 // submit through, so the server refuses it with its own text. Inside a ScreenshotEditor the picture's thumbnail
 // follows the picture, and the editor's Remove screenshot (screenshot-editor:remove) removes it; there is no Remove of
-// its own.
+// its own. Hiding the picture area also empties the title and summary it holds there, as the server refuses them
+// without a picture.
 export default class extends Controller {
   static targets = ['picture', 'empty', 'remove', 'count', 'frame', 'image', 'placeholder', 'file', 'status', 'thumb', 'thumbPlaceholder'];
   static outlets = ['pin-placer'];
@@ -50,6 +51,7 @@ export default class extends Controller {
     const isFocusInHiddenPart = [this.pictureTarget, ...this.removeTargets].some((part) => part.contains(document.activeElement));
     this.releaseSubmit();
     this.clearPins();
+    this.clearPictureText();
     this.forgetPagePicture();
     this.showThumb(null);
     this.showPictureArea(false);
@@ -100,6 +102,13 @@ export default class extends Controller {
     if (this.hasPinPlacerOutlet) {
       this.pinPlacerOutlet.clear();
     }
+  }
+
+  // A hidden field still posts: text left in the hidden area would be sent with no picture and refused out of sight.
+  clearPictureText() {
+    this.pictureTarget.querySelectorAll('input:not([type="hidden"]), textarea').forEach((field) => {
+      field.value = '';
+    });
   }
 
   // presigned-upload draws the new upload into the image only; the editor's thumbnail shows the same picture.
