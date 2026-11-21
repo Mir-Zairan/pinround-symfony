@@ -12,6 +12,7 @@ use App\Media\Application\Processing\EncodedVariant;
 use App\Media\Application\Processing\ImageEncoder;
 use App\Media\Application\Processing\ImageFormat;
 use App\Media\Application\Processing\ImageHeaderReader;
+use App\Media\Application\Processing\ReadyVariants;
 use App\Media\Application\ProcessUpload;
 use App\Media\Domain\MediaId;
 use App\Media\Domain\MediaObject;
@@ -747,7 +748,9 @@ final class CleanUploadTest extends TestCase
 
     private function cleanUploadWith(ImageEncoder $imageEncoder): CleanUpload
     {
-        return new CleanUpload($this->onceOnlyHandling, $this->mediaObjects, $this->mediaFiles, new PurePhpImageHeaderReader(), $imageEncoder, $this->mediaEvents, $this->tenantContext);
+        $imageHeaderReader = new PurePhpImageHeaderReader();
+
+        return new CleanUpload($this->onceOnlyHandling, $this->mediaObjects, $this->mediaFiles, $imageHeaderReader, new ReadyVariants($this->mediaObjects, $this->mediaFiles, $imageHeaderReader, $imageEncoder), $this->mediaEvents, $this->tenantContext);
     }
 
     /**

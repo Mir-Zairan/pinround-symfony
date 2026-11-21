@@ -527,6 +527,22 @@ when@test:
         App\Tests\Fixtures\Media\FakeImageEncoder:
             public: true
         App\Media\Application\Processing\ImageEncoder: '@App\Tests\Fixtures\Media\FakeImageEncoder'
+        # The demo seed's showcase pictures are written to a bucket in memory, so app:demo:seed runs where there is no
+        # MinIO (CI's functional job); SeedPictureFileTest runs SeedPictureFile on the dev stack's MinIO.
+        test.media_seed_files:
+            class: App\Tests\Unit\Media\Application\Processing\InMemoryMediaFiles
+        test.media_seed_ready_variants:
+            class: App\Media\Application\Processing\ReadyVariants
+            arguments:
+                - '@App\Media\Domain\MediaObjects'
+                - '@test.media_seed_files'
+                - '@App\Media\Application\Processing\ImageHeaderReader'
+                - '@App\Media\Application\Processing\ImageEncoder'
+        App\Media\Infrastructure\Demo\SeedPictureFile:
+            arguments:
+                - '@App\Media\Domain\MediaObjects'
+                - '@test.media_seed_ready_variants'
+                - '@App\Media\Application\Processing\ImageHeaderReader'
         # No test may call a real AI provider, so the port gets the deterministic one; public so a test can arm a
         # failure and read the calls. autoconfigure keeps it tagged as resettable, so each kernel reset empties it.
         App\Assist\Infrastructure\Platform\FakeProvider:
