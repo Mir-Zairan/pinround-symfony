@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Ticketing;
 
 use App\Identity\Domain\User;
 use App\Review\UI\Component\RoundsSection;
+use App\Review\UI\NewTicket\ScreenshotReportOnNewTicket;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -411,6 +412,73 @@ final class ReportControllerTest extends WebTestCase
         self::assertCount(1, $page->filter('[name="screenshot_summary"]'), 'No second summary field outside the picture area.');
         self::assertNull($page->filter('.screenshot-report__empty')->attr('hidden'));
         self::assertCount(0, $page->filter('.screenshot-report__remove'), 'The editor\'s Remove screenshot is the only one.');
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string, string}>
+     */
+    public static function pictureTextWithoutAPicture(): iterable
+    {
+        yield 'a title' => [['screenshot_title' => 'Cart page', 'screenshot_summary' => ''], 'Cart page', ''];
+        yield 'a summary' => [['screenshot_title' => '', 'screenshot_summary' => 'The total doubles'], '', 'The total doubles'];
+        yield 'a title for a picture that is not the reporter\'s' => [['screenshot_media_id' => '0197a3c0-0000-7000-8000-00000000beef', 'screenshot_title' => 'Cart page', 'screenshot_summary' => ''], 'Cart page', ''];
+    }
+
+    /**
+     * The editor's Remove screenshot empties the title and summary, but a page without script, or a picture the server
+     * does not keep, posts them without one: the refusal asks to clear them, so the picture area shows them again.
+     *
+     * @param array<string, string> $overrides
+     */
+    #[Test]
+    #[DataProvider('pictureTextWithoutAPicture')]
+    public function aPictureTitleOrSummaryWithoutAPictureIsRefusedInAPictureAreaThatShows(array $overrides, string $title, string $summary): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport($overrides);
+
+        self::assertResponseStatusCodeSame(422);
+        $pictureArea = $page->filter('.screenshot-report__picture');
+        self::assertCount(1, $pictureArea);
+        self::assertNull($pictureArea->attr('hidden'));
+        self::assertSame($title, $pictureArea->filter('#screenshot-editor input[name="screenshot_title"]')->attr('value'));
+        self::assertSame($summary, $pictureArea->filter('#screenshot-editor textarea[name="screenshot_summary"]')->text());
+        self::assertCount(0, $pictureArea->filter('.screenshot__placeholder'), 'There is no picture to be processing.');
+        self::assertSame('', $page->filter('input[name="screenshot_media_id"]')->attr('value'));
+        self::assertNull($page->filter('.screenshot-report__empty')->attr('hidden'), 'The way to add a picture still shows.');
+        self::assertSame(0, $this->ticketCount());
+        self::assertSame(0, $this->roundCount());
+    }
+
+    #[Test]
+    public function aPictureTitleOrSummaryWithoutAPictureIsRefusedWithWhatToDo(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport(['screenshot_title' => 'Cart page', 'screenshot_summary' => 'The total doubles']);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(ScreenshotReportOnNewTicket::CONTENT_WITHOUT_SCREENSHOT, $page->filter('#screenshot-error')->text());
+        self::assertSame('screenshot-error', $page->filter('#screenshot-editor input[name="screenshot_title"]')->attr('aria-describedby'));
+        self::assertSame(0, $this->ticketCount());
+        self::assertSame(0, $this->roundCount());
+    }
+
+    /**
+     * Blank picture text is no content, as the server reads it: a report refused for another field keeps the area hidden.
+     */
+    #[Test]
+    public function aBlankPictureTitleAndSummaryKeepThePictureAreaHidden(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport(['title' => '   ', 'screenshot_title' => '  ', 'screenshot_summary' => "\n "]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(ReportController::TITLE_MISSING, $page->filter('#report-title-error')->text());
+        self::assertSame('', $page->filter('.screenshot-report__picture')->attr('hidden'));
+        self::assertSame(0, $this->ticketCount());
     }
 
     /**

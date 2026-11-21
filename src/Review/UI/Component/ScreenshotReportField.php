@@ -60,7 +60,7 @@ final class ScreenshotReportField
 
     /**
      * Report a problem shows the picture in the ScreenshotEditor, with its title and summary beside it, and those only
-     * once there is a picture (P14.T10). The fields post the same names either way.
+     * once there is a picture or they came back without one (P14.T10). The fields post the same names either way.
      */
     public bool $usesScreenshotEditor = false;
 
@@ -93,6 +93,16 @@ final class ScreenshotReportField
     public function hasPicture(): bool
     {
         return '' !== $this->mediaId;
+    }
+
+    /**
+     * Whether the ScreenshotEditor's picture area shows: when there is a picture, and also when a title or summary came
+     * back without one, as those fields sit in the area and the refusal asks to clear them. Blank text is none, as
+     * NewTicketReport reads it.
+     */
+    public function showsEditorPictureArea(): bool
+    {
+        return $this->hasPicture() || '' !== trim($this->title) || '' !== trim($this->summary);
     }
 
     public function pinCountText(): string
@@ -191,9 +201,10 @@ final class ScreenshotReportField
         return new ScreenshotView($this->fieldId, $image->url, $image->width, $image->height, self::ALT_TEXT, pins: $pins);
     }
 
+    /** Not pending: the editor would say "Processing…" in an area shown only for a title or summary without a picture. */
     private function viewWithoutPicture(): ScreenshotView
     {
-        return new ScreenshotView($this->fieldId, null, null, null, self::ALT_TEXT, status: MediaImageStatus::Pending);
+        return new ScreenshotView($this->fieldId, null, null, null, self::ALT_TEXT, status: MediaImageStatus::Rejected);
     }
 
     /**

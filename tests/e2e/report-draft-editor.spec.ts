@@ -3,7 +3,6 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { drawablePng, MEDIA_ID, routeCompletedUpload, routeStatus } from './media-mocks';
-import { TOAST_REGION } from './ticket';
 
 // The ScreenshotEditor on the report draft page and on Report a problem (P14.T10): one screenshot at a time, chosen by
 // its thumbnail, and forms that post the same field names and values the stacked pictures did. ReportControllerTest and
@@ -219,10 +218,14 @@ test.describe('the report draft page', () => {
     edited.set('screenshots[3][pins][1]', 'No code shown');
     expect(await postedFieldsMatching(draft.form, /^screenshots\[/)).toEqual(sortedByName([...edited.entries()]));
 
+    // The URL is the draft's before and after the save, so the test waits for the save's own answer. Mia's saved
+    // session is shared with parallel specs, any of which may take the one-time "Report draft saved." toast;
+    // ReportDraftScreenshotEditorTest checks it.
+    const saveAnswer = page.waitForResponse((response) => 'POST' === response.request().method() && new URL(response.url()).pathname === `/report-drafts/${seeded.draftId}`);
     await draft.save.click();
 
+    expect((await saveAnswer).status()).toBe(303);
     await expect(page).toHaveURL(new RegExp(`/report-drafts/${seeded.draftId}$`));
-    await expect(page.locator(TOAST_REGION)).toHaveText('Report draft saved.');
     const saved = await openReportDraft(page, seeded);
     await expect(saved.editor.getByRole('tab')).toHaveCount(SCREENSHOT_COUNT - 1);
     expect(await postedFieldsMatching(saved.form, /^screenshots\[/)).toEqual(sortedByName([
@@ -311,13 +314,15 @@ test.describe('Report a problem', () => {
     }
   });
 
-  test('the editor\'s Remove screenshot drops the picture and its pins and hands focus to the upload', async ({ page }) => {
+  test('the editor\'s Remove screenshot drops the picture, its pins, title and summary, and hands focus to the upload', async ({ page }) => {
     const report = await openReportForm(page);
     await report.fileInput.setInputFiles({ name: 'cart.png', mimeType: 'image/png', buffer: drawablePng(400, 240) });
     await expect(report.mediaId).toHaveValue(MEDIA_ID);
     const box = (await report.frame.boundingBox())!;
     await report.frame.click({ position: { x: box.width * 0.5, y: box.height * 0.5 } });
     await expect(report.pins).toHaveCount(1);
+    await report.editor.getByLabel('Picture title · optional').fill('Cart of Acme Foods');
+    await report.editor.getByLabel('What this picture shows · optional').fill('The cart after one coupon.');
 
     await report.editor.getByRole('button', { name: 'Remove screenshot' }).click();
 
@@ -325,6 +330,17 @@ test.describe('Report a problem', () => {
     await expect(report.mediaId).toHaveValue('');
     await expect(report.fileInput).toBeFocused();
     await expect(report.pins).toHaveCount(0);
-    expect((await postedFields(report.form)).filter(([name]) => name.startsWith('pins['))).toEqual([]);
+    expect(await postedFieldsMatching(report.form, PICTURE_FIELDS)).toEqual([
+      ['screenshot_media_id', ''],
+      ['screenshot_summary', ''],
+      ['screenshot_title', ''],
+    ]);
+
+    // A blank ticket title is refused on its own field, so the form sends and no ticket is made.
+    await report.form.locator('input[name="title"]').fill('   ');
+    await report.form.getByRole('button', { name: 'Create ticket' }).click();
+
+    await expect(page.locator('#report-title-error')).toBeVisible();
+    await expect(page.locator('#screenshot-error')).toHaveCount(0);
   });
 });

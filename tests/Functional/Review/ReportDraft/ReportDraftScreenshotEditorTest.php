@@ -138,7 +138,8 @@ final class ReportDraftScreenshotEditorTest extends WebTestCase
 
     /**
      * The form as the page renders it, saved untouched, keeps every screenshot as it was: the editor posts the names
-     * and values the save reads, hidden screenshots included.
+     * and values the save reads, hidden screenshots included. The draft page it goes back to says so; the e2e spec
+     * leaves that one-time toast to this test, as another spec on the same saved session may take it first.
      */
     #[Test]
     public function savingTheFormUntouchedKeepsEveryScreenshotPinAndNote(): void
@@ -148,11 +149,16 @@ final class ReportDraftScreenshotEditorTest extends WebTestCase
         $this->logIn($this->client, $this->people['Mia']);
         $page = $this->client->request('GET', self::DRAFTS.'/'.$draft);
         self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.toast-region [data-toast-message-value]'), 'No toast before the save.');
 
         $this->client->submit($page->selectButton('Save changes')->form());
 
         self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects(self::DRAFTS.'/'.$draft);
         self::assertEquals($screenshots, $this->storedScreenshotsOf($draft, 2));
+        $savedPage = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(ReportDraftController::SAVED, $savedPage->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
     }
 
     /**
