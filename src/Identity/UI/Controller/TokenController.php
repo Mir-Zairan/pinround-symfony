@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace App\Identity\UI\Controller;
 
+use App\Identity\Api\OAuthConnectionNotFound;
+use App\Identity\Api\OAuthConnectionRefused;
 use App\Identity\Application\AccountPermission;
 use App\Identity\Application\ApiTokenNotFound;
 use App\Identity\Application\ApiTokenRefused;
 use App\Identity\Application\CurrentSession;
+use App\Identity\Application\EndOAuthConnection;
 use App\Identity\Application\IssueApiToken;
 use App\Identity\Application\NewApiToken;
 use App\Identity\Application\RevokeApiToken;
 use App\Identity\Application\ShowApiTokens;
+use App\Identity\Application\ShowOAuthConnections;
 use App\Identity\Application\TooManyApiTokens;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\UI\RequiresRecentAuth;
@@ -26,11 +30,13 @@ use Symfony\Component\Routing\Attribute\Route;
  * the organization they work in. Making one needs a recent password and code (RequiresRecentAuth); its plain token is
  * in the response to that request only, so no reload shows it again. Every action asks OwnAccountVoter for
  * AccountPermission::EDIT_OWN first, which a token-authenticated request never gets (ADR-0013, ADR-0021); the page
- * acts on the session's user, and a token id from the request is found only among that user's own tokens.
+ * acts on the session's user, and a token id from the request is found only among that user's own tokens. Its Connected
+ * apps section lists the person's own OAuth connections (ADR-0050); OAuthConnectionVoter decides who may end one.
  */
 final class TokenController extends AbstractController
 {
     public const string TOKEN_REVOKED = 'The token is revoked. It no longer works.';
+    public const string CONNECTION_ENDED = 'The connection is ended. The app can no longer use pinround.';
     public const string LIFETIME_NOT_OFFERED = 'Choose how long the token works from the list.';
 
     /** What each scope lets the token do, in the words the form and the list show; every scope ShowApiTokens names needs one. */
@@ -48,11 +54,14 @@ final class TokenController extends AbstractController
 
     private const string CREATE_CSRF_ID = 'identity_token_create';
     private const string REVOKE_CSRF_ID = 'identity_token_revoke';
+    private const string END_CONNECTION_CSRF_ID = 'identity_oauth_connection_end';
 
     public function __construct(
         private readonly ShowApiTokens $showApiTokens,
         private readonly IssueApiToken $issueApiToken,
         private readonly RevokeApiToken $revokeApiToken,
+        private readonly ShowOAuthConnections $showOAuthConnections,
+        private readonly EndOAuthConnection $endOAuthConnection,
         private readonly CurrentSession $currentSession,
         private readonly TenantContext $tenantContext,
         private readonly ClockInterface $clock,
@@ -121,15 +130,50 @@ final class TokenController extends AbstractController
     }
 
     /**
-     * @param array{name: string, scopes: list<string>, lifetimeDays: string}|null $chosen what the form sent; null
-     *                                                                                     for the form's defaults
+     * Ends one OAuth connection, in the request transaction with its ApiTokenRevoked. The id is not checked by the
+     * route, so a malformed one gets the same 404 as another organization's; another person's that the voter refuses
+     * shows the page again with the reason (403).
      */
-    private function renderPage(Request $request, ?array $chosen = null, ?string $createError = null, ?string $revokeError = null, ?NewApiToken $newToken = null): Response
+    #[Route('/me/tokens/connections/{id}/end', name: 'identity_tokens_end_connection', methods: ['POST'])]
+    public function endConnection(Request $request, string $id): Response
     {
-        $hasError = null !== $createError || null !== $revokeError;
+        $this->denyAccessUnlessGranted(AccountPermission::EDIT_OWN);
+        if (!$this->isCsrfTokenValid(self::END_CONNECTION_CSRF_ID, $request->request->getString('_csrf_token'))) {
+            return $this->renderPage($request, connectionError: LoginController::FORM_EXPIRED);
+        }
+
+        try {
+            $isEndedNow = ($this->endOAuthConnection)($id, $this->clock->now());
+        } catch (OAuthConnectionNotFound $notFound) {
+            throw $this->createNotFoundException($notFound->getMessage(), $notFound);
+        } catch (OAuthConnectionRefused $refused) {
+            return $this->renderPage($request, connectionError: $refused->getMessage(), errorStatus: Response::HTTP_FORBIDDEN);
+        }
+        // Ended already, as after a double click, says nothing: the list no longer shows it.
+        if ($isEndedNow) {
+            $this->addFlash('notice', self::CONNECTION_ENDED);
+        }
+
+        return self::notStored($this->redirectToRoute('identity_tokens'));
+    }
+
+    /**
+     * @param array{name: string, scopes: list<string>, lifetimeDays: string}|null $chosen      what the form sent; null
+     *                                                                                          for the form's defaults
+     * @param int                                                                  $errorStatus the status when an error
+     *                                                                                          is given
+     */
+    private function renderPage(Request $request, ?array $chosen = null, ?string $createError = null, ?string $revokeError = null, ?NewApiToken $newToken = null, ?string $connectionError = null, int $errorStatus = Response::HTTP_UNPROCESSABLE_ENTITY): Response
+    {
+        $hasError = null !== $createError || null !== $revokeError || null !== $connectionError;
+        $now = $this->clock->now();
+        $userId = $this->currentSession->userId();
 
         return self::notStored($this->render('@Identity/tokens.html.twig', [
-            'tokens' => $this->showApiTokens->liveOf($this->currentSession->userId(), $this->clock->now()),
+            'tokens' => $this->showApiTokens->liveOf($userId, $now),
+            'connections' => $this->showOAuthConnections->liveOf($userId, $now),
+            'connectionError' => $connectionError,
+            'endConnectionCsrfTokenId' => self::END_CONNECTION_CSRF_ID,
             'scopeChoices' => $this->scopeChoices(),
             'lifetimeDayChoices' => self::LIFETIME_DAY_CHOICES,
             'chosen' => $chosen ?? ['name' => '', 'scopes' => $this->showApiTokens->defaultScopeNames(), 'lifetimeDays' => (string) ShowApiTokens::DEFAULT_LIFETIME_DAYS],
@@ -139,7 +183,7 @@ final class TokenController extends AbstractController
             'mcpUrl' => $request->getSchemeAndHttpHost().'/mcp',
             'createCsrfTokenId' => self::CREATE_CSRF_ID,
             'revokeCsrfTokenId' => self::REVOKE_CSRF_ID,
-        ], new Response(status: $hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK)));
+        ], new Response(status: $hasError ? $errorStatus : Response::HTTP_OK)));
     }
 
     /**

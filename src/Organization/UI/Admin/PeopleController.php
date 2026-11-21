@@ -6,7 +6,10 @@ namespace App\Organization\UI\Admin;
 
 use App\Identity\Api\ApiTokenNotInOrganization;
 use App\Identity\Api\CurrentUser;
+use App\Identity\Api\OAuthConnectionNotFound;
+use App\Identity\Api\OAuthConnectionRefused;
 use App\Identity\Api\OrganizationApiTokens;
+use App\Identity\Api\OrganizationOAuthConnections;
 use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
 use App\Organization\Api\AdminPermission;
@@ -35,8 +38,8 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * The admin page of people (FR-ID-02): see the organization's people with their roles and teams (P14.T3, read only),
- * invite an email address, see the invitations not joined yet, and see and revoke the organization's live API tokens
- * (P09.T1). ADMIN_AREA guards every route; AbstractController::denyAccessUnlessGranted gives SendAdminToTwoStepProof the attribute and the
+ * invite an email address, see the invitations not joined yet, see and revoke the organization's live API tokens
+ * (P09.T1), and see and end its OAuth connections (ADR-0050). ADMIN_AREA guards every route; AbstractController::denyAccessUnlessGranted gives SendAdminToTwoStepProof the attribute and the
  * organization it needs to send an Admin to the two-step proof.
  */
 final class PeopleController extends AbstractController
@@ -68,13 +71,20 @@ final class PeopleController extends AbstractController
     public const string PEOPLE_AFTER_NAME = 'people_after_name';
     public const string PEOPLE_AFTER_ID = 'people_after_id';
 
+    public const string END_CONNECTION_ROUTE = 'organization_admin_people_connection_end';
+    public const string CONNECTION_ENDED = 'The connection is ended. The app can no longer use pinround.';
+    /** The query parameters of the next page of connected apps: the connectedAt and id of the last one shown, both or neither. */
+    public const string CONNECTIONS_AFTER_CONNECTED_AT = 'connections_after_connected_at';
+    public const string CONNECTIONS_AFTER_ID = 'connections_after_id';
+
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
     private const string CSRF_ID = 'organization_admin_people_invite';
     private const string REVOKE_TOKEN_CSRF_ID = 'organization_admin_people_token_revoke';
+    private const string END_CONNECTION_CSRF_ID = 'organization_admin_people_connection_end';
     /** With microseconds and the offset, so the cursor names the exact created_at the database holds. */
     private const string CURSOR_TIME_FORMAT = 'Y-m-d\TH:i:s.uP';
-    /** expires_at keeps whole seconds, so its cursor needs none. */
+    /** expires_at and a connection's connectedAt keep whole seconds, so their cursors need none. */
     private const string TOKEN_CURSOR_TIME_FORMAT = 'Y-m-d\TH:i:sP';
 
     public function __construct(
@@ -82,6 +92,7 @@ final class PeopleController extends AbstractController
         private readonly InvitationQueries $invitationQueries,
         private readonly InviteMember $inviteMember,
         private readonly OrganizationApiTokens $organizationApiTokens,
+        private readonly OrganizationOAuthConnections $organizationOAuthConnections,
         private readonly UserQueries $userQueries,
         private readonly Transactions $transactions,
         private readonly TenantContext $tenantContext,
@@ -92,8 +103,9 @@ final class PeopleController extends AbstractController
 
     /**
      * The page after the person PEOPLE_AFTER_NAME and PEOPLE_AFTER_ID name, after the invitation that AFTER_INVITED_AT
-     * and AFTER_ID name, and after the API token that TOKENS_AFTER_EXPIRES_AT and TOKENS_AFTER_ID name, or the first
-     * page of each without them.
+     * and AFTER_ID name, after the API token that TOKENS_AFTER_EXPIRES_AT and TOKENS_AFTER_ID name, and after the
+     * connected app that CONNECTIONS_AFTER_CONNECTED_AT and CONNECTIONS_AFTER_ID name, or the first page of each
+     * without them.
      */
     #[Route('/admin/people', name: self::ROUTE, methods: ['GET'])]
     public function show(Request $request): Response
@@ -104,7 +116,13 @@ final class PeopleController extends AbstractController
         $this->denyAccessUnlessGranted(OrganizationPermission::ADMIN, $organizationId);
         \assert($organizationId instanceof OrganizationId);
 
-        return $this->renderPage($organizationId, after: $this->pageCursorOf($request->query), tokensAfter: $this->tokenPageCursorOf($request->query), peopleAfter: $this->peoplePageCursorOf($request->query));
+        return $this->renderPage(
+            $organizationId,
+            after: $this->pageCursorOf($request->query),
+            tokensAfter: $this->tokenPageCursorOf($request->query),
+            peopleAfter: $this->peoplePageCursorOf($request->query),
+            connectionsAfter: $this->connectionPageCursorOf($request->query),
+        );
     }
 
     /**
@@ -123,8 +141,9 @@ final class PeopleController extends AbstractController
         $after = $this->pageCursorOf($request->request);
         $tokensAfter = $this->tokenPageCursorOf($request->request);
         $peopleAfter = $this->peoplePageCursorOf($request->request);
+        $connectionsAfter = $this->connectionPageCursorOf($request->request);
         if (!$this->isCsrfTokenValid(self::REVOKE_TOKEN_CSRF_ID, $request->request->getString('_csrf_token'))) {
-            return $this->renderPage($organizationId, formError: self::FORM_EXPIRED, after: $after, tokensAfter: $tokensAfter, peopleAfter: $peopleAfter);
+            return $this->renderPage($organizationId, formError: self::FORM_EXPIRED, after: $after, tokensAfter: $tokensAfter, peopleAfter: $peopleAfter, connectionsAfter: $connectionsAfter);
         }
         $admin = $this->currentUser->id();
         \assert(null !== $admin);
@@ -138,7 +157,56 @@ final class PeopleController extends AbstractController
             $this->addFlash(self::TOAST, self::TOKEN_REVOKED);
         }
 
-        return $this->redirectToRoute(self::ROUTE, [...$this->peoplePageQueryOf($peopleAfter), ...$this->invitationsPageQueryOf($after), ...$this->tokensPageQueryOf($tokensAfter)]);
+        return $this->redirectToShownPages($after, $tokensAfter, $peopleAfter, $connectionsAfter);
+    }
+
+    /**
+     * Ends any person's OAuth connection of the organization, in the request transaction with its ApiTokenRevoked, and
+     * goes back to the pages of the lists the form names, as revokeToken does. The id is not checked by the route, so a
+     * malformed one gets the same 404 as another organization's. A connection ended already says nothing.
+     */
+    #[Route('/admin/people/connections/{id}/end', name: self::END_CONNECTION_ROUTE, methods: ['POST'])]
+    public function endConnection(Request $request, string $id): Response
+    {
+        $organizationId = $this->tenantContext->get();
+        $this->denyAccessUnlessGranted(AdminPermission::AREA, $organizationId);
+        $this->denyAccessUnlessGranted(OrganizationPermission::ADMIN, $organizationId);
+        \assert($organizationId instanceof OrganizationId);
+        $after = $this->pageCursorOf($request->request);
+        $tokensAfter = $this->tokenPageCursorOf($request->request);
+        $peopleAfter = $this->peoplePageCursorOf($request->request);
+        $connectionsAfter = $this->connectionPageCursorOf($request->request);
+        if (!$this->isCsrfTokenValid(self::END_CONNECTION_CSRF_ID, $request->request->getString('_csrf_token'))) {
+            return $this->renderPage($organizationId, formError: self::FORM_EXPIRED, after: $after, tokensAfter: $tokensAfter, peopleAfter: $peopleAfter, connectionsAfter: $connectionsAfter);
+        }
+
+        try {
+            $isEndedNow = $this->organizationOAuthConnections->end($id, $this->clock->now());
+        } catch (OAuthConnectionNotFound $notFound) {
+            throw $this->createNotFoundException($notFound->getMessage(), $notFound);
+        } catch (OAuthConnectionRefused $refused) {
+            // The guards above ask the same ADMIN_AREA the voter asks, so only a rule added to the voter lands here.
+            return $this->renderPage($organizationId, formError: $refused->getMessage(), after: $after, tokensAfter: $tokensAfter, peopleAfter: $peopleAfter, connectionsAfter: $connectionsAfter, errorStatus: Response::HTTP_FORBIDDEN);
+        }
+        if ($isEndedNow) {
+            $this->addFlash(self::TOAST, self::CONNECTION_ENDED);
+        }
+
+        return $this->redirectToShownPages($after, $tokensAfter, $peopleAfter, $connectionsAfter);
+    }
+
+    /**
+     * @param array{\DateTimeImmutable, string}|null $tokensAfter
+     * @param array{\DateTimeImmutable, string}|null $connectionsAfter
+     */
+    private function redirectToShownPages(?PendingInvitation $after, ?array $tokensAfter, ?PeoplePageCursor $peopleAfter, ?array $connectionsAfter): Response
+    {
+        return $this->redirectToRoute(self::ROUTE, [
+            ...$this->peoplePageQueryOf($peopleAfter),
+            ...$this->invitationsPageQueryOf($after),
+            ...$this->tokensPageQueryOf($tokensAfter),
+            ...$this->connectionsPageQueryOf($connectionsAfter),
+        ]);
     }
 
     /**
@@ -251,6 +319,30 @@ final class PeopleController extends AbstractController
     }
 
     /**
+     * @param InputBag<string> $parameters the query of show, or the form of revokeToken or endConnection
+     *
+     * @return array{\DateTimeImmutable, string}|null the connectedAt and id of the last connected app shown; null when
+     *                                                the request names no page of them
+     *
+     * @throws BadRequestHttpException when only one of the two parameters is given, or either is no valid value
+     */
+    private function connectionPageCursorOf(InputBag $parameters): ?array
+    {
+        $hasConnectedAt = $parameters->has(self::CONNECTIONS_AFTER_CONNECTED_AT);
+        if (!$hasConnectedAt && !$parameters->has(self::CONNECTIONS_AFTER_ID)) {
+            return null;
+        }
+        $connectedAtText = $parameters->getString(self::CONNECTIONS_AFTER_CONNECTED_AT);
+        $id = $parameters->getString(self::CONNECTIONS_AFTER_ID);
+        $connectedAt = \DateTimeImmutable::createFromFormat('!'.self::TOKEN_CURSOR_TIME_FORMAT, $connectedAtText);
+        if (!$hasConnectedAt || false === $connectedAt || $connectedAt->format(self::TOKEN_CURSOR_TIME_FORMAT) !== $connectedAtText || !Uuid::isValid($id)) {
+            throw new BadRequestHttpException('The page of connected apps to show is not valid.');
+        }
+
+        return [$connectedAt, $id];
+    }
+
+    /**
      * @param InputBag<string> $parameters the query of show, or the form of revokeToken
      *
      * @return PeoplePageCursor|null the place of the last person shown; null when the request names no page of people
@@ -275,18 +367,23 @@ final class PeopleController extends AbstractController
     }
 
     /**
-     * Reads the people, the pending invitations and the live API tokens, so it needs a transaction open under
-     * $organizationId.
+     * Reads the people, the pending invitations, the live API tokens and the connected apps, so it needs a transaction
+     * open under $organizationId.
      *
-     * @param array{\DateTimeImmutable, string}|null $tokensAfter the expiresAt and id of the last API token shown
+     * @param array{\DateTimeImmutable, string}|null $tokensAfter      the expiresAt and id of the last API token shown
+     * @param array{\DateTimeImmutable, string}|null $connectionsAfter the connectedAt and id of the last connected app
+     *                                                                 shown
+     * @param int                                    $errorStatus      the status when an error is given
      */
-    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null, ?array $tokensAfter = null, ?PeoplePageCursor $peopleAfter = null): Response
+    private function renderPage(OrganizationId $organizationId, string $typedEmail = '', ?string $emailError = null, ?string $formError = null, ?PendingInvitation $after = null, ?array $tokensAfter = null, ?PeoplePageCursor $peopleAfter = null, ?array $connectionsAfter = null, int $errorStatus = Response::HTTP_UNPROCESSABLE_ENTITY): Response
     {
         $hasError = null !== $emailError || null !== $formError;
+        $now = $this->clock->now();
         // Each list's Show more keeps the pages the other lists are on.
         $peoplePageQuery = $this->peoplePageQueryOf($peopleAfter);
         $invitationsPageQuery = $this->invitationsPageQueryOf($after);
         $tokensPageQuery = $this->tokensPageQueryOf($tokensAfter);
+        $connectionsPageQuery = $this->connectionsPageQueryOf($connectionsAfter);
 
         $people = $this->organizationPeopleQueries->pageOf($organizationId, self::PAGE_SIZE + 1, $peopleAfter);
         $peopleNextPage = null;
@@ -295,6 +392,7 @@ final class PeopleController extends AbstractController
             $peopleNextPage = [
                 ...$invitationsPageQuery,
                 ...$tokensPageQuery,
+                ...$connectionsPageQuery,
                 ...$this->peoplePageQueryOf(PeoplePageCursor::after($people[self::PAGE_SIZE - 1])),
             ];
         }
@@ -306,11 +404,12 @@ final class PeopleController extends AbstractController
             $nextPage = [
                 ...$peoplePageQuery,
                 ...$tokensPageQuery,
+                ...$connectionsPageQuery,
                 self::AFTER_INVITED_AT => $lastShown->invitedAt()->format(self::CURSOR_TIME_FORMAT),
                 self::AFTER_ID => $lastShown->id(),
             ];
         }
-        $liveTokens = $this->organizationApiTokens->livePage($this->clock->now(), self::PAGE_SIZE + 1, $tokensAfter[0] ?? null, $tokensAfter[1] ?? null);
+        $liveTokens = $this->organizationApiTokens->livePage($now, self::PAGE_SIZE + 1, $tokensAfter[0] ?? null, $tokensAfter[1] ?? null);
         $tokensNextPage = null;
         if (\count($liveTokens) > self::PAGE_SIZE) {
             $liveTokens = \array_slice($liveTokens, 0, self::PAGE_SIZE);
@@ -318,33 +417,53 @@ final class PeopleController extends AbstractController
             $tokensNextPage = [
                 ...$peoplePageQuery,
                 ...$invitationsPageQuery,
+                ...$connectionsPageQuery,
                 self::TOKENS_AFTER_EXPIRES_AT => $lastShownToken->expiresAt->format(self::TOKEN_CURSOR_TIME_FORMAT),
                 self::TOKENS_AFTER_ID => $lastShownToken->id,
+            ];
+        }
+        $connections = $this->organizationOAuthConnections->livePage($now, self::PAGE_SIZE + 1, $connectionsAfter[0] ?? null, $connectionsAfter[1] ?? null);
+        $connectionsNextPage = null;
+        if (\count($connections) > self::PAGE_SIZE) {
+            $connections = \array_slice($connections, 0, self::PAGE_SIZE);
+            $lastShownConnection = $connections[self::PAGE_SIZE - 1];
+            $connectionsNextPage = [
+                ...$peoplePageQuery,
+                ...$invitationsPageQuery,
+                ...$tokensPageQuery,
+                ...$this->connectionsPageQueryOf([$lastShownConnection->connectedAt, $lastShownConnection->familyId]),
             ];
         }
         $ownerIds = [];
         foreach ($liveTokens as $token) {
             $ownerIds[$token->ownerId->toString()] = $token->ownerId;
         }
+        foreach ($connections as $connection) {
+            $ownerIds[$connection->userId->toString()] = $connection->userId;
+        }
 
         return $this->render('@Organization/admin/people.html.twig', [
             'people' => $people,
             'peopleNextPage' => $peopleNextPage,
             // Each null on the list's first page; on a later one, the list's first page with the other lists' pages kept.
-            'peopleFirstPage' => null === $peopleAfter ? null : [...$invitationsPageQuery, ...$tokensPageQuery],
-            'invitationsFirstPage' => null === $after ? null : [...$peoplePageQuery, ...$tokensPageQuery],
-            'tokensFirstPage' => null === $tokensAfter ? null : [...$peoplePageQuery, ...$invitationsPageQuery],
+            'peopleFirstPage' => null === $peopleAfter ? null : [...$invitationsPageQuery, ...$tokensPageQuery, ...$connectionsPageQuery],
+            'invitationsFirstPage' => null === $after ? null : [...$peoplePageQuery, ...$tokensPageQuery, ...$connectionsPageQuery],
+            'tokensFirstPage' => null === $tokensAfter ? null : [...$peoplePageQuery, ...$invitationsPageQuery, ...$connectionsPageQuery],
+            'connectionsFirstPage' => null === $connectionsAfter ? null : [...$peoplePageQuery, ...$invitationsPageQuery, ...$tokensPageQuery],
             'pendingInvitations' => $pendingInvitations,
             'nextPage' => $nextPage,
             'liveTokens' => $liveTokens,
-            'tokenOwnerNames' => array_map(static fn (UserView $owner): string => $owner->displayName, $this->userQueries->byIds(array_values($ownerIds))),
+            'ownerNames' => array_map(static fn (UserView $owner): string => $owner->displayName, $this->userQueries->byIds(array_values($ownerIds))),
             'tokensNextPage' => $tokensNextPage,
-            'shownPagesQuery' => [...$peoplePageQuery, ...$invitationsPageQuery, ...$tokensPageQuery],
+            'connections' => $connections,
+            'connectionsNextPage' => $connectionsNextPage,
+            'shownPagesQuery' => [...$peoplePageQuery, ...$invitationsPageQuery, ...$tokensPageQuery, ...$connectionsPageQuery],
             'revokeTokenCsrfId' => self::REVOKE_TOKEN_CSRF_ID,
+            'endConnectionCsrfId' => self::END_CONNECTION_CSRF_ID,
             'typedEmail' => $typedEmail,
             'emailError' => $emailError,
             'formError' => $formError,
-        ], new Response(status: $hasError ? Response::HTTP_UNPROCESSABLE_ENTITY : Response::HTTP_OK));
+        ], new Response(status: $hasError ? $errorStatus : Response::HTTP_OK));
     }
 
     /**
@@ -379,6 +498,20 @@ final class PeopleController extends AbstractController
         return null === $tokensAfter ? [] : [
             self::TOKENS_AFTER_EXPIRES_AT => $tokensAfter[0]->format(self::TOKEN_CURSOR_TIME_FORMAT),
             self::TOKENS_AFTER_ID => $tokensAfter[1],
+        ];
+    }
+
+    /**
+     * @param array{\DateTimeImmutable, string}|null $connectionsAfter
+     *
+     * @return array<string, string> the parameters connectionPageCursorOf reads back as $connectionsAfter; none for the
+     *                               first page
+     */
+    private function connectionsPageQueryOf(?array $connectionsAfter): array
+    {
+        return null === $connectionsAfter ? [] : [
+            self::CONNECTIONS_AFTER_CONNECTED_AT => $connectionsAfter[0]->format(self::TOKEN_CURSOR_TIME_FORMAT),
+            self::CONNECTIONS_AFTER_ID => $connectionsAfter[1],
         ];
     }
 }

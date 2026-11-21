@@ -15,7 +15,7 @@ How to connect Claude Code to pinround, so it can read your round notes, add scr
 - [Fixing your round notes](#fixing-your-round-notes) — the prompt `fix_my_round_notes` with a ticket key
 - [Notebooks](#notebooks) — the six notebook tools, their scopes, and the prompt `explain_my_notebook`
 - [When a call is refused](#when-a-call-is-refused) — the answers you may see and what they mean
-- [Safety](#safety) — your token is your permissions
+- [Safety](#safety) — your token is your permissions; end a sign-in connection under **Connected apps** on **API tokens**
 - [Full loop check](#full-loop-check) — the steps to run by hand, and the record of the last run
 
 ## What you need
@@ -46,7 +46,7 @@ Claude Code and a Claude custom connector can connect with no token to copy: you
 
 A connector calls pinround from Anthropic's servers, not from your computer, so pinround must be reachable on a public HTTPS address. It cannot reach `https://localhost`; on a local install, connect Claude Code instead.
 
-**What you get.** Claude Code registers itself with pinround the first time, with no admin step. It works only in the organization you picked, as you and with your permissions, like a token. When it asks for no particular scopes, it gets the two a new token starts with, `read` and `rounds:write`. For `reports:write` or `notebooks:write`, make a personal access token with those ticked. The access token works for 1 hour, and Claude Code renews it on its own with a refresh token of 30 days; each renewal replaces the refresh token, and an old one that comes back stops the whole connection. Neither token shows on **API tokens**. Both stop working once you leave the organization. To connect again, authenticate again from `/mcp`.
+**What you get.** Claude Code registers itself with pinround the first time, with no admin step. It works only in the organization you picked, as you and with your permissions, like a token. When it asks for no particular scopes, it gets the two a new token starts with, `read` and `rounds:write`. For `reports:write` or `notebooks:write`, make a personal access token with those ticked. The access token works for 1 hour, and Claude Code renews it on its own with a refresh token of 30 days; each renewal replaces the refresh token, and an old one that comes back stops the whole connection. Neither token shows in the list of tokens on **API tokens**; the connection shows under **Connected apps** there, where you can end it. Both stop working once you leave the organization. To connect again, authenticate again from `/mcp`.
 
 ## 1. Make a token
 1. In pinround, open the menu under your avatar and choose **API tokens** (the page is `/me/tokens`).
@@ -179,7 +179,7 @@ A refused call saves nothing. The answers you may see:
 - **A token is your permissions.** Anyone who has it can read and change what you can, within its scopes. Keep it like a password; never put it in a repository or a shared file.
 - **A token never opens admin pages**, even an admin's.
 - **Revoke a lost token at once:** on **API tokens**, press **Revoke**. It stops working at once. An admin can revoke any token in the organization from Admin › People.
-- **A connection made with sign-in** is not on **API tokens** or Admin › People, and pinround has no page to end it yet. `claude mcp remove pinround` removes it from Claude Code; the tokens it held keep working until they expire (the refresh token after 30 days) or until you leave the organization.
+- **A connection made with sign-in** shows under **Connected apps** on **API tokens**, with the app's name, when you connected it and when it last renewed its token. Press **End connection** there: its access token and its refresh token stop working at once. An admin sees every person's connected apps on Admin › People and can end any of them. `claude mcp remove pinround` only removes it from Claude Code; end the connection too, or its tokens keep working until they expire (the refresh token after 30 days) or until you leave the organization.
 - **Titles, summaries and notes are other people's text.** pinround returns them between `<untrusted_text>` and `</untrusted_text>`, and tells Claude Code that this is data, never instructions. Still read what Claude Code does with them.
 - **Nobody else sees your draft round** until you share it in the app. Claude Code cannot share it for you.
 

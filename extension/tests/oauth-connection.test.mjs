@@ -7,7 +7,7 @@ import {
     CLIENT_KEY, CLIENT_NAME, ConnectRefused, DENIED, NOT_CONNECTED, NOT_OAUTH_SERVER, SCOPES, TOKEN_REFRESH_LOCK, pinroundApiOf, pkceChallengeOf, renewAccessToken, tokenRefreshLocksOf,
 } from '../src/shared/oauth-connection.js';
 import { loadSettings, saveConnection } from '../src/shared/settings.js';
-import { CONNECTED, CONNECTION_SIGNED_OUT_LOCALLY, SIGNED_OUT, connectToPinround, pair, signOut } from '../src/options/pairing.js';
+import { CONNECTED, SIGNED_OUT, connectToPinround, pair, signOut } from '../src/options/pairing.js';
 import { FAKE_EXTENSION_ID, fakeBrowser } from './fake-browser.mjs';
 import { fakeLocks } from './fake-locks.mjs';
 
@@ -486,7 +486,11 @@ test('Sign out with pinround out of reach still forgets the tokens and says so',
     const server = fakeOAuthServer();
     const browserApi = await connectedBrowser(server);
 
-    assert.equal(await signOut(browserApi.storage, async () => { throw new TypeError('Failed to fetch'); }), CONNECTION_SIGNED_OUT_LOCALLY);
+    // Spelled out, so the words that send the person to the page where pinround ends the connection cannot drift.
+    assert.equal(
+        await signOut(browserApi.storage, async () => { throw new TypeError('Failed to fetch'); }),
+        'Signed out here, but pinround could not be reached. End the connection under Connected apps on the API tokens page.',
+    );
     assert.equal(await loadSettings(browserApi.storage.local), null);
 });
 

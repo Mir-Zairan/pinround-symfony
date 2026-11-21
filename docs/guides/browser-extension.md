@@ -14,7 +14,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [The dock](#the-dock) — Pin, Capture, Shrink and Save draft on the page, a scenario's step card, and opening it again after a reload
 - [Allowed hosts for scenarios](#allowed-hosts-for-scenarios) — where scenarios may play, and the question before a run
 - [Safety](#safety) — what the player never does, and who decides
-- [Sign out](#sign-out) — the token stops working everywhere
+- [Sign out](#sign-out) — the token stops working everywhere; a Connect can also be ended under **Connected apps** on **API tokens**
 - [Permissions and why](#permissions-and-why) — the four Chrome permissions it asks for
 - [Manual check](#manual-check) — the capture and notebook checks to run by hand, and the record of the last runs
 
@@ -139,7 +139,7 @@ A notebook's scenarios click and type on a page, so they play only on hosts you 
 - **A closed tab stops a run.** "The tab is closed. Open the scenario's page and play again." Nothing runs in another tab in its place.
 
 ## Sign out
-In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it, with your "Play anyway" answers. After **Connect** it revokes the refresh token and the access token at `/oauth/revoke`; if pinround cannot be reached, it still forgets them and says "Signed out here, but pinround could not be reached, so it may still accept the connection." After a pasted token, if pinround cannot be reached, it still forgets it and tells you to revoke it on the **API tokens** page.
+In the options, press **Sign out**. The extension asks pinround to revoke the token, so it stops working everywhere, then forgets it, with your "Play anyway" answers. After **Connect** it revokes the refresh token and the access token at `/oauth/revoke`; if pinround cannot be reached, it still forgets them and says "Signed out here, but pinround could not be reached. End the connection under Connected apps on the API tokens page." Each Connect shows on pinround's **API tokens** page under **Connected apps**, with when it was connected and last renewed; **End connection** there stops its tokens at once, and an admin can end anyone's from Admin › People. After a pasted token, if pinround cannot be reached, it still forgets it and tells you to revoke it on the **API tokens** page.
 
 ## Permissions and why
 | Permission | Why |
