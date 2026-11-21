@@ -30,5 +30,6 @@ final class ResolverFunctions
         'digest_recipients',
         'organizations_with_expiring_api_tokens',
         'resolve_oauth_authorization_code',
+        'resolve_oauth_refresh_token',
     ];
 }

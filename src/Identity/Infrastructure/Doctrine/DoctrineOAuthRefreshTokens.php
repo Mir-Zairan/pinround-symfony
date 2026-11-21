@@ -10,7 +10,6 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\ORM\Query;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -121,13 +120,17 @@ final readonly class DoctrineOAuthRefreshTokens implements OAuthRefreshTokens
     }
 
     /**
-     * Read again from the database even when the entity manager holds it, so used_at is the one just written.
+     * Read again from the database even when the entity manager holds it, so used_at is the one just written. A loaded
+     * copy is detached rather than refreshed, as Doctrine refuses to refresh the readonly createdAt.
      */
     private function freshById(string $organizationId, string $id): ?OAuthRefreshToken
     {
+        $loaded = $this->entityManager->getUnitOfWork()->tryGetById(['organizationId' => $organizationId, 'id' => $id], OAuthRefreshToken::class);
+        if ($loaded instanceof OAuthRefreshToken) {
+            $this->entityManager->detach($loaded);
+        }
         $token = $this->entityManager->createQuery('SELECT t FROM '.OAuthRefreshToken::class.' t WHERE t.organizationId = :organizationId AND t.id = :id')
             ->setParameters(['organizationId' => $organizationId, 'id' => $id])
-            ->setHint(Query::HINT_REFRESH, true)
             ->getOneOrNullResult();
 
         return $token instanceof OAuthRefreshToken ? $token : null;
