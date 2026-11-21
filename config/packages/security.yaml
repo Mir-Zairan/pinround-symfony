@@ -87,6 +87,9 @@ security:
         # anyone logs in. Registration stores a public client only, acts for nobody and is rate-limited per IP
         # (oauth_client_registration_per_ip); the two documents hold no user data.
         - { route: ^identity_oauth_(register|authorization_server_metadata|protected_resource_metadata)$, roles: PUBLIC_ACCESS }
+        # The token and revocation endpoints (ADR-0050), public by design: a public client has no secret, and the code
+        # with its PKCE verifier or the refresh token is the proof; both are rate-limited per IP (oauth_token_per_ip).
+        - { route: ^identity_oauth_(token|revoke)$, roles: PUBLIC_ACCESS }
         - { route: ^web_component_gallery$, roles: PUBLIC_ACCESS }
         - { route: ^test_, roles: PUBLIC_ACCESS }
         - { path: ^/, roles: IS_AUTHENTICATED_FULLY }

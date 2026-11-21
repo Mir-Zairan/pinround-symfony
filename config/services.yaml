@@ -52,6 +52,9 @@ parameters:
         # The consent page has the person pick the organization for the grant, so it must not ask for one first.
         - identity_oauth_authorize
         - identity_oauth_authorize_decide
+        # The token endpoints act for the grant's organization, set from the code or token, never from a browser session.
+        - identity_oauth_token
+        - identity_oauth_revoke
         - health_live
         - health_ready
         - web_component_gallery
@@ -479,6 +482,9 @@ when@test:
         # nothing trades a code before the token endpoint.
         test.identity_oauth_authorization_codes:
             alias: App\Identity\Domain\OAuthAuthorizationCodes
+            public: true
+        test.identity_oauth_refresh_tokens:
+            alias: App\Identity\Domain\OAuthRefreshTokens
             public: true
         test.identity_member_organizations:
             alias: App\Identity\Api\MemberOrganizations

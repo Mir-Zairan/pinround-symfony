@@ -20,6 +20,10 @@ final class OAuthAuthorizationCode implements TenantOwned
     public const int MAX_LIFETIME_SECONDS = 60;
     /** The characters and length RFC 7636 allows; idn_oauth_authorization_code_code_challenge_check holds the same. */
     public const string CODE_CHALLENGE_SHAPE = '/\A[A-Za-z0-9._~-]{43,128}\z/';
+    /** RFC 7636 section 4.1: the verifier has the challenge's characters and length. */
+    public const string CODE_VERIFIER_SHAPE = self::CODE_CHALLENGE_SHAPE;
+    /** What issue() hands out: 32 random bytes in base64url. */
+    public const string PLAIN_CODE_SHAPE = '/\A[A-Za-z0-9_-]{43}\z/';
     private const int RANDOM_BYTES = 32;
 
     private readonly string $organizationId;
@@ -168,6 +172,20 @@ final class OAuthAuthorizationCode implements TenantOwned
     public function scopes(): array
     {
         return ApiTokenScope::fromValues($this->scopes);
+    }
+
+    /**
+     * Whether $codeVerifier is the PKCE verifier of this code's S256 challenge: BASE64URL(SHA-256(verifier)) is the
+     * challenge (RFC 7636 section 4.6), compared in constant time. A verifier that does not match CODE_VERIFIER_SHAPE
+     * never is.
+     */
+    public function isVerifiedBy(#[\SensitiveParameter] string $codeVerifier): bool
+    {
+        if (1 !== preg_match(self::CODE_VERIFIER_SHAPE, $codeVerifier)) {
+            return false;
+        }
+
+        return hash_equals($this->codeChallenge, rtrim(strtr(base64_encode(hash('sha256', $codeVerifier, true)), '+/', '-_'), '='));
     }
 
     /**

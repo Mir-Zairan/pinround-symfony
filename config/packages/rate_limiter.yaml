@@ -33,6 +33,7 @@ parameters:
     identity.password_change_per_user_minutes: 15
     identity.two_step_code_per_user_minutes: 15
     identity.oauth_client_registration_per_ip_minutes: 60
+    identity.oauth_token_per_ip_minutes: 15
     # The window in minutes, also the longest wait a refused begin is told (SymfonyUploadBeginLimit).
     media.upload_begin_per_user_minutes: 1
     # The same for a refused status poll (UploadStatusController).
@@ -89,6 +90,15 @@ framework:
             policy: fixed_window
             limit: 30
             interval: '%identity.oauth_client_registration_per_ip_minutes% minutes'
+            storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
+            lock_factory: lock.factory
+        # POST /oauth/token and /oauth/revoke (ADR-0050), keyed by the client IP, through SymfonyOAuthTokenRequestLimiter:
+        # every request counts, refused ones too. 300 in 15 minutes: Claude connectors refresh from Anthropic's few
+        # addresses for every person of an install, while a script hammering the endpoints is stopped.
+        oauth_token_per_ip:
+            policy: fixed_window
+            limit: 300
+            interval: '%identity.oauth_token_per_ip_minutes% minutes'
             storage_service: App\Identity\Infrastructure\Security\ValkeyLimiterStorage
             lock_factory: lock.factory
         # POST /media/intents, keyed by the user id: three times the 20 uploads a person may have waiting, so pasting a
