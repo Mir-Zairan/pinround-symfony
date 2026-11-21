@@ -150,11 +150,15 @@ test('two captures on two test pages for "A new report" make one report draft in
   await expect(draftTab).toHaveURL(`${appOrigin}/report-drafts/${draftId}`);
   await expect(draftTab.getByRole('heading', { name: 'Report draft for SHOP', level: 1 })).toBeVisible();
   await expect(draftTab.getByLabel('What is wrong, in one line')).toHaveValue(reportTitle);
-  await expect(draftTab.getByRole('heading', { name: /^Screenshot \d+$/, level: 2 })).toHaveText(['Screenshot 1', 'Screenshot 2']);
-  const pictures = draftTab.locator('section.report-draft__picture');
-  await expect(pictures.nth(0).getByLabel('Pin 1 note')).toHaveValue('Total is wrong');
-  await expect(pictures.nth(1).getByLabel('Pin 1 note')).toHaveValue('Jam price');
-  await expect(pictures.nth(1).getByLabel('Pin 2 note')).toHaveCount(0);
+  const editor = draftTab.locator('#draft-shots');
+  await expect(editor.getByRole('tab')).toHaveCount(2);
+  const picture = (number: number) => editor.locator(`#draft-shots-panel-${number}`);
+  await expect(picture(1)).toBeVisible();
+  await expect(picture(1).getByLabel('Note for pin 1', { exact: true })).toHaveValue('Total is wrong');
+  await editor.getByRole('tab', { name: 'Screenshot 2 of 2' }).click();
+  await expect(picture(2)).toBeVisible();
+  await expect(picture(2).getByLabel('Note for pin 1', { exact: true })).toHaveValue('Jam price');
+  await expect(picture(2).getByLabel('Note for pin 2', { exact: true })).toHaveCount(0);
   expect(runAsDatabaseOwner(`
     SELECT d.id, jsonb_array_length(d.screenshots) FROM rvw_report_draft d JOIN idn_user u ON u.id = d.owner_id
     WHERE u.email = '${OMAR_EMAIL}' AND d.title = '${reportTitle}'`)).toEqual([`${draftId}|2`]);

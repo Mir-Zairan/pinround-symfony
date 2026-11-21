@@ -391,6 +391,97 @@ final class ReportControllerTest extends WebTestCase
     }
 
     /**
+     * P14.T10: the picture's title and summary sit in the ScreenshotEditor's picture area, which stays hidden until there
+     * is a picture; the fields are there all the same, so the form posts them.
+     */
+    #[Test]
+    public function withoutAPictureThePictureAreaIsHiddenAndHoldsTheTitleAndSummary(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::REPORT);
+
+        self::assertResponseStatusCodeSame(200);
+        $pictureArea = $page->filter('.screenshot-report__picture');
+        self::assertCount(1, $pictureArea);
+        self::assertSame('', $pictureArea->attr('hidden'));
+        self::assertCount(1, $pictureArea->filter('#screenshot-editor input[name="screenshot_title"]'));
+        self::assertCount(1, $pictureArea->filter('#screenshot-editor textarea[name="screenshot_summary"]'));
+        self::assertCount(1, $page->filter('[name="screenshot_title"]'), 'No second title field outside the picture area.');
+        self::assertCount(1, $page->filter('[name="screenshot_summary"]'), 'No second summary field outside the picture area.');
+        self::assertNull($page->filter('.screenshot-report__empty')->attr('hidden'));
+        self::assertCount(0, $page->filter('.screenshot-report__remove'), 'The editor\'s Remove screenshot is the only one.');
+    }
+
+    /**
+     * A refused report with a ready picture comes back with the picture in the editor, its title as typed and the
+     * editor's one thumbnail showing the same picture.
+     */
+    #[Test]
+    public function aPostedReadyPictureShowsInTheScreenshotEditor(): void
+    {
+        $picture = $this->addReadyPicture('Omar');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport(['title' => '   ', 'screenshot_media_id' => $picture, 'screenshot_title' => 'Cart page']);
+
+        self::assertResponseStatusCodeSame(422);
+        $pictureArea = $page->filter('.screenshot-report__picture');
+        self::assertCount(1, $pictureArea);
+        self::assertNull($pictureArea->attr('hidden'));
+        $editor = $pictureArea->filter('#screenshot-editor');
+        self::assertCount(1, $editor);
+        self::assertSame(['screenshot-editor-panel-1'], $editor->filter('[role="tabpanel"]')->each(static fn (Crawler $panel): string => (string) $panel->attr('id')));
+        $imageUrl = $editor->filter('.screenshot__image')->attr('src');
+        self::assertIsString($imageUrl);
+        self::assertStringContainsString($picture, $imageUrl);
+        self::assertSame($imageUrl, $editor->filter('[role="tab"] .screenshot-editor__thumb-image')->attr('src'));
+        self::assertSame('Cart page', $editor->filter('input[name="screenshot_title"]')->attr('value'));
+        self::assertNull($editor->filter('input[name="screenshot_title"]')->attr('aria-describedby'), 'The refusal is the title\'s, not the picture\'s.');
+        self::assertSame($picture, $page->filter('input[name="screenshot_media_id"]')->attr('value'));
+        self::assertNotNull($page->filter('.screenshot-report__empty')->attr('hidden'));
+        self::assertSame(0, $this->ticketCount());
+    }
+
+    #[Test]
+    public function moreDetailStartsAtFiveLinesAndTheEditorStylesFollowTheReviewStyles(): void
+    {
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', self::REPORT);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('5', $page->filter('textarea[name="description"]')->attr('rows'));
+        $stylesheets = $page->filter('link[rel=stylesheet]')->each(static fn (Crawler $link): string => (string) $link->attr('href'));
+        $review = self::positionOf('#/styles/review[-.]#', $stylesheets);
+        $editor = self::positionOf('#/styles/screenshot-editor[-.]#', $stylesheets);
+        self::assertSame($review + 1, $editor, 'The editor\'s styles come right after review.css, which they build on.');
+    }
+
+    /**
+     * A summary past its cap comes back as typed, not cut to the field's maxlength, and the error describes it.
+     */
+    #[Test]
+    public function aTooLongPictureSummaryIsKeptAsTypedAndDescribedByTheError(): void
+    {
+        $tooLong = str_repeat('Acme Foods ', 54).'SHOP-1x';
+        self::assertSame(601, mb_strlen($tooLong));
+        $picture = $this->addReadyPicture('Omar');
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->postReport(['screenshot_media_id' => $picture, 'screenshot_summary' => $tooLong]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('A picture summary holds at most 600 characters.', $page->filter('#screenshot-error')->text());
+        $summary = $page->filter('#screenshot-editor textarea[name="screenshot_summary"]');
+        self::assertSame($tooLong, $summary->text());
+        self::assertSame('screenshot-error', $summary->attr('aria-describedby'));
+        self::assertSame('screenshot-error', $page->filter('#screenshot-editor input[name="screenshot_title"]')->attr('aria-describedby'));
+        self::assertSame(0, $this->ticketCount());
+        self::assertSame(0, $this->roundCount());
+    }
+
+    /**
      * @return iterable<string, array{\DomainException}>
      */
     public static function projectRefusalsAfterTheChoicesWereRead(): iterable
@@ -601,6 +692,33 @@ final class ReportControllerTest extends WebTestCase
         self::assertIsInt($count);
 
         return $count;
+    }
+
+    private function roundCount(): int
+    {
+        $count = null;
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, &$count): int {
+            $count = $migrator->fetchOne('SELECT count(*) FROM rvw_round WHERE organization_id = ?', [$organizationId]);
+
+            return 0;
+        });
+        self::assertIsInt($count);
+
+        return $count;
+    }
+
+    /**
+     * @param list<string> $hrefs
+     */
+    private static function positionOf(string $pattern, array $hrefs): int
+    {
+        foreach ($hrefs as $position => $href) {
+            if (1 === preg_match($pattern, $href)) {
+                return $position;
+            }
+        }
+        self::fail(\sprintf('No stylesheet matches %s.', $pattern));
     }
 
     private function addReadyPicture(string $uploader): string

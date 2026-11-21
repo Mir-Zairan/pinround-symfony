@@ -38,11 +38,13 @@ test('Mia makes a new ticket of her draft round and lands on the report draft wi
   await expect(page.getByRole('heading', { name: 'Report draft for SHOP', level: 1 })).toBeVisible();
   await expect(page.getByLabel('What is wrong, in one line')).toHaveValue('Coupon field empty');
   await expect(page.getByLabel('More detail · optional')).toHaveValue(`Found while testing ${key}`);
-  const pictures = page.locator('.report-draft__picture');
-  await expect(pictures).toHaveCount(1);
-  await expect(pictures.getByRole('heading', { name: 'Screenshot 1', level: 2 })).toBeVisible();
-  await expect(pictures.locator('img.screenshot__image')).toHaveAttribute('src', /\S/);
-  await expect(pictures.getByLabel('Title · optional')).toHaveValue('Coupon field empty');
+  const editor = page.locator('#draft-shots');
+  await expect(editor.getByRole('tab')).toHaveCount(1);
+  await expect(editor.getByRole('tab', { name: 'Screenshot 1 of 1' })).toHaveAttribute('aria-selected', 'true');
+  const picture = editor.locator('#draft-shots-panel-1');
+  await expect(picture).toBeVisible();
+  await expect(picture.locator('img.screenshot__image')).toHaveAttribute('src', /\S/);
+  await expect(picture.getByLabel('Picture title · optional')).toHaveValue('Coupon field empty');
 
   // The draft round is gone from the ticket.
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
