@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Identity\Application;
 use App\Identity\Domain\OAuthRefreshToken;
 use App\Identity\Domain\OAuthRefreshTokens;
 use App\SharedKernel\Domain\OrganizationId;
+use App\SharedKernel\Domain\UserId;
 
 /**
  * Records add(); IssueOAuthTokenPair calls nothing else.
@@ -41,6 +42,11 @@ final class AddRecordingOAuthRefreshTokens implements OAuthRefreshTokens
     public function byAccessTokenId(string $accessTokenId): ?OAuthRefreshToken
     {
         throw new \LogicException('IssueOAuthTokenPair never loads a token.');
+    }
+
+    public function ownerOfFamily(string $familyId): ?UserId
+    {
+        throw new \LogicException('IssueOAuthTokenPair never reads a family\'s owner.');
     }
 
     public function revokeFamily(string $familyId, \DateTimeImmutable $revokedAt): array

@@ -13,6 +13,7 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\TenantNotSet;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
+use App\Tests\Integration\Identity\WaitsForWaitingChanges;
 use App\Tests\Integration\Organization\TenantTransactions;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
@@ -29,6 +30,8 @@ use Symfony\Component\Process\Process;
  */
 final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
 {
+    use WaitsForWaitingChanges;
+
     private const string ACME_FOODS = '0197a3c0-0000-7000-8000-000000001fa1';
     private const string BETA_BAKERY = '0197a3c0-0000-7000-8000-000000001fb1';
     private const string OMAR = '0197a3c0-0000-7000-8000-000000001fc1';
@@ -274,9 +277,9 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
         try {
             self::assertSame([$traded->id()], $this->migrator()->fetchFirstColumn('SELECT id FROM idn_oauth_refresh_token WHERE organization_id = ? AND id = ? FOR UPDATE', [self::ACME_FOODS, $traded->id()]));
             $changes['rotation'] = $this->startChange('rotate', bin2hex($traded->tokenHash()), self::CLIENT_ID, $this->at('+1 hour')->format(\DATE_ATOM));
-            $this->waitUntilWaiting(1, $changes);
+            $this->waitUntilWaiting($this->connection(), 1, $changes);
             $changes['revocation'] = $this->startChange('revoke', $traded->familyId(), $this->at('+1 hour')->format(\DATE_ATOM));
-            $this->waitUntilWaiting(2, $changes);
+            $this->waitUntilWaiting($this->connection(), 2, $changes);
         } finally {
             $this->migrator()->rollBack();
             $this->tenantContext()->reset();
@@ -449,31 +452,6 @@ final class DoctrineOAuthRefreshTokensTest extends KernelTestCase
         $process->start();
 
         return $process;
-    }
-
-    /**
-     * Polls pg_locks, which every role may read, on the app's connection outside the held transaction, counting only
-     * sessions of this database, as other test databases share the server. Fails when a change ends first, such as on
-     * a boot error, or when they are not waiting within 30 seconds.
-     *
-     * @param array<string, Process> $changes
-     */
-    private function waitUntilWaiting(int $expectedWaiting, array $changes): void
-    {
-        $deadline = microtime(true) + 30;
-        while (microtime(true) < $deadline) {
-            foreach ($changes as $name => $change) {
-                self::assertTrue($change->isRunning(), 'the '.$name.' ended before it waited: '.$change->getOutput().$change->getErrorOutput());
-            }
-            $waiting = $this->connection()->fetchOne(
-                'SELECT count(DISTINCT l.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE NOT l.granted AND a.datname = current_database()',
-            );
-            if ($expectedWaiting === $waiting) {
-                return;
-            }
-            usleep(20_000);
-        }
-        self::fail(\sprintf('%d changes did not wait within 30 seconds.', $expectedWaiting));
     }
 
     private function at(string $afterIssue): \DateTimeImmutable
