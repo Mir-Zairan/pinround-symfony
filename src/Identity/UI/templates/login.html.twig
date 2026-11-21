@@ -21,13 +21,13 @@
                 <p class="login__error" role="alert">{{ errorMessage }}</p>
             {% endif %}
             <form class="login__form" method="post" action="{{ path('identity_login') }}">
-                <label class="login__field">
+                <label class="form-field">
                     Email
-                    <input class="login__input" type="email" name="email" value="{{ lastEmail }}" autocomplete="username" required{% if not lastEmail %} autofocus{% endif %}>
+                    <input class="form-field__input" type="email" name="email" value="{{ lastEmail }}" autocomplete="username" required{% if not lastEmail %} autofocus{% endif %}>
                 </label>
-                <label class="login__field">
+                <label class="form-field">
                     Password
-                    <input class="login__input" type="password" name="password" autocomplete="current-password" required{% if lastEmail %} autofocus{% endif %}>
+                    <input class="form-field__input" type="password" name="password" autocomplete="current-password" required{% if lastEmail %} autofocus{% endif %}>
                 </label>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
                 <twig:Button type="submit">Log in</twig:Button>

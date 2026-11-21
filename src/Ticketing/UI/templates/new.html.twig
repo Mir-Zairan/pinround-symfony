@@ -24,9 +24,9 @@
             <form class="login__form" method="post" action="{{ path('ticketing_ticket_new') }}"
                 {%- if personPicked is not empty %} data-intake-check-person-picked="{{ personPicked|join(' ') }}"{% endif %}>
                 <div class="profile__field">
-                    <label class="login__field">
+                    <label class="form-field">
                         Project
-                        <select class="login__input" name="project_id" required>
+                        <select class="form-field__input" name="project_id" required>
                             {% for project in projects %}
                                 <option value="{{ project.id }}"{% if project.id == input.projectId %} selected{% endif %}>{{ project.key }} · {{ project.name }}</option>
                             {% endfor %}
@@ -34,9 +34,9 @@
                     </label>
                 </div>
                 <div class="profile__field">
-                    <label class="login__field">
+                    <label class="form-field">
                         Title
-                        <input class="login__input" type="text" name="title" value="{{ input.title }}" maxlength="{{ titleMaxLength }}" required
+                        <input class="form-field__input" type="text" name="title" value="{{ input.title }}" maxlength="{{ titleMaxLength }}" required
                             {%- if errors.title is defined %} aria-invalid="true" aria-describedby="ticket-title-error"{% endif %}>
                     </label>
                     {% if errors.title is defined %}
@@ -44,9 +44,9 @@
                     {% endif %}
                 </div>
                 <div class="profile__field">
-                    <label class="login__field">
+                    <label class="form-field">
                         Description
-                        <textarea class="login__input" name="description" rows="6" maxlength="{{ descriptionMaxLength }}"
+                        <textarea class="form-field__input" name="description" rows="6" maxlength="{{ descriptionMaxLength }}"
                             {%- if errors.description is defined %} aria-invalid="true" aria-describedby="ticket-description-error"{% endif %}>{{ input.description }}</textarea>
                     </label>
                     {% if errors.description is defined %}
@@ -94,9 +94,9 @@
                 {# Only a Lead may give a ticket to someone, so the people are those of the teams they lead. #}
                 {% if mayAssign %}
                     <div class="profile__field">
-                        <label class="login__field">
+                        <label class="form-field">
                             Give it to
-                            <select class="login__input" name="assignee_id"
+                            <select class="form-field__input" name="assignee_id"
                                 {%- if errors.assignee is defined %} aria-invalid="true" aria-describedby="ticket-assignee-error"{% endif %}>
                                 <option value="">No one yet</option>
                                 {% for group in assigneeGroups %}

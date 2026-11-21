@@ -19,9 +19,9 @@
             {% endif %}
             <form class="login__form" method="post" action="{{ path('identity_login_code') }}">
                 {# Not inputmode="numeric": a recovery code has letters. #}
-                <label class="login__field">
+                <label class="form-field">
                     Code from your app
-                    <input class="login__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required autofocus
+                    <input class="form-field__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required autofocus
                         {%- if error %} aria-invalid="true" aria-describedby="login-code-error login-code-hint"{% else %} aria-describedby="login-code-hint"{% endif %}>
                 </label>
                 <p class="login__hint" id="login-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>

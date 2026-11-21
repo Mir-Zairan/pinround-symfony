@@ -37,9 +37,9 @@
                     {% if error %}
                         <p class="login__error" role="alert" id="two-step-code-error">{{ error }}</p>
                     {% endif %}
-                    <label class="login__field">
+                    <label class="form-field">
                         Code from the app
-                        <input class="login__input" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required
+                        <input class="form-field__input" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required
                             {%- if error %} aria-invalid="true" aria-describedby="two-step-code-error two-step-code-hint"{% else %} aria-describedby="two-step-code-hint"{% endif %}>
                     </label>
                     <p class="login__hint" id="two-step-code-hint">6 digits. Two-step login stays off until the code is right.</p>

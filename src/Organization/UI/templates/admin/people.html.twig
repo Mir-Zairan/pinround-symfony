@@ -26,9 +26,9 @@
             <h2 class="admin-tab__heading" id="people-invite-title">Invite</h2>
             <form class="admin-tab__inline-form" method="post" action="{{ path('organization_admin_people_invite') }}" {{ stimulus_controller('invite-email') }}>
                 <div class="profile__field admin-tab__field">
-                    <label class="login__field">
+                    <label class="form-field">
                         Email
-                        <input class="login__input" type="email" name="email" value="{{ typedEmail }}" placeholder="name@company.com" autocomplete="off" required
+                        <input class="form-field__input" type="email" name="email" value="{{ typedEmail }}" placeholder="name@company.com" autocomplete="off" required
                             {{ stimulus_target('invite-email', 'field') }} data-action="input->invite-email#update"
                             {%- if emailError %} aria-invalid="true" aria-describedby="people-email-error"{% endif %}>
                     </label>

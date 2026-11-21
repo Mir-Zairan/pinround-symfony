@@ -33,9 +33,9 @@
             data-action="input->report-form#schedulePreview change->report-form#schedulePreview"
             {%- if personPicked is not empty %} data-intake-check-person-picked="{{ personPicked|join(' ') }}"{% endif %}>
             <div class="report__field">
-                <label class="login__field">
+                <label class="form-field">
                     What is wrong, in one line
-                    <input class="login__input" type="text" name="title" value="{{ input.title }}" maxlength="{{ titleMaxLength }}" required autocomplete="off"
+                    <input class="form-field__input" type="text" name="title" value="{{ input.title }}" maxlength="{{ titleMaxLength }}" required autocomplete="off"
                         placeholder="For example: The cart total is counted twice"
                         {%- if errors.title is defined %} aria-invalid="true" aria-describedby="report-title-error"{% endif %}>
                 </label>
@@ -47,9 +47,9 @@
             <div data-report-form-target="duplicates">{% include '@Ticketing/_report_duplicates.html.twig' with {duplicates: duplicates} only %}</div>
 
             <div class="report__field">
-                <label class="login__field">
+                <label class="form-field">
                     More detail · optional
-                    <textarea class="login__input" name="description" rows="5" maxlength="{{ descriptionMaxLength }}"
+                    <textarea class="form-field__input" name="description" rows="5" maxlength="{{ descriptionMaxLength }}"
                         placeholder="What did you do, what did you expect, what happened?"
                         {%- if errors.description is defined %} aria-invalid="true" aria-describedby="report-description-error"{% endif %}>{{ input.description }}</textarea>
                 </label>

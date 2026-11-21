@@ -24,9 +24,9 @@
                 <p class="login__hint">This is the only time pinround shows it. Keep it like a password.</p>
                 {# copy-text shows each Copy button only where the browser can copy, and copies the field's exact value. #}
                 <div class="security__copy" {{ stimulus_controller('copy-text') }}>
-                    <label class="login__field">
+                    <label class="form-field">
                         Token
-                        <input class="login__input" type="text" name="new_token" value="{{ newToken.reveal }}" readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
+                        <input class="form-field__input" type="text" name="new_token" value="{{ newToken.reveal }}" readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
                     </label>
                     <p class="security__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
                         <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy token</twig:Button>
@@ -34,9 +34,9 @@
                     </p>
                 </div>
                 <div class="security__copy" {{ stimulus_controller('copy-text') }}>
-                    <label class="login__field">
+                    <label class="form-field">
                         Add it to Claude Code
-                        <input class="login__input" type="text" name="claude_mcp_add" value='claude mcp add --transport http pinround {{ mcpUrl }} --header "Authorization: Bearer {{ newToken.reveal }}"' readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
+                        <input class="form-field__input" type="text" name="claude_mcp_add" value='claude mcp add --transport http pinround {{ mcpUrl }} --header "Authorization: Bearer {{ newToken.reveal }}"' readonly autocomplete="off" spellcheck="false" {{ stimulus_target('copy-text', 'source') }}>
                     </label>
                     <p class="security__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
                         <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy command</twig:Button>
@@ -53,9 +53,9 @@
             {% endif %}
             <p class="login__hint">A token can do only what you can do, and only what you tick here. Making one may ask for your password and a code again.</p>
             <form class="login__form" method="post" action="{{ path('identity_tokens_create') }}">
-                <label class="login__field">
+                <label class="form-field">
                     Name
-                    <input class="login__input" type="text" name="name" value="{{ chosen.name }}" maxlength="100" required>
+                    <input class="form-field__input" type="text" name="name" value="{{ chosen.name }}" maxlength="100" required>
                 </label>
                 <fieldset class="profile__themes security__scopes">
                     <legend class="profile__legend">What it may do</legend>
@@ -66,9 +66,9 @@
                         </label>
                     {% endfor %}
                 </fieldset>
-                <label class="login__field">
+                <label class="form-field">
                     Works for
-                    <select class="login__input" name="lifetime_days">
+                    <select class="form-field__input" name="lifetime_days">
                         {% for days in lifetimeDayChoices %}
                             <option value="{{ days }}"{% if (days ~ '') == chosen.lifetimeDays %} selected{% endif %}>{{ days }} days</option>
                         {% endfor %}

@@ -30,18 +30,18 @@
             {% elseif view == 'new_person' %}
                 <p>You are invited as {{ invitedEmail }}. Choose your name and a password.</p>
                 <form class="login__form" method="post" action="{{ path('organization_invitation') }}">
-                    <label class="login__field">
+                    <label class="form-field">
                         Your name
-                        <input class="login__input" type="text" name="name" value="{{ typedName }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required autofocus>
+                        <input class="form-field__input" type="text" name="name" value="{{ typedName }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required autofocus>
                     </label>
                     {#- No name, so it is never sent: the account takes the invited email. It is here for password managers. #}
-                    <label class="login__field">
+                    <label class="form-field">
                         Email
-                        <input class="login__input" type="email" value="{{ invitedEmail }}" autocomplete="username" readonly>
+                        <input class="form-field__input" type="email" value="{{ invitedEmail }}" autocomplete="username" readonly>
                     </label>
-                    <label class="login__field">
+                    <label class="form-field">
                         Password
-                        <input class="login__input" type="password" name="password" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" aria-describedby="invitation-password-hint" required>
+                        <input class="form-field__input" type="password" name="password" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" aria-describedby="invitation-password-hint" required>
                     </label>
                     <p class="login__hint" id="invitation-password-hint">At least {{ minimumPasswordLength }} characters.</p>
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token('organization_invitation_accept') }}">

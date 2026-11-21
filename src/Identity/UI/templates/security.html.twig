@@ -22,17 +22,17 @@
                 <p class="login__error" role="alert">{{ passwordError }}</p>
             {% endif %}
             <form class="login__form" method="post" action="{{ path('identity_security_password') }}">
-                <label class="login__field">
+                <label class="form-field">
                     Current password
-                    <input class="login__input" type="password" name="current_password" autocomplete="current-password" required>
+                    <input class="form-field__input" type="password" name="current_password" autocomplete="current-password" required>
                 </label>
-                <label class="login__field">
+                <label class="form-field">
                     New password
-                    <input class="login__input" type="password" name="new_password" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" aria-describedby="new-password-hint" required>
+                    <input class="form-field__input" type="password" name="new_password" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" aria-describedby="new-password-hint" required>
                 </label>
-                <label class="login__field">
+                <label class="form-field">
                     Repeat the new password
-                    <input class="login__input" type="password" name="new_password_repeat" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" required>
+                    <input class="form-field__input" type="password" name="new_password_repeat" autocomplete="new-password" minlength="{{ minimumPasswordLength }}" required>
                 </label>
                 <p class="login__hint" id="new-password-hint">At least {{ minimumPasswordLength }} characters. Other devices are logged out.</p>
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('security_password') }}">
@@ -52,15 +52,15 @@
                 <p class="login__hint" data-two-step-state="on">On. Each login asks for a code from your authenticator app.</p>
                 <form class="login__form" method="post" action="{{ path('identity_two_step_off') }}">
                     <p class="login__hint">To turn it off, type your password and a code. Admin pages need two-step login.</p>
-                    <label class="login__field">
+                    <label class="form-field">
                         Password
-                        <input class="login__input" type="password" name="password" autocomplete="current-password" required
+                        <input class="form-field__input" type="password" name="password" autocomplete="current-password" required
                             {%- if twoStepOffError %} aria-invalid="true" aria-describedby="two-step-off-error"{% endif %}>
                     </label>
                     {# Not inputmode="numeric": a recovery code has letters. #}
-                    <label class="login__field">
+                    <label class="form-field">
                         Code from your app
-                        <input class="login__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
+                        <input class="form-field__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
                             {%- if twoStepOffError %} aria-invalid="true" aria-describedby="two-step-off-error two-step-off-code-hint"{% else %} aria-describedby="two-step-off-code-hint"{% endif %}>
                     </label>
                     <p class="login__hint" id="two-step-off-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>

@@ -22,9 +22,9 @@
         <twig:Card>
             <form class="login__form" method="post" action="{{ path('identity_profile') }}">
                 <div class="profile__field">
-                    <label class="login__field">
+                    <label class="form-field">
                         Display name
-                        <input class="login__input" type="text" name="name" value="{{ profile.name }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required
+                        <input class="form-field__input" type="text" name="name" value="{{ profile.name }}" autocomplete="name" maxlength="{{ maximumNameLength }}" required
                             {%- if nameError %} aria-invalid="true" aria-describedby="profile-name-error"{% endif %}>
                     </label>
                     {% if nameError %}
@@ -32,9 +32,9 @@
                     {% endif %}
                 </div>
                 <div class="profile__field">
-                    <label class="login__field">
+                    <label class="form-field">
                         Time zone
-                        <select class="login__input" name="time_zone" required
+                        <select class="form-field__input" name="time_zone" required
                             {%- if timeZoneError %} aria-invalid="true" aria-describedby="profile-time-zone-error"{% endif %}>
                             {% for timeZone in timeZones %}
                                 <option value="{{ timeZone }}"{% if timeZone == profile.timeZone %} selected{% endif %}>{{ timeZone }}</option>

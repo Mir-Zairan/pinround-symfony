@@ -38,9 +38,9 @@
                                         {% else %}
                                             <form id="add-project-form" class="team__picker" method="post" action="{{ path(projectForms.linkRoute, {slug: team.slug}) }}">
                                                 <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.linkCsrfId) }}">
-                                                <label class="login__field">
+                                                <label class="form-field">
                                                     Find by key or name
-                                                    <input class="login__input" type="search" autocomplete="off" {{ stimulus_target('project-picker', 'search') }} data-action="input->project-picker#filter keydown.enter->project-picker#ignoreEnter">
+                                                    <input class="form-field__input" type="search" autocomplete="off" {{ stimulus_target('project-picker', 'search') }} data-action="input->project-picker#filter keydown.enter->project-picker#ignoreEnter">
                                                 </label>
                                                 <ul class="team__picker-list">
                                                     {% for unlinked in unlinkedProjects %}
@@ -61,13 +61,13 @@
                                         <form class="team__new-project" method="post" action="{{ path(projectForms.createRoute, {slug: team.slug}) }}" aria-labelledby="new-project-title">
                                             <h3 class="team__dialog-heading" id="new-project-title">New project</h3>
                                             <input type="hidden" name="{{ projectForms.csrfField }}" value="{{ csrf_token(projectForms.createCsrfId) }}">
-                                            <label class="login__field">
+                                            <label class="form-field">
                                                 Key
-                                                <input class="login__input mono" type="text" name="{{ projectForms.keyField }}" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{1,9}" title="2 to 10 letters or digits, starting with a letter" autocomplete="off" autocapitalize="characters" required>
+                                                <input class="form-field__input mono" type="text" name="{{ projectForms.keyField }}" maxlength="10" pattern="[A-Za-z][A-Za-z0-9]{1,9}" title="2 to 10 letters or digits, starting with a letter" autocomplete="off" autocapitalize="characters" required>
                                             </label>
-                                            <label class="login__field">
+                                            <label class="form-field">
                                                 Name
-                                                <input class="login__input" type="text" name="{{ projectForms.nameField }}" autocomplete="off" required>
+                                                <input class="form-field__input" type="text" name="{{ projectForms.nameField }}" autocomplete="off" required>
                                             </label>
                                             <div><twig:Button type="submit" variant="outline">Create project</twig:Button></div>
                                         </form>
@@ -151,7 +151,7 @@
                         <form class="team__add-step" method="post" action="{{ path(workflowForms.addStepRoute, {slug: team.slug}) }}" aria-labelledby="add-step-title" {{ stimulus_controller('add-step') }}>
                             <h3 class="visually-hidden" id="add-step-title">Add a team step</h3>
                             <input type="hidden" name="{{ workflowForms.csrfField }}" value="{{ csrf_token(workflowForms.addStepCsrfId) }}">
-                            <input class="login__input team__add-step-name" type="text" name="{{ workflowForms.nameField }}" placeholder="New step, for example: Ready to merge" aria-label="Step name" maxlength="80" autocomplete="off" required {{ stimulus_target('add-step', 'name') }} data-action="input->add-step#update">
+                            <input class="form-field__input team__add-step-name" type="text" name="{{ workflowForms.nameField }}" placeholder="New step, for example: Ready to merge" aria-label="Step name" maxlength="80" autocomplete="off" required {{ stimulus_target('add-step', 'name') }} data-action="input->add-step#update">
                             <fieldset class="team__add-step-groups">
                                 <legend>in</legend>
                                 {% for code, label in workflowForms.groupLabels %}
@@ -200,7 +200,7 @@
                     {%- endif -%}
                 </span></h2>
                 {% if hasMorePeople %}
-                    <input class="login__input team__people-search" type="search" placeholder="Find a person" aria-label="Find a person" autocomplete="off" {{ stimulus_target('team-people', 'search') }} data-action="input->team-people#filter">
+                    <input class="form-field__input team__people-search" type="search" placeholder="Find a person" aria-label="Find a person" autocomplete="off" {{ stimulus_target('team-people', 'search') }} data-action="input->team-people#filter">
                 {% endif %}
                 <ul class="team__people" id="team-people-list">
                     {% for person in workload.people %}

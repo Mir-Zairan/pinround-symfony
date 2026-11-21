@@ -15,15 +15,15 @@
                 <p class="login__error" role="alert" id="confirm-error">{{ error }}</p>
             {% endif %}
             <form class="login__form" method="post" action="{{ path('identity_confirm', {return: returnPath}) }}">
-                <label class="login__field">
+                <label class="form-field">
                     Password
-                    <input class="login__input" type="password" name="password" autocomplete="current-password" required autofocus
+                    <input class="form-field__input" type="password" name="password" autocomplete="current-password" required autofocus
                         {%- if error %} aria-invalid="true" aria-describedby="confirm-error"{% endif %}>
                 </label>
                 {# Not inputmode="numeric": a recovery code has letters. #}
-                <label class="login__field">
+                <label class="form-field">
                     Code from your app
-                    <input class="login__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
+                    <input class="form-field__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
                         {%- if error %} aria-invalid="true" aria-describedby="confirm-error confirm-code-hint"{% else %} aria-describedby="confirm-code-hint"{% endif %}>
                 </label>
                 <p class="login__hint" id="confirm-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>

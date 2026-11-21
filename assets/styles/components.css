@@ -429,6 +429,40 @@ a.seg {
   text-decoration: underline;
 }
 
+/* A form's labelled field: the label's words above its control. The login, account and admin pages, Report a problem
+   and the report draft share it. */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.form-field__input {
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-input);
+  background: var(--s-lowest);
+  color: var(--on-surface);
+  font: inherit;
+  font-weight: 400;
+}
+
+/* No height: the textarea's rows sets how many lines it starts with. */
+textarea.form-field__input {
+  height: auto;
+  padding: var(--space-10) var(--space-12);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* A select is always :read-only, so the rule names the fields that can really be read-only. */
+.form-field__input:is(input, textarea):read-only {
+  background: var(--s-c);
+  color: var(--on-surface-var);
+}
+
 /* A multi-line text field: the thread's composer and edit forms, the ping sheet's message. */
 .text-field {
   display: block;

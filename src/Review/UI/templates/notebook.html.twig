@@ -24,9 +24,9 @@
 
         <form class="login__form" method="post" action="{{ path('review_notebook_rename', {id: notebook.id}) }}" {% if error %}aria-describedby="notebook-error"{% endif %}>
             <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
-            <label class="login__field">
+            <label class="form-field">
                 Notebook title
-                <input class="login__input" type="text" name="title" value="{{ title }}" maxlength="120" required>
+                <input class="form-field__input" type="text" name="title" value="{{ title }}" maxlength="120" required>
             </label>
             <p class="report-draft__actions">
                 <twig:Button type="submit" variant="outline">Rename</twig:Button>
