@@ -104,8 +104,10 @@ test('Mia reports with pins, Omar shares a pinned draft on hand-off, and Mia rev
     // The editor adds the picture by itself once the worker has made it ready.
     const shot = page.locator('section.draft-shot');
     await expect(shot).toHaveCount(1, { timeout: PROCESSING_TIMEOUT_MS });
-    await expectPictureLoaded(shot.locator('img.screenshot__image'));
-    const frame = shot.locator('.screenshot__frame');
+    // Round 0's picture sits beside it as "Before" (the draft board compares), so the draft's own is the "After" one.
+    const afterPicture = shot.locator('.draft-board__picture--after');
+    await expectPictureLoaded(afterPicture.locator('img.screenshot__image'));
+    const frame = afterPicture.locator('.screenshot__frame');
     const box = (await frame.boundingBox())!;
     const pinSaved = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/setPins')
       && 200 === response.status() && carriesText(response.request().postData() ?? '', DRAFT_PIN_NOTE));
