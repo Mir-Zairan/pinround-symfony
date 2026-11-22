@@ -17,7 +17,9 @@
     {% set roundPath = {key: page.ticketKey, number: roundNumber} %}
     {% set ticketHref = path(ticketRoute, {key: page.ticketKey}) %}
     {% set hasTabs = page.tabs|length > 1 %}
-    <article class="round-page" data-controller="compare screenshot-pager round-pins" data-compare-mode="both" data-action="keydown@document->screenshot-pager#follow click->round-pins#select">
+    {#- The fragment an arrow key's visit carries; no element has it as id, so the browser does not scroll. -#}
+    {% set shownTabFragment = 'shown-tab' %}
+    <article class="round-page" data-controller="compare screenshot-pager round-pins" data-compare-mode="both" data-screenshot-pager-fragment-value="{{ shownTabFragment }}" data-action="keydown@document->screenshot-pager#follow click->round-pins#select">
         <header class="round-page__header">
             <div class="round-page__bar">
                 <a href="{{ ticketHref }}" class="icon-btn round-page__back" aria-label="Back to {{ page.ticketKey }}">
@@ -43,7 +45,7 @@
                     {% for tab in page.tabs %}
                         {% set pagerTarget = page.pagerTargetOf(tab) %}
                         <a class="round-tab" id="{{ tab.elementId }}" href="{{ path(roundRoute, roundPath|merge(tab.parameters)) }}"
-                            {%- if tab.isShown %} aria-current="page"{% endif %}
+                            {%- if tab.isShown %} aria-current="page" data-controller="fragment-focus" data-fragment-focus-fragment-value="{{ shownTabFragment }}"{% endif %}
                             {%- if pagerTarget is not null %} data-screenshot-pager-target="{{ pagerTarget }}"{% endif %}>
                             <span class="round-tab__label">{{ tab.label }}</span>
                             {{ include('@Review/_screenshot_tab_tag.html.twig', {tagLabel: tab.tagLabel, tagClass: tab.tagClass, tagId: tab.tagId}, with_context = false) }}

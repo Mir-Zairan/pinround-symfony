@@ -53,15 +53,10 @@ final readonly class RoundPage
 
     /**
      * The round page's screenshot-pager target the tab is: "back" for the tab before the shown one and "next" for the
-     * one after it, which the left and right arrow keys follow, "shown" for the shown one, which takes the focus after
-     * such a visit, null for any other.
+     * one after it, which the left and right arrow keys follow, null for any other.
      */
     public function pagerTargetOf(ScreenshotTab $tab): ?string
     {
-        if ($tab->isShown) {
-            return 'shown';
-        }
-
         return match ($tab->parameters) {
             $this->pager?->backParameters => 'back',
             $this->pager?->nextParameters => 'next',

@@ -123,7 +123,14 @@ final class RoundPageScreenshotsTest extends WebTestCase
         self::assertSame('Draft shot 0', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text(), 'A picture with a title names its tab.');
         self::assertCount(0, $page->filter('.round-page [role="tablist"], .round-page [role="tab"], .round-page [role="tabpanel"], .round-page [aria-selected]'), 'Page links, not ARIA tabs, as each one loads a page.');
         self::assertSame(['round-tab-1'], $page->filter('nav.round-tabs [aria-current]')->each(static fn (Crawler $tab): string => (string) $tab->attr('id')));
-        self::assertSame('round-tab-1', $page->filter('a.round-tab[data-screenshot-pager-target="shown"]')->attr('id'), 'The shown tab takes the focus after an arrow key\'s visit.');
+        $fragment = $page->filter('article.round-page')->attr('data-screenshot-pager-fragment-value');
+        self::assertSame('shown-tab', $fragment);
+        self::assertCount(0, $page->filter('#'.$fragment), 'No element has the fragment as id, so the browser does not scroll to it.');
+        self::assertSame(
+            ['round-tab-1'],
+            $page->filter('nav.round-tabs a.round-tab[data-controller="fragment-focus"]')->each(static fn (Crawler $tab): string => (string) $tab->attr('id')),
+        );
+        self::assertSame($fragment, $page->filter('#round-tab-1')->attr('data-fragment-focus-fragment-value'), 'The shown tab takes the focus after an arrow key\'s visit.');
         self::assertCount(0, $page->filter('.round-tab img'), 'A tab is text only, so the pictures stay above the fold.');
         self::assertSame(['Draft shot 0'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertCount(0, $page->filter('a.round-tab[data-screenshot-pager-target="back"]'), 'There is no screenshot before the first.');
@@ -135,6 +142,10 @@ final class RoundPageScreenshotsTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
+        self::assertSame(
+            ['round-tab-2'],
+            $page->filter('nav.round-tabs a.round-tab[data-controller="fragment-focus"]')->each(static fn (Crawler $tab): string => (string) $tab->attr('id')),
+        );
         self::assertSame('Draft shot 1', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text());
         self::assertSame(['Draft shot 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertSame('/t/SHOP-1/rounds/1?screenshot=1', $page->filter('a.round-tab[data-screenshot-pager-target="back"]')->attr('href'));
