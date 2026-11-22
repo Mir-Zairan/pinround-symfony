@@ -105,7 +105,8 @@ test.describe('The round page of a shared draft', () => {
     await verdict.getByRole('button', { name: 'Save verdict' }).click();
 
     await expect(page.locator(TOAST_REGION)).toContainText('Verdict saved. Lena can see it.');
-    await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=1#round-screenshot-verdict$`));
+    // fragment-focus focuses the section the redirect names, then drops the fragment from the address.
+    await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=1$`));
     await expect(verdict, 'the redirect brings Mia back to the verdict').toBeFocused();
     await expect(verdict.locator('.round-panel__verdict')).toHaveText('Needs fix');
     await expect(verdict.getByRole('radio', { name: 'Needs fix' })).toBeChecked();
