@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
+use App\Insight\Api\TurnWait;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -46,8 +47,16 @@ final readonly class DbalTicketHistory implements TicketHistory
         ?string $overrideNote,
         \DateTimeImmutable $at,
         ?MovedFrom $movedFrom = null,
+        ?TurnWait $turnWaitBefore = null,
     ): void {
         $payload = array_filter(['verb' => $verb, 'override_note' => $overrideNote], static fn (?string $value): bool => null !== $value);
+        if (null !== $turnWaitBefore) {
+            $payload[self::TURN_WAIT_BEFORE_PAYLOAD_KEY] = [
+                'user_id' => $turnWaitBefore->userId?->toString(),
+                'label' => $turnWaitBefore->label,
+                'since' => $turnWaitBefore->since->format(self::AT_FORMAT),
+            ];
+        }
         if (null !== $movedFrom) {
             $payload[self::MOVED_FROM_PAYLOAD_KEY] = [
                 'step_id' => $movedFrom->stepId,
@@ -68,7 +77,8 @@ final readonly class DbalTicketHistory implements TicketHistory
             throw new \LogicException('A ticket\'s history is read in a transaction under the organization as tenant; none is open.');
         }
         $row = $this->connection->fetchAssociative(
-            'SELECT actor_id, type, to_step, payload -> \''.self::MOVED_FROM_PAYLOAD_KEY.'\' AS moved_from, at FROM tkt_ticket_event'
+            'SELECT actor_id, type, to_step, payload -> \''.self::MOVED_FROM_PAYLOAD_KEY.'\' AS moved_from,'
+            .' payload -> \''.self::TURN_WAIT_BEFORE_PAYLOAD_KEY.'\' AS turn_wait_before, at FROM tkt_ticket_event'
             .' WHERE organization_id = CAST(:organization AS uuid) AND ticket_id = CAST(:ticket AS uuid) AND at >= CAST(:ticket_created_at AS timestamptz)'
             .' ORDER BY at DESC, id DESC LIMIT 1',
             DbalTicketHistoryEntries::parametersOf($this->tenantContext->require()->toString(), $ticketId, $ticketCreatedAt),
@@ -86,7 +96,36 @@ final readonly class DbalTicketHistory implements TicketHistory
             $isMove ? $row['to_step'] : null,
             new \DateTimeImmutable($row['at']),
             $isMove && \is_string($row['moved_from']) ? self::movedFromOf($row['moved_from']) : null,
+            $isMove && \is_string($row['turn_wait_before']) ? self::turnWaitOf($row['turn_wait_before']) : null,
         );
+    }
+
+    /**
+     * As movedFromOf, a payload not of the shape recordMoved writes reads as none, so the wait starts at the Undo.
+     */
+    private static function turnWaitOf(string $json): ?TurnWait
+    {
+        $fields = json_decode($json, true);
+        if (!\is_array($fields) || !\is_string($fields['since'] ?? null)) {
+            return null;
+        }
+        $userId = $fields['user_id'] ?? null;
+        $label = $fields['label'] ?? null;
+        if (\is_string($userId) === \is_string($label)) {
+            return null;
+        }
+
+        // Strictly the format recordMoved writes: the constructor would read "last week" as a time.
+        $since = \DateTimeImmutable::createFromFormat(self::AT_FORMAT, $fields['since']);
+        if (false === $since) {
+            return null;
+        }
+
+        try {
+            return new TurnWait(\is_string($userId) ? new UserId($userId) : null, \is_string($label) ? $label : null, $since);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
     }
 
     /**

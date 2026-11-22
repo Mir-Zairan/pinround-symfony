@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Application;
 
+use App\Insight\Api\TurnWait;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
@@ -18,6 +19,8 @@ interface TicketHistory
     public const string GIVEN_TO_PAYLOAD_KEY = 'assignee_id';
     /** The payload key of a move's "moved" row that keeps the fields it changed, as they were before it. */
     public const string MOVED_FROM_PAYLOAD_KEY = 'moved_from';
+    /** The payload key of a move's "moved" row that keeps whose turn it was before it and since when. */
+    public const string TURN_WAIT_BEFORE_PAYLOAD_KEY = 'turn_wait_before';
 
     /**
      * Adds the "created" row in the caller's transaction; the ticket must be saved before, as the row points at it.
@@ -31,14 +34,17 @@ interface TicketHistory
     /**
      * Adds the "moved" row in the caller's transaction, under the organization of its tenant.
      *
-     * @param string         $fromStepId   the wf_step id the ticket left
-     * @param string         $toStepId     the wf_step id the ticket is in now
-     * @param string|null    $verb         the code of the Workflow verb the person clicked, for example "start_work", or null
-     *                                     for a lead's "Move to another step…"
-     * @param string|null    $overrideNote why a lead moved the ticket past a rule, or null when no rule was overridden
-     * @param MovedFrom|null $movedFrom    the fields the move changed, as they were before it, kept under the payload
-     *                                     key MOVED_FROM_PAYLOAD_KEY so lastMoveOf can give them to Undo; null for a
-     *                                     move that cannot be undone (an Undo itself)
+     * @param string         $fromStepId     the wf_step id the ticket left
+     * @param string         $toStepId       the wf_step id the ticket is in now
+     * @param string|null    $verb           the code of the Workflow verb the person clicked, for example "start_work", or null
+     *                                       for a lead's "Move to another step…"
+     * @param string|null    $overrideNote   why a lead moved the ticket past a rule, or null when no rule was overridden
+     * @param MovedFrom|null $movedFrom      the fields the move changed, as they were before it, kept under the payload
+     *                                       key MOVED_FROM_PAYLOAD_KEY so lastMoveOf can give them to Undo; null for a
+     *                                       move that cannot be undone (an Undo itself)
+     * @param TurnWait|null  $turnWaitBefore whose turn it was before the move and since when, kept under the payload key
+     *                                       TURN_WAIT_BEFORE_PAYLOAD_KEY so Undo can give the wait back; null when the
+     *                                       ticket had no turn row, and for an Undo
      *
      * @throws \LogicException when no transaction is open
      */
@@ -52,6 +58,7 @@ interface TicketHistory
         ?string $overrideNote,
         \DateTimeImmutable $at,
         ?MovedFrom $movedFrom = null,
+        ?TurnWait $turnWaitBefore = null,
     ): void;
 
     /**

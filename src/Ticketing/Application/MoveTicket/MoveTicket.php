@@ -6,6 +6,8 @@ namespace App\Ticketing\Application\MoveTicket;
 
 use App\Insight\Api\TeamLoadQueries;
 use App\Insight\Api\TurnProjector;
+use App\Insight\Api\TurnWait;
+use App\Insight\Api\TurnWaits;
 use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\TeamPeopleQueries;
 use App\SharedKernel\Application\PingClearing;
@@ -81,6 +83,7 @@ final readonly class MoveTicket
         private PingClearing $pingClearing,
         private ShareDraftQuestion $shareDraftQuestion,
         private TurnRules $turnRules,
+        private TurnWaits $turnWaits,
     ) {
     }
 
@@ -161,6 +164,7 @@ final readonly class MoveTicket
      * Undo after a mistaken move (gap list 1.10): puts back what the ticket's last move changed (its step, who it waits
      * on, its reviewer and tester, closed_at), so whose turn it is is the one before the move, once Workflow's policy
      * allows it (TransitionPolicy::checkUndo: the mover, within UNDO_SECONDS of $at, while the move is the last change).
+     * Whoever gets the turn back keeps the wait they had before the move, rather than starting a new one.
      * Recorded as a move with the verb UNDO, which no Undo takes back, and published as TicketMoved. A round the move
      * closed stays closed and a draft it shared stays shared.
      *
@@ -204,7 +208,13 @@ final readonly class MoveTicket
         $fromStepId = $ticket->stepId();
         $ticket->undoMove($movedFrom, $at);
 
-        return new MoveResult($this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), self::UNDO, null, $at, $waitingTurns));
+        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), self::UNDO, null, $at, $waitingTurns);
+        // The refresh started the wait of whoever has the turn back at $at; the person the move took it from keeps theirs.
+        if (null !== $lastChange->turnWaitBefore) {
+            $this->turnWaits->restore($ticket->id(), $lastChange->turnWaitBefore);
+        }
+
+        return new MoveResult($clearedPingCount);
     }
 
     /**
@@ -427,6 +437,7 @@ final readonly class MoveTicket
             $draftId = $this->shareDraftQuestion->undecidedDraftIdOf($ticket->id(), $actor);
         }
         $movedFrom = $ticket->movedFrom();
+        $turnWaitBefore = $this->turnWaits->waitOf($ticket->id());
         $ticket->move(
             $target->id(),
             $target->groupCode(),
@@ -437,7 +448,7 @@ final readonly class MoveTicket
             self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
         );
 
-        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns, $movedFrom);
+        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns, $movedFrom, $turnWaitBefore);
         $this->shareDraftQuestion->closeRoundsOnMove($ticket->id(), $moveFacts, $at);
         if (null === $draftId) {
             return new MoveResult($clearedPingCount);
@@ -466,10 +477,12 @@ final readonly class MoveTicket
      * when it left its step, TicketMoved, and clears the actor's pings on the ticket (FR-PNG-05), all in the caller's
      * transaction.
      *
-     * @param UserId|null                       $givenTo      the person a give_it_to names, recorded in the history row
-     * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
-     * @param MovedFrom|null                    $movedFrom    what a move Undo may take back changed, as it was before;
-     *                                                        null for a give and an Undo
+     * @param UserId|null                       $givenTo        the person a give_it_to names, recorded in the history row
+     * @param array<string, array<string, int>> $waitingTurns   the team's waiting reviews and tests already read for $before
+     * @param MovedFrom|null                    $movedFrom      what a move Undo may take back changed, as it was before;
+     *                                                          null for a give and an Undo
+     * @param TurnWait|null                     $turnWaitBefore whose turn it was before the move and since when, for
+     *                                                          its Undo; null for a give, an Undo and a ticket with no turn row
      *
      * @return int how many of the actor's pings on the ticket it cleared
      *
@@ -487,6 +500,7 @@ final readonly class MoveTicket
         \DateTimeImmutable $at,
         array $waitingTurns,
         ?MovedFrom $movedFrom = null,
+        ?TurnWait $turnWaitBefore = null,
     ): int {
         try {
             $this->tickets->save($ticket);
@@ -496,7 +510,7 @@ final readonly class MoveTicket
         $clearedPingCount = $this->pingClearing->clearForActor($ticket->organizationId(), $before->ticketId, $actor, $at);
         $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people), $waitingTurns);
         if (null === $givenTo) {
-            $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at, $movedFrom);
+            $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at, $movedFrom, $turnWaitBefore);
         } else {
             $this->ticketHistory->recordGiven($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $givenTo, $at);
         }

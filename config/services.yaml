@@ -252,6 +252,7 @@ services:
     App\Ticketing\Api\PinProgressQueries: '@App\Review\Infrastructure\Doctrine\DbalPinProgressQueries'
     App\Ticketing\Api\OpenQuestionQueries: '@App\Conversation\Infrastructure\Doctrine\DbalOpenQuestionQueries'
     App\Insight\Api\TurnUserQueries: '@App\Insight\Infrastructure\Doctrine\DbalTurnUserQueries'
+    App\Insight\Api\TurnWaits: '@App\Insight\Infrastructure\Doctrine\DbalTurnWaits'
     App\Insight\Api\ProjectCountQueries: '@App\Insight\Infrastructure\Doctrine\DbalProjectCountQueries'
     App\Insight\Api\TeamLoadQueries: '@App\Insight\Infrastructure\Doctrine\DbalTeamLoadQueries'
     App\Insight\Api\WaitingTurnCounts: '@App\Insight\Infrastructure\Doctrine\DbalWaitingTurnCounts'
@@ -388,6 +389,9 @@ when@test:
             public: true
         test.insight_turn_user_queries:
             alias: App\Insight\Api\TurnUserQueries
+            public: true
+        test.insight_turn_waits:
+            alias: App\Insight\Api\TurnWaits
             public: true
         # No page shows the project rail before P03.T5 step 2; the count tests get it as a page would.
         test.insight_project_count_queries:

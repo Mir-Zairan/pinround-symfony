@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Ticketing\Application;
 
 use App\Insight\Api\TurnProjector;
+use App\Insight\Api\TurnWait;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
@@ -128,8 +129,9 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         ?string $overrideNote,
         \DateTimeImmutable $at,
         ?MovedFrom $movedFrom = null,
+        ?TurnWait $turnWaitBefore = null,
     ): void {
-        $this->lastChanges[$ticketId->toString()] = new LastTicketChange($actor, $toStepId, $at, $movedFrom);
+        $this->lastChanges[$ticketId->toString()] = new LastTicketChange($actor, $toStepId, $at, $movedFrom, $turnWaitBefore);
         $this->writes[] = \sprintf(
             'moved %s by %s from %s to %s with verb %s and note %s at %s',
             $ticketId->toString(),

@@ -4,15 +4,21 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Ticketing;
 
+use App\Insight\Api\TurnWait;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Tests\Integration\Organization\TenantTransactions;
 use App\Ticketing\Api\TicketCommands;
+use App\Ticketing\Application\LastTicketChange;
+use App\Ticketing\Application\TicketHistory;
+use App\Ticketing\Domain\MovedFrom;
 use App\Ticketing\Infrastructure\Doctrine\DbalTicketHistory;
+use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -119,7 +125,81 @@ final class DbalTicketHistoryTest extends KernelTestCase
         self::assertSame([], $this->movedRowsOf(self::ACME_FOODS, $ticketId));
     }
 
-    private function recordMoveOf(string $organizationId, string $ticketId, string $fromStepId, string $toStepId, ?string $verb, ?string $overrideNote, string $movedAt): void
+    /**
+     * The turn a move took from a person and the one it took from a label both come back to Undo as they were kept.
+     */
+    #[Test]
+    public function theLastMoveGivesBackTheTurnWaitItKept(): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $movedFrom = new MovedFrom(ShopTeamRows::TO_DO_STEP, null, null, null, null, null, null);
+        $waits = [
+            new TurnWait(new UserId(self::OMAR), null, new \DateTimeImmutable('2027-03-07 08:15:00 UTC')),
+            new TurnWait(null, 'Customer', new \DateTimeImmutable('2027-03-08 10:00:00 UTC')),
+        ];
+
+        $keptWaits = [];
+        foreach ($waits as $minute => $wait) {
+            $keptWaits[] = $this->transactions()->committedAs(self::ACME_FOODS, function () use ($ticketId, $movedFrom, $wait, $minute): ?TurnWait {
+                $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'put_on_hold', null, \sprintf('2027-03-16 09:3%d:00 UTC', $minute), $movedFrom, $wait);
+
+                return $this->lastChangeOf($ticketId)?->turnWaitBefore;
+            });
+        }
+
+        self::assertEquals($waits, $keptWaits);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function turnWaitsOfAnotherShape(): iterable
+    {
+        yield 'neither a person nor a label' => ['{"user_id": null, "label": null, "since": "2027-03-07T08:15:00.000000+00:00"}'];
+        yield 'both a person and a label' => ['{"user_id": "'.self::OMAR.'", "label": "Customer", "since": "2027-03-07T08:15:00.000000+00:00"}'];
+        yield 'no since' => ['{"user_id": "'.self::OMAR.'", "label": null}'];
+        yield 'a since that is no time' => ['{"user_id": "'.self::OMAR.'", "label": null, "since": "last week"}'];
+        yield 'a person id that is no user id' => ['{"user_id": "omar", "label": null, "since": "2027-03-07T08:15:00.000000+00:00"}'];
+        yield 'no object' => ['"2027-03-07T08:15:00.000000+00:00"'];
+    }
+
+    /**
+     * A payload another writer may have left reads as no kept wait, so the Undo starts a new one, and its moved-from
+     * fields are still read.
+     */
+    #[Test]
+    #[DataProvider('turnWaitsOfAnotherShape')]
+    public function aTurnWaitOfAnotherShapeReadsAsNone(string $turnWaitJson): void
+    {
+        $ticketId = $this->createdTicketOf(self::ACME_FOODS);
+        $movedFrom = new MovedFrom(ShopTeamRows::TO_DO_STEP, null, null, null, null, null, null);
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->recordMoveOf(self::ACME_FOODS, $ticketId, ShopTeamRows::TO_DO_STEP, ShopTeamRows::BACKLOG_STEP, 'put_on_hold', null, self::MOVED_AT, $movedFrom, new TurnWait(new UserId(self::OMAR), null, new \DateTimeImmutable(self::MOVED_AT))));
+        $migrator = self::getContainer()->get('doctrine.dbal.migrator_connection');
+        self::getContainer()->get(TenantContext::class)->set(new OrganizationId(self::ACME_FOODS));
+        try {
+            $changedRows = $migrator->transactional(static fn (Connection $connection): int|string => $connection->executeStatement(
+                "UPDATE tkt_ticket_event SET payload = jsonb_set(payload, '{".TicketHistory::TURN_WAIT_BEFORE_PAYLOAD_KEY."}', CAST(? AS jsonb)) WHERE ticket_id = ? AND type = 'moved'",
+                [$turnWaitJson, $ticketId],
+            ));
+        } finally {
+            self::getContainer()->get(TenantContext::class)->clear();
+        }
+        self::assertSame(1, $changedRows);
+
+        $lastChange = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?LastTicketChange => $this->lastChangeOf($ticketId));
+
+        self::assertNotNull($lastChange);
+        self::assertEquals($movedFrom, $lastChange->movedFrom);
+        self::assertNull($lastChange->turnWaitBefore);
+    }
+
+    private function lastChangeOf(string $ticketId): ?LastTicketChange
+    {
+        return new DbalTicketHistory($this->entityManager()->getConnection(), self::getContainer()->get(TenantContext::class))
+            ->lastChangeOf(new TicketId($ticketId), new \DateTimeImmutable('2026-01-01 00:00:00 UTC'));
+    }
+
+    private function recordMoveOf(string $organizationId, string $ticketId, string $fromStepId, string $toStepId, ?string $verb, ?string $overrideNote, string $movedAt, ?MovedFrom $movedFrom = null, ?TurnWait $turnWaitBefore = null): void
     {
         new DbalTicketHistory($this->entityManager()->getConnection(), self::getContainer()->get(TenantContext::class))->recordMoved(
             new OrganizationId($organizationId),
@@ -130,6 +210,8 @@ final class DbalTicketHistoryTest extends KernelTestCase
             $verb,
             $overrideNote,
             new \DateTimeImmutable($movedAt),
+            $movedFrom,
+            $turnWaitBefore,
         );
     }
 
