@@ -2,7 +2,15 @@
 
 **A symfony of visibility between humans and AI.**
 
-AI builds in minutes what used to take days. The person who has to check it first, often the developer who asked for it, cannot test that much by hand. **Pinround** is a web app where AI shows what it built as screenshots on a ticket. People pin and note what is wrong on them, AI reads the notes, fixes the code and adds the next try, and everyone sees Before and After. Developers check their own work before handing it over, testers add the edge cases they find as the next round, and every ticket says whose turn it is.
+AI builds in minutes what used to take days, and the person who must check it cannot test that much by hand. **Pinround-Symfony** makes AI's work visible: every change shows up as screenshots on its ticket, a person pins what is wrong, AI fixes it from those pins, and the ticket keeps the proof, round by round, until a person says it is right.
+
+**How it differs from other ticket trackers:**
+- **Proof on the ticket.** Claude Code (through MCP) adds screenshots of what it built, and testers capture the app with the browser extension. Each round shows Before and After, with pins on what is still wrong.
+- **Nothing reported gets lost.** Every pin of a report becomes a checklist item: the developer marks it fixed, the tester marks it OK.
+- **The turn comes from the work.** "Now: Mia checks · Next: Lena" is worked out from the step, the checklist and open questions, not set by hand.
+- **AI does the legwork, people decide.** Claude Code reads the pins, fixes the code and adds the next try. Sharing a round, checking an item OK and sending a report always take a person's click.
+
+It is also a full ticket tracker: **Whose turn?** and **My reports** views, search and filters, comments, questions that pause a ticket, pings, live updates, **Summarize with AI** and **Check with AI** (Hugging Face, Anthropic or Ollama on your laptop), separate data per organization and two-step login.
 
 ## Index
 - [Why pinround](#why-pinround): what each ticket shows, and for whom
