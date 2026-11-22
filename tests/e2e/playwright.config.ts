@@ -52,6 +52,9 @@ export default defineConfig({
       name: 'chromium-extension',
       testMatch: EXTENSION_SPECS,
       workers: 1,
+      // On CI's runners one or two of these, a different one each run, miss a 5 s wait while their own Chromium starts
+      // (2026-11-22, phase-14 hand-off); one retry there, none on a laptop, so a real failure still fails twice.
+      retries: process.env.CI ? 1 : 0,
     },
   ],
 });
