@@ -54,6 +54,38 @@ paths:
         '404': { $ref: '#/components/responses/Refused' }
         '422': { $ref: '#/components/responses/Refused' }
   /api/v1/reports:
+    get:
+      summary: My own report drafts in the token's organization, the last changed first (list_my_report_drafts, scope read).
+      description: >-
+        At most 20; `has_more` is true when I have more. Nobody else's drafts are ever listed. Titles come wrapped as
+        untrusted text, as for `GET /api/v1/notebooks`. The browser extension offers them as targets for
+        `POST /api/v1/reports/{id}/screenshots` and opens `url` to check and send one.
+      responses:
+        '200':
+          description: My drafts, or an empty list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [untrusted_text_notice, report_drafts, has_more]
+                properties:
+                  untrusted_text_notice: { type: string }
+                  report_drafts:
+                    type: array
+                    maxItems: 20
+                    items:
+                      type: object
+                      required: [draft_id, project, title, screenshot_count, updated_at, url]
+                      properties:
+                        draft_id: { type: string, format: uuid }
+                        project: { type: string, example: SHOP }
+                        title: { type: string, description: 'Wrapped as untrusted text.' }
+                        screenshot_count: { type: integer, minimum: 0, maximum: 10 }
+                        updated_at: { type: string, format: date-time }
+                        url: { type: string, format: uri, description: 'The draft''s page, where I check and send it.' }
+                  has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/NoToken' }
+        '403': { $ref: '#/components/responses/Refused' }
     post:
       summary: Make a private report draft (create_report, scope reports:write). Never a ticket.
       description: >-

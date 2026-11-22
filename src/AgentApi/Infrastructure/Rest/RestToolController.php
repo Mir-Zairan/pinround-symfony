@@ -16,6 +16,7 @@ use App\AgentApi\Infrastructure\Mcp\Tool\CreateUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListDraftScreenshots;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyReportDrafts;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyTickets;
 use App\AgentApi\Infrastructure\Mcp\ToolCallGate;
 use App\AgentApi\Infrastructure\Mcp\ToolCallOutcome;
@@ -96,6 +97,16 @@ final readonly class RestToolController
     public function reports(Request $request): Response
     {
         return $this->idempotent($request, fn (array $body): Response => $this->run(CreateReport::NAME, $body, Response::HTTP_CREATED));
+    }
+
+    /**
+     * The caller's own report drafts, newest change first, at most 20 (list_my_report_drafts, read), each title wrapped
+     * as UntrustedText, as the tool answers it.
+     */
+    #[Route('/api/v1/reports', name: 'api_v1_my_reports', methods: ['GET'])]
+    public function myReports(): Response
+    {
+        return $this->run(ListMyReportDrafts::NAME, [], Response::HTTP_OK);
     }
 
     /**

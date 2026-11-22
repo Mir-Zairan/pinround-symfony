@@ -12,6 +12,7 @@ use App\AgentApi\Infrastructure\Mcp\Tool\CreateNotebookUpload;
 use App\AgentApi\Infrastructure\Mcp\Tool\GetNotebook;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListDraftScreenshots;
 use App\AgentApi\Infrastructure\Mcp\Tool\ListMyNotebooks;
+use App\AgentApi\Infrastructure\Mcp\Tool\ListMyReportDrafts;
 use App\AgentApi\Infrastructure\Mcp\ToolCallAuditor;
 use App\AgentApi\Infrastructure\Mcp\ToolCallLimiter;
 use App\AgentApi\Infrastructure\Mcp\ToolRefusal;
@@ -26,6 +27,7 @@ use App\Media\Api\MediaImageStatus;
 use App\Media\Application\SignedVariantUrls;
 use App\Review\Api\Notebooks;
 use App\Review\Api\ReportDraftRefused;
+use App\Review\Api\ReportDrafts;
 use App\Review\Domain\ScreenshotTriesFull;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
@@ -76,6 +78,12 @@ final class RestApiTest extends WebTestCase
     /** With the notebook's number. */
     private const string LENAS_PAGED_NOTEBOOK = '0197a3c0-0000-7000-8000-0000000a%04d';
     private const string READY_MEDIA = '0197a3c0-0000-7000-8000-00000000d001';
+    private const string LENAS_NEWER_REPORT_DRAFT = '0197a3c0-0000-7000-8000-0000000d0001';
+    private const string LENAS_OLDER_REPORT_DRAFT = '0197a3c0-0000-7000-8000-0000000d0002';
+    private const string OMARS_REPORT_DRAFT = '0197a3c0-0000-7000-8000-0000000d0003';
+    private const string LENAS_REPORT_DRAFT_IN_BETA_BAKERY = '0197a3c0-0000-7000-8000-0000000d0004';
+    /** With the draft's number. */
+    private const string LENAS_PAGED_REPORT_DRAFT = '0197a3c0-0000-7000-8000-0000000e%04d';
     /** The input schema's problems, as ToolCallGate names them. */
     private const string EMPTY_CURSOR_PROBLEM = '/cursor: String must be at least 1 characters long.';
     private const string LONG_CURSOR_PROBLEM = '/cursor: String must not be longer than 100 characters.';
@@ -687,6 +695,84 @@ final class RestApiTest extends WebTestCase
     }
 
     /**
+     * Omar's draft in Acme Foods and Lena's in Beta Bakery changed after both of hers: the list leaves out the first by
+     * its owner and the second by the token's organization. Her older draft is inserted first and has the higher id,
+     * so neither insertion nor id order gives the answer. Omar's own token lists only his draft, and adding a picture to
+     * Lena's draft with it is refused as not found. No token is 401 with no audit row; a token without read is 403.
+     */
+    #[Test]
+    public function myReportDraftsListsOnlyTheCallersDraftsOfTheTokensOrganizationLastChangedFirst(): void
+    {
+        $betaBakery = $this->createOrganization('Beta Bakery');
+        $this->addMembership($this->people['Lena'], $betaBakery);
+        $twoScreenshots = [['media_id' => self::READY_MEDIA, 'title' => null, 'summary' => null, 'pins' => []], ['media_id' => self::READY_MEDIA, 'title' => null, 'summary' => null, 'pins' => []]];
+        $this->addReportDraft($this->acmeFoods, 'Lena', self::LENAS_OLDER_REPORT_DRAFT, 'Coupon is ignored', '2026-11-05 08:00:00+00', $twoScreenshots);
+        $this->addReportDraft($this->acmeFoods, 'Lena', self::LENAS_NEWER_REPORT_DRAFT, 'Total & <b>', '2026-11-06 09:00:00.5+00');
+        $this->addReportDraft($this->acmeFoods, 'Omar', self::OMARS_REPORT_DRAFT, 'Omar own draft', '2026-11-07 10:00:00+00');
+        $this->addReportDraft($betaBakery, 'Lena', self::LENAS_REPORT_DRAFT_IN_BETA_BAKERY, 'Beta Bakery draft', '2026-11-08 11:00:00+00');
+        [$lenasTokenId, $lenasToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods);
+        [$omarsTokenId, $omarsToken] = $this->issueApiToken($this->people['Omar'], $this->acmeFoods, scopes: [ApiTokenScope::Read, ApiTokenScope::ReportsWrite]);
+        $auditRowsBefore = $this->rowCountOf('aud_event');
+
+        $this->client->request('GET', '/api/v1/reports');
+        self::assertResponseStatusCodeSame(401);
+        self::assertSame($auditRowsBefore, $this->rowCountOf('aud_event'));
+
+        $this->request($lenasToken, 'GET', '/api/v1/reports');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([
+            'untrusted_text_notice' => UntrustedText::NOTICE,
+            'report_drafts' => [
+                ['draft_id' => self::LENAS_NEWER_REPORT_DRAFT, 'project' => 'SHOP', 'title' => '<untrusted_text>Total &amp; &lt;b&gt;</untrusted_text>', 'screenshot_count' => 0, 'updated_at' => '2026-11-06T09:00:00+00:00', 'url' => 'http://localhost/report-drafts/'.self::LENAS_NEWER_REPORT_DRAFT],
+                ['draft_id' => self::LENAS_OLDER_REPORT_DRAFT, 'project' => 'SHOP', 'title' => '<untrusted_text>Coupon is ignored</untrusted_text>', 'screenshot_count' => 2, 'updated_at' => '2026-11-05T08:00:00+00:00', 'url' => 'http://localhost/report-drafts/'.self::LENAS_OLDER_REPORT_DRAFT],
+            ],
+            'has_more' => false,
+        ], $this->json());
+
+        $this->request($omarsToken, 'GET', '/api/v1/reports');
+        self::assertResponseStatusCodeSame(200);
+        $omarsAnswer = $this->json();
+        self::assertIsArray($omarsAnswer['report_drafts'] ?? null);
+        self::assertSame([self::OMARS_REPORT_DRAFT], array_column($omarsAnswer['report_drafts'], 'draft_id'));
+        $draftsBefore = $this->rowsOf('SELECT id, owner_id, screenshots::text, version FROM rvw_report_draft ORDER BY id');
+        $this->request($omarsToken, 'POST', '/api/v1/reports/'.self::LENAS_NEWER_REPORT_DRAFT.'/screenshots', ['upload_id' => $this->addReadyUpload('Omar', 'new_report', 'SHOP')]);
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(['error' => ToolRefusal::NOT_FOUND, 'outcome' => 'not_found'], $this->json());
+        self::assertSame($draftsBefore, $this->rowsOf('SELECT id, owner_id, screenshots::text, version FROM rvw_report_draft ORDER BY id'));
+
+        [$writeOnlyTokenId, $writeOnlyToken] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods, scopes: [ApiTokenScope::ReportsWrite]);
+        $this->request($writeOnlyToken, 'GET', '/api/v1/reports');
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(['error' => \sprintf(ToolRefusal::MISSING_SCOPE, 'read'), 'outcome' => 'missing_scope'], $this->json());
+
+        self::assertEqualsCanonicalizing([[$lenasTokenId, 'ok'], [$omarsTokenId, 'ok'], [$writeOnlyTokenId, 'missing_scope']], $this->toolAuditRowsOf(ListMyReportDrafts::NAME));
+        self::assertSame(0, $this->rowCountOf('tkt_ticket'));
+    }
+
+    /**
+     * One draft more than the list holds, changed n minutes after the first and inserted odd numbers up, then even ones
+     * down: the list is the newest twenty and says more exist.
+     */
+    #[Test]
+    public function myReportDraftsHoldsAtMostTwentyAndSaysWhenMoreExist(): void
+    {
+        $count = ReportDrafts::DRAFTS_PER_PAGE + 1;
+        foreach ([...range(1, $count, 2), ...array_reverse(range(2, $count, 2))] as $number) {
+            $updatedAt = new \DateTimeImmutable('2026-11-05 08:00:00+00')->modify(\sprintf('+%d minutes', $number))->format('Y-m-d H:i:sP');
+            $this->addReportDraft($this->acmeFoods, 'Lena', \sprintf(self::LENAS_PAGED_REPORT_DRAFT, $number), 'Draft '.$number, $updatedAt);
+        }
+        [, $token] = $this->issueApiToken($this->people['Lena'], $this->acmeFoods);
+
+        $this->request($token, 'GET', '/api/v1/reports');
+
+        self::assertResponseStatusCodeSame(200);
+        $answer = $this->json();
+        self::assertIsArray($answer['report_drafts'] ?? null);
+        self::assertSame(array_map(static fn (int $number): string => \sprintf(self::LENAS_PAGED_REPORT_DRAFT, $number), range($count, 2)), array_column($answer['report_drafts'], 'draft_id'));
+        self::assertTrue($answer['has_more'] ?? null);
+    }
+
+    /**
      * Omar's notebook in Acme Foods and Lena's in Beta Bakery were used after both of hers: the list leaves out the
      * first by its owner and the second by the token's organization. Her older notebook is inserted first and has the
      * higher id, so neither insertion nor id order gives the answer. No token is 401 with no audit row, and a token
@@ -1001,6 +1087,19 @@ final class RestApiTest extends WebTestCase
         });
 
         return $intentId;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $screenshots {media_id, title, summary, pins} each
+     */
+    private function addReportDraft(OrganizationId $organizationId, string $owner, string $draftId, string $title, string $updatedAt, array $screenshots = []): void
+    {
+        $parameters = [$organizationId->toString(), $draftId, $this->people[$owner]->id()->toString(), $title, json_encode($screenshots, \JSON_THROW_ON_ERROR), $updatedAt];
+        $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO rvw_report_draft (organization_id, id, owner_id, project_key, title, detail, screenshots, version, created_at, updated_at)
+             VALUES (?, ?, ?, 'SHOP', ?, '', CAST(? AS jsonb), 1, '2026-11-01 08:00:00+00', ?)",
+            $parameters,
+        ));
     }
 
     /**
