@@ -81,6 +81,19 @@ hand-off dialog, and it keeps the findings on the ticket they belong to.
   message.
 - **MCP.** `add_screenshot`, `set_verdict` and `get_round_notes` follow the voter, so a tester's Claude Code can fill
   the tester's draft with the tester's token. No new tool and no new scope.
+- **"Pin this in my draft" (note, 2026-11-22, product owner decision).** A tester or reviewer looking at a shared
+  round may put her own pins on the developer's screenshot. The round page and full screen offer "Pin this in my
+  draft" on the shown picture (the After; a Before is copied from its own round's page) to whoever may start a draft
+  on the ticket, except the round's owner (`RoundPermission::COPY_TO_OWN_DRAFT`, decided by `RoundVoter` through
+  `DRAFT_CREATE`). It adds the screenshot to her private draft on the ticket, starting one with `startDraft` when she
+  has none, as a new screenshot titled "From round N · Screenshot k" with no pins, summary or verdict, and opens the
+  draft page on it (`RoundCommands::copyScreenshotToDraft`). The new screenshot points to the same stored picture: no
+  upload and no bytes through PHP ([ADR-0011](0011-screenshot-storage-and-processing.md)); a picture may be held by
+  several screenshots already, as "Make it a new ticket" shows, so retention keeps it while any round points to it.
+  Only the latest try of a shared round's chain can be copied ([ADR-0048](0048-tries-in-a-draft-and-one-open-round-per-ticket.md)).
+  A second copy of the same picture into the same draft is refused ("Your draft has this screenshot already."). Her
+  draft is the same draft as before: she may add her own captures, and sharing it (or "Needs changes") makes the
+  findings round. The round rules do not change.
 
 ### Consequences
 
