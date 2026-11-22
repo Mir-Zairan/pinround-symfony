@@ -786,14 +786,15 @@ final class WhoseTurnTest extends WebTestCase
     }
 
     #[Test]
-    public function theRailAndTheToolbarSitInAFiltersPanelBeforeTheHeadingThatStartsClosedByAClass(): void
+    public function theRailAndTheToolbarSitInAFiltersPanelAfterTheHeadingThatStartsClosedByAClass(): void
     {
         $this->logIn($this->client, $this->people['Lena']);
 
         $page = $this->client->request('GET', self::TURN);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertFiltersPanelComesFirstAndStartsClosedByAClass($page);
+        self::assertFiltersPanelFollowsTheHeadingAndStartsClosedByAClass($page);
+        self::assertSame(['Tickets'], $page->filter('header nav[aria-label="Main"] a[aria-current="page"]')->each(static fn (Crawler $link): string => $link->text()));
     }
 
     /**

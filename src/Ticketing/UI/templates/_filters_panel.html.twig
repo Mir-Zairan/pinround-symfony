@@ -1,6 +1,6 @@
-{#- The rail and the page's own TicketFilters ("filters" block), before the heading, so Tab meets them in the order a wide
-    screen shows them. Below 600px they sit behind a Filters button that tickets.css places under the heading; from
-    600px the button is hidden and the rail and the toolbar are the grid's own items. Closed from the first paint. -#}
+{#- The rail and the page's own TicketFilters ("filters" block), after the heading and before the list, so Tab meets the
+    toolbar where the page shows it. Below 600px they sit behind a Filters button under the heading; from 600px the
+    button is hidden and the rail and the toolbar are the grid's own items. Closed from the first paint. -#}
 <div class="tickets__filters" {{ stimulus_controller('menu', {}, {closed: 'tickets__filters-panel--closed'}) }}>
     <twig:Button variant="outline" size="sm" class="tickets__filters-button" aria-expanded="false" aria-controls="tickets-filters-panel"
         data-menu-target="trigger" data-action="menu#toggle">Filters</twig:Button>

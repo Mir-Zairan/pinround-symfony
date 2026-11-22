@@ -131,7 +131,7 @@ test('at 390 px wide the Your next step box sits above the Rounds, and the rest 
 
   const box = (await page.locator('.next-step-box').boundingBox())!;
   const rounds = (await page.locator('section.ticket__rounds').boundingBox())!;
-  const people = (await page.locator('section.people').boundingBox())!;
+  const people = (await page.locator('section.ticket-people').boundingBox())!;
   expect(box.y, 'the Your next step box top is above the Rounds top').toBeLessThan(rounds.y);
   expect(box.y + box.height, 'the box ends before the Rounds start').toBeLessThanOrEqual(rounds.y);
   expect(people.y, 'People follows the Rounds').toBeGreaterThan(rounds.y + rounds.height);

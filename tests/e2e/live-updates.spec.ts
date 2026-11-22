@@ -200,7 +200,7 @@ async function resumeThreadRender(page: Page): Promise<void> {
 }
 
 function lenasPeopleRow(page: Page) {
-  return page.locator('#ticket-people .people__row').filter({ has: page.locator('.people__name', { hasText: /^Lena$/ }) });
+  return page.locator('#ticket-people .ticket-people__row').filter({ has: page.locator('.ticket-people__name', { hasText: /^Lena$/ }) });
 }
 
 /** As a lead: picks a step from "Move to another step…" that asks nothing more, and waits for the move's answer. */
@@ -407,7 +407,7 @@ test.describe('two people on one ticket', () => {
     await markThisLoad(omar.page);
     const note = `Could you check the town list ${randomUUID().slice(0, 8)}`;
     const sheet = omar.page.getByRole('dialog', { name: 'Ping Lena' });
-    const lenasTurn = lenasPeopleRow(omar.page).locator('.people__turn');
+    const lenasTurn = lenasPeopleRow(omar.page).locator('.ticket-people__turn');
     await expect(lenasTurn).toHaveCount(0);
     const pingButton = omar.page.getByRole('button', { name: 'Ping Lena' });
     await pingButton.click();

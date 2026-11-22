@@ -9,18 +9,26 @@ use Symfony\Component\DomCrawler\Crawler;
 /**
  * The markup _filters_panel.html.twig gives the tickets list and the whose-turn view, which tickets.css lays out: a
  * Filters button naming one panel that holds the project rail and the toolbar, closed by a class and not by [hidden]
- * (base.css hides [hidden] at every width, and from 600px the rail and the toolbar must show), and the panel before the
- * heading, so Tab meets the rail and the toolbar where a wide screen shows them.
+ * (base.css hides [hidden] at every width, and from 600px the rail and the toolbar must show), and the panel between the
+ * heading and the list, so Tab meets the heading's view switch, then the toolbar, then the list, as the page shows them.
  */
 trait AssertsFiltersPanelMarkup
 {
-    private static function assertFiltersPanelComesFirstAndStartsClosedByAClass(Crawler $page): void
+    private static function assertFiltersPanelFollowsTheHeadingAndStartsClosedByAClass(Crawler $page): void
     {
         self::assertSame(
-            ['tickets__filters', 'tickets__header', 'tickets__list-frame'],
+            ['tickets__header', 'tickets__filters', 'tickets__list-frame'],
             $page->filter('.tickets-page')->children()->each(static fn (Crawler $part): string => explode(' ', (string) $part->attr('class'))[0]),
-            'The rail and the toolbar come before the heading, and the heading before the list.',
+            'The heading comes first, then the rail and the toolbar, then the list.',
         );
+        $header = $page->filter('.tickets-page > .tickets__header');
+        self::assertSame(
+            ['tickets__heading', 'seg-group'],
+            $header->children()->each(static fn (Crawler $part): string => explode(' ', (string) $part->attr('class'))[0]),
+            'The List / Whose turn? switch sits beside the heading, not under the count.',
+        );
+        self::assertCount(1, $header->filter('.tickets__heading > h1.tickets__title + p.tickets__total'));
+        self::assertSame(['List', 'Whose turn?'], $header->filter('.tickets__view[role="group"][aria-label="View"] > a.seg')->each(static fn (Crawler $link): string => $link->text()));
 
         $holder = $page->filter('.tickets-page > .tickets__filters[data-controller="menu"]');
         self::assertCount(1, $holder);

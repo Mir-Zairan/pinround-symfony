@@ -382,7 +382,12 @@ final class PingTest extends WebTestCase
         self::assertSame(PingSheet::PING_FAILED, $form->attr('data-failed-toast'));
         self::assertSame(['Cancel', 'Send ping'], $sheet->filter('.dialog__actions button')->each(static fn (Crawler $button): string => trim($button->text())));
         self::assertCount(0, $page->filter('#ping-'.$this->idOf('Omar')));
-        self::assertGreaterThan(1, $page->filter('.people__row')->count());
+        self::assertGreaterThan(1, $page->filter('.ticket-people__row')->count());
+        // Ping keeps its own grid column, apart from the name and role, so a long role line cannot push it down.
+        $lenasRow = $page->filter('.ticket-people__row')->reduce(static fn (Crawler $row): bool => 'Lena' === $row->filter('.ticket-people__who > .ticket-people__name')->text());
+        self::assertCount(1, $lenasRow);
+        self::assertCount(1, $lenasRow->filter('.ticket-people__row > .ticket-people__actions > #ping-'.$this->idOf('Lena')));
+        self::assertCount(0, $lenasRow->filter('.ticket-people__who .ping-sheet'));
     }
 
     #[Test]
@@ -408,7 +413,7 @@ final class PingTest extends WebTestCase
         $page = $this->client->request('GET', self::TICKET_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertGreaterThan(1, $page->filter('.people__row')->count());
+        self::assertGreaterThan(1, $page->filter('.ticket-people__row')->count());
         self::assertCount(0, $page->filter('.ping-sheet'));
         self::assertCount(0, $page->filter('[id^="ping-"]'));
     }

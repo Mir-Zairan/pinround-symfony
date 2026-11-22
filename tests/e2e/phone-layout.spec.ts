@@ -247,17 +247,17 @@ test('Whose turn? also shows its heading before the Filters button', async ({ pa
   await expect(projectRail(page)).toBeVisible();
 });
 
-test('on the phone the List / Whose turn? switch sits under the Filters button, so Tab goes Filters, switch, list as shown', async ({ page }) => {
+test('on the phone the List / Whose turn? switch sits with the heading above the Filters button, so Tab goes switch, Filters, list as shown', async ({ page }) => {
   await openTicketsWithRows(page);
   const heading = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
   const filters = (await filtersButton(page).boundingBox())!;
   const viewSwitch = (await page.getByRole('group', { name: 'View' }).boundingBox())!;
   const firstRow = (await page.locator('.tickets__rows:not([hidden]) .tickets__row').first().boundingBox())!;
   expect(heading.y + heading.height).toBeLessThanOrEqual(filters.y);
-  expect(filters.y + filters.height).toBeLessThanOrEqual(viewSwitch.y);
-  expect(viewSwitch.y + viewSwitch.height).toBeLessThanOrEqual(firstRow.y);
+  expect(viewSwitch.y + viewSwitch.height).toBeLessThanOrEqual(filters.y);
+  expect(filters.y + filters.height).toBeLessThanOrEqual(firstRow.y);
 
-  expect(await ticketsRegionsInTabOrder(page, 30)).toEqual(['filters button', 'view', 'list']);
+  expect(await ticketsRegionsInTabOrder(page, 30)).toEqual(['view', 'filters button', 'list']);
 });
 
 test('the phone tickets list with its filters open has no serious accessibility violations', async ({ page }) => {
@@ -308,7 +308,7 @@ test.describe('at 1440x900', () => {
     await expect(mainMenu(page).getByRole('link', { name: 'Home', exact: true })).toBeFocused();
   });
 
-  test('Tickets keeps the rail on the left and the toolbar above the heading, with no Filters button', async ({ page }) => {
+  test('Tickets keeps the rail on the left, the heading with the view switch on its right, and the toolbar under them', async ({ page }) => {
     await open(page, '/tickets');
 
     await expect(filtersButton(page)).toBeHidden();
@@ -317,15 +317,19 @@ test.describe('at 1440x900', () => {
     const rail = (await projectRail(page).boundingBox())!;
     const search = (await searchField(page).boundingBox())!;
     const heading = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    const viewSwitch = (await page.getByRole('group', { name: 'View' }).boundingBox())!;
     expect(rail.x + rail.width).toBeLessThanOrEqual(search.x);
     expect(rail.x + rail.width).toBeLessThanOrEqual(heading.x);
-    expect(search.y + search.height).toBeLessThanOrEqual(heading.y);
+    expect(heading.x + heading.width).toBeLessThanOrEqual(viewSwitch.x);
+    expect(viewSwitch.y).toBeLessThan(heading.y + heading.height);
+    expect(heading.y + heading.height).toBeLessThanOrEqual(search.y);
+    expect(viewSwitch.y + viewSwitch.height).toBeLessThanOrEqual(search.y);
   });
 
-  test('Tab goes rail, toolbar, List / Whose turn? switch, then the list, as the page shows them', async ({ page }) => {
+  test('Tab goes List / Whose turn? switch, rail, toolbar, then the list', async ({ page }) => {
     await openTicketsWithRows(page);
 
-    expect(await ticketsRegionsInTabOrder(page, 80)).toEqual(['rail', 'toolbar', 'view', 'list']);
+    expect(await ticketsRegionsInTabOrder(page, 80)).toEqual(['view', 'rail', 'toolbar', 'list']);
   });
 });
 
@@ -333,7 +337,7 @@ test.describe('at 1440x900', () => {
 test.describe('at 700x900', () => {
   test.use({ viewport: { width: 700, height: 900 } });
 
-  test('Tickets shows no Filters button and stacks the rail, the toolbar and the heading, which Tab follows', async ({ page }) => {
+  test('Tickets shows no Filters button and stacks the heading, the rail and the toolbar, which Tab follows', async ({ page }) => {
     await openTicketsWithRows(page);
 
     await expect(filtersButton(page)).toBeHidden();
@@ -342,8 +346,8 @@ test.describe('at 700x900', () => {
     const rail = (await projectRail(page).boundingBox())!;
     const search = (await searchField(page).boundingBox())!;
     const heading = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+    expect(heading.y + heading.height).toBeLessThanOrEqual(rail.y);
     expect(rail.y + rail.height).toBeLessThanOrEqual(search.y);
-    expect(search.y + search.height).toBeLessThanOrEqual(heading.y);
-    expect(await ticketsRegionsInTabOrder(page, 80)).toEqual(['rail', 'toolbar', 'view', 'list']);
+    expect(await ticketsRegionsInTabOrder(page, 80)).toEqual(['view', 'rail', 'toolbar', 'list']);
   });
 });

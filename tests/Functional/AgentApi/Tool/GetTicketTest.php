@@ -251,9 +251,9 @@ final class GetTicketTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1');
 
         self::assertResponseStatusCodeSame(200);
-        $pageRows = $page->filter('.people__row')->each(static fn (Crawler $row): array => [
-            preg_replace('/ \(you\)$/', '', $row->filter('.people__name')->text()),
-            self::roleCodesOf($row->filter('.people__role')->text()),
+        $pageRows = $page->filter('.ticket-people__row')->each(static fn (Crawler $row): array => [
+            preg_replace('/ \(you\)$/', '', $row->filter('.ticket-people__name')->text()),
+            self::roleCodesOf($row->filter('.ticket-people__role')->text()),
         ]);
         self::assertSame([['Omar', ['assignee']], ['Mia', ['tester']], ['Lena', ['reviewer']]], $pageRows, 'The page lists no code reviewer, so the comparison proves nothing.');
         self::assertSame($pageRows, $toolRows);

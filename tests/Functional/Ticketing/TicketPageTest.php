@@ -129,6 +129,18 @@ final class TicketPageTest extends WebTestCase
     }
 
     #[Test]
+    public function onATicketPageTicketsIsTheCurrentItemOfTheMainMenu(): void
+    {
+        $key = $this->addTicket('Search shows no results', ['group' => 'check']);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $page = $this->client->request('GET', '/t/'.$key);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Tickets'], $page->filter('header nav[aria-label="Main"] a[aria-current="page"]')->each(static fn (Crawler $link): string => $link->text()));
+    }
+
+    #[Test]
     public function everyDetailWithAValueShowsInOrderWithTheYearWhenItIsNotThisYears(): void
     {
         $parentKey = $this->addTicket('Checkout rework', ['group' => 'doing']);
@@ -1368,7 +1380,7 @@ final class TicketPageTest extends WebTestCase
         $section = $page->filter('.ticket__aside #'.TicketPageParts::PEOPLE_ID.' section[aria-labelledby="ticket-people-heading"]');
         self::assertCount(1, $section);
         self::assertSame('People', $section->filter('#ticket-people-heading')->text());
-        $rows = $section->filter('.people__row')->each(static fn (Crawler $row): array => [$row->filter('.people__name')->text(), $row->filter('.people__role')->text()]);
+        $rows = $section->filter('.ticket-people__row')->each(static fn (Crawler $row): array => [$row->filter('.ticket-people__name')->text(), $row->filter('.ticket-people__role')->text()]);
         self::assertNotEmpty($rows);
 
         return $rows;

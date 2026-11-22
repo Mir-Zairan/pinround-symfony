@@ -46,7 +46,7 @@ async function openTicket(page: Page, key: string, title: string): Promise<void>
 }
 
 function peopleRowOf(page: Page, firstName: string) {
-  return page.locator('.people__row').filter({ has: page.locator('.people__name', { hasText: new RegExp(`^${firstName}( \\(you\\))?$`) }) });
+  return page.locator('.ticket-people__row').filter({ has: page.locator('.ticket-people__name', { hasText: new RegExp(`^${firstName}( \\(you\\))?$`) }) });
 }
 
 function pingButton(page: Page) {
@@ -92,6 +92,13 @@ test.describe('Omar pings Lena about a SHOP ticket', () => {
     await openTicket(page, key, title);
     await expect(peopleRowOf(page, 'Omar').getByRole('button')).toHaveCount(0);
     await expect(peopleRowOf(page, 'Lena').locator('.ping-sheet__pinged')).toHaveCount(0);
+    for (const width of [1440, 1280, 1100]) {
+      await page.setViewportSize({ width, height: 800 });
+      const name = (await peopleRowOf(page, 'Lena').locator('.ticket-people__name').boundingBox())!;
+      const button = (await pingButton(page).boundingBox())!;
+      expect(button.y, `Ping sits on the name's line at ${width} px`).toBeLessThan(name.y + name.height);
+      expect(button.x, `Ping sits right of the name at ${width} px`).toBeGreaterThan(name.x + name.width);
+    }
 
     await openSheet(page);
 

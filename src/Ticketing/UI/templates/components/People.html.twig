@@ -1,13 +1,17 @@
-<section{{ attributes.defaults({class: 'ticket__section people', 'aria-labelledby': 'ticket-people-heading'}) }}>
+<section{{ attributes.defaults({class: 'ticket__section ticket-people', 'aria-labelledby': 'ticket-people-heading'}) }}>
     <h2 id="ticket-people-heading" class="ticket__section-title">People</h2>
-    <ul class="people__rows">
+    <ul class="ticket-people__rows">
         {% for person in people %}
-            <li class="people__row">
+            <li class="ticket-people__row">
                 <twig:Avatar name="{{ person.name }}" aria-hidden="true"/>
-                <span class="people__name">{{ person.firstName }}{% if person.isViewer %} (you){% endif %}</span>
-                <span class="people__role">{{ person.roleLine }}{% if person.isTheirTurn %}<span class="people__turn"> · their turn</span>{% endif %}</span>
+                <span class="ticket-people__who">
+                    <span class="ticket-people__name">{{ person.firstName }}{% if person.isViewer %} (you){% endif %}</span>
+                    <span class="ticket-people__role">{{ person.roleLine }}{% if person.isTheirTurn %}<span class="ticket-people__turn"> · their turn</span>{% endif %}</span>
+                </span>
                 {# Filled by the page with what the viewer may do with the person, rendered with this row's person. #}
-                {% block person_actions %}{% endblock %}
+                <div class="ticket-people__actions">
+                    {% block person_actions %}{% endblock %}
+                </div>
             </li>
         {% endfor %}
     </ul>

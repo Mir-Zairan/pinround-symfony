@@ -32,6 +32,11 @@ final readonly class MainMenu
     public const string HOME_ROUTE = 'web_home';
     /** P03.T3 (`/tickets`). */
     public const string TICKETS_ROUTE = 'ticketing_tickets';
+    /**
+     * The pages beside the list that the Tickets item stays current on, as the prototype shows it: Whose turn?
+     * (`/tickets/turn`) and a ticket page (`/t/{key}`).
+     */
+    public const array TICKETS_AREA_ROUTES = ['ticketing_whose_turn', 'ticket_show'];
     /** P14.T15 (`/my-reports`); left out, not inert, where the route does not exist (product decision 2026-11-20). */
     public const string MY_REPORTS_ROUTE = MyReportsController::ROUTE;
     /** P02.T8 (`/teams/{slug}`), with the team's slug as "slug". */
@@ -73,7 +78,7 @@ final readonly class MainMenu
         $roles = $actor->roles();
         $teamIds = $roles->teamIds();
         if ([] !== $teamIds || $roles->isManager()) {
-            $items[] = $this->pageItem('Tickets', self::TICKETS_ROUTE);
+            $items[] = MenuItem::page('Tickets', self::TICKETS_ROUTE, [], $this->urlOf(self::TICKETS_ROUTE, []), $this->isTicketsPage());
         }
         if ([] !== $teamIds && null !== $this->urlOf(self::MY_REPORTS_ROUTE, [])) {
             $items[] = $this->pageItem('My reports', self::MY_REPORTS_ROUTE)
@@ -169,6 +174,13 @@ final readonly class MainMenu
     public function adminHomeUrl(): ?string
     {
         return $this->urlOf(self::ADMIN_ROUTE, []);
+    }
+
+    private function isTicketsPage(): bool
+    {
+        $route = $this->requestStack->getMainRequest()?->attributes->get('_route');
+
+        return self::TICKETS_ROUTE === $route || \in_array($route, self::TICKETS_AREA_ROUTES, true);
     }
 
     private function isAdminPage(): bool

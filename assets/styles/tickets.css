@@ -1,18 +1,18 @@
 /* The tickets list (src/Ticketing/UI/templates/list.html.twig): one section per step, in group order. */
 
-/* The page: the project rail on the left, the toolbar, heading and list beside it; on a narrow screen the rail goes on
-   top. The markup holds them in this order, so Tab follows what the page shows; the last row takes what a long rail
-   adds, so the heading stays under the toolbar. */
+/* The page: the project rail on the left; beside it the heading with the List / Whose turn? switch on its right, the
+   toolbar under it, then the list. On a narrow screen the rail goes under the heading. The markup holds the main column
+   in this order, so Tab follows what the page shows; the last row takes what a long rail adds. */
 .tickets-page {
   display: grid;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
   grid-template-rows: auto auto 1fr;
   grid-template-areas:
-    "rail filters"
     "rail header"
+    "rail filters"
     "rail list";
   align-items: start;
-  gap: var(--space-24);
+  gap: var(--space-20) var(--space-24);
 }
 
 .project-rail-frame {
@@ -128,47 +128,22 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: none;
     grid-template-areas:
+      "header"
       "rail"
       "filters"
-      "header"
       "list";
   }
 }
 
-/* A phone (P14.T16): the heading and the count, then a Filters button that shows the rail and the toolbar, then the
-   List / Whose turn? switch and the list, so the first ticket shows without scrolling. The Filters button comes before
-   the header in the markup, so the switch moves under it too and Tab still follows what the page shows. The header's
-   own 6px gap becomes the rows' gap; the margins add the rest. */
+/* A phone (P14.T16): the heading with the List / Whose turn? switch, then a Filters button that shows the rail and the
+   toolbar, then the list, so the first ticket shows without scrolling. */
 @media (max-width: 599.98px) {
   .tickets-page {
     grid-template-areas:
-      "title"
-      "total"
+      "header"
       "filters"
-      "view"
       "list";
-    row-gap: var(--space-6);
-  }
-
-  /* Two classes, so the header's own flex rule further down does not win. */
-  .tickets-page > .tickets__header {
-    display: contents;
-  }
-
-  .tickets__title {
-    grid-area: title;
-  }
-
-  .tickets__total {
-    grid-area: total;
-  }
-
-  .tickets__header > .seg-group {
-    grid-area: view;
-  }
-
-  .tickets__list-frame {
-    margin-top: var(--space-16);
+    row-gap: var(--space-12);
   }
 
   .tickets__filters {
@@ -177,7 +152,6 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-12);
-    margin-block: var(--space-6);
   }
 
   .tickets__filters > .tickets__filters-button {
@@ -257,10 +231,28 @@
   cursor: default;
 }
 
+/* The heading and its count on the left, the List / Whose turn? switch on the right; the switch wraps under them when
+   the column is too narrow for both. */
 .tickets__header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12) var(--space-16);
+}
+
+.tickets__heading {
+  display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* A pill track around the two segments, as the prototype's view switch. */
+.tickets__view {
+  padding: var(--space-4);
+  border-radius: 999px;
+  background: var(--s-high);
 }
 
 .tickets__title {
@@ -366,12 +358,13 @@
   list-style: none;
 }
 
+/* About 52 px a row with a meta line, as dense as the prototype's list. */
 .tickets__row {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-16);
-  padding: var(--space-12) var(--space-16);
+  padding: var(--space-8) var(--space-16);
 }
 
 .tickets__row:hover {
@@ -393,13 +386,14 @@
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 2px;
   min-width: 0;
 }
 
 .tickets__row-title {
   font-size: 15px;
   font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -425,6 +419,11 @@
 .tickets__priority,
 .tickets__updated {
   font-size: 14px;
+}
+
+.tickets__meta {
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .tickets__priority {

@@ -1,12 +1,7 @@
 /* Notification's PingSheet in the ticket page's People rows: the small outline Ping button, the sheet it opens, and
    the "Pinged · again in N h" state that takes the button's place (dialogs-and-popovers.md, Ping sheet). */
 
-/* The row is a wrapping flex line (ticket.css, .people__row); the action keeps to its right end. */
-.ping-sheet,
-.ping-sheet__pinged {
-  margin-inline-start: auto;
-}
-
+/* The row's last grid column holds the action (ticket.css, .ticket-people__row). */
 .ping-sheet__pinged {
   display: inline-flex;
   align-items: center;

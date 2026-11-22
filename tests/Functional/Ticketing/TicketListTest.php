@@ -116,7 +116,7 @@ final class TicketListTest extends WebTestCase
     }
 
     #[Test]
-    public function theRailAndTheToolbarSitInAFiltersPanelBeforeTheHeadingThatStartsClosedByAClass(): void
+    public function theRailAndTheToolbarSitInAFiltersPanelAfterTheHeadingThatStartsClosedByAClass(): void
     {
         $this->addTicket('todo', 'Add a gift note', 'normal');
         $this->logIn($this->client, $this->people['Lena']);
@@ -124,7 +124,8 @@ final class TicketListTest extends WebTestCase
         $page = $this->client->request('GET', self::TICKETS);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertFiltersPanelComesFirstAndStartsClosedByAClass($page);
+        self::assertFiltersPanelFollowsTheHeadingAndStartsClosedByAClass($page);
+        self::assertSame(['Tickets'], $page->filter('header nav[aria-label="Main"] a[aria-current="page"]')->each(static fn (Crawler $link): string => $link->text()));
     }
 
     #[Test]

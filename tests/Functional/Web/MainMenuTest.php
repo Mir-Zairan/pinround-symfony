@@ -177,6 +177,11 @@ final class MainMenuTest extends WebTestCase
         self::assertNotNull($ticketsRoute);
         self::assertSame(TicketListController::class.'::list', $ticketsRoute->getDefault('_controller'), 'the tickets list is the real one, not a stand-in');
         self::assertSame('/tickets', $ticketsRoute->getPath());
+        self::assertSame(
+            ['/tickets/turn', '/t/{key}'],
+            array_map(static fn (string $routeName): ?string => $routes->get($routeName)?->getPath(), MainMenu::TICKETS_AREA_ROUTES),
+            'Tickets stays current on Whose turn? and on a ticket page, so these names must be those pages',
+        );
         self::assertSame(TeamController::class.'::show', $routes->get(MainMenu::TEAM_ROUTE)?->getDefault('_controller'), 'the team page is the real one, not a stand-in');
         $adminRoute = $routes->get(MainMenu::ADMIN_ROUTE);
         self::assertNotNull($adminRoute);

@@ -407,6 +407,32 @@ final class MainMenuTest extends TestCase
         self::assertFalse($items[1]->isCurrent());
     }
 
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function routesAndWhetherTicketsIsCurrent(): iterable
+    {
+        yield 'the tickets list' => [MainMenu::TICKETS_ROUTE, true];
+        yield 'Whose turn?' => ['ticketing_whose_turn', true];
+        yield 'a ticket page' => ['ticket_show', true];
+        yield 'a route that only starts with the same letters as the list' => [MainMenu::TICKETS_ROUTE.'_frame', false];
+        yield 'Report a problem' => ['ticketing_report', false];
+        yield 'Home' => [MainMenu::HOME_ROUTE, false];
+    }
+
+    #[Test]
+    #[DataProvider('routesAndWhetherTicketsIsCurrent')]
+    public function ticketsIsCurrentOnTheListWhoseTurnAndATicketPage(string $currentRoute, bool $isCurrent): void
+    {
+        $this->requestStack->push(new Request(attributes: ['_route' => $currentRoute, '_route_params' => ['key' => 'SHOP-1']]));
+
+        $items = $this->menuFor(new Roles(false, true, [], [], []))->items();
+
+        self::assertSame('Tickets', $items[1]->label());
+        self::assertSame($isCurrent, $items[1]->isCurrent());
+        self::assertSame(MainMenu::HOME_ROUTE === $currentRoute, $items[0]->isCurrent());
+    }
+
     #[Test]
     public function onlyTheTeamOfTheCurrentTeamPageIsCurrent(): void
     {
