@@ -2,7 +2,6 @@
 
 ![Pinround-Symfony: a pin lands on a screenshot, Claude Code fixes it, and the round moves on to the tester](docs/assets/pinround-banner.svg)
 
-**A symfony of visibility between humans and AI.**
 
 AI builds in minutes what used to take days, and the person who must check it cannot test that much by hand. **Pinround-Symfony** makes AI's work visible: every change shows up as screenshots on its ticket, a person pins what is wrong, AI fixes it from those pins, and the ticket keeps the proof, round by round, until a person says it is right.
 
