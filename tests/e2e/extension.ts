@@ -277,6 +277,7 @@ export const STUB_NOTEBOOK_FULL_TEXT = 'A notebook holds at most 10 screenshots.
 const STUB_PERSON = 'lena';
 const STUB_MAX_SCREENSHOTS = 10;
 const STUB_NOTEBOOKS_PER_PAGE = 20;
+const STUB_REPORT_DRAFTS_LISTED = 20;
 const STUB_TICKETS_DEFAULT_LIMIT = 20;
 /** NotebookId's rule: a canonical UUIDv7, taken in any case and kept lowercase; any other path id names no notebook. */
 const STUB_NOTEBOOK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -506,6 +507,18 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
       }
       return tickets.some((ticket) => ticket.key === body.ticket) ? beginUpload({ ticket: String(body.ticket) }, body) : stubNotFound();
     }
+    if (method === 'GET' && pathname === '/api/v1/reports') {
+      if (!scopes.includes('read')) {
+        return stubMissingScope('read');
+      }
+      // The latest made or changed first, as updated_at orders pinround's list; the stub keeps them in that order.
+      const mine = stub.myReportDrafts().reverse();
+      return [200, {
+        untrusted_text_notice: STUB_UNTRUSTED_TEXT_NOTICE,
+        report_drafts: mine.slice(0, STUB_REPORT_DRAFTS_LISTED).map((draft) => ({ draft_id: draft.id, project: draft.project, title: stubWrapped(draft.title), screenshot_count: draft.screenshots.length, updated_at: '2026-03-02T09:00:00+00:00', url: `${PINROUND_TEST_ORIGIN}/report-drafts/${draft.id}` })),
+        has_more: mine.length > STUB_REPORT_DRAFTS_LISTED,
+      }];
+    }
     if (method === 'POST' && pathname === '/api/v1/reports') {
       if (!scopes.includes('reports:write')) {
         return stubMissingScope('reports:write');
@@ -542,6 +555,9 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
         return stubRefused(STUB_REPORT_FULL_TEXT);
       }
       draft.screenshots.push(screenshotOf(body));
+      // A change makes the draft the newest in the list, as its updated_at does.
+      stub.reportDrafts.delete(draft.id);
+      stub.reportDrafts.set(draft.id, draft);
       usedUploads.add(String(body.upload_id));
       return [200, { draft_id: draft.id, media_id: `media-${body.upload_id}`, status: 'added', screenshot_count: draft.screenshots.length }];
     }

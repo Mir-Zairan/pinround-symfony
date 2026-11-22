@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DOCK_TEXTS, answerDockRequest } from '../src/background/dock-requests.js';
-import { CAPTURE_TARGET_KEY, CHOOSE_TARGET_FIRST, NEW_REPORT, goneMessageOf, loadCaptureTarget, saveCaptureTarget } from '../src/capture/capture-target.js';
-import { NEW_REPORT_KEY, NOT_SENT, WAITING_CAPTURES_KEY, loadNewReport } from '../src/capture/new-report.js';
+import { CAPTURE_TARGET_KEY, CHOOSE_TARGET_FIRST, NEW_NOTEBOOK, NEW_REPORT, goneMessageOf, loadCaptureTarget, saveCaptureTarget } from '../src/capture/capture-target.js';
+import { NEW_REPORT_KEY, NOT_SENT, REPORTS_WRITE_MISSING, WAITING_CAPTURES_KEY, loadNewReport } from '../src/capture/new-report.js';
+import { NOTEBOOKS_WRITE_MISSING } from '../src/capture/notebook-capture.js';
 import { MAX_THUMBNAIL_DATA_URL_LENGTH, NOTHING_WAITING, NO_ROOM, WAITING_FULL, capturedMessage, draftSavedMessage, loadWaitingCaptures } from '../src/capture/waiting-captures.js';
 import { PinroundApi } from '../src/shared/api.js';
 import { saveSettings } from '../src/shared/settings.js';
@@ -20,11 +21,15 @@ const NOTEBOOKS = [{ notebook_id: NOTEBOOK_ID, title: 'Checkout', last_used_at: 
 const NEW_REPORT_TARGET = { kind: NEW_REPORT };
 const SHOP_12 = { kind: 'ticket', ticketKey: 'SHOP-12' };
 const SHOP_77 = { kind: 'ticket', ticketKey: 'SHOP-77' };
+const NEW_NOTEBOOK_CHOICE = { value: NEW_NOTEBOOK, label: DOCK_TEXTS.newNotebook, url: null };
 const OFFERED_CHOICES = [
-    { value: NEW_REPORT, label: 'New report' },
-    { value: 'ticket:SHOP-12', label: 'My draft round · SHOP-12' },
-    { value: `notebook:${NOTEBOOK_ID}`, label: 'Notebook · Checkout' },
+    { value: NEW_REPORT, label: 'New report', url: null },
+    { value: 'ticket:SHOP-12', label: 'My draft round · SHOP-12', url: `${PINROUND_ORIGIN}/t/SHOP-12` },
+    { value: `notebook:${NOTEBOOK_ID}`, label: 'Notebook · Checkout', url: `${PINROUND_ORIGIN}/notebooks/${NOTEBOOK_ID}` },
+    NEW_NOTEBOOK_CHOICE,
 ];
+/** The choices once my report draft titled `title` exists: it comes right after "New report". */
+const offeredWithDraft = (draftId, title) => [OFFERED_CHOICES[0], { value: `report:${draftId}`, label: `Report draft · ${title}`, url: `${PINROUND_ORIGIN}/report-drafts/${draftId}` }, ...OFFERED_CHOICES.slice(1)];
 const SHOP_12_ADDED = 'Added to your draft round on SHOP-12. Only you see it.';
 
 /** A report draft as new-report.js keeps it in session storage, with two screenshots made and nothing on its way. */
@@ -33,7 +38,7 @@ const PENDING_CAPTURE = { idempotencyKey: 'key-1', path: `/api/v1/reports/${DRAF
 /** A new report as the popup leaves it once its project key was typed, before any capture. */
 const TYPED_NEW_REPORT = { project: 'SHOP', reportTitle: '', draftId: null, draftUrl: null, screenshotCount: 0, pendingCapture: null };
 /** The dock's view of a new report whose draft is made and has nothing waiting. */
-const MADE_DRAFT_WAITING = { shots: [], needsTitle: false, needsProject: false };
+const MADE_DRAFT_WAITING = { shots: [], needsTitle: false, needsProject: false, draftTitle: 'Logo is cut off' };
 const SAVE = (reportTitle, project = '') => ({ pinroundDock: 'save-draft', value: { reportTitle, project } });
 /** The pins of the stand-in overlay putPinOnPage puts on the shop tab. */
 const PAGE_PIN = { x_pct: 10, y_pct: 20, note: 'Total' };
@@ -139,8 +144,8 @@ test('settings that cannot be read answer "something went wrong", not "connect f
 test('state for a new report counts the captures waiting, offers Save draft only with one waiting or one to send again, and asks only for what is not known', async () => {
     const waitingShot = { id: 'w1', pngDataUrl: 'data:image/png;base64,iVBORw0KGgo=', texts: { title: 'Cart' }, pins: [PAGE_PIN, { x_pct: 90, y_pct: 80, note: '' }] };
     const cases = [
-        ['nothing waiting, project typed in the popup', TYPED_NEW_REPORT, [], { count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: false } }],
-        ['one waiting, no project known', { ...TYPED_NEW_REPORT, project: ' ' }, [waitingShot], { count: 1, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }, { x_pct: 90, y_pct: 80 }], thumbnail: null }], needsTitle: true, needsProject: true } }],
+        ['nothing waiting, project typed in the popup', TYPED_NEW_REPORT, [], { count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: false, draftTitle: null } }],
+        ['one waiting, no project known', { ...TYPED_NEW_REPORT, project: ' ' }, [waitingShot], { count: 1, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }, { x_pct: 90, y_pct: 80 }], thumbnail: null }], needsTitle: true, needsProject: true, draftTitle: null } }],
         ['a draft made, a capture to send again', madeNewReport({ pendingCapture: PENDING_CAPTURE }), [], { count: 0, canSave: true, newReport: MADE_DRAFT_WAITING }],
         ['a draft made, nothing waiting', madeNewReport(), [], { count: 0, canSave: false, newReport: MADE_DRAFT_WAITING }],
     ];
@@ -251,7 +256,7 @@ test('a capture into a new report waits in the extension, sends nothing, and say
     const second = await ask(browser, { pinroundDock: 'capture' }, apiOf);
 
     assert.deepEqual([first.message, second.message], [capturedMessage(1), capturedMessage(2)]);
-    assert.deepEqual(second.state, { choices: OFFERED_CHOICES, chosen: NEW_REPORT, count: 2, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }], thumbnail: null }, { pinSpots: [{ x_pct: 10, y_pct: 20 }], thumbnail: null }], needsTitle: true, needsProject: false } });
+    assert.deepEqual(second.state, { choices: OFFERED_CHOICES, chosen: NEW_REPORT, count: 2, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }], thumbnail: null }, { pinSpots: [{ x_pct: 10, y_pct: 20 }], thumbnail: null }], needsTitle: true, needsProject: false, draftTitle: null } });
     assert.deepEqual(writesOf(pinround), [], 'Nothing reaches pinround before Save draft.');
     const waiting = await loadWaitingCaptures(browser.storage.session);
     assert.equal(waiting.length, 2);
@@ -281,18 +286,21 @@ test('a new report\'s capture keeps its thumbnail and the dock gets it with the 
     assert.deepEqual(writesOf(pinround), []);
 });
 
-test('save-draft makes one report draft with the typed title and every waiting capture, then forgets the report and keeps "New report" chosen', async () => {
+test('save-draft makes one report draft with the typed title and every waiting capture, then forgets the report, keeps "New report" chosen, offers the draft\'s page and lists the draft to pick again', async () => {
     const browser = await newReportBrowser();
     const { pinround, apiOf } = pinroundFor();
     await ask(browser, { pinroundDock: 'capture' }, apiOf);
     await ask(browser, { pinroundDock: 'capture' }, apiOf);
 
-    assert.deepEqual(await ask(browser, SAVE('  Total is wrong  '), apiOf), {
-        message: draftSavedMessage(2),
-        state: { choices: OFFERED_CHOICES, chosen: NEW_REPORT, count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: true } },
-    });
+    const answer = await ask(browser, SAVE('  Total is wrong  '), apiOf);
 
     const [draft, ...otherDrafts] = pinround.myDrafts();
+    assert.deepEqual(answer, {
+        message: draftSavedMessage(2, 'Total is wrong'),
+        savedUrl: `${PINROUND_ORIGIN}/report-drafts/${draft.id}`,
+        state: { choices: offeredWithDraft(draft.id, 'Total is wrong'), chosen: NEW_REPORT, count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: true, draftTitle: null } },
+    });
+    assert.equal(answer.message, 'Draft "Total is wrong" saved with 2 captures. Open it in pinround to send it, or choose it under Save to for more.');
     assert.deepEqual(otherDrafts, []);
     assert.deepEqual([draft.project, draft.title, draft.screenshots.length], ['SHOP', 'Total is wrong', 2]);
     assert.equal(pinround.requests.filter(([method, requestPath]) => 'POST' === method && '/api/v1/reports' === requestPath).length, 1);
@@ -305,7 +313,7 @@ test('save-draft takes the project typed in the panel when the popup has none', 
     const { pinround, apiOf } = pinroundFor();
     await ask(browser, { pinroundDock: 'capture' }, apiOf);
 
-    assert.equal((await ask(browser, SAVE('Total is wrong', 'shop'), apiOf)).message, draftSavedMessage(1));
+    assert.equal((await ask(browser, SAVE('Total is wrong', 'shop'), apiOf)).message, draftSavedMessage(1, 'Total is wrong'));
     assert.deepEqual(pinround.myDrafts().map(({ project, title }) => [project, title]), [['SHOP', 'Total is wrong']]);
 });
 
@@ -334,7 +342,7 @@ test('a title of exactly 200 characters is saved', async () => {
     const { pinround, apiOf } = pinroundFor();
     await ask(browser, { pinroundDock: 'capture' }, apiOf);
 
-    assert.equal((await ask(browser, SAVE('\u{1F600}'.repeat(200)), apiOf)).message, draftSavedMessage(1));
+    assert.equal((await ask(browser, SAVE('\u{1F600}'.repeat(200)), apiOf)).message, draftSavedMessage(1, '\u{1F600}'.repeat(200)));
     assert.equal(pinround.myDrafts()[0].title, '\u{1F600}'.repeat(200));
 });
 
@@ -342,7 +350,7 @@ test('save-draft with nothing waiting says so and keeps the target and report', 
     const cases = [
         ['a ticket', { target: SHOP_12, newReport: madeNewReport() }, DOCK_TEXTS.nothingToSave, { chosen: 'ticket:SHOP-12', count: 0, canSave: false, newReport: null }],
         ['no target', { newReport: madeNewReport() }, DOCK_TEXTS.nothingToSave, { chosen: '', count: null, canSave: false, newReport: null }],
-        ['a new report with nothing captured', { target: NEW_REPORT_TARGET, newReport: TYPED_NEW_REPORT }, NOTHING_WAITING, { chosen: NEW_REPORT, count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: false } }],
+        ['a new report with nothing captured', { target: NEW_REPORT_TARGET, newReport: TYPED_NEW_REPORT }, NOTHING_WAITING, { chosen: NEW_REPORT, count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: false, draftTitle: null } }],
     ];
     for (const [name, seed, message, expectedState] of cases) {
         const browser = await dockBrowser(seed);
@@ -367,7 +375,7 @@ test('a save whose answer is lost keeps that capture to send again, and the next
     assert.deepEqual([lost.message, lost.isError, lost.state.count, lost.state.canSave], [NOT_SENT, true, 1, true]);
     assert.notEqual((await loadNewReport(browser.storage.session)).pendingCapture, null);
 
-    assert.equal((await ask(browser, SAVE(''), apiOf)).message, draftSavedMessage(2));
+    assert.equal((await ask(browser, SAVE(''), apiOf)).message, draftSavedMessage(2, 'Total is wrong'));
     const [draft, ...otherDrafts] = pinround.myDrafts();
     assert.deepEqual([otherDrafts, draft.title, draft.screenshots.length], [[], 'Total is wrong', 2]);
 });
@@ -490,7 +498,7 @@ test('with no apiOf given, the dock\'s calls and each picture\'s PUT go from the
     await putPinOnPage(browser);
 
     assert.equal((await answerDockRequest({ pinroundDock: 'capture' }, SHOP_TAB, { browser })).message, capturedMessage(1));
-    assert.equal((await answerDockRequest(SAVE('Total is wrong'), SHOP_TAB, { browser })).message, draftSavedMessage(1));
+    assert.equal((await answerDockRequest(SAVE('Total is wrong'), SHOP_TAB, { browser })).message, draftSavedMessage(1, 'Total is wrong'));
 
     assert.deepEqual(pinround.myDrafts().map((draft) => [draft.title, draft.screenshots.length]), [['Total is wrong', 1]]);
     const sentFromPage = browser.sentRuntimeMessages.map((message) => message[EXTENSION_PAGE_FETCH]).map(({ method, url }) => `${method} ${new URL(url).origin}`);
@@ -511,4 +519,143 @@ test('a waiting capture this version cannot read is left out, never sent', async
     // A thumbnail this version cannot read costs only the thumbnail: the capture itself is still sent.
     await browser.storage.session.set({ [WAITING_CAPTURES_KEY]: [{ ...good, thumbnail: { dataUrl: 'https://evil.example/x.jpg', width: 10, height: 10 } }] });
     assert.deepEqual((await loadWaitingCaptures(browser.storage.session)).map(({ id, thumbnail }) => [id, thumbnail]), [['w1', null]]);
+});
+
+const OLDER_DRAFT_ID = 'rd000000-0000-4000-8000-000000000002';
+/** My report draft with two pictures, an older one of mine, and Omar's newer one that must never be offered. */
+const REPORT_DRAFTS = [
+    { id: OLDER_DRAFT_ID, owner: 'lena', project: 'SHOP', title: 'Older draft', updated_at: '2026-03-01T08:00:00+00:00', screenshots: [] },
+    { id: DRAFT_ID, owner: 'lena', project: 'SHOP', title: 'Total & <tax>', updated_at: '2026-03-01T10:00:00+00:00', screenshots: [{ upload_id: 'u1' }, { upload_id: 'u2' }] },
+    { id: 'rd000000-0000-4000-8000-000000000003', owner: 'omar', project: 'SHOP', title: 'Omar own draft', updated_at: '2026-03-01T11:00:00+00:00', screenshots: [] },
+];
+const TOTAL_DRAFT = { kind: 'report', draftId: DRAFT_ID, title: 'Total & <tax>', project: 'SHOP' };
+const CHOICES_WITH_MY_DRAFTS = [
+    OFFERED_CHOICES[0],
+    { value: `report:${DRAFT_ID}`, label: 'Report draft · Total & <tax>', url: DRAFT_URL },
+    { value: `report:${OLDER_DRAFT_ID}`, label: 'Report draft · Older draft', url: `${PINROUND_ORIGIN}/report-drafts/${OLDER_DRAFT_ID}` },
+    ...OFFERED_CHOICES.slice(1),
+];
+
+test('my report drafts are offered newest first with their titles and pages; choosing one counts its pictures', async () => {
+    const browser = await dockBrowser();
+    const { pinround, apiOf } = pinroundFor({ reportDrafts: REPORT_DRAFTS });
+
+    assert.deepEqual(await ask(browser, { pinroundDock: 'choose', value: `report:${DRAFT_ID}` }, apiOf), {
+        state: { choices: CHOICES_WITH_MY_DRAFTS, chosen: `report:${DRAFT_ID}`, count: 2, canSave: false, newReport: null },
+    });
+    assert.deepEqual(await loadCaptureTarget(browser.storage.session), TOTAL_DRAFT);
+    assert.deepEqual(writesOf(pinround), []);
+});
+
+test('a capture into a chosen report draft adds the page with its pin at the draft\'s end, uploaded for its project', async () => {
+    const browser = await dockBrowser({ target: TOTAL_DRAFT });
+    await putPinOnPage(browser);
+    const { pinround, apiOf } = pinroundFor({ reportDrafts: REPORT_DRAFTS });
+
+    const answer = await ask(browser, { pinroundDock: 'capture' }, apiOf);
+
+    assert.equal(answer.message, 'Added to "Total & <tax>". It holds 3 of 10 captures.');
+    assert.equal(answer.isError, undefined);
+    assert.equal(answer.state.count, 3);
+    assert.deepEqual(writesOf(pinround).map(([method, path, body]) => [method, path, body]), [
+        ['POST', '/api/v1/uploads', { project: 'SHOP', mime: 'image/png', bytes: writesOf(pinround)[0][2].bytes, sha256: writesOf(pinround)[0][2].sha256 }],
+        ['POST', `/api/v1/reports/${DRAFT_ID}/screenshots`, { upload_id: 'upload-1', title: 'Acme Foods shop', pins: [PAGE_PIN] }],
+    ]);
+    const [draft] = pinround.myDrafts().filter((mine) => DRAFT_ID === mine.id);
+    assert.deepEqual(draft.screenshots.map((screenshot) => screenshot.upload_id), ['u1', 'u2', 'upload-1']);
+});
+
+test('the tenth capture of a report draft says it is full, and an eleventh is pinround\'s refusal as it words it, with the pins kept', async () => {
+    const nineShots = Array.from({ length: 9 }, (unused, index) => ({ upload_id: `u${index}` }));
+    const browser = await dockBrowser({ target: TOTAL_DRAFT });
+    await putPinOnPage(browser);
+    const { pinround, apiOf } = pinroundFor({ reportDrafts: [{ ...REPORT_DRAFTS[1], screenshots: nineShots }] });
+
+    assert.equal((await ask(browser, { pinroundDock: 'capture' }, apiOf)).message, 'Added to "Total & <tax>". The report draft is full: open it in pinround to send it.');
+    await putPinOnPage(browser);
+    await browser.scripting.executeScript({ target: { tabId: SHOP_TAB.id }, func: () => { globalThis.pinroundOverlay.close = () => { globalThis.pinroundClosed = true; }; } });
+    const refused = await ask(browser, { pinroundDock: 'capture' }, apiOf);
+
+    assert.deepEqual([refused.message, refused.isError, refused.state.count, refused.state.chosen], ['A report holds at most 10 screenshots.', true, 10, `report:${DRAFT_ID}`]);
+    assert.equal(pinround.myDrafts()[0].screenshots.length, 10);
+    const [{ result: wasClosed }] = await browser.scripting.executeScript({ target: { tabId: SHOP_TAB.id }, func: () => true === globalThis.pinroundClosed });
+    assert.equal(wasClosed, false, 'The pins stay on the page.');
+});
+
+test('a capture into a report draft that was sent or deleted meanwhile is refused as gone and forgets that target', async () => {
+    const browser = await dockBrowser({ target: TOTAL_DRAFT });
+    await putPinOnPage(browser);
+    const { pinround, apiOf } = pinroundFor();
+
+    const answer = await ask(browser, { pinroundDock: 'capture' }, apiOf);
+
+    assert.deepEqual([answer.message, answer.isError], [goneMessageOf(TOTAL_DRAFT), true]);
+    assert.equal(answer.message, 'The report draft "Total & <tax>" is gone from pinround: it was sent or deleted. Choose where to put the next screenshot.');
+    assert.equal(answer.state.chosen, '');
+    assert.equal(await loadCaptureTarget(browser.storage.session), null);
+    assert.deepEqual(pinround.myDrafts(), []);
+});
+
+test('a capture into a report draft with a token that cannot write reports says how to get one, and keeps the target', async () => {
+    const browser = await dockBrowser({ target: TOTAL_DRAFT });
+    await putPinOnPage(browser);
+    const { pinround, apiOf } = pinroundFor({ scopes: ['read', 'rounds:write', 'notebooks:write'], reportDrafts: REPORT_DRAFTS });
+
+    const answer = await ask(browser, { pinroundDock: 'capture' }, apiOf);
+
+    assert.deepEqual([answer.message, answer.isError], [REPORTS_WRITE_MISSING, true]);
+    assert.deepEqual(await loadCaptureTarget(browser.storage.session), TOTAL_DRAFT);
+    assert.equal(pinround.myDrafts().find((mine) => DRAFT_ID === mine.id).screenshots.length, 2);
+});
+
+test('make-notebook makes a notebook with the typed name, chooses it, and the next capture goes into it', async () => {
+    const browser = await dockBrowser({ target: SHOP_12 });
+    await putPinOnPage(browser);
+    const { pinround, apiOf } = pinroundFor();
+
+    const made = await ask(browser, { pinroundDock: 'make-notebook', value: '  Coupons & <codes>  ' }, apiOf);
+
+    const target = await loadCaptureTarget(browser.storage.session);
+    assert.equal(target.kind, 'notebook');
+    assert.equal(target.title, 'Coupons & <codes>');
+    assert.equal(made.message, 'Notebook "Coupons & <codes>" made. Captures go into it now.');
+    assert.equal(made.state.chosen, `notebook:${target.notebookId}`);
+    assert.deepEqual(made.state.choices.filter((choice) => choice.value.startsWith('notebook:')).map((choice) => choice.label), ['Notebook · Coupons & <codes>', 'Notebook · Checkout']);
+    assert.deepEqual(made.state.choices.at(-1), NEW_NOTEBOOK_CHOICE);
+
+    assert.equal((await ask(browser, { pinroundDock: 'capture' }, apiOf)).isError, undefined);
+    assert.equal(pinround.requests.filter(([method, path]) => 'POST' === method && `/api/v1/notebooks/${target.notebookId}/screenshots` === path).length, 1);
+});
+
+test('make-notebook refuses a blank or too long name before any request, and a token without notebooks:write, keeping the target', async () => {
+    const cases = [
+        ['a blank name', {}, ' \r\n ', 'Give the notebook a title.'],
+        ['121 characters', {}, '\u{1F600}'.repeat(121), 'Keep the notebook title to 120 characters or fewer.'],
+        ['no notebooks:write', { scopes: ['read', 'rounds:write', 'reports:write'] }, 'Coupons', NOTEBOOKS_WRITE_MISSING],
+    ];
+    for (const [name, seed, typed, refusal] of cases) {
+        const browser = await dockBrowser({ target: SHOP_12 });
+        const before = await storedState(browser);
+        const { pinround, apiOf } = pinroundFor(seed);
+
+        const answer = await ask(browser, { pinroundDock: 'make-notebook', value: typed }, apiOf);
+
+        assert.deepEqual([answer.message, answer.isError, answer.state.chosen], [refusal, true, 'ticket:SHOP-12'], name);
+        assert.deepEqual(await storedState(browser), before, name);
+        assert.equal(pinround.requests.filter(([method, path]) => 'POST' === method && '/api/v1/notebooks' === path).length, 'no notebooks:write' === name ? 1 : 0, name);
+        assert.equal(pinround.state.notebooks.size, 1, name);
+    }
+});
+
+test('"New notebook…" is no target: choosing it is refused, and a make-notebook whose name is no text is an unknown request', async () => {
+    const browser = await dockBrowser({ target: SHOP_12 });
+    const before = await storedState(browser);
+    const { pinround, apiOf } = pinroundFor();
+
+    assert.equal((await ask(browser, { pinroundDock: 'choose', value: NEW_NOTEBOOK }, apiOf)).message, DOCK_TEXTS.choiceGone);
+    for (const value of [undefined, 42, { title: 'Coupons' }, 'x'.repeat(1001)]) {
+        assert.deepEqual(await ask(browser, { pinroundDock: 'make-notebook', value }, apiOf), { message: DOCK_TEXTS.unknownRequest, isError: true }, String(value));
+    }
+    assert.deepEqual(await storedState(browser), before);
+    assert.deepEqual(writesOf(pinround), []);
 });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ApiError, PinroundApi } from '../src/shared/api.js';
-import { CAPTURE_TARGET_KEY, NEW_REPORT, TargetGoneError, forgetCaptureTarget, loadCaptureTarget, saveCaptureTarget, targetChoices } from '../src/capture/capture-target.js';
+import { CAPTURE_TARGET_KEY, NEW_REPORT, TargetGoneError, forgetCaptureTarget, loadCaptureTarget, pageUrlOf, saveCaptureTarget, targetChoices } from '../src/capture/capture-target.js';
 import { NEW_SCREENSHOT, captureToTarget, retakeChoices } from '../src/capture/capture-to-target.js';
 import { shownText, unwrappedText } from '../src/capture/untrusted-text.js';
 import { fakeBrowser } from './fake-browser.mjs';
@@ -48,7 +48,7 @@ test('the picker offers a new report, my draft rounds and my own notebooks last 
     assert.deepEqual(labelsOf(choices), ['A new report', 'My draft round on SHOP-7', 'My draft round on SHOP-12', 'Notebook: Fish & <chips>', 'Notebook: Checkout']);
     assert.deepEqual(choices[3].target, { kind: 'notebook', notebookId: NOTEBOOK_ID(2), title: 'Fish & <chips>' });
     assert.deepEqual([target, droppedMessage, loadProblems], [null, null, []]);
-    assert.deepEqual(pinround.requests.map(([method, path]) => [method, path]), [['GET', '/api/v1/me/tickets?limit=50'], ['GET', '/api/v1/notebooks']]);
+    assert.deepEqual(pinround.requests.map(([method, path]) => [method, path]), [['GET', '/api/v1/me/tickets?limit=50'], ['GET', '/api/v1/notebooks'], ['GET', '/api/v1/reports']]);
 });
 
 test('a remembered ticket or notebook pinround still lists stays chosen', async () => {
@@ -93,6 +93,7 @@ test('a remembered target the lists cannot rule out stays offered: more tickets 
     assert.deepEqual(unchecked.loadProblems, [
         'Your tickets could not be loaded. This token does not have the "read" scope. Make a token with it in Settings.',
         'Your notebooks could not be loaded. This token does not have the "read" scope. Make a token with it in Settings.',
+        'Your report drafts could not be loaded. This token does not have the "read" scope. Make a token with it in Settings.',
     ]);
 });
 
@@ -242,4 +243,61 @@ test('shown text writes control and direction characters out and is cut by chara
     assert.equal(shownText('😀'.repeat(121), 120), `${'😀'.repeat(119)}…`);
     assert.equal(shownText('😀'.repeat(120), 120), '😀'.repeat(120));
     assert.equal(shownText('no final newline', 120), 'no final newline');
+});
+
+const REPORT_DRAFT_ID = (number) => `rd000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
+/** Twelve report drafts of mine, draft n changed at minute n, seeded out of order, and Omar's newest one. */
+const MY_REPORT_DRAFTS = [7, 1, 12, 4, 9, 2, 11, 5, 10, 3, 8, 6].map((number) => ({
+    id: REPORT_DRAFT_ID(number), owner: 'lena', project: 'SHOP', title: 12 === number ? 'Total & <tax>' : `Draft ${number}`, updated_at: `2026-03-01T09:${String(number).padStart(2, '0')}:00+00:00`, screenshots: [],
+}));
+const OMARS_REPORT_DRAFT = { id: REPORT_DRAFT_ID(99), owner: 'omar', project: 'SHOP', title: 'Omar own draft', updated_at: '2026-03-01T10:00:00+00:00', screenshots: [] };
+const reportTargetOf = (number) => ({ kind: 'report', draftId: REPORT_DRAFT_ID(number), title: `Draft ${number}`, project: 'SHOP' });
+
+test('the picker offers my ten newest report drafts after "A new report", titles unwrapped, and never another person\'s', async () => {
+    const pinround = fakePinround({ reportDrafts: [...MY_REPORT_DRAFTS, OMARS_REPORT_DRAFT] });
+
+    const { choices } = await targetChoices(apiOf(pinround), null);
+
+    const drafts = choices.filter((choice) => 'report' === choice.target.kind);
+    assert.deepEqual(labelsOf(choices).slice(0, 3), ['A new report', 'Report draft: Total & <tax>', 'Report draft: Draft 11']);
+    assert.deepEqual(drafts.map((choice) => choice.target.draftId), [12, 11, 10, 9, 8, 7, 6, 5, 4, 3].map(REPORT_DRAFT_ID));
+    assert.deepEqual(drafts[0].target, { kind: 'report', draftId: REPORT_DRAFT_ID(12), title: 'Total & <tax>', project: 'SHOP' });
+    assert.equal(drafts[0].screenshotCount, 0);
+});
+
+test('a remembered report draft older than the ten offered stays chosen; one gone from the full list is dropped with a plain message', async () => {
+    const pinround = fakePinround({ reportDrafts: [...MY_REPORT_DRAFTS, OMARS_REPORT_DRAFT] });
+
+    const older = await targetChoices(apiOf(pinround), reportTargetOf(1));
+    assert.deepEqual([older.target, older.droppedMessage], [reportTargetOf(1), null]);
+    assert.deepEqual(older.choices.filter((choice) => 'report' === choice.target.kind).map((choice) => choice.target.draftId).at(-1), REPORT_DRAFT_ID(1));
+
+    const omars = await targetChoices(apiOf(pinround), { kind: 'report', draftId: REPORT_DRAFT_ID(99), title: 'Omar own draft', project: 'SHOP' });
+    assert.equal(omars.target, null);
+    assert.equal(omars.droppedMessage, 'The report draft "Omar own draft" is gone from pinround: it was sent or deleted. Choose where to put the next screenshot.');
+    assert.equal(omars.choices.some((choice) => choice.value.endsWith(REPORT_DRAFT_ID(99))), false);
+
+    const unread = await targetChoices(apiOf(fakePinround({ scopes: ['reports:write'] })), reportTargetOf(3));
+    assert.deepEqual([unread.target, unread.droppedMessage], [reportTargetOf(3), null], 'A list that did not load cannot rule it out.');
+    assert.deepEqual(labelsOf(unread.choices), ['A new report', 'Report draft: Draft 3']);
+});
+
+test('a report draft target is remembered for the session, and a stored one missing its id, title or project is no target', async () => {
+    const { storage } = fakeBrowser();
+    await saveCaptureTarget(storage.session, reportTargetOf(4));
+    assert.deepEqual(await loadCaptureTarget(storage.session), reportTargetOf(4));
+
+    for (const stored of [{ kind: 'report', draftId: REPORT_DRAFT_ID(4), title: 'Draft 4' }, { kind: 'report', draftId: '', title: 'x', project: 'SHOP' }, { kind: 'report', draftId: REPORT_DRAFT_ID(4), title: 7, project: 'SHOP' }, { kind: 'report', draftId: REPORT_DRAFT_ID(4), title: 'x', project: 'S'.repeat(21) }]) {
+        await storage.session.set({ [CAPTURE_TARGET_KEY]: stored });
+        assert.equal(await loadCaptureTarget(storage.session), null, JSON.stringify(stored));
+    }
+});
+
+test('each target\'s page is on the paired pinround, built from its id alone; a new report has none yet', () => {
+    assert.equal(pageUrlOf({ kind: 'report', draftId: REPORT_DRAFT_ID(4), title: 'x', project: 'SHOP' }, PINROUND_ORIGIN), `${PINROUND_ORIGIN}/report-drafts/${REPORT_DRAFT_ID(4)}`);
+    assert.equal(pageUrlOf({ kind: 'ticket', ticketKey: 'SHOP-12' }, PINROUND_ORIGIN), `${PINROUND_ORIGIN}/t/SHOP-12`);
+    assert.equal(pageUrlOf({ kind: 'notebook', notebookId: NOTEBOOK_ID(1), title: 'Checkout' }, PINROUND_ORIGIN), `${PINROUND_ORIGIN}/notebooks/${NOTEBOOK_ID(1)}`);
+    assert.equal(pageUrlOf({ kind: 'report', draftId: '../../evil.example/x?y#z', title: 'x', project: 'SHOP' }, PINROUND_ORIGIN), `${PINROUND_ORIGIN}/report-drafts/..%2F..%2Fevil.example%2Fx%3Fy%23z`);
+    assert.equal(pageUrlOf({ kind: NEW_REPORT }, PINROUND_ORIGIN), null);
+    assert.equal(pageUrlOf(null, PINROUND_ORIGIN), null);
 });

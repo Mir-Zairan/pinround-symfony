@@ -278,12 +278,12 @@ test.describe('with the local certificate accepted in a tab, as README says, and
     for (const thumbnail of thumbnails) {
       await expect.poll(() => inspector.runAsPageOn(thumbnail.backendNodeId, isMostlyBright)).toEqual([184, 120, true]);
     }
-    await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'What is wrong, in one line' });
+    await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'Name of the report draft: what is wrong, in one line' });
     await testPage.keyboard.type(reportTitle);
     madeReportDrafts.push({ ownerEmail: OMAR_EMAIL, title: reportTitle });
     await clickOverlayButton(inspector, testPage, 'Save draft');
 
-    await expect.poll(() => overlayMessagesOf(inspector), { timeout: 30_000 }).toEqual(['Draft saved with 3 captures. Open it in pinround to send it.']);
+    await expect.poll(() => overlayMessagesOf(inspector), { timeout: 30_000 }).toEqual([`Draft "${reportTitle}" saved with 3 captures. Open it in pinround to send it, or choose it under Save to for more.`]);
     expect(runAsDatabaseOwner(`
       SELECT jsonb_array_length(d.screenshots) FROM rvw_report_draft d JOIN idn_user u ON u.id = d.owner_id
       WHERE u.email = '${OMAR_EMAIL}' AND d.title = '${reportTitle}'`)).toEqual(['3']);

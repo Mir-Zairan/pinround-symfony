@@ -7,9 +7,15 @@ export const CAPTURE_TARGET_KEY = 'pinroundCaptureTarget';
 export const NEW_REPORT = 'new-report';
 export const NEW_NOTEBOOK = 'new-notebook';
 export const CHOOSE_TARGET_FIRST = 'Choose where to put the screenshot first.';
-// list_my_tickets answers at most 50; list_my_notebooks at most 20 a page.
+// list_my_tickets answers at most 50; list_my_notebooks at most 20 a page; list_my_report_drafts at most 20.
 export const TICKETS_LIMIT = 50;
 const NOTEBOOKS_PAGE_SIZE = 20;
+const REPORT_DRAFTS_LIMIT = 20;
+/** The person's newest report drafts the pickers offer; an older one stays offered while it is the chosen target. */
+export const REPORT_DRAFTS_SHOWN = 10;
+const MAX_PROJECT_KEY_LENGTH = 20;
+/** A report draft holds at most 10 pictures, as capture.js's MAX_SCREENSHOTS; capture.js imports this module. */
+const MAX_SCREENSHOTS_IN_DRAFT = 10;
 const MAX_ID_LENGTH = 64;
 const MAX_SHOWN_TITLE_LENGTH = 120;
 
@@ -26,8 +32,11 @@ export class TargetGoneError extends Error {
 }
 
 /**
- * @typedef {{kind: 'new-report'} | {kind: 'ticket', ticketKey: string} | {kind: 'notebook', notebookId: string, title: string}} CaptureTarget
- * @typedef {{value: string, label: string, target: CaptureTarget}} TargetChoice
+ * @typedef {{kind: 'new-report'} | {kind: 'ticket', ticketKey: string} | {kind: 'notebook', notebookId: string, title: string}
+ *   | {kind: 'report', draftId: string, title: string, project: string}} CaptureTarget a 'report' is a report draft of
+ *   the person's that pinround already has, to add captures to
+ * @typedef {{value: string, label: string, target: CaptureTarget, screenshotCount?: number|null}} TargetChoice a report
+ *   draft's choice carries how many pictures pinround said it holds, null when it said nothing readable
  */
 
 /** @returns {string} the picker's option value for the target */
@@ -36,11 +45,17 @@ export function choiceValueOf(target) {
         return `ticket:${target.ticketKey}`;
     }
 
+    if ('report' === target.kind) {
+        return `report:${target.draftId}`;
+    }
+
     return 'notebook' === target.kind ? `notebook:${target.notebookId}` : NEW_REPORT;
 }
 
 export const ticketChoice = (ticketKey) => ({ value: `ticket:${ticketKey}`, label: `My draft round on ${shownText(ticketKey, MAX_ID_LENGTH)}`, target: { kind: 'ticket', ticketKey } });
 export const notebookChoice = (notebookId, title) => ({ value: `notebook:${notebookId}`, label: `Notebook: ${shownText(title, MAX_SHOWN_TITLE_LENGTH)}`, target: { kind: 'notebook', notebookId, title } });
+
+export const reportDraftChoice = (draftId, title, project) => ({ value: `report:${draftId}`, label: `Report draft: ${shownText(title, MAX_SHOWN_TITLE_LENGTH)}`, target: { kind: 'report', draftId, title, project } });
 
 export const isId = (value) => 'string' === typeof value && '' !== value && value.length <= MAX_ID_LENGTH;
 
@@ -58,9 +73,15 @@ export function checkedTarget(stored) {
     if ('notebook' === stored.kind && isId(stored.notebookId) && 'string' === typeof stored.title) {
         return { kind: 'notebook', notebookId: stored.notebookId, title: stored.title };
     }
+    if ('report' === stored.kind && isId(stored.draftId) && 'string' === typeof stored.title && isProjectKey(stored.project)) {
+        return { kind: 'report', draftId: stored.draftId, title: stored.title, project: stored.project };
+    }
 
     return null;
 }
+
+const checkedCountOf = (value) => (Number.isInteger(value) && value >= 0 && value <= MAX_SCREENSHOTS_IN_DRAFT ? value : null);
+const isProjectKey = (value) => 'string' === typeof value && '' !== value && value.length <= MAX_PROJECT_KEY_LENGTH;
 
 /** @returns {Promise<CaptureTarget|null>} */
 export async function loadCaptureTarget(storage) {
@@ -104,7 +125,22 @@ async function notebookChoices(api) {
 }
 
 /**
- * Every target to offer, in the picker's order, with the remembered one checked: a ticket or notebook that pinround
+ * The person's own report drafts, newest change first (GET /api/v1/reports): the first REPORT_DRAFTS_SHOWN are
+ * offered, the rest it answered (`beyond`) only while one of them is the chosen target.
+ *
+ * @returns {Promise<{choices: TargetChoice[], beyond: TargetChoice[], isComplete: boolean}>}
+ */
+async function reportDraftChoices(api) {
+    const answer = await api.call('GET', '/api/v1/reports');
+    const drafts = Array.isArray(answer.report_drafts) ? answer.report_drafts.slice(0, REPORT_DRAFTS_LIMIT) : [];
+    const all = drafts.filter((draft) => isId(draft?.draft_id) && 'string' === typeof draft.title && isProjectKey(draft.project))
+        .map((draft) => ({ ...reportDraftChoice(draft.draft_id, unwrappedText(draft.title), draft.project), screenshotCount: checkedCountOf(draft.screenshot_count) }));
+
+    return { choices: all.slice(0, REPORT_DRAFTS_SHOWN), beyond: all.slice(REPORT_DRAFTS_SHOWN), isComplete: true !== answer.has_more };
+}
+
+/**
+ * Every target to offer, in the picker's order, with the remembered one checked: a ticket, notebook or report draft that pinround
  * no longer lists, on a list it answered in full, is dropped with `droppedMessage`. One it could not check (the list
  * did not load, or has more pages than were read) stays offered, and pinround refuses it at the capture if it is gone.
  *
@@ -119,12 +155,13 @@ export async function targetChoices(api, remembered) {
         } catch (error) {
             loadProblems.push(`${problem} ${error instanceof ApiError ? error.message : ''}`.trim());
 
-            return { choices: [], isComplete: false };
+            return { choices: [], beyond: [], isComplete: false };
         }
     };
     const tickets = await loaded(ticketChoices, 'Your tickets could not be loaded.');
     const notebooks = await loaded(notebookChoices, 'Your notebooks could not be loaded.');
-    const choices = [{ value: NEW_REPORT, label: 'A new report', target: { kind: NEW_REPORT } }, ...tickets.choices, ...notebooks.choices];
+    const reports = await loaded(reportDraftChoices, 'Your report drafts could not be loaded.');
+    const choices = [{ value: NEW_REPORT, label: 'A new report', target: { kind: NEW_REPORT } }, ...reports.choices, ...tickets.choices, ...notebooks.choices];
     if (null === remembered || NEW_REPORT === remembered.kind) {
         return { choices, target: remembered, droppedMessage: null, loadProblems };
     }
@@ -133,14 +170,46 @@ export async function targetChoices(api, remembered) {
     if (undefined !== listed) {
         return { choices, target: listed.target, droppedMessage: null, loadProblems };
     }
-    const list = 'ticket' === remembered.kind ? tickets : notebooks;
+    const olderDraft = reports.beyond.find((choice) => choice.value === rememberedValue);
+    if (undefined !== olderDraft) {
+        return { choices: [...choices, olderDraft], target: olderDraft.target, droppedMessage: null, loadProblems };
+    }
+    const list = { ticket: tickets, notebook: notebooks, report: reports }[remembered.kind];
     if (!list.isComplete) {
-        const unchecked = 'ticket' === remembered.kind ? ticketChoice(remembered.ticketKey) : notebookChoice(remembered.notebookId, remembered.title);
-
-        return { choices: [...choices, unchecked], target: remembered, droppedMessage: null, loadProblems };
+        return { choices: [...choices, uncheckedChoiceOf(remembered)], target: remembered, droppedMessage: null, loadProblems };
     }
 
     return { choices, target: null, droppedMessage: goneMessageOf(remembered), loadProblems };
+}
+
+/** @returns {TargetChoice} the choice for a remembered target its list could not check */
+function uncheckedChoiceOf(target) {
+    if ('ticket' === target.kind) {
+        return ticketChoice(target.ticketKey);
+    }
+
+    return 'notebook' === target.kind ? notebookChoice(target.notebookId, target.title) : reportDraftChoice(target.draftId, target.title, target.project);
+}
+
+/**
+ * The page in pinround that shows the target: the ticket for a draft round, the notebook, or the report draft, where
+ * the person checks and sends it. Built on the paired origin from ids only, so it never leads anywhere else.
+ *
+ * @param {CaptureTarget|null} target
+ * @param {string} pinroundOrigin
+ * @returns {string|null} null for a new report, which pinround does not have yet, or no target
+ */
+export function pageUrlOf(target, pinroundOrigin) {
+    if (null === target) {
+        return null;
+    }
+    const paths = {
+        ticket: () => `/t/${encodeURIComponent(target.ticketKey)}`,
+        notebook: () => `/notebooks/${encodeURIComponent(target.notebookId)}`,
+        report: () => `/report-drafts/${encodeURIComponent(target.draftId)}`,
+    };
+
+    return Object.hasOwn(paths, target.kind) ? new URL(paths[target.kind](), pinroundOrigin).href : null;
 }
 
 /** @returns {string} the plain message for a remembered target pinround no longer offers */
@@ -150,6 +219,9 @@ export function goneMessageOf(target) {
     }
     if ('notebook' === target.kind) {
         return `The notebook "${shownText(target.title, MAX_SHOWN_TITLE_LENGTH)}" is gone. Choose where to put the next screenshot.`;
+    }
+    if ('report' === target.kind) {
+        return `The report draft "${shownText(target.title, MAX_SHOWN_TITLE_LENGTH)}" is gone from pinround: it was sent or deleted. Choose where to put the next screenshot.`;
     }
 
     return 'Your report draft is gone from pinround. Choose where to put the next screenshot.';

@@ -5,10 +5,12 @@ import { ApiError } from '../shared/api.js';
 import { pinroundApiOf } from '../shared/oauth-connection.js';
 import { loadSettings } from '../shared/settings.js';
 import { captureTexts, listDraftScreenshots } from '../capture/capture.js';
-import { CHOOSE_TARGET_FIRST, NEW_REPORT, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
+import { CHOOSE_TARGET_FIRST, NEW_NOTEBOOK, NEW_REPORT, TargetGoneError, choiceValueOf, forgetCaptureTarget, loadCaptureTarget, pageUrlOf, saveCaptureTarget, targetChoices } from '../capture/capture-target.js';
 import { captureToTarget } from '../capture/capture-to-target.js';
 import { clearNewReport, loadNewReport } from '../capture/new-report.js';
+import { makeNotebook } from '../capture/notebook-capture.js';
 import { pageTitleOf } from '../capture/page-context.js';
+import { shownText } from '../capture/untrusted-text.js';
 import { capturedMessage, draftSavedMessage, keepWaitingCapture, loadWaitingCaptures, saveWaitingCaptures, thumbnailOf } from '../capture/waiting-captures.js';
 import { SYSTEM_CLOCK } from '../player/step-runner.js';
 import { openStartPage, scenarioToPlay, taggedCaptureTexts } from './dock-scenario.js';
@@ -16,27 +18,34 @@ import { extensionPageFetchOf } from './extension-page-fetch.js';
 
 const runRules = globalThis.pinroundDockRun;
 
-export const DOCK_ACTIONS = Object.freeze(['state', 'choose', 'capture', 'save-draft', 'scenario', 'open-start']);
+export const DOCK_ACTIONS = Object.freeze(['state', 'choose', 'capture', 'save-draft', 'make-notebook', 'scenario', 'open-start']);
 
 export const DOCK_TEXTS = Object.freeze({
     notPaired: 'Connect the extension to your pinround first: open its options.',
     unknownRequest: 'The dock asked for something this extension does not do. Reload the page.',
     failed: 'Something went wrong in the extension. Try again.',
     choiceGone: 'That choice is no longer offered. Choose again.',
-    nothingToSave: 'Capture into a new report first. Draft rounds and notebooks keep each capture as you take it.',
+    newNotebook: 'New notebook…',
+    notebookMade: (title) => `Notebook "${title}" made. Captures go into it now.`,
+    nothingToSave: 'Capture into a new report first. Draft rounds, notebooks and report drafts keep each capture as you take it.',
 });
 /** The longest title or project key the dock may send with Save draft; new-report.js holds the real caps. */
 const TYPED_MAX_LENGTH = 1000;
+const MAX_SHOWN_TITLE_LENGTH = 120;
 
 /**
  * @typedef {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: import('../capture/waiting-captures.js').Thumbnail|null}>,
- *   needsTitle: boolean, needsProject: boolean}} WaitingReport the captures waiting for Save draft, with where their pins
- *   are and their thumbnails; needsTitle while no draft is made, needsProject when the popup has no project key either
- * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean,
- *   newReport: WaitingReport|null}} DockState count is the captures waiting for a new report, the screenshots of the
- *   chosen draft round, or null when the dock cannot tell (a notebook, or a list that did not load); canSave is true
- *   only for a new report with a capture waiting or one to send again; newReport only while a new report is chosen
- * @typedef {{message?: string, isError?: boolean, state?: DockState}} DockAnswer
+ *   needsTitle: boolean, needsProject: boolean, draftTitle: string|null}} WaitingReport the captures waiting for Save
+ *   draft, with where their pins are and their thumbnails; needsTitle while no draft is made, needsProject when the
+ *   popup has no project key either; draftTitle, once the draft is made, is its title, which the panel only shows
+ * @typedef {{choices: Array<{value: string, label: string, url: string|null}>, chosen: string, count: number|null,
+ *   canSave: boolean, newReport: WaitingReport|null}} DockState each choice's url is its page on the paired pinround
+ *   (capture-target.js pageUrlOf), null for a new report; count is the captures waiting for a new report, the
+ *   screenshots of the chosen draft round or report draft, or null when the dock cannot tell (a notebook, or a list
+ *   that did not load); canSave is true only for a new report with a capture waiting or one to send again; newReport
+ *   only while a new report is chosen
+ * @typedef {{message?: string, isError?: boolean, state?: DockState, savedUrl?: string}} DockAnswer savedUrl, after
+ *   Save draft, is the saved report draft's page on the paired pinround
  */
 
 /** True for a message the dock sends; the service worker leaves every other message alone. */
@@ -79,6 +88,9 @@ export async function answerDockRequest(request, tab, { browser, apiOf = (settin
         if ('save-draft' === request.pinroundDock) {
             return await saveDraft(api, session, request.value);
         }
+        if ('make-notebook' === request.pinroundDock) {
+            return await newNotebook(api, session, request.value);
+        }
         if ('scenario' === request.pinroundDock) {
             return await scenarioToPlay({ api, browser, session, pinroundOrigin: settings.origin }, request.value);
         }
@@ -115,6 +127,9 @@ function isReadableValue({ pinroundDock: action, value }) {
     if ('save-draft' === action) {
         return null !== value && 'object' === typeof value && isTypedText(value.reportTitle) && isTypedText(value.project);
     }
+    if ('make-notebook' === action) {
+        return isTypedText(value);
+    }
 
     return true;
 }
@@ -127,7 +142,7 @@ function dockLabelOf({ value, label }) {
         return 'New report';
     }
 
-    return label.replace(/^My draft round on /u, 'My draft round · ').replace(/^Notebook: /u, 'Notebook · ');
+    return label.replace(/^My draft round on /u, 'My draft round · ').replace(/^Notebook: /u, 'Notebook · ').replace(/^Report draft: /u, 'Report draft · ');
 }
 
 async function stateAnswer(api, session) {
@@ -146,15 +161,24 @@ async function dockStateWithProblems(api, session) {
     if (null !== droppedMessage) {
         await forgetCaptureTarget(session);
     }
-    const { count, canSave, newReport } = await draftCountOf(api, session, target);
+    const chosen = null === target ? '' : choiceValueOf(target);
+    const { count, canSave, newReport } = await draftCountOf(api, session, target, choices.find((choice) => choice.value === chosen));
 
     return {
-        state: { choices: choices.map((choice) => ({ value: choice.value, label: dockLabelOf(choice) })), chosen: null === target ? '' : choiceValueOf(target), count, canSave, newReport },
+        state: {
+            // "New notebook…" asks for the name in the dock (make-notebook); it is never a target of its own.
+            choices: [...choices.map((choice) => ({ value: choice.value, label: dockLabelOf(choice), url: pageUrlOf(choice.target, api.origin) })), { value: NEW_NOTEBOOK, label: DOCK_TEXTS.newNotebook, url: null }],
+            chosen,
+            count,
+            canSave,
+            newReport,
+        },
         problems: [droppedMessage, ...loadProblems].filter((problem) => null !== problem),
     };
 }
 
-async function draftCountOf(api, session, target) {
+/** @param {import('../capture/capture-target.js').TargetChoice|undefined} chosenChoice the offered choice of `target` */
+async function draftCountOf(api, session, target, chosenChoice) {
     if (null === target) {
         return { count: null, canSave: false, newReport: null };
     }
@@ -162,6 +186,7 @@ async function draftCountOf(api, session, target) {
         const newReport = await loadNewReport(session);
         const waiting = await loadWaitingCaptures(session);
         const needsTitle = null === newReport.draftId && null === newReport.pendingCapture;
+        const reportTitle = newReport.reportTitle.trim();
 
         return {
             count: waiting.length,
@@ -170,6 +195,7 @@ async function draftCountOf(api, session, target) {
                 shots: waiting.map((shot) => ({ pinSpots: shot.pins.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })), thumbnail: shot.thumbnail })),
                 needsTitle,
                 needsProject: needsTitle && '' === newReport.project.trim(),
+                draftTitle: needsTitle || '' === reportTitle ? null : reportTitle,
             },
         };
     }
@@ -182,6 +208,10 @@ async function draftCountOf(api, session, target) {
         });
 
         return { count: null === screenshots ? null : screenshots.length, canSave: false, newReport: null };
+    }
+
+    if ('report' === target.kind) {
+        return { count: chosenChoice?.screenshotCount ?? null, canSave: false, newReport: null };
     }
 
     return { count: null, canSave: false, newReport: null };
@@ -226,7 +256,7 @@ async function capture({ api, browser, session, tab, stepTag, makeThumbnail }) {
 /**
  * Saves the captures waiting for the new report as its draft, with the title typed in the dock's Save draft panel and
  * its project key, or the popup's when the panel asked for none. The draft is then forgotten here, as it is done: the
- * person opens and sends it in pinround.
+ * person opens and sends it in pinround through savedUrl, or picks it under Save to to add more captures.
  */
 async function saveDraft(api, session, typed) {
     const target = await loadCaptureTarget(session);
@@ -238,7 +268,24 @@ async function saveDraft(api, session, typed) {
     const saved = await saveWaitingCaptures(session, api, { project, reportTitle: typed.reportTitle });
     await clearNewReport(session);
 
-    return { message: draftSavedMessage(saved.screenshotCount), state: await dockState(api, session) };
+    return {
+        message: draftSavedMessage(saved.screenshotCount, saved.reportTitle),
+        savedUrl: pageUrlOf({ kind: 'report', draftId: saved.draftId }, api.origin),
+        state: await dockState(api, session),
+    };
+}
+
+/**
+ * Makes a new notebook of the person's with the name typed in the dock, as the popup's "Make the notebook" does, and
+ * chooses it, so the next capture goes into it.
+ *
+ * @throws {Error} makeNotebook's refusal of the name before any request, or pinround's
+ */
+async function newNotebook(api, session, typedTitle) {
+    const { notebookId, title } = await makeNotebook(api, typedTitle);
+    await saveCaptureTarget(session, { kind: 'notebook', notebookId, title });
+
+    return { message: DOCK_TEXTS.notebookMade(shownText(title, MAX_SHOWN_TITLE_LENGTH)), state: await dockState(api, session) };
 }
 
 async function forgetIfRemembered(session, goneTarget) {

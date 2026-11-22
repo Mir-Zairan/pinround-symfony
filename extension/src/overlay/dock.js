@@ -25,6 +25,9 @@ globalThis.pinroundDock ??= (() => {
     const MAX_PIN_SPOTS = 100;
     const REPORT_TITLE_MAX_LENGTH = 200;
     const PROJECT_KEY_MAX_LENGTH = 20;
+    // notebook-capture.js's cap and capture-target.js's value for a new notebook.
+    const NOTEBOOK_TITLE_MAX_LENGTH = 120;
+    const NEW_NOTEBOOK = 'new-notebook';
     // waiting-captures.js's thumbnail: its prefix, caps and the box it covers, which is this panel's box at 2x.
     const THUMBNAIL_DATA_URL_PREFIX = 'data:image/jpeg;base64,';
     const MAX_THUMBNAIL_DATA_URL_LENGTH = 200_000;
@@ -46,7 +49,7 @@ globalThis.pinroundDock ??= (() => {
         play: 'Play',
         saveDraft: 'Save draft',
         saveDraftHint: 'Review the captures',
-        saveDraftCannot: 'Draft rounds and notebooks keep each capture as you take it.',
+        saveDraftCannot: 'Draft rounds, notebooks and report drafts keep each capture as you take it.',
         saveDraftCount: (count) => `Save draft, ${count} in it`,
         shrink: 'Shrink the dock',
         shrinkHint: 'Shrink (H)',
@@ -62,7 +65,17 @@ globalThis.pinroundDock ??= (() => {
         savePanel: 'Save draft',
         saveCount: (count) => `Save ${count} ${1 === count ? 'capture' : 'captures'}`,
         shotCaption: (shotNumber, pinCount) => `Shot ${shotNumber} · ${pinCount} ${1 === pinCount ? 'pin' : 'pins'}`,
-        reportTitle: 'What is wrong, in one line',
+        reportTitle: 'Name of the report draft: what is wrong, in one line',
+        addsTo: (title) => `Adds to the report draft "${title}".`,
+        goesToMade: 'Goes to the report draft above. Nobody is told yet. You send it from pinround.',
+        openTarget: 'Open',
+        openTargetName: 'Open the chosen place in pinround, in a new tab',
+        openSaved: 'Open the draft in pinround',
+        newNotebookPanel: 'New notebook',
+        notebookName: 'Notebook name',
+        makeNotebook: 'Make the notebook',
+        cancel: 'Cancel',
+        notebookNameRefused: 'Give the notebook a title, at most 120 characters.',
         project: 'Project key',
         projectExample: 'SHOP',
         goesTo: 'Goes to a new report draft. Nobody is told yet. You send it from pinround.',
@@ -246,6 +259,10 @@ globalThis.pinroundDock ??= (() => {
             overflow-wrap: anywhere;
         }
         .dock__status:empty { display: none; }
+        .dock__open { padding: 6px 8px; border-radius: 8px; color: inherit; text-decoration: underline; }
+        .dock__open:hover { background: var(--dock-hover); }
+        .dock__saved { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); font: 500 0.8rem/1.4 var(--font); }
+        .dock__saved a { color: var(--primary); }
         .dock__status--error { background: var(--panel); color: var(--danger); border: 1px solid var(--danger); }
         .dock-handle {
             display: grid;
@@ -400,13 +417,14 @@ globalThis.pinroundDock ??= (() => {
         }
     }
 
-    /** @returns {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: null|{dataUrl: string, width: number, height: number}}>, needsTitle: boolean, needsProject: boolean}|null|undefined} undefined when unreadable */
+    /** @returns {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: null|{dataUrl: string, width: number, height: number}}>, needsTitle: boolean, needsProject: boolean, draftTitle: string|null}|null|undefined} undefined when unreadable */
     function checkedWaitingReport(value) {
         if (undefined === value || null === value) {
             return null;
         }
         if ('object' !== typeof value || !Array.isArray(value.shots) || value.shots.length > MAX_SHOTS
-            || 'boolean' !== typeof value.needsTitle || 'boolean' !== typeof value.needsProject) {
+            || 'boolean' !== typeof value.needsTitle || 'boolean' !== typeof value.needsProject
+            || !(undefined === value.draftTitle || null === value.draftTitle || 'string' === typeof value.draftTitle)) {
             return undefined;
         }
         const shots = [];
@@ -419,13 +437,13 @@ globalThis.pinroundDock ??= (() => {
             shots.push({ pinSpots: shot.pinSpots.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })), thumbnail: checkedThumbnail(shot.thumbnail ?? null) });
         }
 
-        return { shots, needsTitle: value.needsTitle, needsProject: value.needsProject };
+        return { shots, needsTitle: value.needsTitle, needsProject: value.needsProject, draftTitle: value.draftTitle ?? null };
     }
 
     /**
-     * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean,
+     * @typedef {{choices: Array<{value: string, label: string, url: string|null}>, chosen: string, count: number|null, canSave: boolean,
      *   newReport: null|{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: null|{dataUrl: string,
-     *   width: number, height: number}}>, needsTitle: boolean, needsProject: boolean}}} DockState
+     *   width: number, height: number}}>, needsTitle: boolean, needsProject: boolean, draftTitle: string|null}}} DockState
      * @returns {DockState|null} the state as the extension answered it, or null when it is not one
      */
     function checkedState(state) {
@@ -439,7 +457,24 @@ globalThis.pinroundDock ??= (() => {
         }
         const choices = state.choices.slice(0, MAX_CHOICES).filter((choice) => 'string' === typeof choice?.value && 'string' === typeof choice.label);
 
-        return { choices: choices.map(({ value, label }) => ({ value, label })), chosen: state.chosen, count: state.count, canSave: state.canSave, newReport };
+        return { choices: choices.map(({ value, label, url }) => ({ value, label, url: checkedPageUrl(url) })), chosen: state.chosen, count: state.count, canSave: state.canSave, newReport };
+    }
+
+    /** @returns {string|null} a web address the dock may link to, or null for anything else */
+    function checkedPageUrl(value) {
+        if ('string' !== typeof value || !URL.canParse(value)) {
+            return null;
+        }
+        const { protocol } = new URL(value);
+
+        return 'https:' === protocol || 'http:' === protocol ? value : null;
+    }
+
+    /** Why "Make the notebook" cannot send the typed name, as notebook-capture.js would refuse it, or null when it can. */
+    function refusalOfNotebookName(typed) {
+        const title = typed.trim();
+
+        return '' === title || [...title].length > NOTEBOOK_TITLE_MAX_LENGTH ? TEXTS.notebookNameRefused : null;
     }
 
     /**
@@ -469,7 +504,8 @@ globalThis.pinroundDock ??= (() => {
      * @param {{storage: {get: Function, set: Function, onChanged: object}, siteHost: string, viewport: {width: () => number,
      *   height: () => number}, onAction: (action: string, value?: unknown) => void, guardTyping?: (field: HTMLInputElement) => (value: string) => void}} options
      *   storage is the extension's local storage; onAction hears pin, clear-pins, capture, play, choose (with the picked
-     *   value) and save-draft (with {reportTitle, project}); shrink, Letter keys and the Save draft panel stay in here.
+     *   value), save-draft (with {reportTitle, project}) and make-notebook (with the typed name); shrink, Letter keys,
+     *   the Save draft panel and the New notebook panel stay in here.
      *   guardTyping puts the overlay's guard against the page writing into a field the person types in on the field, and
      *   answers how the dock sets that field's value. Play's step card goes in the answer's stepSlot.
      */
@@ -500,6 +536,9 @@ globalThis.pinroundDock ??= (() => {
         const picker = make('select', 'dock__target');
         picker.setAttribute('aria-label', TEXTS.target);
         const separator = () => hiddenFromReaders(make('span', 'dock__sep'));
+        // A link, not a button: the page in pinround opens in a new tab, and the tested page is never its referrer.
+        const openLink = make('a', 'dock__open', { target: '_blank', rel: 'noopener noreferrer', textContent: TEXTS.openTarget, title: TEXTS.openTargetName, hidden: true });
+        openLink.setAttribute('aria-label', TEXTS.openTargetName);
 
         const actionButton = (text, icon, key) => {
             const button = make('button', 'dock__action', { type: 'button' });
@@ -544,7 +583,7 @@ globalThis.pinroundDock ??= (() => {
         shrinkButton.setAttribute('aria-label', TEXTS.shrink);
         shrinkButton.setAttribute('aria-keyshortcuts', 'H');
         shrinkButton.append(hiddenFromReaders(make('span', 'dock__icon dock__icon--shrink')));
-        bar.append(grip, picker, separator(), pinButton, captureButton, clearPinsButton, playButton, separator(), saveButton, letterKeysButton, shrinkButton);
+        bar.append(grip, picker, openLink, separator(), pinButton, captureButton, clearPinsButton, playButton, separator(), saveButton, letterKeysButton, shrinkButton);
 
         const savePanel = make('section', 'dock-pop dock-save', { hidden: true });
         savePanel.setAttribute('role', 'dialog');
@@ -557,6 +596,7 @@ globalThis.pinroundDock ??= (() => {
         const projectField = make('input', 'dock-save__project', { type: 'text', maxLength: PROJECT_KEY_MAX_LENGTH, autocomplete: 'off', placeholder: TEXTS.projectExample });
         const projectLabel = make('label', 'dock-save__field');
         projectLabel.append(make('span', '', { textContent: TEXTS.project }), projectField);
+        const draftName = make('p', 'dock-save__draft', { hidden: true });
         const panelError = make('p', 'dock-save__error', { id: 'pinround-save-error' });
         panelError.setAttribute('role', 'alert');
         const goesTo = make('p', 'dock-save__goes', { textContent: TEXTS.goesTo });
@@ -564,7 +604,22 @@ globalThis.pinroundDock ??= (() => {
         const keepTestingButton = make('button', 'dock-btn dock-save__keep', { type: 'button', textContent: TEXTS.keepTesting });
         const panelButtons = make('div', 'dock-save__buttons');
         panelButtons.append(panelSaveButton, keepTestingButton);
-        savePanel.append(saveHeading, shotList, titleLabel, projectLabel, panelError, goesTo, panelButtons);
+        savePanel.append(saveHeading, shotList, titleLabel, draftName, projectLabel, panelError, goesTo, panelButtons);
+
+        const notebookPanel = make('section', 'dock-pop dock-notebook', { hidden: true });
+        notebookPanel.setAttribute('role', 'dialog');
+        notebookPanel.setAttribute('aria-label', TEXTS.newNotebookPanel);
+        const notebookField = make('input', 'dock-notebook__title', { type: 'text', maxLength: NOTEBOOK_TITLE_MAX_LENGTH, autocomplete: 'off' });
+        const notebookLabel = make('label', 'dock-save__field');
+        notebookLabel.append(make('span', '', { textContent: TEXTS.notebookName }), notebookField);
+        const notebookError = make('p', 'dock-save__error', { id: 'pinround-notebook-error' });
+        notebookError.setAttribute('role', 'alert');
+        const makeNotebookButton = make('button', 'dock-btn dock-btn--primary dock-notebook__make', { type: 'button', textContent: TEXTS.makeNotebook });
+        const cancelNotebookButton = make('button', 'dock-btn dock-notebook__cancel', { type: 'button', textContent: TEXTS.cancel });
+        const notebookButtons = make('div', 'dock-save__buttons');
+        notebookButtons.append(makeNotebookButton, cancelNotebookButton);
+        notebookPanel.append(make('h3', '', { textContent: TEXTS.newNotebookPanel }), notebookLabel, notebookError, notebookButtons);
+        const setNotebookField = guardTyping(notebookField);
         const setTitleField = guardTyping(titleField);
         const setProjectField = guardTyping(projectField);
 
@@ -572,7 +627,10 @@ globalThis.pinroundDock ??= (() => {
         status.setAttribute('role', 'status');
         const stepSlot = make('div', 'dock__step-slot');
         const pops = make('div', 'dock__pops');
-        pops.append(savePanel, stepSlot, status);
+        const saved = make('p', 'dock__saved', { hidden: true });
+        const savedLink = make('a', '', { target: '_blank', rel: 'noopener noreferrer', textContent: TEXTS.openSaved });
+        saved.append(savedLink);
+        pops.append(savePanel, notebookPanel, stepSlot, status, saved);
         dock.append(bar, pops);
 
         const handle = make('button', 'dock-handle dock--right', { type: 'button', hidden: true });
@@ -590,6 +648,8 @@ globalThis.pinroundDock ??= (() => {
         let waitingReport = null;
         /** The picker's value as the extension last answered it, put back when the picker is changed while busy. */
         let chosenTarget = '';
+        /** The choices as the extension last answered them, with each one's page in pinround. */
+        let shownChoices = [];
         // Off until the stored switch is read, so a person who turned the keys off never has a key act meanwhile.
         let areLetterKeysOn = false;
         /** @type {null|{element: HTMLElement, dx: number, dy: number, width: number, height: number, startX: number, startY: number, hasMoved: boolean}} */
@@ -617,7 +677,7 @@ globalThis.pinroundDock ??= (() => {
         // aria-disabled, not disabled: a disabled control loses focus, so the keyboard user would be thrown out of the
         // dock each time a request starts. A press on one is ignored by whenEnabled instead.
         function enableControls() {
-            for (const control of [picker, captureButton, panelSaveButton]) {
+            for (const control of [picker, captureButton, panelSaveButton, makeNotebookButton]) {
                 control.setAttribute('aria-disabled', String(isBusy));
             }
             saveButton.setAttribute('aria-disabled', String(isBusy || !canSave));
@@ -626,6 +686,13 @@ globalThis.pinroundDock ??= (() => {
         function say(message, isError = false) {
             status.textContent = message;
             status.classList.toggle('dock__status--error', isError);
+            saved.hidden = true;
+        }
+
+        /** Shows "Open the draft in pinround" under the status, until the next message. */
+        function offerSavedDraft(url) {
+            savedLink.setAttribute('href', url);
+            saved.hidden = false;
         }
 
         /** The handler for a person's press on the control, which does nothing while it is aria-disabled. */
@@ -678,6 +745,10 @@ globalThis.pinroundDock ??= (() => {
             }));
             titleLabel.hidden = !(waitingReport?.needsTitle ?? false);
             projectLabel.hidden = !(waitingReport?.needsProject ?? false);
+            const draftTitle = waitingReport?.draftTitle ?? null;
+            draftName.hidden = null === draftTitle;
+            draftName.textContent = null === draftTitle ? '' : TEXTS.addsTo(draftTitle);
+            goesTo.textContent = null === draftTitle ? TEXTS.goesTo : TEXTS.goesToMade;
         }
 
         function showPanelError(message, field = null) {
@@ -694,6 +765,7 @@ globalThis.pinroundDock ??= (() => {
         }
 
         function openSavePanel() {
+            closeNotebookPanel();
             showShots();
             showPanelError('');
             savePanel.hidden = false;
@@ -714,6 +786,62 @@ globalThis.pinroundDock ??= (() => {
             }
 
             return true;
+        }
+
+        const isNotebookPanelOpen = () => !notebookPanel.hidden;
+
+        function showNotebookError(message) {
+            notebookError.textContent = message;
+            if ('' === message) {
+                notebookField.removeAttribute('aria-invalid');
+                notebookField.removeAttribute('aria-describedby');
+            } else {
+                notebookField.setAttribute('aria-invalid', 'true');
+                notebookField.setAttribute('aria-describedby', notebookError.id);
+            }
+        }
+
+        function openNotebookPanel() {
+            closeSavePanel();
+            showNotebookError('');
+            notebookPanel.hidden = false;
+            notebookField.focus();
+        }
+
+        /** Closes the New notebook panel; focus inside it goes back to the picker. @returns {boolean} whether it was open */
+        function closeNotebookPanel() {
+            if (!isNotebookPanelOpen()) {
+                return false;
+            }
+            const hadFocus = hasFocusIn(notebookPanel);
+            notebookPanel.hidden = true;
+            if (hadFocus) {
+                picker.focus();
+            }
+
+            return true;
+        }
+
+        function sendNotebookName() {
+            const refusal = refusalOfNotebookName(notebookField.value);
+            if (null !== refusal) {
+                showNotebookError(refusal);
+                notebookField.focus();
+
+                return;
+            }
+            showNotebookError('');
+            onAction('make-notebook', notebookField.value);
+        }
+
+        function showOpenLink() {
+            const url = shownChoices.find((choice) => choice.value === chosenTarget)?.url ?? null;
+            openLink.hidden = null === url;
+            if (null === url) {
+                openLink.removeAttribute('href');
+            } else {
+                openLink.setAttribute('href', url);
+            }
         }
 
         function sendTyped() {
@@ -746,9 +874,11 @@ globalThis.pinroundDock ??= (() => {
                 options.push(make('option', '', { value: choice.value, textContent: choice.label }));
             }
             picker.replaceChildren(...options);
-            const chosen = options.find((option) => option.value === state.chosen) ?? options[0];
+            const chosen = options.find((option) => option.value === state.chosen && NEW_NOTEBOOK !== option.value) ?? options[0];
             chosen.selected = true;
             chosenTarget = chosen.value;
+            shownChoices = state.choices;
+            showOpenLink();
             showCount(state.count);
             canSave = state.canSave;
             waitingReport = state.newReport;
@@ -775,7 +905,12 @@ globalThis.pinroundDock ??= (() => {
             if ('true' === picker.getAttribute('aria-disabled')) {
                 picker.value = chosenTarget;
                 say(TEXTS.busy);
+            } else if (NEW_NOTEBOOK === picker.value) {
+                // Not a place yet: the picker keeps the last one until the notebook is made, which chooses it.
+                picker.value = chosenTarget;
+                openNotebookPanel();
             } else {
+                closeNotebookPanel();
                 onAction('choose', picker.value);
             }
         }));
@@ -790,6 +925,18 @@ globalThis.pinroundDock ??= (() => {
         }));
         panelSaveButton.addEventListener('click', whenEnabled(panelSaveButton, sendTyped));
         keepTestingButton.addEventListener('click', onlyTrusted(closeSavePanel));
+        makeNotebookButton.addEventListener('click', whenEnabled(makeNotebookButton, sendNotebookName));
+        cancelNotebookButton.addEventListener('click', onlyTrusted(closeNotebookPanel));
+        notebookField.addEventListener('keydown', onlyTrusted((event) => {
+            if ('Enter' === event.key && !event.isComposing) {
+                event.preventDefault();
+                if ('true' === makeNotebookButton.getAttribute('aria-disabled')) {
+                    say(TEXTS.busy);
+                } else {
+                    sendNotebookName();
+                }
+            }
+        }));
         for (const field of [titleField, projectField]) {
             field.addEventListener('keydown', onlyTrusted((event) => {
                 if ('Enter' === event.key && !event.isComposing) {
@@ -905,8 +1052,10 @@ globalThis.pinroundDock ??= (() => {
             stepSlot,
             /** The dock's focusable controls in Tab order, the open Save draft panel's among them, for the overlay's focus trap while pinning. */
             focusables: () => (dock.hidden ? [handle] : [
-                ...[grip, picker, pinButton, captureButton, clearPinsButton, playButton, saveButton, letterKeysButton, shrinkButton].filter((control) => !control.hidden),
+                ...[grip, picker, openLink, pinButton, captureButton, clearPinsButton, playButton, saveButton, letterKeysButton, shrinkButton].filter((control) => !control.hidden),
                 ...(isPanelOpen() ? [titleField, projectField, panelSaveButton, keepTestingButton].filter((control) => !control.parentNode.hidden) : []),
+                ...(isNotebookPanelOpen() ? [notebookField, makeNotebookButton, cancelNotebookButton] : []),
+                ...(saved.hidden ? [] : [savedLink]),
             ]),
             /** Whether P, C and H typed anywhere on the page are the dock's; inside the dock they always are. */
             areLetterKeysOn: () => areLetterKeysOn,
@@ -932,7 +1081,9 @@ globalThis.pinroundDock ??= (() => {
             },
             /**
              * Shows the extension's answer to `action`: its state, its message; anything unreadable is said as no
-             * answer. A refused save-draft is said in the open panel, by its fields; a saved one closes the panel.
+             * answer. A refused save-draft is said in the open panel, by its fields; a saved one closes the panel and
+             * offers its page in pinround. A refused make-notebook is said in the New notebook panel; a made one
+             * closes it.
              */
             showAnswer(answer, action) {
                 if (null === answer || 'object' !== typeof answer) {
@@ -947,6 +1098,7 @@ globalThis.pinroundDock ??= (() => {
                     return;
                 }
                 const isPanelAnswer = 'save-draft' === action && isPanelOpen();
+                const isNotebookAnswer = 'make-notebook' === action && isNotebookPanelOpen();
                 if (undefined !== state) {
                     showState(state);
                 }
@@ -958,16 +1110,29 @@ globalThis.pinroundDock ??= (() => {
 
                     return;
                 }
+                if (isNotebookAnswer && true === answer.isError) {
+                    showNotebookError(answer.message);
+
+                    return;
+                }
                 if (isPanelAnswer && true !== answer.isError) {
                     setTitleField('');
                     setProjectField('');
                     closeSavePanel();
                 }
+                if (isNotebookAnswer) {
+                    setNotebookField('');
+                    closeNotebookPanel();
+                }
                 say(answer.message, true === answer.isError);
+                const savedUrl = 'save-draft' === action && true !== answer.isError ? checkedPageUrl(answer.savedUrl) : null;
+                if (null !== savedUrl) {
+                    offerSavedDraft(savedUrl);
+                }
             },
             say,
-            /** Closes the Save draft panel, as Escape does. @returns {boolean} whether one was open */
-            closePanels: closeSavePanel,
+            /** Closes the Save draft and New notebook panels, as Escape does. @returns {boolean} whether one was open */
+            closePanels: () => [closeSavePanel(), closeNotebookPanel()].includes(true),
             toggleShrunk,
             isShrunk: () => dock.hidden,
             focusPinButton: () => (dock.hidden ? handle : pinButton).focus(),
@@ -976,8 +1141,8 @@ globalThis.pinroundDock ??= (() => {
 
     return Object.freeze({
         PLACE_KEY_PREFIX, LETTER_KEYS_KEY, DEFAULT_PLACE, EDGE_GAP_PX, GRIP_STEP_PCT, MAX_SHOTS, REPORT_TITLE_MAX_LENGTH, PROJECT_KEY_MAX_LENGTH, TEXTS,
-        THUMBNAIL_DATA_URL_PREFIX, MAX_THUMBNAIL_DATA_URL_LENGTH, MAX_THUMBNAIL_SIDE_PX, THUMBNAIL_BOX_PX,
-        nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, refusalOfTyped,
+        THUMBNAIL_DATA_URL_PREFIX, MAX_THUMBNAIL_DATA_URL_LENGTH, MAX_THUMBNAIL_SIDE_PX, THUMBNAIL_BOX_PX, NOTEBOOK_TITLE_MAX_LENGTH, NEW_NOTEBOOK,
+        nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, refusalOfTyped, refusalOfNotebookName, checkedPageUrl,
         coverCropOf, coverSpotOf, mountDock,
     });
 })();

@@ -7,6 +7,7 @@ import { base64OfBlob } from '../shared/base64.js';
 import { MAX_SCREENSHOTS, pngOf } from './capture.js';
 import { WAITING_CAPTURES_KEY, addCaptureToNewReport, checkedNewReportCapture, loadNewReport, saveTypedReport, sendPendingCapture } from './new-report.js';
 import { capturePinnedTab, closePinOverlay } from './page-pins.js';
+import { shownText } from './untrusted-text.js';
 
 export const NO_ROOM = 'The extension has no room for another capture. Press Save draft first.';
 export const WAITING_FULL = 'A report holds at most 10 captures. Press Save draft, then start a new report for more.';
@@ -18,9 +19,11 @@ export const THUMBNAIL_BOX_PX = Object.freeze({ width: 184, height: 120 });
 export const MAX_THUMBNAIL_DATA_URL_LENGTH = 200_000;
 export const MAX_THUMBNAIL_SIDE_PX = 2000;
 const THUMBNAIL_JPEG_QUALITY = 0.8;
+const MAX_SHOWN_TITLE_LENGTH = 120;
 
 export const capturedMessage = (waitingCount) => `Captured. ${waitingCount} waiting.`;
-export const draftSavedMessage = (screenshotCount) => `Draft saved with ${screenshotCount} ${1 === screenshotCount ? 'capture' : 'captures'}. Open it in pinround to send it.`;
+/** After Save draft: the saved draft's name, and that it can be picked again under Save to for more captures. */
+export const draftSavedMessage = (screenshotCount, reportTitle) => `Draft "${shownText(reportTitle, MAX_SHOWN_TITLE_LENGTH)}" saved with ${screenshotCount} ${1 === screenshotCount ? 'capture' : 'captures'}. Open it in pinround to send it, or choose it under Save to for more.`;
 
 /**
  * @typedef {{dataUrl: string, width: number, height: number}} Thumbnail a JPEG of the capture, its size in pixels, in

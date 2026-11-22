@@ -9,7 +9,7 @@ import * as waitingCaptures from '../src/capture/waiting-captures.js';
 
 const {
     DEFAULT_PLACE, EDGE_GAP_PX, LETTER_KEYS_KEY, TEXTS, MAX_SHOTS, REPORT_TITLE_MAX_LENGTH, THUMBNAIL_DATA_URL_PREFIX, MAX_THUMBNAIL_DATA_URL_LENGTH, MAX_THUMBNAIL_SIDE_PX, THUMBNAIL_BOX_PX,
-    actionOfKey, checkedPlace, checkedState, coverCropOf, coverSpotOf, isTypingTarget, loadPlace, nearerSide, placeKeyOf, refusalOfTyped, savePlace, topPercentOf,
+    actionOfKey, checkedPageUrl, checkedPlace, checkedState, coverCropOf, coverSpotOf, isTypingTarget, loadPlace, nearerSide, placeKeyOf, refusalOfNotebookName, refusalOfTyped, savePlace, topPercentOf,
 } = globalThis.pinroundDock;
 const waiting = { ...waitingCaptures, MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH: CAPTURE_REPORT_TITLE_MAX_LENGTH };
 
@@ -905,4 +905,184 @@ test('the focus trap lets Tab and Shift+Tab move on from Clear as from any dock 
 
     assert.equal(page.keydown(clear, 'Tab', { shiftKey: true }).defaultPrevented, false, 'Shift+Tab goes back to Pin, not round to the end.');
     assert.equal(page.keydown(clear, 'Tab').defaultPrevented, false);
+});
+
+const PINROUND = 'https://pinround.acme-foods.example';
+const DRAFT_PAGE = `${PINROUND}/report-drafts/rd000000-0000-4000-8000-000000000001`;
+const CHOICES_WITH_PAGES = [
+    { value: 'new-report', label: 'New report', url: null },
+    { value: 'report:rd1', label: 'Report draft · Total is wrong', url: DRAFT_PAGE },
+    { value: 'ticket:SHOP-12', label: 'My draft round · SHOP-12', url: `${PINROUND}/t/SHOP-12` },
+    { value: 'new-notebook', label: 'New notebook…', url: null },
+];
+const openLinkOf = (inRoot) => ({ isShown: !inRoot('.dock__open').hidden, href: inRoot('.dock__open').getAttribute('href') });
+
+test('Open links the chosen place\'s page in pinround in a new tab, without the tested page as referrer, and hides for a new report or an address that is no web page', async () => {
+    const states = [];
+    const { page, inRoot } = await dockedPage({ answer: async () => ({ state: states.shift() }) });
+    const show = async (state) => {
+        states.push(state);
+        page.dispatch(inRoot('select'), 'change', { bubbles: false, composed: false });
+        await settled();
+    };
+
+    await show({ ...STATE, choices: CHOICES_WITH_PAGES, chosen: 'report:rd1' });
+    assert.deepEqual(openLinkOf(inRoot), { isShown: true, href: DRAFT_PAGE });
+    assert.deepEqual([inRoot('.dock__open').target, inRoot('.dock__open').rel, inRoot('.dock__open').getAttribute('aria-label')], ['_blank', 'noopener noreferrer', TEXTS.openTargetName]);
+
+    await show({ ...STATE, choices: CHOICES_WITH_PAGES, chosen: 'ticket:SHOP-12' });
+    assert.deepEqual(openLinkOf(inRoot), { isShown: true, href: `${PINROUND}/t/SHOP-12` });
+
+    await show({ ...STATE, choices: CHOICES_WITH_PAGES, chosen: 'new-report' });
+    assert.deepEqual(openLinkOf(inRoot), { isShown: false, href: null });
+
+    await show({ ...STATE, choices: [{ value: 'ticket:SHOP-12', label: 'My draft round · SHOP-12', url: 'javascript:alert(1)' }], chosen: 'ticket:SHOP-12' });
+    assert.deepEqual(openLinkOf(inRoot), { isShown: false, href: null });
+});
+
+test('a page address is linked only when it is an http or https URL', () => {
+    assert.equal(checkedPageUrl(DRAFT_PAGE), DRAFT_PAGE);
+    for (const url of ['javascript:alert(1)', 'data:text/html,x', 'not a url', 42, null, undefined]) {
+        assert.equal(checkedPageUrl(url), null, String(url));
+    }
+});
+
+test('a saved draft offers "Open the draft in pinround" under the message until the next message; a refused save offers nothing', async () => {
+    const { page, inRoot, buttonNamed, saves } = await dockWithCapturesWaiting();
+    page.click(buttonNamed(TEXTS.saveDraft));
+    page.typeInto(inRoot('.dock-save__title'), 'Total is wrong');
+    page.click(inRoot('.dock-save__send'));
+    await settled();
+    assert.equal(inRoot('.dock__saved').hidden, true);
+
+    saves[0]({ message: 'Draft "Total is wrong" saved with 2 captures.', savedUrl: DRAFT_PAGE, state: { ...STATE, choices: CHOICES_WITH_PAGES, chosen: 'new-report', count: 0, canSave: false, newReport: { ...WAITING, shots: [] } } });
+    await settled();
+    await settled();
+
+    const link = inRoot('.dock__saved').querySelector('a');
+    assert.deepEqual([inRoot('.dock__saved').hidden, link.getAttribute('href'), link.textContent, link.target, link.rel], [false, DRAFT_PAGE, TEXTS.openSaved, '_blank', 'noopener noreferrer']);
+
+    page.keydown(page.document.body, 'c');
+    await settled();
+    saves[1]({ message: 'Captured. 1 waiting.', state: NEW_REPORT_STATE });
+    await settled();
+    await settled();
+    assert.deepEqual([inRoot('.dock__status').textContent, inRoot('.dock__saved').hidden], ['Captured. 1 waiting.', true], 'The next message replaces it.');
+});
+
+test('a save answer whose page address is no web page offers no link', async () => {
+    const { page, inRoot, buttonNamed, saves } = await dockWithCapturesWaiting();
+    page.click(buttonNamed(TEXTS.saveDraft));
+    page.typeInto(inRoot('.dock-save__title'), 'Total is wrong');
+    page.click(inRoot('.dock-save__send'));
+    await settled();
+
+    saves[0]({ message: 'Draft saved.', savedUrl: 'javascript:alert(1)', state: { ...STATE, chosen: 'new-report', count: 0, canSave: false, newReport: { ...WAITING, shots: [] } } });
+    await settled();
+    await settled();
+
+    assert.equal(inRoot('.dock__saved').hidden, true);
+});
+
+test('the title field names the new report draft; once the draft is made, its name shows as text only and nothing asks for it', async () => {
+    const naming = await dockWithCapturesWaiting();
+    naming.page.click(naming.buttonNamed(TEXTS.saveDraft));
+    assert.equal(naming.inRoot('.dock-save__title').parentNode.children[0].textContent, 'Name of the report draft: what is wrong, in one line');
+    assert.equal(naming.inRoot('.dock-save__draft').hidden, true);
+
+    const made = await dockWithCapturesWaiting({ ...WAITING, needsTitle: false, draftTitle: 'Total <b>is</b> wrong' });
+    made.page.click(made.buttonNamed(TEXTS.saveDraft));
+    assert.deepEqual([panelOf(made.inRoot).hasTitle, made.inRoot('.dock-save__draft').hidden, made.inRoot('.dock-save__draft').textContent], [false, false, 'Adds to the report draft "Total <b>is</b> wrong".']);
+    assert.equal(made.inRoot('.dock-save__draft').children.length, 0, 'The title made no element.');
+    assert.equal(made.inRoot('.dock-save__goes').textContent, TEXTS.goesToMade);
+    made.page.click(made.inRoot('.dock-save__send'));
+    await settled();
+    assert.deepEqual(made.page.sentMessages.at(-1), { pinroundDock: 'save-draft', value: { reportTitle: '', project: '' } });
+});
+
+test('a waiting report whose draft name is no text is no state', () => {
+    assert.equal(checkedState({ ...NEW_REPORT_STATE, newReport: { ...WAITING, draftTitle: 42 } }), null);
+    assert.equal(checkedState({ ...NEW_REPORT_STATE, newReport: { ...WAITING, draftTitle: 'Total' } }).newReport.draftTitle, 'Total');
+    assert.equal(checkedState(NEW_REPORT_STATE).newReport.draftTitle, null);
+});
+
+/** The dock on SHOP-12 with "New notebook…" offered; make-notebook answers wait until released. */
+async function dockOfferingNewNotebook() {
+    const makes = [];
+    const docked = await dockedPage({
+        answer: async ({ pinroundDock }) => ('make-notebook' === pinroundDock ? new Promise((resolve) => makes.push(resolve)) : { state: { ...STATE, choices: CHOICES_WITH_PAGES } }),
+    });
+    const pickNewNotebook = () => {
+        const picker = docked.inRoot('select');
+        picker.value = 'new-notebook';
+        docked.page.dispatch(picker, 'change', { bubbles: false, composed: false });
+    };
+
+    return { ...docked, makes, pickNewNotebook };
+}
+
+test('"New notebook…" in Save to opens the name field in the dock, keeps the place chosen before and asks the extension nothing yet', async () => {
+    const { page, root, inRoot, pickNewNotebook } = await dockOfferingNewNotebook();
+
+    pickNewNotebook();
+    await settled();
+
+    assert.deepEqual([inRoot('.dock-notebook').hidden, inRoot('.dock-notebook').getAttribute('role'), root.activeElement], [false, 'dialog', inRoot('.dock-notebook__title')]);
+    assert.equal(inRoot('select').value, 'ticket:SHOP-12');
+    assert.deepEqual(requestsOf(page), ['state']);
+});
+
+test('the notebook name is refused inline when blank or over 120 characters, and sent as typed otherwise', async () => {
+    const { page, root, inRoot, pickNewNotebook } = await dockOfferingNewNotebook();
+    pickNewNotebook();
+    const field = inRoot('.dock-notebook__title');
+
+    for (const typed of ['', '  ', '\u{1F600}'.repeat(121)]) {
+        field.value = typed;
+        page.click(inRoot('.dock-notebook__make'));
+        assert.deepEqual([inRoot('.dock-notebook').querySelector('.dock-save__error').textContent, field.getAttribute('aria-invalid'), root.activeElement], [TEXTS.notebookNameRefused, 'true', field], JSON.stringify(typed.slice(0, 4)));
+    }
+    assert.deepEqual(requestsOf(page), ['state']);
+    assert.equal(refusalOfNotebookName('\u{1F600}'.repeat(120)), null);
+
+    field.value = '';
+    page.typeInto(field, 'Coupons');
+    page.keydown(field, 'Enter');
+    await settled();
+    assert.deepEqual(page.sentMessages.at(-1), { pinroundDock: 'make-notebook', value: 'Coupons' });
+});
+
+test('a made notebook closes the panel, empties the name and says so; a refused one keeps the panel with pinround\'s reason', async () => {
+    const { page, inRoot, makes, pickNewNotebook } = await dockOfferingNewNotebook();
+    pickNewNotebook();
+    page.typeInto(inRoot('.dock-notebook__title'), 'Coupons');
+    page.click(inRoot('.dock-notebook__make'));
+    await settled();
+
+    makes[0]({ message: 'Your pinround token cannot write to notebooks.', isError: true, state: { ...STATE, choices: CHOICES_WITH_PAGES } });
+    await settled();
+    await settled();
+    assert.deepEqual([inRoot('.dock-notebook').hidden, inRoot('.dock-notebook').querySelector('.dock-save__error').textContent, inRoot('.dock-notebook__title').value], [false, 'Your pinround token cannot write to notebooks.', 'Coupons']);
+
+    page.click(inRoot('.dock-notebook__make'));
+    await settled();
+    const made = [...CHOICES_WITH_PAGES.slice(0, 3), { value: 'notebook:nb9', label: 'Notebook · Coupons', url: `${PINROUND}/notebooks/nb9` }, CHOICES_WITH_PAGES[3]];
+    makes[1]({ message: 'Notebook "Coupons" made. Captures go into it now.', state: { ...STATE, choices: made, chosen: 'notebook:nb9' } });
+    await settled();
+    await settled();
+
+    assert.deepEqual([inRoot('.dock-notebook').hidden, inRoot('.dock-notebook__title').value, inRoot('.dock__status').textContent], [true, '', 'Notebook "Coupons" made. Captures go into it now.']);
+    assert.equal(inRoot('select').value, 'notebook:nb9');
+    assert.deepEqual(openLinkOf(inRoot), { isShown: true, href: `${PINROUND}/notebooks/nb9` });
+});
+
+test('Cancel and Escape close the New notebook panel and give focus back to Save to', async () => {
+    const { page, root, inRoot, pickNewNotebook } = await dockOfferingNewNotebook();
+    pickNewNotebook();
+    page.click(inRoot('.dock-notebook__cancel'));
+    assert.deepEqual([inRoot('.dock-notebook').hidden, root.activeElement], [true, inRoot('select')]);
+
+    pickNewNotebook();
+    page.keydown(inRoot('.dock-notebook__title'), 'Escape');
+    assert.deepEqual([inRoot('.dock-notebook').hidden, root.activeElement], [true, inRoot('select')]);
 });

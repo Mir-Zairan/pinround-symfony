@@ -132,11 +132,11 @@ test('a tester pins, removes a pin, captures twice and saves one report draft wi
   expect(stub.myReportDrafts()).toEqual([]);
 
   await clickOverlayButton(inspector, testPage, 'Save draft, 2 in it');
-  await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'What is wrong, in one line' });
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'Name of the report draft: what is wrong, in one line' });
   await testPage.keyboard.type('Basket total is wrong');
   await clickOverlayButton(inspector, testPage, 'Save draft');
 
-  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Draft saved with 2 captures. Open it in pinround to send it.']);
+  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Draft "Basket total is wrong" saved with 2 captures. Open it in pinround to send it, or choose it under Save to for more.']);
   const [draft, ...otherDrafts] = stub.myReportDrafts();
   expect(otherDrafts).toEqual([]);
   expect([draft.project, draft.title]).toEqual(['SHOP', 'Basket total is wrong']);

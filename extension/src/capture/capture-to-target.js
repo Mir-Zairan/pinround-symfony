@@ -6,6 +6,7 @@ import { NEW_REPORT, TargetGoneError, goneMessageOf } from './capture-target.js'
 import { addCaptureToNewReport, checkedNewReportCapture, loadNewReport } from './new-report.js';
 import { captureToNotebook } from './notebook-capture.js';
 import { capturePinnedTab, closePinOverlay } from './page-pins.js';
+import { captureToReportDraft } from './report-draft-capture.js';
 import { shownText } from './untrusted-text.js';
 
 /** The retake picker's value for a new screenshot; every other value is the screenshot_id to retake. */
@@ -28,6 +29,9 @@ export async function captureToTarget({ api, browser, storage, tabId, target, ty
     }
     if ('notebook' === target.kind) {
         return captureToNotebook(api, browser, target, tabId, texts);
+    }
+    if ('report' === target.kind) {
+        return captureToReportDraft(api, browser, target, tabId, texts);
     }
     const { file, pins } = await capturePinnedTab(browser, tabId);
     const goneOr = (error) => (error instanceof ApiError && NOT_FOUND === error.outcome ? new TargetGoneError(goneMessageOf(target), target) : error);
