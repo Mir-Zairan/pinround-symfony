@@ -52,7 +52,7 @@ test('Mia opens the round from the Rounds section, switches area tabs and compar
   await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/${roundNumber}$`));
   await page.waitForLoadState('networkidle');
 
-  await expect(areaTab(page, REVIEW_AREAS[0])).toHaveAttribute('aria-selected', 'true');
+  await expect(areaTab(page, REVIEW_AREAS[0])).toHaveAttribute('aria-current', 'page');
   await expect(areaTab(page, REVIEW_AREAS[0])).toContainText('2 pins');
   await expect(areaTab(page, REVIEW_AREAS[1])).toContainText('Not reviewed');
   await expect(panel(page).getByRole('heading', { name: 'Pins from round 1' })).toBeVisible();
@@ -67,8 +67,8 @@ test('Mia opens the round from the Rounds section, switches area tabs and compar
 
   await areaTab(page, REVIEW_AREAS[1]).click();
   await expect(page).toHaveURL(new RegExp(`\\?area=1$`));
-  await expect(areaTab(page, REVIEW_AREAS[1])).toHaveAttribute('aria-selected', 'true');
-  await expect(areaTab(page, REVIEW_AREAS[0])).not.toHaveAttribute('aria-selected', 'true');
+  await expect(areaTab(page, REVIEW_AREAS[1])).toHaveAttribute('aria-current', 'page');
+  await expect(areaTab(page, REVIEW_AREAS[0])).not.toHaveAttribute('aria-current', 'page');
   await expect(panel(page).getByRole('heading', { name: `Your verdict on ${REVIEW_AREAS[1]}` })).toBeVisible();
   await expect(panel(page)).toContainText('That round left no pins here.');
 

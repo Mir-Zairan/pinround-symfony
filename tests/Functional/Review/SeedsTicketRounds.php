@@ -115,6 +115,15 @@ trait SeedsTicketRounds
         return $screenshotId;
     }
 
+    private function markRetakeOf(string $laterTryId, string $firstTryId): void
+    {
+        $organizationId = $this->acmeFoods->toString();
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            'UPDATE rvw_screenshot SET retake_of = ? WHERE organization_id = ? AND id = ?',
+            [$firstTryId, $organizationId, $laterTryId],
+        ));
+    }
+
     /**
      * @return string the pin's id
      */

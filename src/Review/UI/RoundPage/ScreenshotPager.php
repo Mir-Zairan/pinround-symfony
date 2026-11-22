@@ -20,13 +20,10 @@ final readonly class ScreenshotPager
     public const string NAV_LABEL = 'Back and next';
 
     /**
-     * @param int                     $shownNumber    from 1
      * @param array<string, int>|null $backParameters the query of the screenshot before; null on the first
      * @param array<string, int>|null $nextParameters the query of the screenshot after; null on the last
      */
     private function __construct(
-        public int $shownNumber,
-        public int $count,
         public ?array $backParameters,
         public ?array $nextParameters,
     ) {
@@ -46,8 +43,6 @@ final readonly class ScreenshotPager
         $shownIndex = $shownIndexes[0];
 
         return new self(
-            $shownIndex + 1,
-            \count($tabs),
             ($tabs[$shownIndex - 1] ?? null)?->parameters,
             ($tabs[$shownIndex + 1] ?? null)?->parameters,
         );
@@ -69,16 +64,8 @@ final readonly class ScreenshotPager
         }
 
         return new self(
-            $shownNumber,
-            $count,
             1 === $shownNumber ? null : [RoundController::SCREENSHOT_PARAMETER => $shownNumber - 1],
             $count === $shownNumber ? null : [RoundController::SCREENSHOT_PARAMETER => $shownNumber + 1],
         );
-    }
-
-    /** "2 of 3". */
-    public function positionLabel(): string
-    {
-        return \sprintf('%d of %d', $this->shownNumber, $this->count);
     }
 }

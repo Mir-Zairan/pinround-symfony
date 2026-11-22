@@ -108,8 +108,8 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
-        self::assertSame('Screenshots', $page->filter('[role="tablist"]')->attr('aria-label'));
+        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
+        self::assertSame('Screenshots', $page->filter('nav.round-tabs')->attr('aria-label'));
         self::assertCount(0, $page->filter('nav.screenshot-pager, .pin-list'), 'The tabs replace the pager, and the side panel lists the notes.');
         self::assertSame(
             ['Draft shot 0 2 pins', 'Draft shot 1 0 pins', 'Draft shot 2 1 pin'],
@@ -118,10 +118,12 @@ final class RoundPageScreenshotsTest extends WebTestCase
         );
         self::assertSame(
             ['/t/SHOP-1/rounds/1?screenshot=1', '/t/SHOP-1/rounds/1?screenshot=2', '/t/SHOP-1/rounds/1?screenshot=3'],
-            $page->filter('[role="tablist"] a.round-tab')->each(static fn (Crawler $thumb): string => (string) $thumb->attr('href')),
+            $page->filter('nav.round-tabs a.round-tab')->each(static fn (Crawler $thumb): string => (string) $thumb->attr('href')),
         );
-        self::assertSame('Draft shot 0', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text(), 'A picture with a title names its tab.');
-        self::assertSame('round-tab-1', $page->filter('#round-tabpanel[role="tabpanel"]')->attr('aria-labelledby'));
+        self::assertSame('Draft shot 0', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text(), 'A picture with a title names its tab.');
+        self::assertCount(0, $page->filter('.round-page [role="tablist"], .round-page [role="tab"], .round-page [role="tabpanel"], .round-page [aria-selected]'), 'Page links, not ARIA tabs, as each one loads a page.');
+        self::assertSame(['round-tab-1'], $page->filter('nav.round-tabs [aria-current]')->each(static fn (Crawler $tab): string => (string) $tab->attr('id')));
+        self::assertSame('round-tab-1', $page->filter('a.round-tab[data-screenshot-pager-target="shown"]')->attr('id'), 'The shown tab takes the focus after an arrow key\'s visit.');
         self::assertCount(0, $page->filter('.round-tab img'), 'A tab is text only, so the pictures stay above the fold.');
         self::assertSame(['Draft shot 0'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertCount(0, $page->filter('a.round-tab[data-screenshot-pager-target="back"]'), 'There is no screenshot before the first.');
@@ -132,8 +134,8 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_PAGE.'?'.RoundController::SCREENSHOT_PARAMETER.'=2');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
-        self::assertSame('Draft shot 1', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
+        self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
+        self::assertSame('Draft shot 1', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text());
         self::assertSame(['Draft shot 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertSame('/t/SHOP-1/rounds/1?screenshot=1', $page->filter('a.round-tab[data-screenshot-pager-target="back"]')->attr('href'));
         self::assertSame('/t/SHOP-1/rounds/1?screenshot=3', $page->filter('a.round-tab[data-screenshot-pager-target="next"]')->attr('href'));
@@ -141,7 +143,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_PAGE.'?'.RoundController::SCREENSHOT_PARAMETER.'=3');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-3', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
+        self::assertSame('round-tab-3', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
         self::assertSame('/t/SHOP-1/rounds/1?screenshot=2', $page->filter('a.round-tab[data-screenshot-pager-target="back"]')->attr('href'));
         self::assertCount(0, $page->filter('a.round-tab[data-screenshot-pager-target="next"]'), 'There is no screenshot after the last.');
     }
@@ -159,7 +161,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
             $page = $this->client->request('GET', $roundPage);
 
             self::assertResponseStatusCodeSame(200);
-            self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
+            self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
             self::assertSame(['Report shot 0 2 pins', 'Report shot 1 0 pins'], self::tabTextsOf($page));
             self::assertSame(['Report shot 0'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
             self::assertStringNotContainsString('Later draft shot', (string) $this->client->getResponse()->getContent(), 'Another round\'s screenshots are not the report\'s.');
@@ -167,7 +169,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
             $page = $this->client->request('GET', $roundPage.'?'.RoundController::SCREENSHOT_PARAMETER.'=2');
 
             self::assertResponseStatusCodeSame(200);
-            self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
+            self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
             self::assertSame(['Report shot 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         }
     }
@@ -199,13 +201,13 @@ final class RoundPageScreenshotsTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(RoundPages::NO_AREAS, $page->filter('.empty-state')->text());
-        self::assertCount(0, $page->filter('[role="tablist"], .screenshot-pager'));
+        self::assertCount(0, $page->filter('nav.round-tabs, .screenshot-pager'));
 
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(RoundPages::NO_SCREENSHOTS, $page->filter('.empty-state')->text());
-        self::assertCount(0, $page->filter('[role="tablist"], .screenshot-pager'));
+        self::assertCount(0, $page->filter('nav.round-tabs, .screenshot-pager'));
 
         $this->client->request('GET', '/t/SHOP-1/rounds/2?'.RoundController::SCREENSHOT_PARAMETER.'=1');
 
@@ -238,7 +240,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_PAGE.'?'.$query);
 
         self::assertResponseStatusCodeSame(404);
-        self::assertCount(0, $page->filter('[role="tablist"], .screenshot-pager, .screenshot__title'));
+        self::assertCount(0, $page->filter('nav.round-tabs, .screenshot-pager, .screenshot__title'));
         foreach ([0, 1, 2] as $position) {
             self::assertStringNotContainsString(self::HIDDEN_TITLE_PREFIX.$position, (string) $this->client->getResponse()->getContent());
         }
@@ -278,7 +280,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
+        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
         self::assertSame(['Latest try'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertNoPrivateTitleIn((string) $this->client->getResponse()->getContent());
 
@@ -308,8 +310,8 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1?'.RoundController::AREA_PARAMETER.'=1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
-        self::assertSame(RoundPages::AREAS_TABS_LABEL, $page->filter('[role="tablist"]')->attr('aria-label'));
+        self::assertSame('round-tab-2', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
+        self::assertSame(RoundPages::AREAS_TABS_LABEL, $page->filter('nav.round-tabs')->attr('aria-label'));
         self::assertCount(0, $page->filter('.round-compare-control, .round-compare__side--before'));
         self::assertSame(['After · round 1'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
         self::assertSame(['Checkout after'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
@@ -363,7 +365,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
+        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
         self::assertSame(['Old draft shot 0 1 pin', 'Old draft shot 1 2 pins'], self::tabTextsOf($page));
         self::assertSame(['Old draft shot 0'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
     }
@@ -407,7 +409,7 @@ final class RoundPageScreenshotsTest extends WebTestCase
      */
     private static function tabTextsOf(Crawler $page): array
     {
-        return $page->filter('[role="tablist"] a.round-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text())));
+        return $page->filter('nav.round-tabs a.round-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text())));
     }
 
     private function queryCountOf(string $uri): int
@@ -461,14 +463,5 @@ final class RoundPageScreenshotsTest extends WebTestCase
         ksort($screenshotIds);
 
         return array_values($screenshotIds);
-    }
-
-    private function markRetakeOf(string $laterTryId, string $firstTryId): void
-    {
-        $organizationId = $this->acmeFoods->toString();
-        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            'UPDATE rvw_screenshot SET retake_of = ? WHERE organization_id = ? AND id = ?',
-            [$firstTryId, $organizationId, $laterTryId],
-        ));
     }
 }

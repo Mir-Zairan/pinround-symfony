@@ -85,7 +85,8 @@ final readonly class FocusPages
         // Each picture walks its own pins, as each side of the round page's Before / After draws its own.
         $pins = array_values(array_filter($shown->pins, RoundCards::isShownPin(...)));
         $checkRows = $this->roundPages->checkRowsOf($visible, $round, $previousRound)[$isBefore ? 'before' : 'after'];
-        $stops = self::stopsOf($ticket, $pins, $shown->position, $checkRows);
+        // The Before is the same-numbered chain of the earlier round, so both sides key their check items on this index.
+        $stops = self::stopsOf($ticket, $pins, $shownIndex, $checkRows);
         $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$shown->mediaId], RoundCards::VARIANT, $now)[$shown->mediaId] ?? null;
         $picture = RoundCards::viewOfPicture(
             'focus-picture',
@@ -164,13 +165,13 @@ final readonly class FocusPages
     }
 
     /**
-     * @param list<RoundPinView>          $pins            on one picture
-     * @param int                         $picturePosition that picture's position in its round, from 0
-     * @param array<string, ChecklistRow> $checkRows       by RoundPages::checkKeyOf
+     * @param list<RoundPinView>          $pins       on one picture
+     * @param int                         $chainIndex that picture's chain, as RoundPages::checkKeyOf takes it
+     * @param array<string, ChecklistRow> $checkRows  by RoundPages::checkKeyOf
      *
      * @return list<FocusPinStop>
      */
-    private static function stopsOf(TicketPageView $ticket, array $pins, int $picturePosition, array $checkRows): array
+    private static function stopsOf(TicketPageView $ticket, array $pins, int $chainIndex, array $checkRows): array
     {
         $count = \count($pins);
         $stops = [];
@@ -187,7 +188,7 @@ final readonly class FocusPages
                 null !== $pin->verdict,
                 FocusPage::previousPositionBefore($position, $count),
                 FocusPage::nextPositionAfter($position, $count),
-                $checkRows[RoundPages::checkKeyOf($picturePosition, $pin->number)] ?? null,
+                $checkRows[RoundPages::checkKeyOf($chainIndex, $pin->number)] ?? null,
             );
         }
 

@@ -160,7 +160,7 @@ test('Full screen opens from a shared draft, from Round 0 and from Round 0 on th
   await page.waitForLoadState('networkidle');
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/${draftNumber}\\?screenshot=2$`));
-  await expect(page.getByRole('tablist', { name: 'Screenshots' }).getByRole('tab', { selected: true })).toHaveAttribute('href', new RegExp('screenshot=2$'));
+  await expect(page.getByRole('navigation', { name: 'Screenshots', exact: true }).locator('a[aria-current="page"]')).toHaveAttribute('href', new RegExp('screenshot=2$'));
   await expect(fullScreenLink).toBeFocused();
 
   await page.goto(`/t/${reportKey}/rounds/0`, { waitUntil: 'networkidle' });

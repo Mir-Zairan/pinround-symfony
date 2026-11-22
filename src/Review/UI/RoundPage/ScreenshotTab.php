@@ -30,7 +30,7 @@ final readonly class ScreenshotTab
     ) {
     }
 
-    /** The tab's element id, which the tab panel is labelled by. */
+    /** The tab link's element id. */
     public function elementId(): string
     {
         return 'round-tab-'.$this->number;

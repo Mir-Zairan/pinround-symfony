@@ -155,9 +155,9 @@ final readonly class RoundPages
             null,
             new ScreenshotPanel(
                 null === $previousRound || null === $beforeScreenshot ? null : \sprintf(self::PINS_FROM_ROUND, $previousRound->number ?? 0),
-                null === $beforeScreenshot ? [] : self::picturePinRowsOf($ticket, $beforeScreenshot, $checkRows['before']),
+                null === $beforeScreenshot ? [] : self::picturePinRowsOf($ticket, $beforeScreenshot, $shownIndex, $checkRows['before']),
                 \sprintf(self::PINS_FROM_ROUND, $picturesRound->number ?? 0),
-                self::picturePinRowsOf($ticket, $screenshot, $checkRows['after']),
+                self::picturePinRowsOf($ticket, $screenshot, $shownIndex, $checkRows['after']),
             ),
             $verdictGiverName,
             self::NO_SCREENSHOTS,
@@ -202,14 +202,16 @@ final readonly class RoundPages
     }
 
     /**
-     * The key checkRowsOf gives a pin's check row: the pin's picture and its number, as pin numbers start at 1 on each
-     * picture.
+     * The key checkRowsOf gives a pin's check row: the pin's chain of tries and its number, as pin numbers start at 1 on
+     * each picture.
      *
-     * @param int $picturePosition the picture's position in its round, from 0
+     * @param int $chainIndex the place of the picture's chain among its round's chains, from 0, as
+     *                        RoundCards::shownChainsOf orders them; not the picture's stored position, which a retake
+     *                        moves past every first try
      */
-    public static function checkKeyOf(int $picturePosition, int $pinNumber): string
+    public static function checkKeyOf(int $chainIndex, int $pinNumber): string
     {
-        return $picturePosition.':'.$pinNumber;
+        return $chainIndex.':'.$pinNumber;
     }
 
     /**
@@ -228,16 +230,17 @@ final readonly class RoundPages
     /**
      * The picture's pins as the side panel lists them, every pin but a dismissed AI suggestion, each with its check row.
      *
-     * @param array<string, ChecklistRow> $checkRows by checkKeyOf
+     * @param int                         $chainIndex as checkKeyOf takes it
+     * @param array<string, ChecklistRow> $checkRows  by checkKeyOf
      *
      * @return list<PicturePinRow> by number
      */
-    private static function picturePinRowsOf(TicketPageView $ticket, RoundScreenshotView $picture, array $checkRows): array
+    private static function picturePinRowsOf(TicketPageView $ticket, RoundScreenshotView $picture, int $chainIndex, array $checkRows): array
     {
         $rows = [];
         foreach ($picture->pins as $pin) {
             if (RoundCards::isShownPin($pin)) {
-                $rows[] = new PicturePinRow($pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $checkRows[self::checkKeyOf($picture->position, $pin->number)] ?? null);
+                $rows[] = new PicturePinRow($pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $checkRows[self::checkKeyOf($chainIndex, $pin->number)] ?? null);
             }
         }
 
@@ -485,7 +488,7 @@ final readonly class RoundPages
             null === $area->beforeRoundNumber ? null : \sprintf(self::PINS_FROM_ROUND, $area->beforeRoundNumber),
             $earlierPins,
             \sprintf(self::PINS_FROM_ROUND, $round->number),
-            self::picturePinRowsOf($ticket, $area->after, []),
+            self::picturePinRowsOf($ticket, $area->after, $area->position, []),
             $area->verdict,
             null === $area->verdict ? null : (self::AREA_VERDICT_LABELS[$area->verdict] ?? null),
             $area->note,

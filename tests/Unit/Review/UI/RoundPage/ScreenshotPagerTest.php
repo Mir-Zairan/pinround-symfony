@@ -17,11 +17,8 @@ final class ScreenshotPagerTest extends TestCase
     {
         $pager = ScreenshotPager::over(self::strip(3, 1));
 
-        self::assertSame(1, $pager->shownNumber);
-        self::assertSame(3, $pager->count);
         self::assertNull($pager->backParameters);
         self::assertSame(['screenshot' => 2], $pager->nextParameters);
-        self::assertSame('1 of 3', $pager->positionLabel());
     }
 
     #[Test]
@@ -29,10 +26,8 @@ final class ScreenshotPagerTest extends TestCase
     {
         $pager = ScreenshotPager::over(self::strip(3, 2));
 
-        self::assertSame(2, $pager->shownNumber);
         self::assertSame(['screenshot' => 1], $pager->backParameters);
         self::assertSame(['screenshot' => 3], $pager->nextParameters);
-        self::assertSame('2 of 3', $pager->positionLabel());
     }
 
     #[Test]
@@ -42,7 +37,6 @@ final class ScreenshotPagerTest extends TestCase
 
         self::assertSame(['screenshot' => 2], $pager->backParameters);
         self::assertNull($pager->nextParameters);
-        self::assertSame('3 of 3', $pager->positionLabel());
     }
 
     #[Test]
@@ -52,7 +46,6 @@ final class ScreenshotPagerTest extends TestCase
 
         self::assertNull($pager->backParameters);
         self::assertNull($pager->nextParameters);
-        self::assertSame('1 of 1', $pager->positionLabel());
     }
 
     #[Test]
@@ -105,10 +98,10 @@ final class ScreenshotPagerTest extends TestCase
         $last = ScreenshotPager::overScreenshots(3, 3);
         $alone = ScreenshotPager::overScreenshots(1, 1);
 
-        self::assertSame([null, ['screenshot' => 2], '1 of 3'], [$first->backParameters, $first->nextParameters, $first->positionLabel()]);
-        self::assertSame([['screenshot' => 1], ['screenshot' => 3], '2 of 3'], [$middle->backParameters, $middle->nextParameters, $middle->positionLabel()]);
-        self::assertSame([['screenshot' => 2], null, '3 of 3'], [$last->backParameters, $last->nextParameters, $last->positionLabel()]);
-        self::assertSame([null, null, '1 of 1'], [$alone->backParameters, $alone->nextParameters, $alone->positionLabel()]);
+        self::assertSame([null, ['screenshot' => 2]], [$first->backParameters, $first->nextParameters]);
+        self::assertSame([['screenshot' => 1], ['screenshot' => 3]], [$middle->backParameters, $middle->nextParameters]);
+        self::assertSame([['screenshot' => 2], null], [$last->backParameters, $last->nextParameters]);
+        self::assertSame([null, null], [$alone->backParameters, $alone->nextParameters]);
     }
 
     /**

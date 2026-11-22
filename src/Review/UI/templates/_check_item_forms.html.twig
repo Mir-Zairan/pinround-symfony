@@ -1,0 +1,26 @@
+{#- The checklist buttons of one check item (ChecklistRow) on the round page's side panel and in the full-screen bar:
+    plain forms, which ChecklistController answers by coming back to the page its RETURN_* fields in returnFields name.
+    Expects check, ticketKey, csrfToken, returnFields, formClass, buttonSize ("sm" or "md"), notFixedVariant (the quiet
+    button's look), describedBy (an id, or null), isWalkerStop (whether pin-walker names the buttons) and
+    autofocusFirst (whether the first button takes the focus as the page loads). -#}
+{% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
+{% set csrfField = constant(checklistController ~ '::CSRF_FIELD') %}
+{% if check.mayMarkFixed %}
+    <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="{{ formClass }}" data-turbo="false">
+        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+        {{ returnFields }}
+        <twig:Button type="submit" variant="tonal" :size="buttonSize" :autofocus="autofocusFirst" :aria-describedby="describedBy" :data-pin-walker-control="isWalkerStop ? 'mark-fixed' : null">Mark fixed</twig:Button>
+    </form>
+{% endif %}
+{% if check.mayCheck %}
+    <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="{{ formClass }}" data-turbo="false">
+        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+        {{ returnFields }}
+        <twig:Button type="submit" variant="tonal" :size="buttonSize" :autofocus="autofocusFirst and not check.mayMarkFixed" :aria-describedby="describedBy" :data-pin-walker-control="isWalkerStop ? 'ok' : null">OK</twig:Button>
+    </form>
+    <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="{{ formClass }}" data-turbo="false">
+        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+        {{ returnFields }}
+        <twig:Button type="submit" :variant="notFixedVariant" :size="buttonSize" :aria-describedby="describedBy" :data-pin-walker-control="isWalkerStop ? 'not-fixed' : null">Not fixed</twig:Button>
+    </form>
+{% endif %}

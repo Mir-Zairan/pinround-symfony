@@ -163,19 +163,24 @@ final class ChecklistControllerTest extends WebTestCase
         $this->client->request('POST', $this->itemUrl(5, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()] + $back);
 
         self::assertResponseStatusCodeSame(303);
-        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1', $this->client->getResponse()->headers->get('Location'));
+        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1#round-check-'.$this->items[5], $this->client->getResponse()->headers->get('Location'), 'Back to the changed pin\'s row.');
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Pin 5 checked OK.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
-        self::assertSame('Checked OK', $page->filter('.round-pin[data-pin-list="after"]')->eq(4)->filter('.check-state')->text());
+        $changedRow = $page->filter('#round-check-'.$this->items[5]);
+        self::assertSame(['5', '-1', 'fragment-focus'], [$changedRow->attr('data-pin-number'), $changedRow->attr('tabindex'), $changedRow->attr('data-controller')], 'The row the fragment names takes the focus.');
+        self::assertSame('Checked OK', $changedRow->filter('.check-state')->text());
         self::assertSame(array_replace(self::STATES_AS_SEEDED, [5 => 'ok']), $this->storedStates());
 
         $this->logIn($this->client, $this->people['Omar']);
         $this->client->request('POST', $this->itemUrl(2, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()] + $back);
 
         self::assertResponseStatusCodeSame(303);
-        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1', $this->client->getResponse()->headers->get('Location'), 'A refusal comes back to the round page too.');
+        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1#round-check-'.$this->items[2], $this->client->getResponse()->headers->get('Location'), 'A refusal comes back to the round page too.');
         self::assertSame(array_replace(self::STATES_AS_SEEDED, [5 => 'ok']), $this->storedStates());
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(ChecklistController::ONLY_THE_TESTER, $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
 
         $this->client->request('POST', $this->itemUrl(1, 'fixed'), [
             ChecklistController::CSRF_FIELD => $this->checklistToken(),
@@ -215,6 +220,25 @@ final class ChecklistControllerTest extends WebTestCase
             $secondBar->filter('input[name="'.ChecklistController::RETURN_PIN_FIELD.'"]')->first()->attr('value'),
         ]);
         self::assertCount(0, $bars->eq(0)->filter('form'), 'An open pin is the assignee\'s to mark fixed, not the tester\'s.');
+        self::assertSame(['OK'], $bars->filter('[autofocus]')->each(static fn (Crawler $control): string => $control->text()), 'Only the shown bar\'s first check button takes the focus, not pin 5\'s.');
+        self::assertCount(1, $secondBar->filter('button[autofocus]'));
+
+        $this->client->request('POST', $this->itemUrl(2, 'ok'), [
+            ChecklistController::CSRF_FIELD => $this->checklistToken(),
+            ChecklistController::RETURN_ROUND_FIELD => '1',
+            ChecklistController::RETURN_SCREENSHOT_FIELD => '1',
+            ChecklistController::RETURN_SIDE_FIELD => 'after',
+            ChecklistController::RETURN_PIN_FIELD => '2',
+        ]);
+
+        self::assertResponseStatusCodeSame(303);
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $secondBar = $page->filter('.focus-bar__stop')->eq(1);
+        self::assertSame('Checked OK', $secondBar->filter('.check-state')->text());
+        self::assertCount(0, $secondBar->filter('form'));
+        self::assertSame(['focus-bar__note'], $page->filter('.focus-bar [autofocus]')->each(static fn (Crawler $control): string => (string) $control->attr('class')), 'With no button left, the shown bar\'s note takes the focus.');
+        self::assertCount(1, $secondBar->filter('.focus-bar__note[autofocus]'));
     }
 
     #[Test]

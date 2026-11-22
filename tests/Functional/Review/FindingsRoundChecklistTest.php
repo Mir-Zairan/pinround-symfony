@@ -304,6 +304,94 @@ final class FindingsRoundChecklistTest extends WebTestCase
     }
 
     /**
+     * A retake is stored after every first try of its round, so its stored position is another chain's place: here the
+     * retake of Screenshot 1 is stored at 1, Screenshot 2's place. The round page and the full screen find a pin's check
+     * item by its chain's place, as the checklist numbers the screenshot, so each pin shows its own item and OK changes
+     * that item alone.
+     */
+    #[Test]
+    public function aRetakesFindingIsCheckedOnItsOwnScreenshotNotOnTheOneItsStoredPositionNames(): void
+    {
+        $findingsRound = $this->addRound($this->ticketId, 2, 'draft', 'Mia', self::SHARED_AT);
+        $firstTry = $this->addScreenshot($findingsRound, $this->addMedia('ready'), 0, 'Cart first try', null, 'not_right');
+        $retake = $this->addScreenshot($findingsRound, $this->addMedia('ready'), 1, 'Cart retake', null, 'not_right');
+        $this->markRetakeOf($retake, $firstTry);
+        $checkout = $this->addScreenshot($findingsRound, $this->addMedia('ready'), 2, 'Checkout', null, 'not_right');
+        $retakeItem = $this->addCheckItem($findingsRound, $this->addPin($retake, 1, '20.00', '80.00', self::CUT_OFF_NOTE, 'Mia'), 'fixed');
+        $checkoutItem = $this->addCheckItem($findingsRound, $this->addPin($checkout, 1, '50.00', '50.00', self::DOUBLE_WARNING_NOTE, 'Mia'), 'open');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
+
+        self::assertResponseStatusCodeSame(200);
+        $rows = $page->filter('.round-pin[data-pin-list="after"]');
+        self::assertSame([[self::CUT_OFF_NOTE, 'Fixed · to check', ['OK', 'Not fixed']]], self::pinRowsOf($rows));
+        self::assertSame('round-check-'.$retakeItem, $rows->attr('id'));
+        self::assertSame('/t/SHOP-1/checklist/'.$retakeItem.'/ok', $rows->filter('form')->first()->attr('action'));
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2?screenshot=2');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([[self::DOUBLE_WARNING_NOTE, 'Open', []]], self::pinRowsOf($page->filter('.round-pin[data-pin-list="after"]')), 'Mia does not mark a finding fixed.');
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2/focus?screenshot=1');
+
+        self::assertResponseStatusCodeSame(200);
+        $bar = $page->filter('.focus-bar__stop');
+        self::assertCount(1, $bar);
+        self::assertSame('Fixed · to check', $bar->filter('.check-state')->text());
+        self::assertSame('/t/SHOP-1/checklist/'.$retakeItem.'/ok', $bar->filter('form')->first()->attr('action'));
+
+        $this->client->request('POST', '/t/SHOP-1/checklist/'.$retakeItem.'/ok', [
+            ChecklistController::CSRF_FIELD => $this->checklistToken(),
+            ChecklistController::RETURN_ROUND_FIELD => '2',
+            ChecklistController::RETURN_SCREENSHOT_FIELD => '1',
+        ]);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1/rounds/2?screenshot=1#round-check-'.$retakeItem, $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([[self::CUT_OFF_NOTE, 'Checked OK', []]], self::pinRowsOf($page->filter('.round-pin[data-pin-list="after"]')));
+        self::assertSame([$retakeItem => 'ok', $checkoutItem => 'open'], $this->statesOf([$retakeItem, $checkoutItem]));
+    }
+
+    /**
+     * @return list<array{string, string, list<string>}> each round page row's note, check state and buttons
+     */
+    private static function pinRowsOf(Crawler $rows): array
+    {
+        self::assertNotCount(0, $rows);
+
+        return $rows->each(static fn (Crawler $row): array => [
+            $row->filter('.round-pin__note')->text(),
+            $row->filter('.check-state')->text(),
+            $row->filter('button')->each(static fn (Crawler $button): string => $button->text()),
+        ]);
+    }
+
+    /**
+     * @param list<string> $itemIds
+     *
+     * @return array<string, string> the items' states, by id in the order given
+     */
+    private function statesOf(array $itemIds): array
+    {
+        $states = [];
+        $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($itemIds, &$states): int {
+            foreach ($itemIds as $itemId) {
+                $state = $migrator->fetchOne('SELECT state FROM rvw_check_item WHERE id = ?', [$itemId]);
+                self::assertIsString($state);
+                $states[$itemId] = $state;
+            }
+
+            return 0;
+        });
+
+        return $states;
+    }
+
+    /**
      * Mia shares her draft through its Share form, and the items it made are read by pin number.
      */
     private function shareMiasDraft(): void

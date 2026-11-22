@@ -118,9 +118,9 @@ final class RoundPageTest extends WebTestCase
         self::assertSame('· shot today, 10:12 · '.$readyForLine, $page->filter('h1.round-page__title .round-page__detail')->text(), 'The rest of the header is muted.');
         self::assertSame(
             ['Per order Passed', 'Per product 3 pins', 'Combined Needs fix', 'Totals Question', 'Footer Not reviewed'],
-            $page->filter('[role="tablist"] a.round-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
+            $page->filter('nav.round-tabs a.round-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
         );
-        self::assertSame('Per order', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
+        self::assertSame('Per order', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text());
         self::assertSame(['Cart total shows the wrong sum', '/t/SHOP-1'], [$page->filter('.round-page__ticket a.round-page__ticket-link')->text(), $page->filter('.round-page__ticket a.round-page__ticket-link')->attr('href')]);
         $compare = $page->filter('.round-compare-control[role="group"][aria-label="Compare"][hidden]');
         self::assertSame(
@@ -141,7 +141,7 @@ final class RoundPageTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUND_PAGE.'?'.RoundController::AREA_PARAMETER.'=1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Per product', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
+        self::assertSame('Per product', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text());
         self::assertSame(['Before · round 1', 'After · round 2'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
         self::assertSame(['Before title 1', 'After title 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertSame(['Before summary 1', 'After summary 1'], $page->filter('.screenshot__summary')->each(static fn (Crawler $summary): string => $summary->text()));
@@ -192,7 +192,7 @@ final class RoundPageTest extends WebTestCase
             $page = $this->client->request('GET', self::ROUND_PAGE.'?'.$query);
 
             self::assertResponseStatusCodeSame(200);
-            self::assertSame('Per order', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
+            self::assertSame('Per order', $page->filter('a.round-tab[aria-current="page"] .round-tab__label')->text());
         }
     }
 
@@ -283,7 +283,7 @@ final class RoundPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Round 1 · shot yesterday, 10:00 · Ready for Mia', $page->filter('h1.round-page__title')->text());
         self::assertSame('This round has no screen areas.', $page->filter('.empty-state')->text());
-        self::assertCount(0, $page->filter('[role="tablist"], .screenshot-pager, .round-compare-control'));
+        self::assertCount(0, $page->filter('nav.round-tabs, .screenshot-pager, .round-compare-control'));
 
         $this->addRound($ticketId, 2, 'review', 'Omar', '2026-10-30 18:05:00+00');
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');

@@ -170,10 +170,10 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
+        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-current="page"]')->attr('id'));
         self::assertSame(
             ['Cart after the fix 1 pin', 'Checkout page 1 pin'],
-            $page->filter('[role="tablist"] a.round-tab')->each(static fn (Crawler $thumb): string => (string) preg_replace('/\s+/', ' ', trim($thumb->text()))),
+            $page->filter('nav.round-tabs a.round-tab')->each(static fn (Crawler $thumb): string => (string) preg_replace('/\s+/', ' ', trim($thumb->text()))),
         );
         self::assertSame([self::RETAKE_TITLE], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         $content = (string) $this->client->getResponse()->getContent();

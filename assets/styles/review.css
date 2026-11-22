@@ -1144,7 +1144,7 @@ button.round-tab {
   background: var(--s-high);
 }
 
-.round-tab[aria-selected="true"] {
+.round-tab[aria-current="page"] {
   border-bottom-color: var(--primary);
   color: var(--on-surface);
 }

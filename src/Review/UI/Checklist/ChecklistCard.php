@@ -23,6 +23,8 @@ final readonly class ChecklistCard
 
     public const string MARK_FIXED_ID_PREFIX = 'checklist-fixed-';
     public const string OK_ID_PREFIX = 'checklist-ok-';
+    /** With the item's id: its pin's row in the round page's side panel, which a change's redirect names as fragment. */
+    public const string ROUND_PIN_ID_PREFIX = 'round-check-';
 
     /** What a change's Turbo Stream replaces. */
     public string $id;

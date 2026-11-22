@@ -18,8 +18,8 @@ final readonly class ChecklistRow
      * @param string $stateClass      the chip's colour class, for example "check-state--fixed"
      * @param bool   $mayMarkFixed    whether the row shows "Mark fixed"
      * @param bool   $mayCheck        whether the row shows "OK" and "Not fixed"
-     * @param int    $picturePosition the position of its pin's picture in that picture's round, from 0, which with
-     *                                $pinNumber finds the pin on the round page (RoundPages::checkRowsOf)
+     * @param int    $picturePosition the place of its pin's chain of tries among that round's chains, from 0, which
+     *                                with $pinNumber finds the pin on the round page (RoundPages::checkKeyOf)
      */
     public function __construct(
         public string $itemId,
@@ -42,6 +42,11 @@ final readonly class ChecklistRow
     public function okId(): string
     {
         return ChecklistCard::OK_ID_PREFIX.$this->itemId;
+    }
+
+    public function roundPinId(): string
+    {
+        return ChecklistCard::ROUND_PIN_ID_PREFIX.$this->itemId;
     }
 
     /**

@@ -38,17 +38,18 @@
                 {% endif %}
             </div>
             {% if hasTabs %}
-                <div class="round-tabs" role="tablist" aria-label="{{ page.tabsLabel }}">
+                {#- Page links styled as tabs, not ARIA tabs: each one loads another page, which a tab must not do. -#}
+                <nav class="round-tabs" aria-label="{{ page.tabsLabel }}">
                     {% for tab in page.tabs %}
                         {% set pagerTarget = page.pagerTargetOf(tab) %}
-                        <a class="round-tab" role="tab" id="{{ tab.elementId }}" href="{{ path(roundRoute, roundPath|merge(tab.parameters)) }}" aria-selected="{{ tab.isShown ? 'true' : 'false' }}"
-                            {%- if tab.isShown %} aria-controls="round-tabpanel"{% endif %}
+                        <a class="round-tab" id="{{ tab.elementId }}" href="{{ path(roundRoute, roundPath|merge(tab.parameters)) }}"
+                            {%- if tab.isShown %} aria-current="page"{% endif %}
                             {%- if pagerTarget is not null %} data-screenshot-pager-target="{{ pagerTarget }}"{% endif %}>
                             <span class="round-tab__label">{{ tab.label }}</span>
                             {{ include('@Review/_screenshot_tab_tag.html.twig', {tagLabel: tab.tagLabel, tagClass: tab.tagClass, tagId: tab.tagId}, with_context = false) }}
                         </a>
                     {% endfor %}
-                </div>
+                </nav>
             {% endif %}
         </header>
 
@@ -58,8 +59,7 @@
                 <twig:MoveOnButtons :form="moveOnForm" :roundNumber="roundNumber" />
             {% endif %}
         {% else %}
-            {% set shownTab = page.shownTab %}
-            <div class="round-page__body" id="round-tabpanel"{% if hasTabs and shownTab is not null %} role="tabpanel" aria-labelledby="{{ shownTab.elementId }}"{% endif %}>
+            <div class="round-page__body">
                 <section class="round-compare" aria-label="Pictures of {{ shown.name }}">
                     <div class="round-compare__sides">
                         {% if shown.before is not null %}

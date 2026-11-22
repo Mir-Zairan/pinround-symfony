@@ -74,7 +74,9 @@
                                 <div class="focus-bar__text">
                                     <h2 class="focus-bar__label" id="focus-pin-{{ stop.position }}-label">{{ stop.label }}</h2>
                                     {#- tabindex: a long note scrolls inside the bar (review.css), and a keyboard scrolls only what it can focus. -#}
-                                    <p class="focus-bar__note" tabindex="0">{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
+                                    {#- A check item with no button left, as after OK, gives the focus to its note, which keeps the person in the bar. -#}
+                                    {% set isNoteFocused = isCurrent and not page.mayGiveVerdicts and stop.check is not null and not stop.check.mayMarkFixed and not stop.check.mayCheck %}
+                                    <p class="focus-bar__note" tabindex="0"{% if isNoteFocused %} autofocus{% endif %}>{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
                                 </div>
                                 {% if page.mayGiveVerdicts %}
                                     {% set focusFields %}
@@ -97,32 +99,27 @@
                                     {% endif %}
                                 {% endif %}
                                 {% if stop.check is not null %}
-                                    {% set check = stop.check %}
-                                    {% set checkFields %}
-                                        <input type="hidden" name="{{ constant(checklistController ~ '::CSRF_FIELD') }}" value="{{ checklistToken }}">
+                                    {% set checkReturnFields %}
                                         <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_ROUND_FIELD') }}" value="{{ roundNumber }}">
                                         <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_SCREENSHOT_FIELD') }}" value="{{ page.shownParameters[constant(roundController ~ '::SCREENSHOT_PARAMETER')] ?? '' }}">
                                         <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_SIDE_FIELD') }}" value="{{ page.side }}">
                                         <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_PIN_FIELD') }}" value="{{ stop.position }}">
                                     {% endset %}
                                     <div class="focus-bar__choices">
-                                        <twig:Tag class="check-state {{ check.stateClass }}">{{ check.stateLabel }}</twig:Tag>
-                                        {% if check.mayMarkFixed %}
-                                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="focus-bar__choices" data-turbo="false">
-                                                {{ checkFields }}
-                                                <twig:Button type="submit" variant="tonal" data-pin-walker-control="mark-fixed">Mark fixed</twig:Button>
-                                            </form>
-                                        {% endif %}
-                                        {% if check.mayCheck %}
-                                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="focus-bar__choices" data-turbo="false">
-                                                {{ checkFields }}
-                                                <twig:Button type="submit" variant="tonal" data-pin-walker-control="ok">OK</twig:Button>
-                                            </form>
-                                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="focus-bar__choices" data-turbo="false">
-                                                {{ checkFields }}
-                                                <twig:Button type="submit" variant="text" data-pin-walker-control="not-fixed">Not fixed</twig:Button>
-                                            </form>
-                                        {% endif %}
+                                        <twig:Tag class="check-state {{ stop.check.stateClass }}">{{ stop.check.stateLabel }}</twig:Tag>
+                                        {#- The pin verdicts take the focus where the bar has them; a screenshot's stop has none. -#}
+                                        {{ include('@Review/_check_item_forms.html.twig', {
+                                            check: stop.check,
+                                            ticketKey: ticketKey,
+                                            csrfToken: checklistToken,
+                                            returnFields: checkReturnFields,
+                                            formClass: 'focus-bar__choices',
+                                            buttonSize: 'md',
+                                            notFixedVariant: 'text',
+                                            describedBy: null,
+                                            isWalkerStop: true,
+                                            autofocusFirst: isCurrent and not page.mayGiveVerdicts,
+                                        }, with_context = false) }}
                                     </div>
                                 {% endif %}
                             </div>

@@ -58,12 +58,11 @@ test.describe('The round page of a shared draft', () => {
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
     // networkidle: the arrow keys need the screenshot-pager controller, which connects after the importmap modules load.
     await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
-    const tabs = page.getByRole('tablist', { name: 'Screenshots', exact: true });
-    const selectedTab = tabs.getByRole('tab', { selected: true });
+    const tabs = page.getByRole('navigation', { name: 'Screenshots', exact: true });
+    const selectedTab = tabs.locator('a[aria-current="page"]');
     const afterTitle = page.locator('.round-compare__side--after .screenshot__title');
-    await expect(tabs.getByRole('tab')).toHaveCount(3);
+    await expect(tabs.getByRole('link')).toHaveCount(3);
     await expect(selectedTab).toHaveId('round-tab-1');
-    await expect(page.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'round-tab-1');
     const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
     expect(violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical').map((violation) => violation.id)).toEqual([]);
 
@@ -71,9 +70,10 @@ test.describe('The round page of a shared draft', () => {
 
     await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=2$`));
     await expect(selectedTab).toHaveId('round-tab-2');
+    await expect(selectedTab, 'the arrow key\'s visit gives the shown tab the focus').toBeFocused();
     await expect(afterTitle).toHaveText('Screenshot copy 1');
 
-    await tabs.getByRole('tab', { name: /^Screenshot copy 2/ }).click();
+    await tabs.getByRole('link', { name: /^Screenshot copy 2/ }).click();
 
     await expect(selectedTab).toHaveId('round-tab-3');
     await expect(afterTitle).toHaveText('Screenshot copy 2');

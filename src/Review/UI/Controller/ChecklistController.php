@@ -163,7 +163,7 @@ final class ChecklistController extends AbstractController
             throw $this->createAccessDeniedException();
         }
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
-        $returnUrl = $this->returnUrlOf($request, $key);
+        $returnUrl = $this->returnUrlOf($request, $key, $itemId);
 
         try {
             $answer = $this->transactions->run(function () use ($key, $itemId, $permission, $deniedToast, $csrfToken, $change, $toastOf): array {
@@ -209,8 +209,9 @@ final class ChecklistController extends AbstractController
     /**
      * The round page or full-screen review the form names in its RETURN_* fields, built from the route, so no form can
      * send the person off the site; null when it names no round number, and then the answer is the ticket's Rounds.
+     * The round page's has the item's row as fragment, which takes the focus there, so the person keeps their place.
      */
-    private function returnUrlOf(Request $request, string $key): ?string
+    private function returnUrlOf(Request $request, string $key, string $itemId): ?string
     {
         $fields = $request->request->all();
         $roundNumber = RoundController::positionOf($fields[self::RETURN_ROUND_FIELD] ?? null);
@@ -224,7 +225,8 @@ final class ChecklistController extends AbstractController
         }
         $side = $fields[self::RETURN_SIDE_FIELD] ?? null;
         if (!\in_array($side, [FocusPage::SIDE_AFTER, FocusPage::SIDE_BEFORE], true)) {
-            return $this->generateUrl(RoundController::ROUND_ROUTE, $parameters);
+            // ChecklistRow ids are lowercase; an id the request does not know is a 404 and goes nowhere.
+            return $this->generateUrl(RoundController::ROUND_ROUTE, $parameters + ['_fragment' => ChecklistCard::ROUND_PIN_ID_PREFIX.strtolower($itemId)]);
         }
         $parameters[RoundController::SIDE_PARAMETER] = $side;
         $pinPosition = RoundController::positionOf($fields[self::RETURN_PIN_FIELD] ?? null);
