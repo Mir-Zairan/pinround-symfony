@@ -11,7 +11,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Notebooks](#notebooks) — make one, pin a page and capture it there
 - [Ask Claude Code about a notebook](#ask-claude-code-about-a-notebook) — the `explain_my_notebook` prompt and its token
 - [Play scenarios](#play-scenarios) — Play, Step, Stop, Next and Back, and what stops a run
-- [The dock](#the-dock) — Pin, Capture, Shrink and Save draft on the page, a scenario's step card, and opening it again after a reload
+- [The dock](#the-dock) — the one-row bar on the page: pins and their notes, Capture, the Save draft panel that asks for the report title, the puck, a scenario's step card, and opening it again after a reload
 - [Allowed hosts for scenarios](#allowed-hosts-for-scenarios) — where scenarios may play, and the question before a run
 - [Safety](#safety) — what the player never does, and who decides
 - [Sign out](#sign-out) — the token stops working everywhere; a Connect can also be ended under **Connected apps** on **API tokens**
@@ -55,7 +55,7 @@ What happens underneath: the extension reads `/.well-known/oauth-authorization-s
 1. Open the page with the problem and click the extension's icon.
 2. In **Put the screenshot in**, choose **A new report** or **My draft round on SHOP-12**.
 3. For a new report, type the project key (for example `SHOP`) and what is wrong in one line.
-4. The title starts as the page's title, and **What this picture shows** as "Page: <address> · Window <width>×<height> · <browser and version>". The address has no user name, password, query (`?…`) or fragment (`#…`), as those can hold a token. Change or clear either; the title holds up to 120 characters and the summary up to 600, and a longer page title or address is cut with "…".
+4. The title starts as the page's title; a longer one is cut with "…". **What this picture shows** starts empty: write what the picture shows in your own words. The extension does not fill in the page's address, window size or browser, as pinround has no place for them and they are not what the picture shows. Change or clear either; the title holds up to 120 characters and the summary up to 600.
 5. For a draft round, **Add it as** offers **New screenshot** (chosen at first) and one **Retake of screenshot N · <title>** for each screenshot already in your draft round, in its order. Choose a retake to add the picture as that screenshot's next try, for example after a fix; the earlier tries keep their pins. A screenshot keeps at most 5 tries: a sixth is refused with pinround's reason ("This screenshot already has 5 tries. Remove one before you add another."), and a screenshot removed from your draft since the popup opened is "Not found". Nothing is added then, and your pins stay on the page for the next try. When the list cannot be loaded, the popup says so and offers only **New screenshot**. After each capture it goes back to **New screenshot**.
 6. Press **Capture this page**. For a draft round the picture is added at once; pinround processes it first, which can take a few seconds.
 7. For a new report, open the next page and capture again, up to 10 pictures; each goes into the same report draft. Then press **Done**. pinround opens the draft: check it and press **Send**.
@@ -103,16 +103,20 @@ A scenario is a short list of steps: open a page, click, type, choose, wait, che
 A capture step adds a screenshot of the page to the notebook, titled with the scenario's title.
 
 ## The dock
-The dock is a small bar on the page itself. It stays open while you click the page, so you can pin, capture and walk through a scenario without the popup.
-1. Click the extension's icon and press **Open the dock on this page**. The popup says "The dock is on the page. Pin, capture and save your draft from there." Drag the dock by its grip, or move it with the arrow keys.
-2. In **Put it in**, choose where captures go, as in the popup. The popup and the dock always show the same choice.
-3. Use the buttons. P, C and H work as keys too, but not while you type in a field or hold Ctrl, Alt or Cmd. Turn **Letter keys** off in the dock and they work only while focus is in the dock; the extension keeps that choice for every site. While the dock waits for the extension, a press on Capture, Save draft, Play or **Put it in** does nothing but say "Still working on the last request. Try again when it is done." The buttons:
-   - **Pin** (P) turns pinning on: click the page to drop a pin and type your note.
-   - **Capture** (C) takes the page with its pins into the place you chose, for example "Added to your draft round on SHOP-12. Only you see it."
-   - **Shrink** (H) folds the dock into a small round button. Press it to open the dock again.
-   - **Save draft** works for a new report once its draft holds a picture and no capture is still on its way. It opens the report draft in pinround, where you check it and press **Send**.
-   - **×** beside a pin (**Remove pin 2** for a screen reader) drops that pin. **Clear 3 pins** drops them all and keeps the dock open.
-4. To play a scenario, choose a notebook in **Put it in** and press **Play**. The dock opens the scenario's start page if the tab is elsewhere, and shows a step card: "Step 1 of 4", **Do** (what to do) and **Expected** (what you should see). The dock does not click for you: you do the step, then answer it.
+The dock is one small dark bar on the page itself (a light one when your system is in dark mode). It stays open while you click the page, so you pin, capture, save and walk through a scenario without opening the popup again.
+1. Click the extension's icon and press **Open the dock on this page**. The popup says "The dock is on the page. Pin, capture and save your draft from there." Drag the bar by its grip (the logo and the dots): it snaps to the nearer side and remembers the side and height for the site. The arrow keys on the grip move it too.
+2. In **Save to**, choose where captures go: **New report**, **My draft round · SHOP-12** or **Notebook · <title>**. The popup and the dock always show the same choice.
+3. Use the bar, left to right. P, C and H work as keys too, but not while you type in a field or hold Ctrl, Alt or Cmd. While the dock waits for the extension, a press on Capture, Save draft or **Save to** does nothing but say "Still working on the last request. Try again when it is done."
+   - **Pin** (P) turns pin mode on: the page gets a faint tint, and a click drops a pin and opens its note form just below it. Type what is wrong in **What is wrong here?** and press **Save** or Enter. A pin with a note shows it in a dark label beside it. Click a pin to change its note or **Remove** it; the chosen pin has a ring. Delete on a focused pin removes it too.
+   - **Capture** (C) takes the page with its pins, with a short white flash. For a new report it waits in the extension: "Captured. 2 waiting." Nothing is sent yet. For a draft round or a notebook it is added at once, for example "Added to your draft round on SHOP-12. Only you see it."
+   - **Clear 3 pins** shows only while pins are on the page, and drops them all.
+   - **Play** plays a notebook's scenario (step 4).
+   - **Save draft** shows how many captures wait. It works for a new report with a capture waiting; draft rounds and notebooks keep each capture as you take it, so for them it stays off.
+   - **Keys On** (the **Letter keys** switch) is small, near the end. Turn it off and P, C and H work only while focus is in the dock; the extension keeps that choice for every site.
+   - **–** (H) shrinks the dock into a round button with the logo and the number of captures waiting. Press it to open the bar again, or drag it.
+   - Escape stops pin mode and drops the pins, and closes the Save draft panel.
+4. **Save draft** opens a panel above or below the bar: "Save 2 captures", a small box for each shot with its pins as dots ("Shot 1 · 2 pins"), and **What is wrong, in one line**, which becomes the report's title (up to 200 characters). When the popup has no project key, the panel asks for **Project key** too. "Goes to a new report draft. Nobody is told yet. You send it from pinround." Press **Save draft**: the captures are uploaded, the report draft is made with all of them, and the dock says "Draft saved with 2 captures. Open it in pinround to send it." Find it under **My reports**, check it and press **Send**. **Keep testing** closes the panel. An empty or too long title is refused in the panel: "Write what is wrong in one line, at most 200 characters." A new report holds at most 10 captures.
+5. To play a scenario, choose a notebook in **Save to** and press **Play**. The dock opens the scenario's start page if the tab is elsewhere, and shows a step card under the bar: "Step 1 of 4", **Do** (what to do) and **Expected** (what you should see). The dock does not click for you: you do the step, then answer it.
    - **Looks right** goes to the next step.
    - **Found a problem** goes to the next step and turns pinning on: "Pin the problem, then capture. The capture is tagged with step 2." The capture is titled with the step, for example "Step 2: Look at the total".
    - **Skip** goes to the next step and counts the step as skipped.
@@ -137,7 +141,8 @@ A notebook's scenarios click and type on a page, so they play only on hosts you 
 - **AI suggests, you play.** Claude Code only writes scenarios into your notebook. Nothing runs until you press **Play** or **Step**, and nothing runs on a new host until you press **Play anyway**.
 - **Data, never code.** A scenario is a list of steps the player reads. A step finds its element by role and name, by visible text or by label, never by a CSS or XPath string. The extension holds no `eval(`, no `new Function` and no plain `Function(` call, and the build fails if a tracked file under `extension/` has one.
 - **Text from pinround is shown as text.** Titles, lines and notes never become part of the page or the popup's markup.
-- **The page's title and address are the page's to choose.** Before they fill a capture's title and summary, control characters, line breaks, the BOM and direction overrides go, white space collapses to one line, and the address loses its user name, password, query and fragment. They only ever fill the two fields as text.
+- **The page's title is the page's to choose.** Before it fills a capture's title, control characters, line breaks, the BOM and direction overrides go, and white space collapses to one line. It only ever fills the field as text. The page's address is never sent.
+- **Waiting captures stay in the extension.** A new report's captures wait in the extension's session storage, which the page cannot read, until you press **Save draft**; signing out or closing the browser forgets them.
 - **A closed tab stops a run.** "The tab is closed. Open the scenario's page and play again." Nothing runs in another tab in its place.
 
 ## Sign out
@@ -146,10 +151,10 @@ In the options, press **Sign out**. The extension asks pinround to revoke the to
 ## Permissions and why
 | Permission | Why |
 |---|---|
-| `activeTab` | To take a picture of the tab you are on, and read its title and address for the capture's title and summary, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
+| `activeTab` | To take a picture of the tab you are on, and read its title for the capture's title, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
 | `identity` | To open pinround's consent page in a window of its own when you press **Connect to pinround**, and take the one-time code back from it. It reads no Google account and no other site's sign-in. |
 | `scripting` | To run the extension's own pin overlay and scenario player in the tab you are on, only after you click the extension's icon. It never runs a script from the network. |
-| `storage` | To keep the pinround address, your tokens, your allowed hosts and your "Play anyway" answers in this browser profile, and, until the browser closes, where your captures go and the report draft they are adding to. |
+| `storage` | To keep the pinround address, your tokens, your allowed hosts and your "Play anyway" answers in this browser profile, and, until the browser closes, where your captures go, the report draft they are adding to, and the dock's captures waiting for **Save draft**. |
 
 It asks for no host permission and has no content scripts. It injects only its own files, and only into the tab you chose by clicking its icon. `extension/tests/pairing.test.mjs` checks that the manifest asks for exactly these.
 

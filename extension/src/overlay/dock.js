@@ -161,7 +161,9 @@ globalThis.pinroundDock ??= (() => {
             line-height: 18px;
             text-align: center;
         }
-        .dock__keys { padding: 6px 6px; font-size: 0.7rem; opacity: 0.8; }
+        /* Secondary: no fill when on, the state is the word beside it. */
+        .dock__bar .dock__keys { padding: 6px 6px; font-size: 0.7rem; opacity: 0.8; }
+        .dock__bar .dock__keys[aria-pressed="true"] { background: transparent; color: inherit; }
         .dock__keys .dock__switch { font-weight: 700; }
         .dock__pops {
             position: absolute;

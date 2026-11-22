@@ -451,3 +451,13 @@ test('the service worker answers a dock message from a tab through the listener 
         delete globalThis.chrome;
     }
 });
+
+test('a waiting capture this version cannot read is left out, never sent', async () => {
+    const good = { id: 'w1', pngDataUrl: 'data:image/png;base64,iVBORw0KGgo=', texts: { title: 'Cart' }, pins: [PAGE_PIN] };
+    const browser = await dockBrowser({ target: NEW_REPORT_TARGET, newReport: TYPED_NEW_REPORT });
+    await browser.storage.session.set({ [WAITING_CAPTURES_KEY]: [good, { ...good, id: 'w2', pngDataUrl: 'https://evil.example/x.png' }, { ...good, id: 'w3', pins: 'all' }, null] });
+    const { apiOf } = pinroundFor();
+
+    assert.deepEqual((await loadWaitingCaptures(browser.storage.session)).map(({ id }) => id), ['w1']);
+    assert.equal((await ask(browser, { pinroundDock: 'state' }, apiOf)).state.count, 1);
+});
