@@ -14,10 +14,11 @@ import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
-// The prototype's chip colours (ticket-page.md, Rounds): --s-highest, the ping, passed and error containers, as
-// tokens.css sets them for the light theme and review.css's check-state rules use them.
+// The chip colours (ticket-page.md, Rounds): Open has no fill, so it cannot pass for a button, and --on-surface-var
+// text; then the ping, passed and error containers, as tokens.css sets them for the light theme and review.css's
+// check-state rules use them.
 const CHIP_COLOURS = {
-  open: { background: 'rgb(221, 228, 225)', text: 'rgb(22, 29, 27)' },
+  open: { background: 'rgba(0, 0, 0, 0)', text: 'rgb(63, 73, 70)' },
   fixed: { background: 'rgb(208, 228, 255)', text: 'rgb(0, 29, 52)' },
   ok: { background: 'rgb(131, 248, 205)', text: 'rgb(0, 33, 22)' },
   notFixed: { background: 'rgb(255, 218, 214)', text: 'rgb(147, 0, 10)' },
@@ -138,10 +139,24 @@ test('on the round page Mia undoes her Not fixed on pin 2 by its Undo, and sends
   await expect(pinRow.getByRole('button'), 'the pin waits for its check again').toHaveText(['OK', 'Not fixed']);
   await expect(pinRow, 'the redirect brings the person back to the pin').toBeFocused();
 
-  await pinRow.getByRole('button', { name: 'Not fixed', exact: true }).click();
+  // In the full-screen bar the state is a small status centred on the buttons beside it, never stretched to their height.
+  await page.goto(`/t/${key}/rounds/0/focus?pin=2`, { waitUntil: 'networkidle' });
+  const bar = page.locator('.focus-bar__stop:not([hidden])');
+  const chip = bar.locator('.check-state');
+  const notFixed = bar.getByRole('button', { name: 'Not fixed', exact: true });
+  await expect(chip).toHaveText('Fixed · to check');
+  const chipBox = await chip.boundingBox();
+  const buttonBox = await notFixed.boundingBox();
+  if (chipBox === null || buttonBox === null) {
+    throw new Error('The chip or the Not fixed button has no box.');
+  }
+  expect(chipBox.height, 'the chip is shorter than the buttons').toBeLessThan(buttonBox.height * 0.7);
+  expect(Math.abs(chipBox.y + chipBox.height / 2 - (buttonBox.y + buttonBox.height / 2)), 'the chip is centred on the buttons').toBeLessThanOrEqual(1);
+
+  await notFixed.click();
   await expect(page.locator(TOAST_REGION)).toContainText('Pin 2 sent back.');
-  await expect(pinRow.locator('.check-state')).toHaveText('Not fixed');
-  await expect(pinRow.getByRole('button')).toHaveText(['Undo']);
+  await expect(page.locator('.focus-bar__stop:not([hidden]) .check-state')).toHaveText('Not fixed');
+  await expect(page.locator('.focus-bar__stop:not([hidden])').getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
   await context.close();
 });
 

@@ -239,8 +239,13 @@ Section title `Rounds`, in this order:
    | ok | `Checked OK` | passed colours |
    | bad | `Not fixed` | error colours |
 
+   - **Product differs (2026-11-22):** the chip is a status, not a button: small, with a leading dot, centred on the
+     buttons beside it; `Open` has no fill (a thin `--outline-var` ring, `--on-surface-var` text, a hollow dot), as the
+     prototype's grey chip read as a button. The same chip shows on the round page's panel and in the full-screen bar.
    - Assignee on Open or Not fixed: `Mark fixed`. Toast `Pin N marked fixed. <tester> checks it.`
    - Tester on Fixed: `OK` (toast `Pin N checked OK.`) and `Not fixed` (toast `Pin N sent back.`).
+   - **Product adds (2026-11-22):** the tester on Checked OK or Not fixed: a text `Undo` beside the chip, which puts the
+     pin back to `Fixed · to check` (toast `Check on pin N undone.`), here, on the round page and in full screen.
 3. **A review round** (example in the prototype): a bordered row `Round 2 · Ready for Mia` (Round 1 in the product, as the checklist has no number) with the muted line `Example round with made-up screenshots` and the button `Open round`. It opens the [Review round board](review-round.md).
 4. **Draft round** (see below).
 5. **No rounds**: a dashed box: `No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here.`
