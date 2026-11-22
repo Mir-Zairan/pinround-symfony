@@ -4,8 +4,14 @@ import '../src/overlay/dock.js';
 import { OVERLAY_FILES } from '../src/capture/page-pins.js';
 import { fakeBrowser } from './fake-browser.mjs';
 import { fakePage } from './fake-page.mjs';
+import { MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH as CAPTURE_REPORT_TITLE_MAX_LENGTH } from '../src/capture/capture.js';
+import * as waitingCaptures from '../src/capture/waiting-captures.js';
 
-const { DEFAULT_PLACE, EDGE_GAP_PX, LETTER_KEYS_KEY, TEXTS, actionOfKey, checkedPlace, checkedState, isTypingTarget, loadPlace, nearerSide, placeKeyOf, refusalOfTyped, savePlace, topPercentOf } = globalThis.pinroundDock;
+const {
+    DEFAULT_PLACE, EDGE_GAP_PX, LETTER_KEYS_KEY, TEXTS, MAX_SHOTS, REPORT_TITLE_MAX_LENGTH, THUMBNAIL_DATA_URL_PREFIX, MAX_THUMBNAIL_DATA_URL_LENGTH, MAX_THUMBNAIL_SIDE_PX, THUMBNAIL_BOX_PX,
+    actionOfKey, checkedPlace, checkedState, coverCropOf, coverSpotOf, isTypingTarget, loadPlace, nearerSide, placeKeyOf, refusalOfTyped, savePlace, topPercentOf,
+} = globalThis.pinroundDock;
+const waiting = { ...waitingCaptures, MAX_SCREENSHOTS, REPORT_TITLE_MAX_LENGTH: CAPTURE_REPORT_TITLE_MAX_LENGTH };
 
 const SHOP_HOST = 'shop.acme-foods.example';
 const MOBILE_HOST = 'm.acme-foods.example';
@@ -590,6 +596,50 @@ test('a state with a waiting report the dock cannot read is no state', () => {
     for (const newReport of [{ ...WAITING, shots: 'all' }, { ...WAITING, needsTitle: 'yes' }, { ...WAITING, shots: [{ pinSpots: [{ x_pct: 120, y_pct: 10 }] }] }, { ...WAITING, shots: Array.from({ length: 11 }, () => ({ pinSpots: [] })) }]) {
         assert.equal(checkedState({ ...NEW_REPORT_STATE, newReport }), null, JSON.stringify(newReport).slice(0, 60));
     }
+});
+
+const THUMBNAIL = { dataUrl: `${THUMBNAIL_DATA_URL_PREFIX}/9j/4AAQ`, width: 213, height: 120 };
+
+test('the dock\'s caps and thumbnail rules are the ones capture.js and waiting-captures.js keep', () => {
+    assert.deepEqual(
+        [MAX_SHOTS, REPORT_TITLE_MAX_LENGTH, THUMBNAIL_DATA_URL_PREFIX, MAX_THUMBNAIL_DATA_URL_LENGTH, MAX_THUMBNAIL_SIDE_PX, { ...THUMBNAIL_BOX_PX }],
+        [waiting.MAX_SCREENSHOTS, waiting.REPORT_TITLE_MAX_LENGTH, waiting.THUMBNAIL_DATA_URL_PREFIX, waiting.MAX_THUMBNAIL_DATA_URL_LENGTH, waiting.MAX_THUMBNAIL_SIDE_PX, { ...waiting.THUMBNAIL_BOX_PX }],
+    );
+});
+
+test('a wide picture covers the box with its middle, a tall one with its middle band, and pins move with the crop', () => {
+    // A 1920x1080 window in the panel's 184x120 box: the full height, the middle 1656 of the width.
+    assert.deepEqual(coverCropOf(1920, 1080, 184, 120), { x: 132, y: 0, width: 1656, height: 1080 });
+    const tall = coverCropOf(360, 640, 184, 120);
+    assert.deepEqual([tall.x, tall.width, Math.round(tall.y * 10) / 10, Math.round(tall.height * 10) / 10], [0, 360, 202.6, 234.8]);
+
+    const moved = coverSpotOf({ x_pct: 25, y_pct: 40 }, 1920, 1080, 184, 120);
+    assert.deepEqual([Math.round(moved.x_pct * 100) / 100, moved.y_pct], [21.01, 40]);
+    assert.deepEqual(coverSpotOf({ x_pct: 2, y_pct: 99 }, 1920, 1080, 184, 120), { x_pct: 0, y_pct: 99 }, 'A pin the crop cuts off stays at the edge.');
+    assert.deepEqual(coverSpotOf({ x_pct: 50, y_pct: 50 }, 184, 120, 184, 120), { x_pct: 50, y_pct: 50 }, 'A picture of the box\'s shape is not cropped.');
+});
+
+test('each shot with a thumbnail shows it under its pins, its dots where the crop puts them; one without shows a plain box', async () => {
+    const { page, inRoot, buttonNamed } = await dockWithCapturesWaiting({ ...WAITING, shots: [{ ...WAITING.shots[0], thumbnail: { ...THUMBNAIL, width: 1920, height: 1080 } }, { ...WAITING.shots[1], thumbnail: null }] });
+    page.click(buttonNamed(TEXTS.saveDraft));
+
+    const [withPicture, withoutPicture] = inRoot('.dock-save__shots').querySelectorAll('.dock-save__thumb');
+    const [picture, ...otherPictures] = withPicture.querySelectorAll('canvas');
+    assert.deepEqual(otherPictures, []);
+    assert.deepEqual([picture.className, picture.width, picture.height], ['dock-save__picture', 184, 120]);
+    assert.deepEqual(withPicture.children.map((child) => child.tagName), ['CANVAS', 'SPAN', 'SPAN'], 'The dots come after the picture, so they show on it.');
+    const dots = withPicture.querySelectorAll('span').map((dot) => [Math.round(parseFloat(dot.style.left) * 100) / 100, dot.style.top]);
+    assert.deepEqual(dots, [[21.01, '40%'], [78.99, '60%']]);
+    assert.deepEqual(withoutPicture.querySelectorAll('canvas'), []);
+    assert.deepEqual(panelOf(inRoot).captions, ['Shot 1 · 2 pins', 'Shot 2 · 0 pins']);
+});
+
+test('a thumbnail the dock cannot read is none: the shot and its pins still show', () => {
+    for (const thumbnail of [{ ...THUMBNAIL, dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }, { ...THUMBNAIL, dataUrl: 'https://evil.example/x.jpg' }, { ...THUMBNAIL, dataUrl: THUMBNAIL_DATA_URL_PREFIX + 'A'.repeat(MAX_THUMBNAIL_DATA_URL_LENGTH) }, { ...THUMBNAIL, width: 0 }, { ...THUMBNAIL, height: 2001 }, { ...THUMBNAIL, width: 1.5 }, 'picture', undefined]) {
+        const state = checkedState({ ...NEW_REPORT_STATE, newReport: { ...WAITING, shots: [{ ...WAITING.shots[0], thumbnail }] } });
+        assert.deepEqual(state.newReport.shots, [{ pinSpots: WAITING.shots[0].pinSpots, thumbnail: null }], JSON.stringify(thumbnail)?.slice(0, 60));
+    }
+    assert.deepEqual(checkedState({ ...NEW_REPORT_STATE, newReport: { ...WAITING, shots: [{ pinSpots: [], thumbnail: THUMBNAIL }] } }).newReport.shots, [{ pinSpots: [], thumbnail: THUMBNAIL }]);
 });
 
 test('the shrunk puck shows the captures waiting and opens the dock again; a drag of it moves it and opens nothing', async () => {

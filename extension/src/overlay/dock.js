@@ -25,6 +25,11 @@ globalThis.pinroundDock ??= (() => {
     const MAX_PIN_SPOTS = 100;
     const REPORT_TITLE_MAX_LENGTH = 200;
     const PROJECT_KEY_MAX_LENGTH = 20;
+    // waiting-captures.js's thumbnail: its prefix, caps and the box it covers, which is this panel's box at 2x.
+    const THUMBNAIL_DATA_URL_PREFIX = 'data:image/jpeg;base64,';
+    const MAX_THUMBNAIL_DATA_URL_LENGTH = 200_000;
+    const MAX_THUMBNAIL_SIDE_PX = 2000;
+    const THUMBNAIL_BOX_PX = Object.freeze({ width: 184, height: 120 });
 
     const TEXTS = Object.freeze({
         toolbar: 'pinround dock',
@@ -191,9 +196,11 @@ globalThis.pinroundDock ??= (() => {
         .dock-pop p { margin: 0; }
         .dock-save__shots { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; }
         .dock-save__shot { display: grid; gap: 4px; margin: 0; font-size: 0.75rem; color: var(--muted); }
-        .dock-save__thumb { position: relative; width: 92px; height: 60px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow: hidden; }
+        .dock-save__thumb { position: relative; width: ${THUMBNAIL_BOX_PX.width / 2}px; height: ${THUMBNAIL_BOX_PX.height / 2}px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); overflow: hidden; }
+        .dock-save__picture { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
         .dock-save__dot {
             position: absolute;
+            z-index: 1;
             width: 8px;
             height: 8px;
             border: 1.5px solid #ffffff;
@@ -340,8 +347,60 @@ globalThis.pinroundDock ??= (() => {
     }
 
     const isPercent = (value) => 'number' === typeof value && Number.isFinite(value) && value >= 0 && value <= 100;
+    const isSide = (value) => Number.isInteger(value) && value >= 1 && value <= MAX_THUMBNAIL_SIDE_PX;
 
-    /** @returns {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>}>, needsTitle: boolean, needsProject: boolean}|null|undefined} undefined when unreadable */
+    /** @returns {{dataUrl: string, width: number, height: number}|null} the thumbnail, or null for none or one it cannot read */
+    function checkedThumbnail(value) {
+        if (null === value || 'object' !== typeof value || 'string' !== typeof value.dataUrl || !value.dataUrl.startsWith(THUMBNAIL_DATA_URL_PREFIX)
+            || value.dataUrl.length > MAX_THUMBNAIL_DATA_URL_LENGTH || !isSide(value.width) || !isSide(value.height)) {
+            return null;
+        }
+
+        return { dataUrl: value.dataUrl, width: value.width, height: value.height };
+    }
+
+    /**
+     * The part of a picture that covers a box of another shape, as CSS's object-fit: cover shows it: the whole of one
+     * side, the middle of the other.
+     *
+     * @returns {{x: number, y: number, width: number, height: number}} in the picture's pixels
+     */
+    function coverCropOf(pictureWidth, pictureHeight, boxWidth, boxHeight) {
+        const scale = Math.max(boxWidth / pictureWidth, boxHeight / pictureHeight);
+        const width = boxWidth / scale;
+        const height = boxHeight / scale;
+
+        return { x: (pictureWidth - width) / 2, y: (pictureHeight - height) / 2, width, height };
+    }
+
+    /**
+     * Where a pin of the whole picture shows in the box its cover crop fills; a pin cut off by the crop stays at the
+     * box's edge, so every pin the caption counts is seen.
+     *
+     * @returns {{x_pct: number, y_pct: number}}
+     */
+    function coverSpotOf(spot, pictureWidth, pictureHeight, boxWidth, boxHeight) {
+        const crop = coverCropOf(pictureWidth, pictureHeight, boxWidth, boxHeight);
+
+        return {
+            x_pct: clampedPercent((((spot.x_pct / 100) * pictureWidth) - crop.x) / crop.width * 100),
+            y_pct: clampedPercent((((spot.y_pct / 100) * pictureHeight) - crop.y) / crop.height * 100),
+        };
+    }
+
+    /** Draws the thumbnail into the canvas, cropped to cover it. A canvas, not an img: the page's CSP governs img sources. */
+    async function drawCover(canvas, thumbnail) {
+        const bytes = Uint8Array.from(atob(thumbnail.dataUrl.slice(THUMBNAIL_DATA_URL_PREFIX.length)), (character) => character.charCodeAt(0));
+        const picture = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+        try {
+            const crop = coverCropOf(picture.width, picture.height, canvas.width, canvas.height);
+            canvas.getContext('2d').drawImage(picture, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+        } finally {
+            picture.close();
+        }
+    }
+
+    /** @returns {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: null|{dataUrl: string, width: number, height: number}}>, needsTitle: boolean, needsProject: boolean}|null|undefined} undefined when unreadable */
     function checkedWaitingReport(value) {
         if (undefined === value || null === value) {
             return null;
@@ -356,7 +415,8 @@ globalThis.pinroundDock ??= (() => {
                 || !shot.pinSpots.every((spot) => null !== spot && 'object' === typeof spot && isPercent(spot.x_pct) && isPercent(spot.y_pct))) {
                 return undefined;
             }
-            shots.push({ pinSpots: shot.pinSpots.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })) });
+            // A thumbnail it cannot read only costs the picture: the shot and its pins still show.
+            shots.push({ pinSpots: shot.pinSpots.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })), thumbnail: checkedThumbnail(shot.thumbnail ?? null) });
         }
 
         return { shots, needsTitle: value.needsTitle, needsProject: value.needsProject };
@@ -364,7 +424,8 @@ globalThis.pinroundDock ??= (() => {
 
     /**
      * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean,
-     *   newReport: null|{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>}>, needsTitle: boolean, needsProject: boolean}}} DockState
+     *   newReport: null|{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: null|{dataUrl: string,
+     *   width: number, height: number}}>, needsTitle: boolean, needsProject: boolean}}} DockState
      * @returns {DockState|null} the state as the extension answered it, or null when it is not one
      */
     function checkedState(state) {
@@ -596,10 +657,18 @@ globalThis.pinroundDock ??= (() => {
             saveHeading.textContent = TEXTS.saveCount(shots.length);
             shotList.replaceChildren(...shots.map((shot, index) => {
                 const thumb = hiddenFromReaders(make('div', 'dock-save__thumb'));
+                const { thumbnail } = shot;
+                if (null !== thumbnail) {
+                    const picture = make('canvas', 'dock-save__picture', { width: THUMBNAIL_BOX_PX.width, height: THUMBNAIL_BOX_PX.height });
+                    thumb.append(picture);
+                    // A thumbnail that does not decode leaves the plain box, the pins still on it.
+                    drawCover(picture, thumbnail).catch(() => undefined);
+                }
                 for (const spot of shot.pinSpots) {
+                    const shown = null === thumbnail ? spot : coverSpotOf(spot, thumbnail.width, thumbnail.height, THUMBNAIL_BOX_PX.width, THUMBNAIL_BOX_PX.height);
                     const dot = make('span', 'dock-save__dot');
-                    dot.style.left = `${spot.x_pct}%`;
-                    dot.style.top = `${spot.y_pct}%`;
+                    dot.style.left = `${shown.x_pct}%`;
+                    dot.style.top = `${shown.y_pct}%`;
                     thumb.append(dot);
                 }
                 const figure = make('figure', 'dock-save__shot');
@@ -907,6 +976,8 @@ globalThis.pinroundDock ??= (() => {
 
     return Object.freeze({
         PLACE_KEY_PREFIX, LETTER_KEYS_KEY, DEFAULT_PLACE, EDGE_GAP_PX, GRIP_STEP_PCT, MAX_SHOTS, REPORT_TITLE_MAX_LENGTH, PROJECT_KEY_MAX_LENGTH, TEXTS,
-        nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, refusalOfTyped, mountDock,
+        THUMBNAIL_DATA_URL_PREFIX, MAX_THUMBNAIL_DATA_URL_LENGTH, MAX_THUMBNAIL_SIDE_PX, THUMBNAIL_BOX_PX,
+        nearerSide, topPercentOf, checkedPlace, placeKeyOf, loadPlace, savePlace, loadLetterKeys, isTypingTarget, actionOfKey, checkedState, refusalOfTyped,
+        coverCropOf, coverSpotOf, mountDock,
     });
 })();

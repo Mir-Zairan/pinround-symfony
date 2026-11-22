@@ -9,7 +9,7 @@ import { CHOOSE_TARGET_FIRST, NEW_REPORT, TargetGoneError, choiceValueOf, forget
 import { captureToTarget } from '../capture/capture-to-target.js';
 import { clearNewReport, loadNewReport } from '../capture/new-report.js';
 import { pageTitleOf } from '../capture/page-context.js';
-import { capturedMessage, draftSavedMessage, keepWaitingCapture, loadWaitingCaptures, saveWaitingCaptures } from '../capture/waiting-captures.js';
+import { capturedMessage, draftSavedMessage, keepWaitingCapture, loadWaitingCaptures, saveWaitingCaptures, thumbnailOf } from '../capture/waiting-captures.js';
 import { SYSTEM_CLOCK } from '../player/step-runner.js';
 import { openStartPage, scenarioToPlay, taggedCaptureTexts } from './dock-scenario.js';
 import { extensionPageFetchOf } from './extension-page-fetch.js';
@@ -29,9 +29,9 @@ export const DOCK_TEXTS = Object.freeze({
 const TYPED_MAX_LENGTH = 1000;
 
 /**
- * @typedef {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>}>, needsTitle: boolean, needsProject: boolean}} WaitingReport
- *   the captures waiting for Save draft, with where their pins are; needsTitle while no draft is made, needsProject
- *   when the popup has no project key either
+ * @typedef {{shots: Array<{pinSpots: Array<{x_pct: number, y_pct: number}>, thumbnail: import('../capture/waiting-captures.js').Thumbnail|null}>,
+ *   needsTitle: boolean, needsProject: boolean}} WaitingReport the captures waiting for Save draft, with where their pins
+ *   are and their thumbnails; needsTitle while no draft is made, needsProject when the popup has no project key either
  * @typedef {{choices: Array<{value: string, label: string}>, chosen: string, count: number|null, canSave: boolean,
  *   newReport: WaitingReport|null}} DockState count is the captures waiting for a new report, the screenshots of the
  *   chosen draft round, or null when the dock cannot tell (a notebook, or a list that did not load); canSave is true
@@ -49,13 +49,14 @@ export function isDockRequest(message) {
  * @param {{id?: number, url?: string, title?: string, width?: number, height?: number}} tab the tab whose dock asked,
  *   as Chrome names the sender
  * @param {{browser: object, apiOf?: (settings: {origin: string, token: string}) => import('../shared/api.js').PinroundApi,
- *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} deps apiOf by default sends every request from
- *   the extension's offscreen document (extension-page-fetch.js); the clock, in ms, times the wait for the start page
- *   to load; the system's by default
+ *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}, makeThumbnail?: (file: Blob) => Promise<object>}} deps
+ *   apiOf by default sends every request from the extension's offscreen document (extension-page-fetch.js); the clock,
+ *   in ms, times the wait for the start page to load; the system's by default; makeThumbnail makes a new report's
+ *   capture its Save draft thumbnail
  * @returns {Promise<DockAnswer>} never rejects: a refusal is an answer with isError. A scenario request answers
  *   {scenario} (dock-scenario.js) instead of a state
  */
-export async function answerDockRequest(request, tab, { browser, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local, extensionPageFetchOf(browser)), clock = SYSTEM_CLOCK }) {
+export async function answerDockRequest(request, tab, { browser, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local, extensionPageFetchOf(browser)), clock = SYSTEM_CLOCK, makeThumbnail = thumbnailOf }) {
     if (!DOCK_ACTIONS.includes(request.pinroundDock) || !Number.isInteger(tab?.id) || !isReadableValue(request)) {
         return { message: DOCK_TEXTS.unknownRequest, isError: true };
     }
@@ -73,7 +74,7 @@ export async function answerDockRequest(request, tab, { browser, apiOf = (settin
             return await choose(api, session, request.value);
         }
         if ('capture' === request.pinroundDock) {
-            return await capture({ api, browser, session, tab, stepTag: runRules.checkedTag(request.value ?? null) });
+            return await capture({ api, browser, session, tab, stepTag: runRules.checkedTag(request.value ?? null), makeThumbnail });
         }
         if ('save-draft' === request.pinroundDock) {
             return await saveDraft(api, session, request.value);
@@ -166,7 +167,7 @@ async function draftCountOf(api, session, target) {
             count: waiting.length,
             canSave: waiting.length > 0 || null !== newReport.pendingCapture,
             newReport: {
-                shots: waiting.map((shot) => ({ pinSpots: shot.pins.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })) })),
+                shots: waiting.map((shot) => ({ pinSpots: shot.pins.map(({ x_pct, y_pct }) => ({ x_pct, y_pct })), thumbnail: shot.thumbnail })),
                 needsTitle,
                 needsProject: needsTitle && '' === newReport.project.trim(),
             },
@@ -204,7 +205,7 @@ async function choose(api, session, value) {
 }
 
 /** stepTag, from the dock's run, names the step "Found a problem" was pressed on; null for a plain capture. */
-async function capture({ api, browser, session, tab, stepTag }) {
+async function capture({ api, browser, session, tab, stepTag, makeThumbnail }) {
     const target = await loadCaptureTarget(session);
     if (null === target) {
         return { message: CHOOSE_TARGET_FIRST, isError: true, state: await dockState(api, session) };
@@ -213,7 +214,7 @@ async function capture({ api, browser, session, tab, stepTag }) {
     const pageTexts = captureTexts(pageTitleOf(tab), '');
     const texts = null === stepTag ? pageTexts : taggedCaptureTexts(pageTexts, stepTag);
     if (NEW_REPORT === target.kind) {
-        const waitingCount = await keepWaitingCapture(browser, session, tab.id, texts);
+        const waitingCount = await keepWaitingCapture(browser, session, tab.id, texts, makeThumbnail);
 
         return { message: capturedMessage(waitingCount), state: await dockState(api, session) };
     }

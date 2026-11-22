@@ -13,6 +13,8 @@ export const PAGE_NOT_ON_SCREEN = 'The page is no longer on screen, so nothing w
 export const CAPTURED_TOO_FAST = 'Chrome takes at most two captures a second, so nothing was captured. Press Capture again.';
 // Chrome's refusal names its own cap: captureVisibleTab may run twice a second.
 const CAPTURE_QUOTA_NAME = 'MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND';
+/** Chrome's cap counts the captures of the last second, so a second's wait leaves room for one more. */
+export const CAPTURE_QUOTA_WAIT_MS = 1000;
 
 /** @returns {Promise<number>} the id of the tab the popup was opened on */
 export async function activeTabId(browser) {
@@ -54,10 +56,14 @@ export async function closePinOverlay(browser, tabId) {
  * window shows, so the tab must be the shown one of the window the person is in, before and after the capture: a
  * person who switched tabs while the capture was on its way would otherwise send another page with this one's pins.
  *
+ * A capture Chrome refuses for its two-a-second cap is taken once more after CAPTURE_QUOTA_WAIT_MS, so a quick second
+ * press still captures.
+ *
+ * @param {(milliseconds: number) => Promise<void>} wait
  * @returns {Promise<{file: Blob, pins: Array<{x_pct: number, y_pct: number, note: string}>}>}
- * @throws {Error} PAGE_NOT_ON_SCREEN, the pin rules' refusal, or Chrome's when the tab cannot be captured
+ * @throws {Error} PAGE_NOT_ON_SCREEN, CAPTURED_TOO_FAST, the pin rules' refusal, or Chrome's when the tab cannot be captured
  */
-export async function capturePinnedTab(browser, tabId) {
+export async function capturePinnedTab(browser, tabId, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))) {
     const windowId = await windowShowing(browser, tabId);
     let injections;
     try {
@@ -72,12 +78,12 @@ export async function capturePinnedTab(browser, tabId) {
             throw error;
         }
 
-        return { file: await shownTabPng(browser, tabId, windowId), pins: [] };
+        return { file: await shownTabPng(browser, tabId, windowId, wait), pins: [] };
     }
     try {
         const pins = checkedPins(injections[0]?.result);
 
-        return { file: await shownTabPng(browser, tabId, windowId), pins };
+        return { file: await shownTabPng(browser, tabId, windowId, wait), pins };
     } finally {
         // Only a page that went away mid-capture refuses; the pins stay in its state for the next "Pin this page".
         await browser.scripting.executeScript({ target: { tabId }, func: () => globalThis.pinroundOverlay?.show() }).catch(() => undefined);
@@ -107,13 +113,19 @@ async function windowShowing(browser, tabId) {
  * The window's picture, kept only when the tab is still the one it shows once Chrome answered: a switch meanwhile
  * throws the picture away, and is also what a refusal of Chrome's then meant (activeTab stays with the tab).
  */
-async function shownTabPng(browser, tabId, windowId) {
-    const { dataUrl, refusal } = await browser.tabs.captureVisibleTab(windowId, { format: 'png' }).then((taken) => ({ dataUrl: taken }), (error) => ({ refusal: error }));
+async function shownTabPng(browser, tabId, windowId, wait) {
+    const take = () => browser.tabs.captureVisibleTab(windowId, { format: 'png' }).then((taken) => ({ dataUrl: taken }), (error) => ({ refusal: error }));
+    const isOverQuota = (refusal) => undefined !== refusal && String(refusal?.message).includes(CAPTURE_QUOTA_NAME);
+    let { dataUrl, refusal } = await take();
+    if (isOverQuota(refusal)) {
+        await wait(CAPTURE_QUOTA_WAIT_MS);
+        ({ dataUrl, refusal } = await take());
+    }
     if (windowId !== await shownWindowIdOf(browser, tabId)) {
         throw new Error(PAGE_NOT_ON_SCREEN);
     }
     if (undefined !== refusal) {
-        throw String(refusal?.message).includes(CAPTURE_QUOTA_NAME) ? new Error(CAPTURED_TOO_FAST) : refusal;
+        throw isOverQuota(refusal) ? new Error(CAPTURED_TOO_FAST) : refusal;
     }
 
     return pngOf(dataUrl);

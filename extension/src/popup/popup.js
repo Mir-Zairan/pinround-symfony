@@ -247,6 +247,18 @@ async function start() {
     fillReportInputs(element, await loadNewReport(extensionSession));
     const { choices, target, droppedMessage, loadProblems } = await targetChoices(api, await loadCaptureTarget(extensionSession));
     fillPicker(choices, null === target ? NO_CHOICE : choiceValueOf(target));
+    // In the same turn as the choices: a choice made while the fields below load is kept, never lost.
+    element('target').addEventListener('change', async () => {
+        const picked = offeredTargets.get(element('target').value);
+        if (undefined === picked) {
+            await forgetCaptureTarget(extensionSession);
+        } else {
+            await saveCaptureTarget(extensionSession, picked);
+        }
+        await showFields();
+        showScenariosOfPicker();
+        await showRetakePickerOf();
+    });
     if (null !== droppedMessage) {
         await forgetCaptureTarget(extensionSession);
     }
@@ -257,18 +269,6 @@ async function start() {
     if (problems.length > 0) {
         showStatus(problems.join(' '), true);
     }
-
-    element('target').addEventListener('change', async () => {
-        const target = offeredTargets.get(element('target').value);
-        if (undefined === target) {
-            await forgetCaptureTarget(extensionSession);
-        } else {
-            await saveCaptureTarget(extensionSession, target);
-        }
-        await showFields();
-        showScenariosOfPicker();
-        await showRetakePickerOf();
-    });
     for (const id of ['project', 'report-title']) {
         element(id).addEventListener('change', () => saveTypedReport(extensionSession, { project: element('project').value, reportTitle: element('report-title').value }));
     }

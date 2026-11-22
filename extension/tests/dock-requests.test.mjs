@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { DOCK_TEXTS, answerDockRequest } from '../src/background/dock-requests.js';
 import { CAPTURE_TARGET_KEY, CHOOSE_TARGET_FIRST, NEW_REPORT, goneMessageOf, loadCaptureTarget, saveCaptureTarget } from '../src/capture/capture-target.js';
 import { NEW_REPORT_KEY, NOT_SENT, WAITING_CAPTURES_KEY, loadNewReport } from '../src/capture/new-report.js';
-import { NOTHING_WAITING, NO_ROOM, WAITING_FULL, capturedMessage, draftSavedMessage, loadWaitingCaptures } from '../src/capture/waiting-captures.js';
+import { MAX_THUMBNAIL_DATA_URL_LENGTH, NOTHING_WAITING, NO_ROOM, WAITING_FULL, capturedMessage, draftSavedMessage, loadWaitingCaptures } from '../src/capture/waiting-captures.js';
 import { PinroundApi } from '../src/shared/api.js';
 import { saveSettings } from '../src/shared/settings.js';
 import { EXTENSION_PAGE_FETCH, answerExtensionPageFetch } from '../src/background/extension-page-fetch.js';
@@ -140,7 +140,7 @@ test('state for a new report counts the captures waiting, offers Save draft only
     const waitingShot = { id: 'w1', pngDataUrl: 'data:image/png;base64,iVBORw0KGgo=', texts: { title: 'Cart' }, pins: [PAGE_PIN, { x_pct: 90, y_pct: 80, note: '' }] };
     const cases = [
         ['nothing waiting, project typed in the popup', TYPED_NEW_REPORT, [], { count: 0, canSave: false, newReport: { shots: [], needsTitle: true, needsProject: false } }],
-        ['one waiting, no project known', { ...TYPED_NEW_REPORT, project: ' ' }, [waitingShot], { count: 1, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }, { x_pct: 90, y_pct: 80 }] }], needsTitle: true, needsProject: true } }],
+        ['one waiting, no project known', { ...TYPED_NEW_REPORT, project: ' ' }, [waitingShot], { count: 1, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }, { x_pct: 90, y_pct: 80 }], thumbnail: null }], needsTitle: true, needsProject: true } }],
         ['a draft made, a capture to send again', madeNewReport({ pendingCapture: PENDING_CAPTURE }), [], { count: 0, canSave: true, newReport: MADE_DRAFT_WAITING }],
         ['a draft made, nothing waiting', madeNewReport(), [], { count: 0, canSave: false, newReport: MADE_DRAFT_WAITING }],
     ];
@@ -251,12 +251,34 @@ test('a capture into a new report waits in the extension, sends nothing, and say
     const second = await ask(browser, { pinroundDock: 'capture' }, apiOf);
 
     assert.deepEqual([first.message, second.message], [capturedMessage(1), capturedMessage(2)]);
-    assert.deepEqual(second.state, { choices: OFFERED_CHOICES, chosen: NEW_REPORT, count: 2, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }] }, { pinSpots: [{ x_pct: 10, y_pct: 20 }] }], needsTitle: true, needsProject: false } });
+    assert.deepEqual(second.state, { choices: OFFERED_CHOICES, chosen: NEW_REPORT, count: 2, canSave: true, newReport: { shots: [{ pinSpots: [{ x_pct: 10, y_pct: 20 }], thumbnail: null }, { pinSpots: [{ x_pct: 10, y_pct: 20 }], thumbnail: null }], needsTitle: true, needsProject: false } });
     assert.deepEqual(writesOf(pinround), [], 'Nothing reaches pinround before Save draft.');
     const waiting = await loadWaitingCaptures(browser.storage.session);
     assert.equal(waiting.length, 2);
     assert.deepEqual(waiting.map(({ texts, pins }) => ({ texts, pins })), [{ texts: { title: 'Acme Foods shop' }, pins: [PAGE_PIN] }, { texts: { title: 'Acme Foods shop' }, pins: [PAGE_PIN] }]);
     assert.ok(waiting.every(({ pngDataUrl }) => pngDataUrl.startsWith('data:image/png;base64,')));
+});
+
+test('a new report\'s capture keeps its thumbnail and the dock gets it with the pins; one whose thumbnail fails is kept without', async () => {
+    const thumbnail = { dataUrl: 'data:image/jpeg;base64,/9j/4AAQ', width: 213, height: 120 };
+    const madeFrom = [];
+    const browser = await newReportBrowser();
+    const { pinround, apiOf } = pinroundFor();
+    const makeThumbnail = async (file) => {
+        madeFrom.push(new Uint8Array(await file.arrayBuffer()).slice(0, 4));
+
+        return thumbnail;
+    };
+
+    const kept = await answerDockRequest({ pinroundDock: 'capture' }, SHOP_TAB, { browser, apiOf, makeThumbnail });
+    const failing = await answerDockRequest({ pinroundDock: 'capture' }, SHOP_TAB, { browser, apiOf, makeThumbnail: async () => { throw new Error('No OffscreenCanvas here.'); } });
+    const oversized = await answerDockRequest({ pinroundDock: 'capture' }, SHOP_TAB, { browser, apiOf, makeThumbnail: async () => ({ ...thumbnail, dataUrl: `data:image/jpeg;base64,${'A'.repeat(MAX_THUMBNAIL_DATA_URL_LENGTH)}` }) });
+
+    assert.deepEqual([kept.message, failing.message, oversized.message], [capturedMessage(1), capturedMessage(2), capturedMessage(3)]);
+    assert.deepEqual(madeFrom, [new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'The thumbnail is made from the PNG the tab gave.');
+    assert.deepEqual(oversized.state.newReport.shots.map((shot) => shot.thumbnail), [thumbnail, null, null]);
+    assert.deepEqual((await loadWaitingCaptures(browser.storage.session)).map((capture) => capture.thumbnail), [thumbnail, null, null]);
+    assert.deepEqual(writesOf(pinround), []);
 });
 
 test('save-draft makes one report draft with the typed title and every waiting capture, then forgets the report and keeps "New report" chosen', async () => {
@@ -485,4 +507,8 @@ test('a waiting capture this version cannot read is left out, never sent', async
 
     assert.deepEqual((await loadWaitingCaptures(browser.storage.session)).map(({ id }) => id), ['w1']);
     assert.equal((await ask(browser, { pinroundDock: 'state' }, apiOf)).state.count, 1);
+
+    // A thumbnail this version cannot read costs only the thumbnail: the capture itself is still sent.
+    await browser.storage.session.set({ [WAITING_CAPTURES_KEY]: [{ ...good, thumbnail: { dataUrl: 'https://evil.example/x.jpg', width: 10, height: 10 } }] });
+    assert.deepEqual((await loadWaitingCaptures(browser.storage.session)).map(({ id, thumbnail }) => [id, thumbnail]), [['w1', null]]);
 });

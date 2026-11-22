@@ -36,7 +36,6 @@ const FIRST_REPORT_CAPTURE_SAVED = 'Report draft made with screenshot 1. Capture
 const REPORTS_WRITE_MISSING = 'Your pinround token cannot make reports. Make a token that may prepare report drafts on the API tokens page, then pair the extension again.';
 const SHOP_HOST_QUESTION = 'This scenario clicks and types on shop.acme-foods.test. It can change data there.';
 const RAN_TO_ITS_END = 'The scenario ran to its end.';
-const CAPTURED_TOO_FAST = 'Chrome takes at most two captures a second, so nothing was captured. Press Capture again.';
 
 test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS });
 
@@ -102,6 +101,9 @@ async function pinAndCapture(popup: Page, page: Page, note: string, [xFraction, 
   const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
   await popup.getByRole('button', { name: 'Pin this page' }).click();
   await page.mouse.click(viewport.width * xFraction, viewport.height * yFraction);
+  // Typed only once the pin's note field has the focus, as a person sees it open; earlier keys go to the page.
+  const inspector = await PageInspector.of(page.context(), page);
+  await expect.poll(async () => (await inspector.focused())?.name ?? '').toMatch(/^Note for pin \d+$/);
   await page.keyboard.type(note);
   await page.keyboard.press('Enter');
   await popup.getByRole('button', { name: 'Capture this page' }).click();
@@ -219,30 +221,63 @@ test.describe('with the local certificate accepted in a tab, as README says, and
     await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'A new report' });
     await popup.getByLabel('Project key').fill('SHOP');
     await popup.getByLabel('Project key').press('Tab');
-    await expect.poll(async () => (await inSession(popup, 'pinroundNewReport'))?.project).toBe('SHOP');
+    await expect.poll(async () => [(await inSession(popup, 'pinroundNewReport'))?.project, (await inSession(popup, 'pinroundCaptureTarget'))?.kind]).toEqual(['SHOP', 'new-report']);
     await popup.getByRole('button', { name: 'Open the dock on this page' }).click();
     await expect(popup.getByRole('status')).toHaveText('The dock is on the page. Pin, capture and save your draft from there.');
     await popup.close();
     await testPage.bringToFront();
     const inspector = await PageInspector.of(context, testPage);
+    const [worker] = context.serviceWorkers();
 
     for (const [shot, pinSpot] of [[1, [400, 200]], [2, null], [3, [900, 600]]] as Array<[number, [number, number] | null]>) {
       if (pinSpot !== null) {
         await testPage.keyboard.press('p');
         await testPage.mouse.click(...pinSpot);
+        await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'Note for pin 1' });
         await testPage.keyboard.type(`Note ${shot}`);
         await testPage.keyboard.press('Enter');
+        await expect.poll(async () => (await inspector.accessibleNodes()).some((node) => node.role === 'button' && node.name === `Pin 1: Note ${shot}`)).toBe(true);
       }
-      const captured = `Captured. ${shot} waiting.`;
+      // Pressed as fast as the dock answers: a press within Chrome's one-second cap is taken a second later.
       await clickOverlayButton(inspector, testPage, 'Capture');
-      // Chrome takes two captures a second; a person told so presses Capture again.
-      await expect.poll(() => overlayMessagesOf(inspector)).toEqual([expect.stringMatching(new RegExp(`^(${captured}|${CAPTURED_TOO_FAST})$`))]);
-      if ((await overlayMessagesOf(inspector))[0] === CAPTURED_TOO_FAST) {
-        await clickOverlayButton(inspector, testPage, 'Capture');
-      }
-      await expect.poll(() => overlayMessagesOf(inspector)).toEqual([captured]);
+      await expect.poll(() => overlayMessagesOf(inspector), { timeout: 15_000 }).toEqual([`Captured. ${shot} waiting.`]);
     }
+    // The test page is white with black text: a picture of it is mostly near-white, a black one has none.
+    const storedPictures = await worker.evaluate(async () => {
+      const { chrome } = globalThis as unknown as ExtensionPageGlobals;
+      const stored = (await chrome.storage.session.get('pinroundWaitingCaptures')).pinroundWaitingCaptures as Array<{ pngDataUrl: string }>;
+      return Promise.all(stored.map(async ({ pngDataUrl }) => {
+        const picture = await createImageBitmap(await (await fetch(pngDataUrl)).blob());
+        const canvas = new OffscreenCanvas(picture.width, picture.height);
+        const drawn = canvas.getContext('2d');
+        drawn?.drawImage(picture, 0, 0);
+        const data = drawn?.getImageData(0, 0, picture.width, picture.height).data ?? new Uint8ClampedArray();
+        let bright = 0;
+        for (let at = 0; at < data.length; at += 4) {
+          bright += data[at] + data[at + 1] + data[at + 2] > 600 ? 1 : 0;
+        }
+        return [picture.width, picture.height, bright / (data.length / 4) > 0.5];
+      }));
+    });
+    // The picture is the tab's viewport: the window's 1080 less Chrome's own bars.
+    const viewport = await testPage.evaluate(() => [window.innerWidth, window.innerHeight]);
+    expect(viewport[0]).toBe(1920);
+    expect(storedPictures).toEqual([[...viewport, true], [...viewport, true], [...viewport, true]]);
+
     await clickOverlayButton(inspector, testPage, 'Save draft, 3 in it');
+    const thumbnails = (await inspector.shadowElementsOf('pinround-overlay')).filter((element) => element.className === 'dock-save__picture');
+    expect(thumbnails).toHaveLength(3);
+    const isMostlyBright = `function () {
+      const { data } = this.getContext('2d').getImageData(0, 0, this.width, this.height);
+      let bright = 0;
+      for (let at = 0; at < data.length; at += 4) {
+        bright += data[at] + data[at + 1] + data[at + 2] > 600 ? 1 : 0;
+      }
+      return [this.width, this.height, bright / (data.length / 4) > 0.5];
+    }`;
+    for (const thumbnail of thumbnails) {
+      await expect.poll(() => inspector.runAsPageOn(thumbnail.backendNodeId, isMostlyBright)).toEqual([184, 120, true]);
+    }
     await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'What is wrong, in one line' });
     await testPage.keyboard.type(reportTitle);
     madeReportDrafts.push({ ownerEmail: OMAR_EMAIL, title: reportTitle });
