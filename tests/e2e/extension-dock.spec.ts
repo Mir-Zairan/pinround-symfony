@@ -200,6 +200,53 @@ test('on a 360px wide phone the dock wraps inside the screen, and its buttons ke
   }
 });
 
+/** WCAG's relative luminance of an `rgb(r, g, b)` colour as getComputedStyle answers it. */
+function luminanceOf(cssColour: string): number {
+  const channels = (cssColour.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+  expect(channels, cssColour).toHaveLength(3);
+  const [red, green, blue] = channels.map((channel) => {
+    const share = channel / 255;
+    return share <= 0.04045 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+const contrastOf = (first: string, second: string) => {
+  const [lighter, darker] = [luminanceOf(first), luminanceOf(second)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+};
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`in a ${colorScheme} colour scheme the shrunk puck shows the 30px logo inside a ring that stands out on a white page and on a black one`, async ({ context, testPage }) => {
+    await answerPinroundApi(context, { answersDock: true });
+    await testPage.emulateMedia({ colorScheme });
+    const popup = await pairedPopupFor(context, testPage);
+    const inspector = await openDockAndClosePopup(context, testPage, popup);
+    await clickOverlayButton(inspector, testPage, 'Shrink the dock');
+    const { backendNodeId: puckId } = await inspector.node('button', 'Open the pinround dock');
+    if (puckId === undefined) {
+      throw new Error('The puck has no node.');
+    }
+
+    const puck = await inspector.boxesOf(puckId);
+    if (puck === null) {
+      throw new Error('The puck is not shown.');
+    }
+    expect([Math.round(puck.border.right - puck.border.left), Math.round(puck.border.bottom - puck.border.top)]).toEqual([46, 46]);
+    const [ringWidth, ringColour] = await inspector.runAsPageOn(puckId, 'function () { const style = getComputedStyle(this); return [parseFloat(style.borderTopWidth), style.borderTopColor]; }') as [number, string];
+    expect(ringWidth).toBeGreaterThanOrEqual(2);
+    expect(contrastOf(ringColour, 'rgb(255, 255, 255)')).toBeGreaterThanOrEqual(3);
+    expect(contrastOf(ringColour, 'rgb(0, 0, 0)')).toBeGreaterThanOrEqual(3);
+
+    const logos = (await inspector.shadowElementsOf('pinround-overlay')).filter((element) => element.className === 'dock__logo');
+    const shown = (await Promise.all(logos.map(async (logo) => ({ logo, boxes: await inspector.boxesOf(logo.backendNodeId) })))).filter(({ boxes }) => boxes !== null);
+    expect(shown).toHaveLength(1);
+    const [{ logo, boxes }] = shown;
+    expect([Math.round((boxes?.border.right ?? 0) - (boxes?.border.left ?? 0)), Math.round((boxes?.border.bottom ?? 0) - (boxes?.border.top ?? 0))]).toEqual([30, 30]);
+    expect(await inspector.runAsPageOn(logo.backendNodeId, 'function () { return getComputedStyle(this).backgroundColor; }')).toBe('rgb(0, 107, 95)');
+  });
+}
+
 test('with Letter keys off, P on the page does nothing while P in the dock still pins, and turned on again P on the page pins', async ({ context, testPage }) => {
   await answerPinroundApi(context, { answersDock: true });
   const popup = await pairedPopupFor(context, testPage);

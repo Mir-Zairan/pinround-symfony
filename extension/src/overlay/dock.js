@@ -111,18 +111,11 @@ globalThis.pinroundDock ??= (() => {
         .dock :focus-visible, .dock-handle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
         .dock__grip { cursor: grab; padding: 4px 6px; }
         .dock--dragging .dock__grip { cursor: grabbing; }
-        .dock__logo { position: relative; flex: none; width: 22px; height: 22px; border-radius: 6px; background: #006b5f; }
-        .dock__logo::after {
-            content: '';
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            width: 8px;
-            height: 8px;
-            border: 2px solid #ffffff;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-        }
+        /* The app's logo mark (base.html.twig, a 26-unit square) in shares of its size: a pin's head and stem. */
+        .dock__logo { position: relative; display: block; flex: none; width: 22px; height: 22px; border-radius: 27%; background: #006b5f; }
+        .dock__logo::before, .dock__logo::after { content: ''; position: absolute; left: 50%; background: #ffffff; transform: translateX(-50%); }
+        .dock__logo::before { top: 26.9%; width: 34.6%; height: 34.6%; border-radius: 50%; }
+        .dock__logo::after { top: 57.3%; width: 8.5%; height: 27.7%; border-radius: 999px; }
         .dock__dots { flex: none; width: 6px; height: 14px; opacity: 0.7; background: radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 0 / 3px 4.67px; }
         .dock__target {
             max-width: 150px;
@@ -248,18 +241,20 @@ globalThis.pinroundDock ??= (() => {
         .dock__status:empty { display: none; }
         .dock__status--error { background: var(--panel); color: var(--danger); border: 1px solid var(--danger); }
         .dock-handle {
+            display: grid;
+            place-items: center;
             width: 46px;
             height: 46px;
             padding: 0;
-            border: none;
+            /* The brand teal in both schemes, not --primary: 6.4:1 on a white page and 3.3:1 on a black one. */
+            border: 3px solid #006b5f;
             border-radius: 50%;
             background: var(--dock);
-            box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+            box-shadow: 0 4px 16px rgb(0 0 0 / 45%);
             cursor: pointer;
             touch-action: none;
         }
-        .dock-handle .dock__logo { width: 30px; height: 30px; margin: auto; border-radius: 8px; }
-        .dock-handle .dock__logo::after { width: 11px; height: 11px; }
+        .dock-handle .dock__logo { width: 30px; height: 30px; }
         .dock-handle .dock__count { position: absolute; top: -4px; right: -4px; background: var(--primary); color: var(--on-primary); }
         @media (max-width: 600px) {
             .dock__label, .dock kbd { display: none; }
