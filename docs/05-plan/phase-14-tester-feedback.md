@@ -302,7 +302,7 @@ NFR-SEC-01, NFR-SEC-03, NFR-SEC-04, NFR-SEC-09, NFR-SEC-10, NFR-PERF-06.
 ### P14.T18 — Demo switch for two-step login
 - **Why:** a person trying a local demo must turn on two-step login before they can make a token or open admin pages.
 - **Steps:**
-  1. `PINROUND_DEMO_SKIP_2FA` (bool, default false), read only in `RecentAuth::hasConfirmedTwoStepLoginWithin`; `AdminAreaVoter` (through `LoginAssurance`), `AskToConfirmItsYou` and token creation go through it (ADR-0049).
+  1. `PINROUND_DEMO_SKIP_2FA` (bool, default false), read only in `RecentAuth::hasConfirmedTwoStepLoginWithin`; `AdminAreaVoter` (through `LoginAssurance`), `AskToConfirmItsYou` and token creation go through it (ADR-0049). While it is on, "Confirm it's you" asks for the password only (ADR-0049's note of 2026-11-22).
   2. The kernel refuses to boot when it is true and `APP_ENV` is not `dev`, with a plain message (`KernelTest`).
   3. A banner on every page while it is on: "Demo mode: two-step login is skipped."
   4. `.env` explains it; the `pinround-setup` skill asks whether to turn it on.

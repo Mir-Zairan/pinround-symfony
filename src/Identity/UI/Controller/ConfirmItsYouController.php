@@ -19,13 +19,15 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * "Confirm it's you" (ADR-0012): the password and a code from the app, or a recovery code, before an action marked
- * RequiresRecentAuth, then back to it. It acts only on the logged-in user and asks OwnAccountVoter for
+ * RequiresRecentAuth, then back to it; the password only while the demo switch skips two-step login (ADR-0049). It acts only on the logged-in user and asks OwnAccountVoter for
  * AccountPermission::EDIT_OWN first (ADR-0013). Every response says no-store.
  */
 final class ConfirmItsYouController extends AbstractController
 {
     /** One message for both, so the page never tells which of the two was right. */
     public const string WRONG_PASSWORD_OR_CODE = 'The password or code is wrong.';
+    /** While the demo switch skips two-step login (ADR-0049), the page asks for the password only. */
+    public const string WRONG_PASSWORD = 'The password is wrong.';
 
     private const string CSRF_ID = 'confirm_its_you';
 
@@ -45,7 +47,7 @@ final class ConfirmItsYouController extends AbstractController
 
         $userId = $this->currentSession->userId();
         $returnPath = $this->recentAuthRedirects->safeReturnPath($request->query->getString('return')) ?? $this->recentAuthRedirects->homePath();
-        if (!$this->showTwoStepSetup->stateOf($userId)->isOn()) {
+        if ($this->confirmItsYou->asksForTwoStepCode() && !$this->showTwoStepSetup->stateOf($userId)->isOn()) {
             return self::notStored($this->recentAuthRedirects->toTwoStepSetup($request, $returnPath));
         }
         if (!$request->isMethod('POST')) {
@@ -64,6 +66,7 @@ final class ConfirmItsYouController extends AbstractController
         return match ($outcome) {
             ConfirmItsYouOutcome::Confirmed => self::notStored($this->redirect($returnPath)),
             ConfirmItsYouOutcome::WrongPasswordOrCode => $this->renderPage($returnPath, self::WRONG_PASSWORD_OR_CODE),
+            ConfirmItsYouOutcome::WrongPassword => $this->renderPage($returnPath, self::WRONG_PASSWORD),
             // Turned off since the check above, by another request of this person.
             ConfirmItsYouOutcome::TwoStepLoginOff => self::notStored($this->recentAuthRedirects->toTwoStepSetup($request, $returnPath)),
         };
@@ -74,6 +77,7 @@ final class ConfirmItsYouController extends AbstractController
         return $this->render('@Identity/confirm_its_you.html.twig', [
             'returnPath' => $returnPath,
             'error' => $error,
+            'asksForTwoStepCode' => $this->confirmItsYou->asksForTwoStepCode(),
         ], self::notStored(new Response(status: null === $error ? Response::HTTP_OK : $status)));
     }
 

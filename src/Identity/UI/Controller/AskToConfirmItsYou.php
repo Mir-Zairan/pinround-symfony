@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Identity\UI\Controller;
 
+use App\Identity\Application\ConfirmItsYou;
 use App\Identity\Application\CurrentSession;
 use App\Identity\Application\RecentAuth;
 use App\Identity\Application\ShowTwoStepSetup;
@@ -19,7 +20,8 @@ use Symfony\Component\Security\Core\User\UserInterface;
 /**
  * Enforces RequiresRecentAuth on a controller class or action (ADR-0012): without a recent password and code proof
  * (RecentAuth), the action does not run and the person goes to "Confirm it's you", or, while their two-step login is
- * off, to its setup page. It acts on sub-requests too, so no path reaches a marked action without the proof. A visitor
+ * off, to its setup page; while the demo switch skips two-step login (ADR-0049), always to "Confirm it's you", which
+ * then asks for the password only. It acts on sub-requests too, so no path reaches a marked action without the proof. A visitor
  * who is not logged in is left to the firewall and the action's own access check. Holds no state, so it is safe in
  * worker mode (ADR-0008).
  */
@@ -30,6 +32,7 @@ final readonly class AskToConfirmItsYou
         private Security $security,
         private CurrentSession $currentSession,
         private RecentAuth $recentAuth,
+        private ConfirmItsYou $confirmItsYou,
         private ShowTwoStepSetup $showTwoStepSetup,
         private RecentAuthRedirects $recentAuthRedirects,
         private ClockInterface $clock,
@@ -49,7 +52,7 @@ final readonly class AskToConfirmItsYou
 
         $request = $event->getRequest();
         $returnPath = $this->recentAuthRedirects->returnPathOf($request);
-        $redirect = $this->showTwoStepSetup->stateOf($userId)->isOn()
+        $redirect = !$this->confirmItsYou->asksForTwoStepCode() || $this->showTwoStepSetup->stateOf($userId)->isOn()
             ? $this->recentAuthRedirects->toConfirm($returnPath)
             : $this->recentAuthRedirects->toTwoStepSetup($request, $returnPath);
         $event->setController(static fn (): RedirectResponse => $redirect);

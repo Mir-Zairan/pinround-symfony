@@ -10,7 +10,7 @@
     <div class="login">
         <twig:Card tag="section" class="login__card" aria-labelledby="confirm-title">
             <h1 class="login__title" id="confirm-title">Confirm it's you</h1>
-            <p class="login__hint">To do this, type your password and a code again.</p>
+            <p class="login__hint">To do this, type your password{% if asksForTwoStepCode %} and a code{% endif %} again.</p>
             {% if error %}
                 <p class="login__error" role="alert" id="confirm-error">{{ error }}</p>
             {% endif %}
@@ -20,13 +20,15 @@
                     <input class="form-field__input" type="password" name="password" autocomplete="current-password" required autofocus
                         {%- if error %} aria-invalid="true" aria-describedby="confirm-error"{% endif %}>
                 </label>
-                {# Not inputmode="numeric": a recovery code has letters. #}
-                <label class="form-field">
-                    Code from your app
-                    <input class="form-field__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
-                        {%- if error %} aria-invalid="true" aria-describedby="confirm-error confirm-code-hint"{% else %} aria-describedby="confirm-code-hint"{% endif %}>
-                </label>
-                <p class="login__hint" id="confirm-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>
+                {% if asksForTwoStepCode %}
+                    {# Not inputmode="numeric": a recovery code has letters. #}
+                    <label class="form-field">
+                        Code from your app
+                        <input class="form-field__input" type="text" name="code" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" required
+                            {%- if error %} aria-invalid="true" aria-describedby="confirm-error confirm-code-hint"{% else %} aria-describedby="confirm-code-hint"{% endif %}>
+                    </label>
+                    <p class="login__hint" id="confirm-code-hint">6 digits. No phone with you? Type one of your recovery codes instead.</p>
+                {% endif %}
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token('confirm_its_you') }}">
                 <twig:Button type="submit">Confirm</twig:Button>
             </form>

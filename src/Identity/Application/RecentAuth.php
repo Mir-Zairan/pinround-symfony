@@ -39,7 +39,8 @@ final readonly class RecentAuth
 
     /**
      * Whether the demo switch is on in the dev environment, so a two-step proof is never needed. The page banner
-     * reads it, so it shows exactly when the skip applies.
+     * reads it, so it shows exactly when the skip applies, and so does ConfirmItsYou, which then asks for the password
+     * only, as isRecentFor still needs it.
      */
     public function isTwoStepLoginSkippedForDemo(): bool
     {

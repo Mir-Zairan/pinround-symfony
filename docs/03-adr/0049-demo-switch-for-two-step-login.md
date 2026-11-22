@@ -14,7 +14,8 @@ else.
   - [Consequences](#consequences) — what gets easier and what it risks.
 - [Confirmation](#confirmation) — the tests of P14.T18.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — the trade-offs.
-- [Decided at acceptance](#decided-at-acceptance) — the product owner's answer on the audit entry.
+- [Decided at acceptance](#decided-at-acceptance) — the product owner's answer on the audit entry; the 2026-11-22
+  note on "Confirm it's you" with the password only.
 - [More information](#more-information) — related ADRs, requirements, revisit triggers.
 
 ## Status
@@ -126,6 +127,16 @@ people see it, and cannot be turned on in a real deployment.
 - **Audit entry.** The product owner decided on 2026-11-21 that no audit entry records a skipped two-step login (the
   hackathon flag's planned `mfa_skipped: true` is not built): the switch runs only on a local `dev` demo, whose audit
   log no one reviews.
+- **Note, 2026-11-22: "Confirm it's you" asks for the password only while the switch skips two-step login.** A
+  person whose login was older than 10 minutes was sent from the consent page or **Make token** to the two-step
+  login setup page, because `AskToConfirmItsYou` and `ConfirmItsYouController` chose by whether two-step login was on,
+  and only a new login helped. The recent password of `isRecentFor` is still needed, as decided above. Now, while
+  `RecentAuth::isTwoStepLoginSkippedForDemo` is true, both send the person to "Confirm it's you", which asks for the
+  password only (`ConfirmItsYou::asksForTwoStepCode`), records the password time and never a two-step time, then
+  goes back to the page asked for. The switch is still read only by `RecentAuth`; `ConfirmItsYou` asks its
+  `isTwoStepLoginSkippedForDemo`, as the banner does. With the switch off, nothing changes. Tested in
+  `DemoModeTest` (an old login confirms with the password and allows the consent; a wrong password records nothing;
+  with the switch off or outside `dev`, the setup page as before) and the unit `ConfirmItsYouTest`.
 
 ## More information
 
