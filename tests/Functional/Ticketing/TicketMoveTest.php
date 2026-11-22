@@ -1361,7 +1361,8 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
-     * The toast's Undo: a POST form to the Undo route with the version the move left, shown for 30 seconds.
+     * The toast's Undo: a POST form to the Undo route with the version the move left, shown for 30 seconds and kept
+     * while the pointer is on the toast or focus is in it; Undo is the button the controller may give the focus.
      *
      * @param array<string, Crawler> $streams
      */
@@ -1369,10 +1370,14 @@ final class TicketMoveTest extends WebTestCase
     {
         $toast = $streams[self::TOAST_REGION_ID]->filter('.toast[data-controller="toast"]');
         self::assertSame('30000', $toast->attr('data-toast-shown-for-ms-value'));
+        self::assertSame(
+            'mouseenter->toast#pointerEntered mouseleave->toast#pointerLeft focusin->toast#focusEntered focusout->toast#focusLeft',
+            $toast->attr('data-action'),
+        );
         $form = $toast->filter('form.toast__action');
         self::assertCount(1, $form);
         self::assertSame('/t/'.self::KEY.'/undo-move', $form->attr('action'));
-        self::assertSame(MoveToasts::UNDO, $form->filter('button')->text());
+        self::assertSame(MoveToasts::UNDO, $form->filter('button[data-toast-target="action"]')->text());
         self::assertSame((string) (self::VERSION + 1), $form->filter('input[name="'.TicketMoveController::VERSION_FIELD.'"]')->attr('value'));
 
         return $form;

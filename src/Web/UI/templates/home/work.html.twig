@@ -46,7 +46,7 @@
 
         <div class="home__row">
             <div class="home__column home__column--main">
-                {% embed '@Web/home/_section.html.twig' with {id: 'needs-you-now', title: 'Needs you now', group: 'my_work', focus: focus.value, needsYouNow: needsYouNow, waitingCount: waitingCount, notShownCount: notShownCount, seeAllUrl: seeAllUrl} only %}
+                {% embed '@Web/home/_section.html.twig' with {id: 'needs-you-now', title: 'Needs you now', group: 'my_work', focus: focus.value, needsYouNow: needsYouNow, today: today, waitingCount: waitingCount, notShownCount: notShownCount, seeAllUrl: seeAllUrl} only %}
                     {% block header_extra %}
                         {% if notShownCount > 0 %}
                             <span class="home__section-note">top {{ needsYouNow|length }} of {{ waitingCount|number_format }}</span>
@@ -64,10 +64,12 @@
                         {% else %}
                             {#- The Why line's wait counts from when the turn came to the person, not from the ticket's last
                                 change, so it says that, dated in the person's time zone. No hover prefetch: each link would
-                                cost a ticket page's queries. -#}
+                                cost a ticket page's queries. "Today" is the person's calendar day, not the last 24 hours,
+                                so a turn that came at 22:00 yesterday is dated. -#}
                             <ol class="home__needs" data-turbo-prefetch="false">
                                 {% for card in needsYouNow %}
-                                    {%- set waitReason = card.waitDays == 0 ? 'came to you today' : (card.waitDays > 7 ? 'with you for ' ~ card.waitDays ~ ' days' : 'came to you on ' ~ card.waitingSince|date('j M', app.user.timeZone)) -%}
+                                    {%- set cameToday = card.waitingSince|date('Y-m-d', app.user.timeZone) == today|date('Y-m-d', app.user.timeZone) -%}
+                                    {%- set waitReason = cameToday ? 'came to you today' : (card.waitDays > 7 ? 'with you for ' ~ card.waitDays ~ ' days' : 'came to you on ' ~ card.waitingSince|date('j M', app.user.timeZone)) -%}
                                     <li class="home__need{{ loop.first ? ' home__need--first' }}">
                                         <span class="home__rank" aria-hidden="true">{{ loop.index }}</span>
                                         <div class="home__need-body">
@@ -77,7 +79,7 @@
                                         </div>
                                         <div class="home__need-side">
                                             <twig:Button variant="{{ loop.first ? 'filled' : 'tonal' }}" size="sm" href="{{ card.url }}" class="home__need-open">{{ card.openLabel }}<span class="visually-hidden"> {{ card.key }}</span></twig:Button>
-                                            <span class="home__need-wait">{{ card.waitText }}</span>
+                                            <span class="home__need-wait">{{ card.waitDays == 0 and not cameToday ? 'since yesterday' : card.waitText }}</span>
                                         </div>
                                     </li>
                                 {% endfor %}

@@ -221,6 +221,30 @@ final class HomeNeedsYouNowTest extends WebTestCase
     }
 
     /**
+     * "Today" is Lena's calendar day in Berlin, not the last 24 hours: at 13:00 there on 6 Nov, a turn that came at 00:30
+     * came today, and one that came at 23:30 on 5 Nov, 13 hours and a half ago, came yesterday.
+     */
+    #[Test]
+    public function aTurnCameTodayOnlyOnThePersonsCalendarDay(): void
+    {
+        self::assertSame('Europe/Berlin', $this->people['Lena']->timeZone());
+        $lenaId = $this->people['Lena']->id()->toString();
+        foreach (['2026-11-05 23:30:00+00', '2026-11-05 22:30:00+00'] as $waitingSince) {
+            $key = 'SHOP-'.$this->nextNumber;
+            $ticketId = $this->insertTicket($this->acmeFoods, $this->shopProject, $this->shop->toString(), $key, $this->doingStep, null, null, 'normal');
+            $this->insertTurnRow($this->acmeFoods, $ticketId, $this->shop->toString(), $this->shopProject, $lenaId, 0, waitingSince: $waitingSince);
+        }
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $home = $this->client->request('GET', self::HOME);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-2', 'SHOP-1'], self::textsOf($home, '.home__need-key'));
+        self::assertSame(['came to you on 5 Nov', 'came to you today'], self::textsOf($home, '.home__need-reasons'));
+        self::assertSame(['since yesterday', 'today'], self::textsOf($home, '.home__need-wait'));
+    }
+
+    /**
      * @return iterable<string, array{int, int, string}>
      */
     public static function ticketCountsUpToSix(): iterable
@@ -448,9 +472,12 @@ final class HomeNeedsYouNowTest extends WebTestCase
         return $ticketId;
     }
 
-    private function insertTurnRow(OrganizationId $organizationId, string $ticketId, ?string $teamId, string $projectId, ?string $turnUserId, int $waitDays, string $kind = 'build', int $baseScore = 100, ?string $assigneeId = null): void
+    /**
+     * @param string|null $waitingSince when the turn came, instead of $waitDays and an hour before NOW
+     */
+    private function insertTurnRow(OrganizationId $organizationId, string $ticketId, ?string $teamId, string $projectId, ?string $turnUserId, int $waitDays, string $kind = 'build', int $baseScore = 100, ?string $assigneeId = null, ?string $waitingSince = null): void
     {
-        $waitingSince = new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d days -1 hour', $waitDays))->format('Y-m-d H:i:sP');
+        $waitingSince ??= new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d days -1 hour', $waitDays))->format('Y-m-d H:i:sP');
         $values = [$organizationId->toString(), $ticketId, $teamId, $projectId, $turnUserId, null === $turnUserId ? 'Customer' : null, $kind, $baseScore, $waitingSince, $this->people['Lena']->id()->toString(), $assigneeId];
         $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)

@@ -438,6 +438,7 @@ a.seg {
 
 .toast__action-button:focus-visible {
   outline: 2px solid var(--inverse-on-surface);
+  outline-offset: 2px;
 }
 
 /* LiveUpdates' "Updates paused" banner, above the page it follows; its top margin is main's top padding (.page). No
