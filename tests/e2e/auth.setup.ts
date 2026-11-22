@@ -5,6 +5,7 @@ import {
   demoPassword,
   LENA_EMAIL,
   LENA_STORAGE_STATE,
+  LENA_TEAM_PAGE_STORAGE_STATE,
   MIA_EMAIL,
   MIA_STORAGE_STATE,
   OMAR_EMAIL,
@@ -25,7 +26,8 @@ function avatarOf(page: Page, firstName: string) {
   return page.getByRole('button', { name: firstName, exact: true });
 }
 
-// One login per person for the whole run: the login limiter allows five tries per email and address in 15 minutes.
+// One login per session for the whole run: the login limiter allows five tries per email and address in 15 minutes
+// (a successful login clears that count, so Lena's two logins leave it as one).
 async function logIn(page: Page, email: string, firstName: string, storageState: string): Promise<void> {
   await submitPassword(page, email);
   await expect(avatarOf(page, firstName)).toBeVisible();
@@ -34,6 +36,10 @@ async function logIn(page: Page, email: string, firstName: string, storageState:
 
 setup('log in as Lena', async ({ page }) => {
   await logIn(page, LENA_EMAIL, 'Lena', LENA_STORAGE_STATE);
+});
+
+setup('log in as Lena for the team page', async ({ page }) => {
+  await logIn(page, LENA_EMAIL, 'Lena', LENA_TEAM_PAGE_STORAGE_STATE);
 });
 
 setup('log in as Omar', async ({ page }) => {

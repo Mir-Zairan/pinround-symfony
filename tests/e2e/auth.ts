@@ -9,6 +9,11 @@ export const LENA_EMAIL = 'lena@acme-foods.example';
 // Written by auth.setup.ts and read by the specs that open a logged-in page. It sits in test-results/, which is git-ignored.
 export const LENA_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'lena.json');
 
+// Lena's second session, for team-page.spec.ts alone, which reads the toast each of its redirects flashed. The specs on
+// other workers that use LENA_STORAGE_STATE share that one session, and a page any of them loads between a redirect and
+// its page takes the flash out of it, or writes back a copy read before the flash. A second spec here would do the same.
+export const LENA_TEAM_PAGE_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'lena-team-page.json');
+
 // Omar's own session for the specs that save a preference, so Lena's pages in the other specs keep their look.
 export const OMAR_EMAIL = 'omar@acme-foods.example';
 export const OMAR_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'omar.json');

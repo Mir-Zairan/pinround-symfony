@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { LENA_TEAM_PAGE_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // The demo seed gives Shop one project (SHOP) and leaves APP and DOCS with no team. The specs change links, so they run
@@ -52,7 +52,7 @@ async function addProjects(page: Page, keys: string[]): Promise<void> {
 }
 
 test.describe('as the lead', () => {
-  test.use({ storageState: LENA_STORAGE_STATE });
+  test.use({ storageState: LENA_TEAM_PAGE_STORAGE_STATE });
 
   // Whatever the test did, Shop ends with exactly SHOP and APP and DOCS have no team, as the seed leaves them.
   test.afterEach(async ({ page }) => {
