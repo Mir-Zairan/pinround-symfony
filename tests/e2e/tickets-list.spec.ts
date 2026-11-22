@@ -91,7 +91,11 @@ test('Lena collapses a step with the keyboard and finds it collapsed after a rel
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(rows).toBeHidden();
 
+  // The expand is saved in the background too; ending the test before its answer can drop the save and leave the step
+  // collapsed for Lena in every later spec that looks for a shown row.
+  const expandSaved = page.waitForResponse((response) => response.url().includes('/collapse') && response.request().method() === 'POST');
   await toggle.click();
+  expect((await expandSaved).status()).toBe(204);
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(rows).toBeVisible();
 });
