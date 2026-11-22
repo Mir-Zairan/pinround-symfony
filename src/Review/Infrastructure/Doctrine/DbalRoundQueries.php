@@ -207,8 +207,18 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             .' ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
             .' AND round.id <> CAST(:round AS uuid) AND screenshot.media_id = CAST(:media AS uuid)'
+            // A later round that copied this picture is no source of it: only rounds below, and unshared ones (no number)
+            // only for an unshared draft.
+            .' AND (round.number < :below OR (round.number IS NULL AND CAST(:unshared AS boolean)))'
             .' ORDER BY is_source DESC, round.number DESC NULLS LAST LIMIT 1',
-            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'round' => $roundId, 'media' => $mediaId, 'below' => $belowNumber],
+            [
+                'organization' => $organizationId->toString(),
+                'ticket' => $ticketId->toString(),
+                'round' => $roundId,
+                'media' => $mediaId,
+                'below' => $belowNumber,
+                'unshared' => RoundsVisibleTo::UNSHARED_DRAFT_NUMBER === $belowNumber ? 'true' : 'false',
+            ],
         );
         if (false === $sourceRow) {
             return null;

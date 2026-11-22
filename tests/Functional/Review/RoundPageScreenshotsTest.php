@@ -58,9 +58,10 @@ final class RoundPageScreenshotsTest extends WebTestCase
      * first shared draft's Befores through RoundsVisibleTo::previousHandOffRoundOf (its visibility check, the round, its
      * screenshots and their pins; ADR-0048, amended 2026-11-21) raised it from 28. The tab row has no small pictures to
      * sign, and the side panel reads the check items of the report's pins (the checklist round, then its items), which
-     * raised it from 32.
+     * raised it from 32. The one query that finds the shown picture is no copy (RoundsVisibleTo::copySourceOf,
+     * RoundPages::pairedBeforeOf) raised it from 33.
      */
-    private const int DRAFT_PAGE_QUERIES = 33;
+    private const int DRAFT_PAGE_QUERIES = 34;
 
     private KernelBrowser $client;
 
@@ -359,6 +360,49 @@ final class RoundPageScreenshotsTest extends WebTestCase
         self::assertSame([], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()), 'The report has no Screenshot 2.');
         self::assertCount(0, $page->filter('.round-compare-control, .round-compare__side--before'));
         self::assertSame(['Draft shot 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
+    }
+
+    /**
+     * Mia pinned Round 1's Screenshot 2 in her draft and shared it as Round 2, where it is Screenshot 1. "Pin this in my
+     * draft" keeps the picture, so its Before is its source, Round 1's Screenshot 2 with its pins, on the round page and
+     * in full screen, not Round 1's Screenshot 1 by number. The later copies (Round 2, Omar's unshared draft) do not
+     * make Round 1's own picture a copy: it still pairs with the report's Screenshot 2.
+     */
+    #[Test]
+    public function aCopiedScreenshotOfASharedDraftHasItsSourceAsItsBeforeOnTheRoundPageAndInFullScreen(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->seedRoundOfScreenshots($ticketId, 0, 'report', 'Mia', 'Report shot ', [0, 0]);
+        $roundOne = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_EARLIER);
+        $this->addScreenshot($roundOne, $this->addMedia('ready'), 0, 'Cart total', null);
+        $discountMedia = $this->addMedia('ready');
+        $discountLine = $this->addScreenshot($roundOne, $discountMedia, 1, 'Discount line', null);
+        $this->addPin($discountLine, 1, '40.00', '40.00', 'The discount line is missing', 'Omar');
+        $roundTwo = $this->addRound($ticketId, 2, 'draft', 'Mia', self::SHARED_TODAY);
+        $this->addScreenshot($roundTwo, $discountMedia, 0, 'From round 1 · Screenshot 2', null);
+        $this->addScreenshot($roundTwo, $this->addMedia('ready', 'Mia'), 1, 'Mia own shot', null);
+        $this->addScreenshot($this->addRound($ticketId, null, 'draft', 'Omar', null), $discountMedia, 0, 'Copied again', null);
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Before · round 1', 'After · round 2'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
+        self::assertSame('screenshot-'.$discountLine, $page->filter('.round-compare__side--before figure.screenshot')->attr('id'), 'Its source, not Round 1\'s Screenshot 1.');
+        $earlierPins = $page->filter('.round-panel__section')->first();
+        self::assertSame('Pins from round 1', $earlierPins->filter('h2')->text());
+        self::assertStringContainsString('The discount line is missing', $earlierPins->text());
+
+        $focus = $this->client->request('GET', '/t/SHOP-1/rounds/2/focus?screenshot=1&side=before');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Before, round 1: Discount line', $focus->filter('img.screenshot__image')->attr('alt'));
+        self::assertSame(['The discount line is missing'], $focus->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()));
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1?'.RoundController::SCREENSHOT_PARAMETER.'=2');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['Report shot 1'], $page->filter('.round-compare__side--before .screenshot__title')->each(static fn (Crawler $title): string => $title->text()), 'Round 1\'s own picture still pairs by number.');
     }
 
     /**

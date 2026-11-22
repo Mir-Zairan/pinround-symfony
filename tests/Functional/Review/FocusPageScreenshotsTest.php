@@ -54,9 +54,10 @@ final class FocusPageScreenshotsTest extends WebTestCase
      * Fewer than the round page's (RoundPageScreenshotsTest::DRAFT_PAGE_QUERIES): no move-on buttons, no "Ready for"
      * header. Measured, and the same for 2 and 6 screenshots; the report's read as the first shared draft's Befores (four
      * queries, ADR-0048 amended 2026-11-21) raised it from 24, and the read of the check items of the walked pins (the
-     * checklist round, then its items, RoundPages::checkRowsOf) from 28.
+     * checklist round, then its items, RoundPages::checkRowsOf) from 28, and the one query that finds the shown picture is
+     * no copy (RoundsVisibleTo::copySourceOf, RoundPages::pairedBeforeOf) from 30.
      */
-    private const int DRAFT_FOCUS_QUERIES = 30;
+    private const int DRAFT_FOCUS_QUERIES = 31;
 
     private KernelBrowser $client;
 

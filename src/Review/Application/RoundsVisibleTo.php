@@ -16,6 +16,9 @@ use App\Ticketing\Api\TicketVisibility;
  */
 interface RoundsVisibleTo
 {
+    /** The number copySourceOf and previousHandOffRoundOf take for an unshared draft, which comes after every round. */
+    public const int UNSHARED_DRAFT_NUMBER = 2_147_483_647;
+
     /**
      * The same rounds, cap, screenshot counts and queries as RoundQueries::forTicket for the viewer the visibility
      * belongs to, less the reads of their roles and of the triager. Only the report and the viewer's own unshared draft
@@ -69,10 +72,12 @@ interface RoundsVisibleTo
      * ticket: it gives no picture or text, only a round number, whose pictures sharedRoundOf reads after its own check.
      *
      * @param string $roundId     the round the picture is shown in, which is left out
-     * @param int    $belowNumber the source must have a number below it; RoundView::$number of a shared round, or a
-     *                            number above every round's for an unshared draft, which comes after them all
+     * @param int    $belowNumber the source must have a number below it; RoundView::$number of a shared round, or
+     *                            UNSHARED_DRAFT_NUMBER for an unshared draft, which comes after them all. Only rounds
+     *                            numbered below it are looked at, and unshared rounds only for an unshared draft, so a
+     *                            later copy of a shared round's own picture never makes that picture a copy
      *
-     * @return ScreenshotCopySource|null null for a picture no other round of the ticket holds
+     * @return ScreenshotCopySource|null null for a picture no other round of the ticket that it looks at holds
      *
      * @throws \LogicException           when no transaction is open or no tenant is set, before any query
      * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query

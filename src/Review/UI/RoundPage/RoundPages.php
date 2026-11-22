@@ -41,8 +41,8 @@ use App\Ticketing\Api\TicketPageView;
  *
  * Its reads do not grow with the screenshots or pins: one signing call for the shown pictures, for a round without areas
  * other than a review round, RoundsVisibleTo's read of the one round whose screenshots it shows, for a shared draft its
- * read of the hand-off round before it or, with none, of the report, whose pictures are the Befores, checkRowsOf's
- * reads of the check items, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
+ * read of the hand-off round before it or, with none, of the report, whose pictures are the Befores (and, for a copied
+ * picture that round does not hold, pairedBeforeOf's reads of its source), checkRowsOf's reads of the check items, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
  */
 final readonly class RoundPages
 {
@@ -133,11 +133,10 @@ final readonly class RoundPages
             return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::SCREENSHOTS_TABS_LABEL, [], null, null, null, null, $verdictGiverName, self::NO_SCREENSHOTS);
         }
         $tabs = self::screenshotTabsOf($screenshots, $shownIndex);
-        $previousRound = $this->previousHandOffRoundOf($visible, $round);
         $number = $shownIndex + 1;
         $screenshot = $screenshots[$shownIndex];
-        $beforeScreenshot = self::beforeScreenshotOf($previousRound, $number);
-        $checkRows = $this->checkRowsOf($visible, $round, $previousRound);
+        [$beforeRound, $beforeScreenshot, $beforeNumber] = $this->pairedBeforeOf($visible, $picturesRound, $number, $this->previousHandOffRoundOf($visible, $round), $round->number) ?? [null, null, 0];
+        $checkRows = $this->checkRowsOf($visible, $round, $beforeRound);
 
         return new RoundPage(
             $ticket->key,
@@ -147,11 +146,11 @@ final readonly class RoundPages
             self::SCREENSHOTS_TABS_LABEL,
             $tabs,
             ScreenshotPager::over($tabs),
-            $this->shownScreenshotOf($ticket, $picturesRound, $screenshot, $number, $previousRound, $now),
+            $this->shownScreenshotOf($ticket, $picturesRound, $screenshot, $number, $beforeRound, $beforeScreenshot, $beforeNumber, $now),
             null,
             new ScreenshotPanel(
-                null === $previousRound || null === $beforeScreenshot ? null : \sprintf(self::PINS_FROM_ROUND, $previousRound->number ?? 0),
-                null === $beforeScreenshot ? [] : self::picturePinRowsOf($ticket, $beforeScreenshot, $shownIndex, $checkRows['before']),
+                null === $beforeRound ? null : \sprintf(self::PINS_FROM_ROUND, $beforeRound->number ?? 0),
+                null === $beforeScreenshot ? [] : self::picturePinRowsOf($ticket, $beforeScreenshot, $beforeNumber - 1, $checkRows['before']),
                 \sprintf(self::PINS_FROM_ROUND, $picturesRound->number ?? 0),
                 self::picturePinRowsOf($ticket, $screenshot, $shownIndex, $checkRows['after']),
             ),
@@ -167,7 +166,7 @@ final readonly class RoundPages
      * queries when either side may have items. Runs inside the request transaction whose tenant is the viewer's
      * organization.
      *
-     * @param RoundView|null $previousRound as previousHandOffRoundOf gives it
+     * @param RoundView|null $previousRound the round of the shown screenshot's Before, as pairedBeforeOf gives it
      *
      * @return array{after: array<string, ChecklistRow>, before: array<string, ChecklistRow>} each by checkKeyOf
      */
@@ -296,6 +295,44 @@ final readonly class RoundPages
     }
 
     /**
+     * The Before of a draft's "Screenshot N", its round and its number from 1 there. A copy made by "Pin this in my
+     * draft" keeps its source's picture, so its Before is the source: found in the previous hand-off round, else in the
+     * round copySourceOf names, and none when no shared round below holds it any more. Any other chain's Before is the
+     * screenshot with its number in the previous hand-off round (beforeScreenshotOf). Reads copySourceOf, and then
+     * sharedRoundOf for a copy, only for a chain the previous hand-off round does not hold. Runs inside the request
+     * transaction whose tenant is the viewer's organization.
+     *
+     * @param RoundView      $draft         a shared or unshared draft, with its tries
+     * @param int            $number        from 1, the chain's place in the strip
+     * @param RoundView|null $previousRound as previousHandOffRoundOf gives it; null means no Before at all
+     * @param int            $belowNumber   the draft's number, or RoundsVisibleTo::UNSHARED_DRAFT_NUMBER for an
+     *                                      unshared draft, as copySourceOf takes it
+     *
+     * @return array{RoundView, RoundScreenshotView, int}|null
+     */
+    public function pairedBeforeOf(VisibleTicket $visible, RoundView $draft, int $number, ?RoundView $previousRound, int $belowNumber): ?array
+    {
+        $firstTry = RoundCards::shownChainsOf($draft)[$number - 1][0] ?? null;
+        if (null === $previousRound || null === $firstTry) {
+            return null;
+        }
+        $heldByPreviousRound = self::screenshotWithMediaOf($previousRound, $firstTry->mediaId);
+        if (null !== $heldByPreviousRound) {
+            return [$previousRound, ...$heldByPreviousRound];
+        }
+        $copySource = $this->roundsVisibleTo->copySourceOf($visible->ticket->id, $visible->visibility, $draft->id, $firstTry->mediaId, $belowNumber);
+        if (null === $copySource) {
+            $beforeScreenshot = self::beforeScreenshotOf($previousRound, $number);
+
+            return null === $beforeScreenshot ? null : [$previousRound, $beforeScreenshot, $number];
+        }
+        $sourceRound = null === $copySource->roundNumber ? null : $this->roundsVisibleTo->sharedRoundOf($visible->ticket->id, $visible->visibility, $copySource->roundNumber);
+        $heldBySourceRound = null === $sourceRound ? null : self::screenshotWithMediaOf($sourceRound, $copySource->mediaId);
+
+        return null === $sourceRound || null === $heldBySourceRound ? null : [$sourceRound, ...$heldBySourceRound];
+    }
+
+    /**
      * No data ties a chain to one of an earlier round (a retake stays in its own draft, ADR-0048), so the Before of
      * "Screenshot N" is the latest try of "Screenshot N" of the previous hand-off round, the way the review seed pairs
      * areas by position; a chain numbered past that round's last one is new and has none.
@@ -391,28 +428,27 @@ final readonly class RoundPages
     }
 
     /**
-     * The screenshot with its Before, as beforeScreenshotOf pairs them; one without a Before stands alone.
+     * The screenshot with its Before, as pairedBeforeOf pairs them; one without a Before stands alone.
      *
-     * @param int            $number        from 1, its place in the strip
-     * @param RoundView|null $previousRound the hand-off round shared before a shared draft, or the report when there is
-     *                                      none, with its latest tries; null for Round 0 and a draft of a ticket with
-     *                                      neither
+     * @param int                      $number           from 1, its place in the strip
+     * @param RoundView|null           $beforeRound      the round of the Before, with its latest tries
+     * @param RoundScreenshotView|null $beforeScreenshot the Before; null when the screenshot has none
+     * @param int                      $beforeNumber     from 1, the Before's place in its own round
      */
-    private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, ?RoundView $previousRound, \DateTimeImmutable $now): ShownScreenshot
+    private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, ?RoundView $beforeRound, ?RoundScreenshotView $beforeScreenshot, int $beforeNumber, \DateTimeImmutable $now): ShownScreenshot
     {
-        $beforeScreenshot = self::beforeScreenshotOf($previousRound, $number);
         $mediaIds = null === $beforeScreenshot ? [$screenshot->mediaId] : [$screenshot->mediaId, $beforeScreenshot->mediaId];
         $images = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, array_values(array_unique($mediaIds)), RoundCards::VARIANT, $now);
         $after = RoundCards::screenshotViewOf($picturesRound, $screenshot, $number, $images);
         $afterSource = new ScreenshotSource($picturesRound->id, $screenshot->id, $picturesRound->ownerId);
-        if (null === $previousRound || null === $beforeScreenshot) {
+        if (null === $beforeRound || null === $beforeScreenshot) {
             return new ShownScreenshot(\sprintf('Screenshot %d', $number), null, null, $after, null, $afterSource);
         }
 
         return new ShownScreenshot(
             \sprintf('Screenshot %d', $number),
-            RoundCards::screenshotViewOf($previousRound, $beforeScreenshot, $number, $images),
-            \sprintf('Before · round %d', $previousRound->number ?? 0),
+            RoundCards::screenshotViewOf($beforeRound, $beforeScreenshot, $beforeNumber, $images),
+            \sprintf('Before · round %d', $beforeRound->number ?? 0),
             $after,
             \sprintf('After · round %d', $picturesRound->number ?? 0),
             $afterSource,

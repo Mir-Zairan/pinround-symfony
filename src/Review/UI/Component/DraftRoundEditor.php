@@ -69,7 +69,7 @@ final class DraftRoundEditor
      * Past the highest number a round can get (rvw_round.number is an INT), so the hand-off round before it is the
      * latest one shared: the round the draft would follow if it were shared now.
      */
-    private const int NUMBER_AFTER_EVERY_ROUND = 2_147_483_647;
+    private const int NUMBER_AFTER_EVERY_ROUND = RoundsVisibleTo::UNSHARED_DRAFT_NUMBER;
 
     /** The ticket's key, as the page's URL carries it. */
     #[LiveProp]
@@ -115,6 +115,7 @@ final class DraftRoundEditor
         private readonly RoundCommands $roundCommands,
         private readonly RoundCards $roundCards,
         private readonly RoundsVisibleTo $roundsVisibleTo,
+        private readonly RoundPages $roundPages,
         private readonly SignedUrls $signedUrls,
         private readonly Security $security,
         private readonly ClockInterface $clock,
@@ -404,12 +405,8 @@ final class DraftRoundEditor
     }
 
     /**
-     * The shown chain's Before, its round and its number from 1. A copy made by "Pin this in my draft" keeps its source's
-     * picture, so its Before is the source: found in the hand-off round shared last, else in the round copySourceOf
-     * names, and none when no shared round holds it, as when only another unshared draft does. Any other chain's Before
-     * is the screenshot with its number in the hand-off round shared last, or the report when none was
-     * (RoundPages::beforeScreenshotOf). Read once per shown chain; copySourceOf and sharedRoundOf are read only for a
-     * chain the hand-off round shared last does not hold.
+     * The shown chain's Before, its round and its number from 1, as RoundPages::pairedBeforeOf finds it for an unshared
+     * draft, against the hand-off round shared last or the report. Read once per shown chain.
      *
      * @return array{RoundView, RoundScreenshotView, int}|null
      */
@@ -420,26 +417,11 @@ final class DraftRoundEditor
             return $this->pairedBefores[$number];
         }
         $previousRound = $this->previousHandOffRound();
-        $firstTry = null === $this->draft ? null : (RoundCards::shownChainsOf($this->draft)[$number - 1][0] ?? null);
-        if (null === $previousRound || null === $this->draft || null === $firstTry) {
+        if (null === $this->draft) {
             return $this->pairedBefores[$number] = null;
         }
-        $heldByPreviousRound = RoundPages::screenshotWithMediaOf($previousRound, $firstTry->mediaId);
-        if (null !== $heldByPreviousRound) {
-            return $this->pairedBefores[$number] = [$previousRound, ...$heldByPreviousRound];
-        }
 
-        $visibleTicket = $this->visibleTicket();
-        $copySource = $this->roundsVisibleTo->copySourceOf($visibleTicket->ticket->id, $visibleTicket->visibility, $this->draft->id, $firstTry->mediaId, self::NUMBER_AFTER_EVERY_ROUND);
-        if (null === $copySource) {
-            $beforeScreenshot = RoundPages::beforeScreenshotOf($previousRound, $number);
-
-            return $this->pairedBefores[$number] = null === $beforeScreenshot ? null : [$previousRound, $beforeScreenshot, $number];
-        }
-        $sourceRound = null === $copySource->roundNumber ? null : $this->roundsVisibleTo->sharedRoundOf($visibleTicket->ticket->id, $visibleTicket->visibility, $copySource->roundNumber);
-        $heldBySourceRound = null === $sourceRound ? null : RoundPages::screenshotWithMediaOf($sourceRound, $copySource->mediaId);
-
-        return $this->pairedBefores[$number] = null === $sourceRound || null === $heldBySourceRound ? null : [$sourceRound, ...$heldBySourceRound];
+        return $this->pairedBefores[$number] = $this->roundPages->pairedBeforeOf($this->visibleTicket(), $this->draft, $number, $previousRound, self::NUMBER_AFTER_EVERY_ROUND);
     }
 
     /** Read once per render, and only for a draft with a screenshot to pair. */

@@ -21,12 +21,12 @@ use App\Ticketing\Api\TicketPageView;
  * area those are the earlier round's pins, the same the round page's side panel lists, in the same order; on a
  * screenshot of any other round, the pins that the round page draws on the picture shown, numbered as the round page
  * numbers its screenshots (RoundPages::screenshotsOf). A shared draft's screenshot has the same Before as on the round
- * page, the same-numbered screenshot of the hand-off round before it, or of the report when there is none
- * (RoundPages::beforeScreenshotOf).
+ * page (RoundPages::pairedBeforeOf): a copy's source, else the same-numbered screenshot of the hand-off round before
+ * it, or of the report when there is none.
  *
  * Its reads do not grow with the screenshots or pins: one signing call, and, for a round without areas other than a
  * review round, RoundPages' read of the one round whose screenshots it shows, for a shared draft its read of the
- * hand-off round before it or the report, and RoundPages::checkRowsOf's reads of the check items, whose buttons the
+ * hand-off round before it or the report (and of a copy's source), and RoundPages::checkRowsOf's reads of the check items, whose buttons the
  * walked pins that are check items show.
  */
 final readonly class FocusPages
@@ -78,21 +78,20 @@ final readonly class FocusPages
 
         $number = $shownIndex + 1;
         $count = \count($screenshots);
-        $previousRound = $this->roundPages->previousHandOffRoundOf($visible, $round);
-        $before = RoundPages::beforeScreenshotOf($previousRound, $number);
+        [$beforeRound, $before, $beforeNumber] = $this->roundPages->pairedBeforeOf($visible, $picturesRound, $number, $this->roundPages->previousHandOffRoundOf($visible, $round), $round->number) ?? [null, null, 0];
         $isBefore = null !== $before && FocusPage::SIDE_BEFORE === $side;
         $shown = $isBefore ? $before : $screenshot;
         // Each picture walks its own pins, as each side of the round page's Before / After draws its own.
         $pins = array_values(array_filter($shown->pins, RoundCards::isShownPin(...)));
-        $checkRows = $this->roundPages->checkRowsOf($visible, $round, $previousRound)[$isBefore ? 'before' : 'after'];
-        // The Before is the same-numbered chain of the earlier round, so both sides key their check items on this index.
-        $stops = self::stopsOf($ticket, $pins, $shownIndex, $checkRows);
+        $checkRows = $this->roundPages->checkRowsOf($visible, $round, $beforeRound)[$isBefore ? 'before' : 'after'];
+        // Each side keys its check items on its own chain: a copied screenshot's Before has its number in its source round.
+        $stops = self::stopsOf($ticket, $pins, $isBefore ? $beforeNumber - 1 : $shownIndex, $checkRows);
         $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$shown->mediaId], RoundCards::VARIANT, $now)[$shown->mediaId] ?? null;
         $picture = RoundCards::viewOfPicture(
             'focus-picture',
             match (true) {
                 null === $before => self::altTextOf($round, $screenshot, $number),
-                $isBefore => \sprintf('Before, round %d: %s', $previousRound->number ?? 0, $before->title ?? \sprintf('Screenshot %d', $number)),
+                $isBefore => \sprintf('Before, round %d: %s', $beforeRound->number ?? 0, $before->title ?? \sprintf('Screenshot %d', $beforeNumber)),
                 default => \sprintf('After, round %d: %s', $round->number, $screenshot->title ?? \sprintf('Screenshot %d', $number)),
             },
             null,
