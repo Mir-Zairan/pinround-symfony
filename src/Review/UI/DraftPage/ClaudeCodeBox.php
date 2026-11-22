@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Review\UI\DraftPage;
 
 /**
- * The draft page's "For Claude Code" box: the line its owner gives Claude Code, which fits their part on the ticket,
+ * The draft page's "Use Claude Code" box (collapsed, in the side panel): the line its owner gives Claude Code, which fits their part on the ticket,
  * the tools Claude Code uses on AgentApi's MCP server, and the command that connects it with sign-in (ADR-0050).
  */
 final readonly class ClaudeCodeBox

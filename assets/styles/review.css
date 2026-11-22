@@ -830,8 +830,9 @@ button.round-tab {
     "after texts"
     "after remove"
     "after upload"
+    "after claude"
     "after .";
-  grid-template-rows: repeat(5, auto) 1fr;
+  grid-template-rows: repeat(6, auto) 1fr;
   gap: var(--space-16) var(--space-24);
   align-items: start;
 }
@@ -844,6 +845,7 @@ button.round-tab {
     "before after texts"
     "before after remove"
     "before after upload"
+    "before after claude"
     "before after .";
 }
 
@@ -854,6 +856,7 @@ button.round-tab {
     "before texts"
     "before remove"
     "before upload"
+    "before claude"
     "before .";
 }
 
@@ -943,13 +946,15 @@ button.round-tab {
   .draft-board,
   .draft-board--compare[data-compare-mode] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "before" "after" "verdict" "pins" "texts" "remove" "upload";
+    grid-template-areas: "before" "after" "verdict" "pins" "texts" "remove" "upload" "claude";
     grid-template-rows: none;
   }
 }
 
-.draft-page__claude-code {
-  max-width: 760px;
+/* min-width: 0, so the line and the command wrap inside the side panel instead of widening it. */
+.draft-board__claude-code {
+  grid-area: claude;
+  min-width: 0;
 }
 
 .claude-code-box__command {
@@ -977,6 +982,7 @@ button.round-tab {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .claude-code-box__copy {

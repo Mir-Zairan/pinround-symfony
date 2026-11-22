@@ -82,8 +82,11 @@ test.describe('Draft round', () => {
     await expect(page.getByText('No screenshots yet.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Add screenshot' })).toHaveCount(1);
     await expect(header.getByRole('button', { name: 'Delete draft' })).toBeVisible();
-    const box = page.locator('section.claude-code-box');
-    await expect(box.getByRole('heading', { name: 'For Claude Code', level: 2 })).toBeVisible();
+    const box = page.locator('details.claude-code-box');
+    await expect(box.getByLabel('Line to give Claude Code'), 'the box comes collapsed').toBeHidden();
+    const sidePanelLeft = await page.getByRole('button', { name: 'Add screenshot' }).evaluate((element) => element.getBoundingClientRect().left);
+    expect(await box.evaluate((element) => element.getBoundingClientRect().left), 'the box sits in the side panel, under Add screenshot').toBeCloseTo(sidePanelLeft, 0);
+    await box.getByText('Use Claude Code', { exact: true }).click();
     await expect(box.getByLabel('Line to give Claude Code')).toHaveValue(`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`);
     await expect(box.locator('.claude-code-box__tools')).toContainText('get_round_notes, add_screenshot, set_verdict');
     await expect(box.locator('code.claude-code-box__command')).toHaveText(/^claude mcp add --transport http pinround https:\/\/[^ ]+\/mcp$/);
@@ -126,8 +129,9 @@ test.describe('Draft round', () => {
     await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Start a draft round' }).click();
     await expectOnDraftPage(page);
-    const box = page.locator('section.claude-code-box');
-    const line = `Read my pinround notes for ${key} and fix what is marked “Not right yet”.`;
+    const box = page.locator('details.claude-code-box');
+    await box.getByText('Use Claude Code', { exact: true }).click();
+    const line =`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`;
     await expect(box.getByLabel('Line to give Claude Code')).toHaveValue(line);
     await expect(box.getByRole('link', { name: 'API tokens' })).toHaveAttribute('href', '/me/tokens');
 
@@ -172,7 +176,8 @@ test.describe('Draft round', () => {
     await page.getByRole('button', { name: 'Start a draft round' }).click();
     await expectOnDraftPage(page);
     expect(await page.evaluate(() => typeof navigator.clipboard?.writeText)).toBe('undefined');
-    const box = page.locator('section.claude-code-box');
+    const box = page.locator('details.claude-code-box');
+    await box.getByText('Use Claude Code', { exact: true }).click();
     // Before copy-text connects the controls are hidden anyway; only after it has run does hidden prove its check.
     await expect(box.locator('[data-controller~="copy-text"][data-copy-text-connected]')).toHaveCount(1);
 

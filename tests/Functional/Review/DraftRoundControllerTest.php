@@ -1070,7 +1070,9 @@ final class DraftRoundControllerTest extends WebTestCase
 
         $boxes = $page->filter('.claude-code-box');
         self::assertCount(1, $boxes);
-        self::assertSame('For Claude Code', $boxes->filter('h2')->text());
+        self::assertCount(1, $page->filter('.draft-board > details.claude-code-box.draft-board__claude-code[data-live-ignore]'), 'In the side panel of the board, kept open across live re-renders.');
+        self::assertNull($boxes->attr('open'), 'The box comes collapsed.');
+        self::assertSame('Use Claude Code', $boxes->filter('summary')->text());
         $prompt = $boxes->filter('textarea.claude-code-box__prompt[readonly][data-copy-text-target="source"]');
         self::assertCount(1, $prompt, 'The line is a read-only field, so copy-text can copy its value and select it.');
         self::assertSame('Read my pinround notes for SHOP-1 and fix what is marked “Not right yet”.', $prompt->text(), 'Omar is the assignee, so his line fixes.');

@@ -14,7 +14,6 @@ use App\Review\Api\RoundRefused;
 use App\Review\UI\Controller\RefusalAnswers;
 use App\Review\UI\Controller\RefusedWithToast;
 use App\Review\UI\Controller\RoundController;
-use App\Review\UI\DraftPage\ClaudeCodeBox;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
@@ -92,7 +91,7 @@ final class DraftRoundController extends AbstractController
     }
 
     /**
-     * The owner's unshared draft, laid out as a round page, with its editor and the "For Claude Code" box; "?screenshot=N"
+     * The owner's unshared draft, laid out as a round page, with its editor and the "Use Claude Code" box; "?screenshot=N"
      * from 1 opens it on that screenshot, and one past the last on the last, as the editor's tabs do. Runs in the
      * request transaction. A ticket the person may not see is the ticket page's 404; an unknown or malformed id, a round
      * of another ticket, a round that is no unshared draft (shared since, or of another kind) and one RoundPermission
@@ -110,7 +109,6 @@ final class DraftRoundController extends AbstractController
             || !$this->isGranted(RoundPermission::EDIT, $round)) {
             throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
         }
-        $assigneeId = $visible->ticket->turnSnapshot->assigneeId;
         // all(), not get(): "?screenshot[]=1" is a 400 from get(). A missing or malformed one, or 0, shows the first.
         $shownNumber = RoundController::positionOf($request->query->all()[RoundController::SCREENSHOT_PARAMETER] ?? null);
 
@@ -118,7 +116,6 @@ final class DraftRoundController extends AbstractController
             'ticketKey' => $visible->ticket->key,
             'roundId' => $round->roundId,
             'shownNumber' => max(1, $shownNumber ?? 1),
-            'claudeCode' => ClaudeCodeBox::forDraftOwner($visible->ticket->key, null !== $assigneeId && $assigneeId->equals($visible->actor->userId()), $request->getSchemeAndHttpHost()),
         ]);
     }
 

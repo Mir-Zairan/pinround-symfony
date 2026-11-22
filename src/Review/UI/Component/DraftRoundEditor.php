@@ -14,6 +14,7 @@ use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Controller\RoundController;
+use App\Review\UI\DraftPage\ClaudeCodeBox;
 use App\Review\UI\DraftRoundController;
 use App\Review\UI\Media\RoundMediaTarget;
 use App\Review\UI\PinView;
@@ -27,6 +28,7 @@ use App\Review\UI\VisibleTicketLookup;
 use App\SharedKernel\Domain\UserId;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\UX\LiveComponent\Attribute\AsLiveComponent;
@@ -41,7 +43,7 @@ use Symfony\UX\LiveComponent\DefaultActionTrait;
  * a round page: the header with "k of n look right", the share, new-ticket and delete buttons and a tab per screenshot,
  * then one screenshot at a time, beside the picture of the same number in the hand-off round before it when there is
  * one (Before, After or both), with its "Looks right" / "Not right yet" toggle, pins, title, summary and "Remove
- * screenshot", and "Add screenshot". A retaken screenshot shows its latest try with "Try 2 of 2" and a switch to its
+ * screenshot", "Add screenshot" and the collapsed "Use Claude Code" box. A retaken screenshot shows its latest try with "Try 2 of 2" and a switch to its
  * earlier tries (ADR-0048); an earlier try is read-only but for marking its pins "Fixed on try N" or "Still wrong" and
  * "Remove this try". Each change is saved at once through RoundCommands' draft commands, in the request transaction: a
  * RoundRefused other than NOT_FOUND is shown on the page and saves nothing; NOT_FOUND is the round's 404.
@@ -119,6 +121,7 @@ final class DraftRoundEditor
         private readonly SignedUrls $signedUrls,
         private readonly Security $security,
         private readonly ClockInterface $clock,
+        private readonly RequestStack $requestStack,
     ) {
     }
 
@@ -338,6 +341,23 @@ final class DraftRoundEditor
     public function ticketTitle(): string
     {
         return $this->visibleTicket()->ticket->title;
+    }
+
+    /**
+     * The "Use Claude Code" box: the line that fits the owner's part on the ticket, and the command that connects
+     * Claude Code at the address the page was opened at.
+     */
+    public function claudeCode(): ClaudeCodeBox
+    {
+        $visibleTicket = $this->visibleTicket();
+        $assigneeId = $visibleTicket->ticket->turnSnapshot->assigneeId;
+        $request = $this->requestStack->getMainRequest() ?? throw new \LogicException('The draft editor renders only for a request.');
+
+        return ClaudeCodeBox::forDraftOwner(
+            $visibleTicket->ticket->key,
+            null !== $assigneeId && $assigneeId->equals($visibleTicket->actor->userId()),
+            $request->getSchemeAndHttpHost(),
+        );
     }
 
     public function draftCsrfId(): string

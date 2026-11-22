@@ -79,7 +79,7 @@ In Claude Code, ask: "Use pinround's whoami tool." It answers your name, your or
 Then ask: "List my pinround tickets." You should see the tickets where it is your turn or that are assigned to you.
 
 ## Example prompts
-- "Read my pinround notes for SHOP-88 and fix what is marked “Not right yet”." This is the line the **For Claude Code** box on your draft round gives you to copy.
+- "Read my pinround notes for SHOP-88 and fix what is marked “Not right yet”." This is the line the **Use Claude Code** box on your draft round's page gives you to copy (it is under Add screenshot, closed until you open it).
 - `/mcp__pinround__fix_my_round_notes SHOP-88`, the same with pinround's prompt: fix pin by pin, keep each retake, and upload the retakes as tries only when you ask ([Fixing your round notes](#fixing-your-round-notes)).
 - "Which pinround tickets are waiting for me?"
 - "Which open pinround ticket is about the checkout total?"

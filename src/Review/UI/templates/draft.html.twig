@@ -1,7 +1,7 @@
 {% extends '@Web/base.html.twig' %}
 
 {#- The owner's private draft round on its own page (DraftRoundController::page), laid out as the round page: the
-    editor (DraftRoundEditor) with its header, tabs, pictures and side panel, and the "For Claude Code" box. -#}
+    editor (DraftRoundEditor) with its header, tabs, pictures and side panel, the "Use Claude Code" box at its foot. -#}
 
 {% block title %}Draft round · {{ ticketKey }} · pinround{% endblock %}
 
@@ -12,18 +12,5 @@
 {% block main %}
     <article class="round-page draft-page" aria-labelledby="round-{{ roundId }}-heading">
         <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="roundId" :shownNumber="shownNumber" />
-        <section class="claude-code-box draft-page__claude-code" aria-labelledby="draft-claude-code">
-            <h2 id="draft-claude-code" class="claude-code-box__title">For Claude Code</h2>
-            {#- A field, not a code line: copy-text copies a field's value, and selects it when the browser refuses. -#}
-            <div class="claude-code-box__copy" {{ stimulus_controller('copy-text') }}>
-                <textarea class="claude-code-box__prompt" rows="2" readonly spellcheck="false" aria-label="Line to give Claude Code" {{ stimulus_target('copy-text', 'source') }}>{{ claudeCode.prompt }}</textarea>
-                <p class="claude-code-box__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
-                    <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy line</twig:Button>
-                    <span class="claude-code-box__copy-status" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
-                </p>
-            </div>
-            <p class="claude-code-box__tools">{{ constant('App\\Review\\UI\\DraftPage\\ClaudeCodeBox::TOOLS_NOTE') }}</p>
-            <p class="claude-code-box__connect">To connect Claude Code, run <code class="claude-code-box__command">{{ claudeCode.connectCommand }}</code> and sign in. To use a token instead, see the <a class="claude-code-box__tokens-link" href="{{ path('identity_tokens') }}">API tokens</a> page.</p>
-        </section>
     </article>
 {% endblock %}
