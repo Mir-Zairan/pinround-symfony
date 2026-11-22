@@ -40,7 +40,7 @@ git clone https://github.com/Mir-Zairan/pinround-symfony.git && cd pinround-symf
 make demo
 ```
 
-It pulls ready-made images, starts pinround and loads the demo people and their tickets: 4 minutes 8 seconds, measured from `git clone` on an empty Docker. Then open https://localhost, accept the browser's warning about the local certificate once, and log in as `mia@acme-foods.example` (tester), `omar@acme-foods.example` (developer) or `lena@acme-foods.example` (lead). The password: `grep DEMO_PASSWORD .env.dev.local`. Stop with `make down`. [More](docs/guides/demo.md).
+It pulls ready-made images, starts pinround and loads the demo people and their tickets: about 4 minutes (4 min 15 s measured from `git clone` on an empty Docker). Then open https://localhost, accept the browser's warning about the local certificate once, and log in as `mia@acme-foods.example` (tester), `omar@acme-foods.example` (developer) or `lena@acme-foods.example` (lead). The password: `grep DEMO_PASSWORD .env.dev.local`. Stop with `make down`. [More](docs/guides/demo.md).
 
 **What to open first:** log in as Mia and open **Tickets** › "Cart total disappears after a discount code". It is her turn, and its Round 1 shows Omar's fix Before and After with pins (the checklist from the report has no round number). Two more show the rest of the loop: "Search finds nothing for Bread with a capital B" (done) and "Orders filter leaves out the last order" (Mia found more, so it is back with Omar).
 
