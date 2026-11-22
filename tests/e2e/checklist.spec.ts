@@ -15,13 +15,13 @@ import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 
 // The chip colours (ticket-page.md, Rounds): Open has no fill, so it cannot pass for a button, and --on-surface-var
-// text; then the ping, passed and error containers, as tokens.css sets them for the light theme and review.css's
-// check-state rules use them.
+// text; then the ping, passed and error containers, as review.css's check-state rules use them. They are read from the
+// page's own theme, as a person's saved theme (another spec may set dark) changes every token.
 const CHIP_COLOURS = {
-  open: { background: 'rgba(0, 0, 0, 0)', text: 'rgb(63, 73, 70)' },
-  fixed: { background: 'rgb(208, 228, 255)', text: 'rgb(0, 29, 52)' },
-  ok: { background: 'rgb(131, 248, 205)', text: 'rgb(0, 33, 22)' },
-  notFixed: { background: 'rgb(255, 218, 214)', text: 'rgb(147, 0, 10)' },
+  open: { background: 'transparent', text: 'var(--on-surface-var)' },
+  fixed: { background: 'var(--ping-container)', text: 'var(--on-ping-container)' },
+  ok: { background: 'var(--passed-container)', text: 'var(--on-passed-container)' },
+  notFixed: { background: 'var(--error-container)', text: 'var(--on-error-container)' },
 } as const;
 
 const SAVE_FAILED = 'Could not save the checklist change. Try again.';
@@ -64,8 +64,20 @@ function button(scope: Locator, name: 'Mark fixed' | 'OK' | 'Not fixed'): Locato
 async function expectChip(pinRow: Locator, label: string, colours: { background: string; text: string }): Promise<void> {
   const chip = pinRow.locator('.check-state');
   await expect(chip).toHaveText(label);
-  await expect(chip).toHaveCSS('background-color', colours.background);
-  await expect(chip).toHaveCSS('color', colours.text);
+  // A probe in the chip's place resolves each token as the browser does, in the theme the page shows.
+  const [background, text] = await chip.evaluate((element, wanted) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = wanted.background;
+    probe.style.color = wanted.text;
+    element.parentElement?.append(probe);
+    const computed = getComputedStyle(probe);
+    const resolved = [computed.backgroundColor, computed.color];
+    probe.remove();
+
+    return resolved;
+  }, colours);
+  await expect(chip).toHaveCSS('background-color', background);
+  await expect(chip).toHaveCSS('color', text);
 }
 
 async function expectButtons(page: Page, counts: { markFixed: number; ok: number; notFixed: number }): Promise<void> {
