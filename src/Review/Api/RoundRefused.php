@@ -45,6 +45,14 @@ final class RoundRefused extends \DomainException
     public const string UNKNOWN_PIN_VERDICT = 'Mark the pin fixed or still wrong.';
     /** A round saved without RoundCommands took the number while the draft was being shared. */
     public const string NUMBER_TAKEN = 'Another round took this number just now. Try again.';
+    /**
+     * No screenshot of a shared round of the ticket with those ids, as copyScreenshotToDraft looks for it: an unknown or
+     * malformed id, another organization's or another ticket's round, an unshared or deleted draft, or an earlier try,
+     * which nobody but the draft's owner sees (ADR-0048). One answer for all, so nobody learns that a draft exists.
+     */
+    public const string SHARED_SCREENSHOT_NOT_FOUND = 'No round you may see has that screenshot.';
+    /** The draft holds that picture already, from an earlier copy. */
+    public const string COPIED_ALREADY = 'Your draft has this screenshot already.';
 
     private const string KIND_READ_ONLY = 'read_only';
     private const string KIND_INVALID_CONTENT = 'invalid_content';
@@ -119,12 +127,12 @@ final class RoundRefused extends \DomainException
     }
 
     /**
-     * NOT_FOUND, SCREENSHOT_NOT_FOUND or PIN_NOT_FOUND: no draft of the person with that id, or no such picture or pin
-     * in it.
+     * NOT_FOUND, SCREENSHOT_NOT_FOUND, PIN_NOT_FOUND or SHARED_SCREENSHOT_NOT_FOUND: no draft of the person with that
+     * id, no such picture or pin in it, or no such picture of a shared round to copy.
      */
     public function isNotFound(): bool
     {
-        return \in_array($this->getMessage(), [self::NOT_FOUND, self::SCREENSHOT_NOT_FOUND, self::PIN_NOT_FOUND], true);
+        return \in_array($this->getMessage(), [self::NOT_FOUND, self::SCREENSHOT_NOT_FOUND, self::PIN_NOT_FOUND, self::SHARED_SCREENSHOT_NOT_FOUND], true);
     }
 
     public function isReadOnly(): bool

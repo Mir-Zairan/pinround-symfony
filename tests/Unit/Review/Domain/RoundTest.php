@@ -232,6 +232,44 @@ final class RoundTest extends TestCase
         $draft->latestTryIdOfChainWith(new ScreenshotId(self::UNKNOWN_SCREENSHOT));
     }
 
+    /**
+     * draftWithTries: chain A is 0, 2, 3, B is 1 alone, C is 4, 5. By their latest try B would come first, so a number
+     * counted over the latest tries by position would say 2 for A's.
+     *
+     * @return iterable<string, array{int, int|null}> the position of the named try and its number, null for none
+     */
+    public static function triesAndTheirScreenshotNumber(): iterable
+    {
+        yield 'the latest try of the first chain' => [3, 1];
+        yield 'a screenshot with no retake' => [1, 2];
+        yield 'the latest try of the last chain' => [5, 3];
+        yield 'the first try of a chain of three' => [0, null];
+        yield 'a middle try' => [2, null];
+        yield 'the first try of another chain' => [4, null];
+    }
+
+    #[Test]
+    #[DataProvider('triesAndTheirScreenshotNumber')]
+    public function aLatestTryIsNumberedByItsChainsFirstTryAndAnEarlierTryIsNotFound(int $namedPosition, ?int $number): void
+    {
+        $draft = self::draftWithTries();
+        $before = self::snapshot($draft);
+
+        $found = $draft->latestTryWithNumber(self::screenshotId($namedPosition));
+
+        self::assertSame(
+            null === $number ? null : [self::screenshotId($namedPosition)->toString(), $number],
+            null === $found ? null : [$found[0]->id()->toString(), $found[1]],
+        );
+        self::assertSame($before, self::snapshot($draft));
+    }
+
+    #[Test]
+    public function aScreenshotTheRoundDoesNotHaveHasNoNumber(): void
+    {
+        self::assertNull(self::draftWithTries()->latestTryWithNumber(new ScreenshotId(self::UNKNOWN_SCREENSHOT)));
+    }
+
     #[Test]
     public function aShareOfADraftWithNoRetakeKeepsEveryScreenshot(): void
     {

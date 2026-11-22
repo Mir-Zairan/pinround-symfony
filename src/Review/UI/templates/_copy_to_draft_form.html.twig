@@ -1,0 +1,7 @@
+{#- "Pin this in my draft" (DraftRoundController::copyScreenshot) for the picture shown (ticketKey, source, csrfId,
+    formClass, size): it copies that screenshot into the person's private draft and opens the draft on it. -#}
+{% set draftController = 'App\\Review\\UI\\DraftRoundController' %}
+<form method="post" action="{{ path(constant(draftController ~ '::COPY_SCREENSHOT_ROUTE'), {key: ticketKey, id: source.roundId, screenshotId: source.screenshotId}) }}" class="copy-to-draft {{ formClass }}">
+    <input type="hidden" name="{{ constant(draftController ~ '::CSRF_FIELD') }}" value="{{ csrf_token(csrfId) }}">
+    <twig:Button type="submit" variant="outline" :size="size" class="copy-to-draft__button">Pin this in my draft</twig:Button>
+</form>

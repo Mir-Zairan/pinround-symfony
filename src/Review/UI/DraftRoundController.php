@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Review\UI;
 
+use App\Review\Api\CopiedDraftScreenshot;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
 use App\Review\Api\RoundCommands;
@@ -12,6 +13,7 @@ use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
 use App\Review\UI\Controller\RefusalAnswers;
 use App\Review\UI\Controller\RefusedWithToast;
+use App\Review\UI\Controller\RoundController;
 use App\Review\UI\DraftPage\ClaudeCodeBox;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
@@ -27,7 +29,8 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * A private draft round's own page and its buttons (P05.T8, ADR-0017, ticket-page.md, Draft round): the page that edits
  * it (DraftRoundEditor), "Start a draft round" in the Rounds section, which answers with the new draft's page, and the
- * page's "Share with the team now", "Delete draft" and "Make it a new ticket" (ADR-0044). Share and delete answer with
+ * page's "Share with the team now", "Delete draft" and "Make it a new ticket" (ADR-0044), and a shared round's "Pin
+ * this in my draft", which answers with the draft's page on the copied screenshot. Share and delete answer with
  * a redirect to the ticket's Rounds section and their toast flashed; "Make it a new ticket" to the new report draft's
  * page instead. A refusal (a start the person may not make, an expired form, or a RoundRefused
  * other than NOT_FOUND) changes nothing and is a 422 toast stream for a Turbo form, and a redirect with the toast
@@ -49,6 +52,7 @@ final class DraftRoundController extends AbstractController
     public const string SHARE_ROUTE = 'review_draft_share';
     public const string DELETE_ROUTE = 'review_draft_delete';
     public const string NEW_TICKET_ROUTE = 'review_draft_new_ticket';
+    public const string COPY_SCREENSHOT_ROUTE = 'review_draft_copy_screenshot';
 
     public const string CSRF_FIELD = '_csrf_token';
 
@@ -58,6 +62,9 @@ final class DraftRoundController extends AbstractController
     public const string DRAFT_DELETED = 'Draft round deleted.';
     public const string MOVED_TO_REPORT_DRAFT = 'Your draft is a report draft now. Press Send to make the ticket.';
     public const string ONLY_THE_ASSIGNEE_OR_TURN_STARTS = 'Only the assignee, or the person whose turn it is, can start a draft round.';
+    public const string ONLY_THE_TURN_COPIES = 'Only the assignee, or the person whose turn it is, can pin another person\'s screenshot in their draft.';
+    public const string COPIED_TO_DRAFT = 'Copied to your draft. Add your pins.';
+    public const string COPIED_TO_NEW_DRAFT = 'Draft round started with this screenshot. Only you see it. Add your pins.';
 
     /** The flash type base.html.twig shows in its toast region. */
     private const string TOAST = 'toast';
@@ -85,7 +92,8 @@ final class DraftRoundController extends AbstractController
     }
 
     /**
-     * The owner's unshared draft, laid out as a round page, with its editor and the "For Claude Code" box. Runs in the
+     * The owner's unshared draft, laid out as a round page, with its editor and the "For Claude Code" box; "?screenshot=N"
+     * from 1 opens it on that screenshot, and one past the last on the last, as the editor's tabs do. Runs in the
      * request transaction. A ticket the person may not see is the ticket page's 404; an unknown or malformed id, a round
      * of another ticket, a round that is no unshared draft (shared since, or of another kind) and one RoundPermission
      * VIEW or EDIT denies are all one 404, so another person's draft cannot be told from a missing one.
@@ -103,10 +111,13 @@ final class DraftRoundController extends AbstractController
             throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
         }
         $assigneeId = $visible->ticket->turnSnapshot->assigneeId;
+        // all(), not get(): "?screenshot[]=1" is a 400 from get(). A missing or malformed one, or 0, shows the first.
+        $shownNumber = RoundController::positionOf($request->query->all()[RoundController::SCREENSHOT_PARAMETER] ?? null);
 
         return $this->render('@Review/draft.html.twig', [
             'ticketKey' => $visible->ticket->key,
             'roundId' => $round->roundId,
+            'shownNumber' => max(1, $shownNumber ?? 1),
             'claudeCode' => ClaudeCodeBox::forDraftOwner($visible->ticket->key, null !== $assigneeId && $assigneeId->equals($visible->actor->userId()), $request->getSchemeAndHttpHost()),
         ]);
     }
@@ -130,6 +141,44 @@ final class DraftRoundController extends AbstractController
             $this->addFlash(self::TOAST, self::DRAFT_STARTED);
 
             return $this->redirectToRoute(self::PAGE_ROUTE, ['key' => $key, 'id' => $draftId], Response::HTTP_SEE_OTHER);
+        });
+    }
+
+    /**
+     * "Pin this in my draft" on a shared round's page (ADR-0044, 2026-11-22 note): copies the shown screenshot into the
+     * person's draft on the ticket, starting one when they have none, and answers with the draft's page on that
+     * screenshot. A round id RoundQueries::accessFactsOf does not know, a round of another ticket and one RoundPermission
+     * VIEW denies are the round's 404; COPY_TO_OWN_DRAFT denied (not their turn, their own round) is refused with its
+     * toast, as the page may show the button after the ticket moved on; then an expired form; then the command's own
+     * refusals, of which a screenshot it does not find is the 404 too.
+     */
+    #[Route('/t/{key}/rounds/{id}/screenshots/{screenshotId}/copy-to-draft', name: self::COPY_SCREENSHOT_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function copyScreenshot(string $key, string $id, string $screenshotId, Request $request): Response
+    {
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $now = $this->clock->now();
+
+        return $this->answerRefusalsOf($request, $key, function () use ($key, $id, $screenshotId, $csrfToken, $now): Response {
+            $copy = $this->transactions->run(function () use ($key, $id, $screenshotId, $csrfToken, $now): CopiedDraftScreenshot {
+                $visible = $this->visibleTicketLookup->visibleTicketOf($key);
+                $round = $this->roundQueries->accessFactsOf($id);
+                if (null === $round || !$round->ticketId->equals($visible->ticket->id) || !$this->isGranted(RoundPermission::VIEW, $round)) {
+                    throw $this->createNotFoundException(RoundRefused::SHARED_SCREENSHOT_NOT_FOUND);
+                }
+                if (!$this->isGranted(RoundPermission::COPY_TO_OWN_DRAFT, $round)) {
+                    throw new RefusedWithToast(self::ONLY_THE_TURN_COPIES);
+                }
+                $this->refuseAnExpiredForm($key, $csrfToken);
+
+                return $this->roundCommands->copyScreenshotToDraft($visible->ticket->id, $id, $screenshotId, $visible->actor->userId(), $now);
+            });
+            $this->addFlash(self::TOAST, $copy->isDraftStarted ? self::COPIED_TO_NEW_DRAFT : self::COPIED_TO_DRAFT);
+
+            return $this->redirectToRoute(
+                self::PAGE_ROUTE,
+                ['key' => $key, 'id' => $copy->draftRoundId, RoundController::SCREENSHOT_PARAMETER => $copy->screenshotNumber],
+                Response::HTTP_SEE_OTHER,
+            );
         });
     }
 
@@ -210,8 +259,8 @@ final class DraftRoundController extends AbstractController
         } catch (RefusedWithToast $refused) {
             return $this->respondToRefusal($request, $key, $refused);
         } catch (RoundRefused $refused) {
-            if (RoundRefused::NOT_FOUND === $refused->getMessage()) {
-                throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
+            if (\in_array($refused->getMessage(), [RoundRefused::NOT_FOUND, RoundRefused::SHARED_SCREENSHOT_NOT_FOUND], true)) {
+                throw $this->createNotFoundException($refused->getMessage());
             }
 
             return $this->respondToRefusal($request, $key, new RefusedWithToast($refused->getMessage()));

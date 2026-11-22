@@ -22,6 +22,7 @@ final readonly class ShownScreenshot
      *                                           picture; null exactly when $before is
      * @param string|null         $afterCaption  for example "After · round 2"; null for a screenshot of a round without
      *                                           areas that has no $before, which stands alone
+     * @param ScreenshotSource    $afterSource   the round and screenshot $after is, which "Pin this in my draft" copies
      */
     public function __construct(
         public string $name,
@@ -29,6 +30,7 @@ final readonly class ShownScreenshot
         public ?string $beforeCaption,
         public ScreenshotView $after,
         public ?string $afterCaption,
+        public ScreenshotSource $afterSource,
     ) {
     }
 }

@@ -377,6 +377,109 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertCount(1, $frame->filter(self::ROUNDS.' form.rounds__start'), 'The assignee may still start his own.');
     }
 
+    /**
+     * ADR-0044, 2026-11-22: in Testing it is Mia's turn, and Omar's self-check is Round 1. "Pin this in my draft" on its
+     * second screenshot starts Mia's draft with that picture and opens it there.
+     */
+    #[Test]
+    public function theTesterWhoseTurnItIsPinsAScreenshotOfOmarsRoundInANewDraftAndLandsOnIt(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->putInTestingWithMiasTurn($ticketId);
+        $omarsRound = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $this->addScreenshot($omarsRound, $this->addMedia('ready', 'Omar'), 0, 'Cart total', null);
+        $secondMedia = $this->addMedia('ready', 'Omar');
+        $second = $this->addScreenshot($omarsRound, $secondMedia, 1, 'Discount line', null);
+        $copyUrl = $this->copyUrl($omarsRound, $second);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $focus = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus?screenshot=2');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$copyUrl], $focus->filter('form.copy-to-draft')->each(static fn (Crawler $form): string => (string) $form->attr('action')), 'Full screen offers it too.');
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1?screenshot=2');
+        self::assertResponseStatusCodeSame(200);
+        $form = $page->filter('.round-page__side form.copy-to-draft');
+        self::assertSame([$copyUrl], $form->each(static fn (Crawler $copy): string => (string) $copy->attr('action')));
+        self::assertSame('Pin this in my draft', $form->filter('button[type=submit]')->text());
+
+        $this->client->submit($form->form());
+
+        $drafts = array_values(array_filter($this->roundRowsOf($ticketId), static fn (array $round): bool => null === $round['number']));
+        self::assertCount(1, $drafts);
+        self::assertSame(['draft', $this->people['Mia']->id()->toString(), null, 'open'], [$drafts[0]['kind'], $drafts[0]['owner_id'], $drafts[0]['shared_at'], $drafts[0]['state']]);
+        self::assertIsString($drafts[0]['id']);
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame($this->draftPageUrl($drafts[0]['id']).'?screenshot=1', $this->client->getResponse()->headers->get('Location'));
+        $draftPage = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(DraftRoundController::COPIED_TO_NEW_DRAFT, $draftPage->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        self::assertStringContainsString('From round 1 · Screenshot 2', (string) $this->client->getResponse()->getContent());
+        $copies = $this->screenshotRowsOf($drafts[0]['id']);
+        self::assertSame([['From round 1 · Screenshot 2', null, null]], array_map(static fn (array $row): array => [$row['title'], $row['summary'], $row['verdict']], $copies));
+        self::assertSame([], $this->pinRowsOf($drafts[0]['id']));
+        self::assertCount(2, $this->screenshotRowsOf($omarsRound), 'Omar\'s round keeps its screenshots.');
+
+        $this->client->request('POST', $copyUrl, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
+
+        self::assertSame(RoundRefused::COPIED_ALREADY, $this->toastAfterTheRedirect(), 'A second copy is refused, not doubled.');
+        self::assertCount(1, $this->screenshotRowsOf($drafts[0]['id']));
+    }
+
+    /**
+     * In Testing it is Mia's turn: Omar is the assignee and may start a draft, but the round is his own; Lena and Raj
+     * may see the round but may not start a draft. Each is refused with the reason and nothing is made.
+     */
+    #[Test]
+    public function onlyWhoMayStartADraftOnAnotherPersonsRoundSeesPinThisInMyDraftAndOthersAreRefused(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $this->putInTestingWithMiasTurn($ticketId);
+        $omarsRound = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $screenshot = $this->addScreenshot($omarsRound, $this->addMedia('ready', 'Omar'), 0, 'Cart total', null);
+        $ben = $this->otherOrganizationsAdmin();
+        $before = $this->roundRowsOf($ticketId);
+        self::assertCount(1, $before);
+
+        foreach (['Omar', 'Lena', 'Raj'] as $person) {
+            $this->logIn($this->client, $this->people[$person]);
+            foreach (['/t/SHOP-1/rounds/1', '/t/SHOP-1/rounds/1/focus'] as $url) {
+                $page = $this->client->request('GET', $url);
+                self::assertResponseStatusCodeSame(200);
+                self::assertCount(0, $page->filter('form.copy-to-draft'), $person.' on '.$url);
+            }
+
+            $this->client->request('POST', $this->copyUrl($omarsRound, $screenshot), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
+
+            self::assertSame(DraftRoundController::ONLY_THE_TURN_COPIES, $this->toastAfterTheRedirect(), $person);
+            self::assertSame($before, $this->roundRowsOf($ticketId), $person);
+
+            $this->client->request('POST', $this->copyUrl($omarsRound, $screenshot), [], [], self::TURBO_FORM_HEADERS);
+
+            self::assertSame(DraftRoundController::ONLY_THE_TURN_COPIES, $this->toastOfTheRefusal(), $person.': the voter runs before the form token is read.');
+            self::assertSame($before, $this->roundRowsOf($ticketId), $person);
+        }
+
+        $this->logIn($this->client, $this->people['Mia']);
+        foreach ([$this->copyUrl($omarsRound, Uuid::v7()->toRfc4122()), $this->copyUrl(Uuid::v7()->toRfc4122(), $screenshot), $this->copyUrl('not-a-round', $screenshot)] as $url) {
+            $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
+            self::assertResponseStatusCodeSame(404);
+            self::assertSame($before, $this->roundRowsOf($ticketId), $url);
+        }
+        $this->client->request('POST', $this->copyUrl($omarsRound, $screenshot), [DraftRoundController::CSRF_FIELD => 'expired']);
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastAfterTheRedirect());
+        self::assertSame($before, $this->roundRowsOf($ticketId));
+
+        $this->logIn($this->client, $ben);
+        $this->client->request('POST', $this->copyUrl($omarsRound, $screenshot), [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame($before, $this->roundRowsOf($ticketId));
+    }
+
+    private function copyUrl(string $roundId, string $screenshotId): string
+    {
+        return '/t/SHOP-1/rounds/'.$roundId.'/screenshots/'.$screenshotId.'/copy-to-draft';
+    }
+
     #[Test]
     public function noOneButTheAssigneeSeesTheStartButtonOrMayStartADraftWhileItIsNobodyElsesTurn(): void
     {

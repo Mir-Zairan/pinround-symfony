@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\AgentApi\Infrastructure\Mcp\Tool;
 
+use App\Review\Api\CopiedDraftScreenshot;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\SharedKernel\Domain\TicketId;
@@ -68,6 +69,11 @@ final class RecordingRoundCommands implements RoundCommands
     public function addDraftScreenshot(string $roundId, UserId $ownerId, string $mediaId, \DateTimeImmutable $addedAt): string
     {
         throw new \LogicException('set_verdict never adds a screenshot.');
+    }
+
+    public function copyScreenshotToDraft(TicketId $ticketId, string $roundId, string $screenshotId, UserId $ownerId, \DateTimeImmutable $copiedAt): CopiedDraftScreenshot
+    {
+        throw new \LogicException('set_verdict never copies a screenshot.');
     }
 
     public function removeDraftScreenshot(string $roundId, UserId $ownerId, string $screenshotId, \DateTimeImmutable $at): void

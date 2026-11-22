@@ -212,6 +212,29 @@ final class Round
     }
 
     /**
+     * The latest try with that id and its number from 1, the place of its chain among the round's chains by the position
+     * of each chain's first try, as ScreenshotChains numbers them on the round page; null when the round has no such
+     * picture or it is an earlier try, which nobody but a draft's owner sees (ADR-0048).
+     *
+     * @return array{Screenshot, int}|null
+     */
+    public function latestTryWithNumber(ScreenshotId $screenshotId): ?array
+    {
+        $chainNumbers = [];
+        foreach ($this->screenshots as $screenshot) {
+            // By position, so a chain's first try, which has its lowest position, comes before its other tries.
+            $chainNumbers[$screenshot->firstTryId()->toString()] ??= \count($chainNumbers) + 1;
+        }
+        foreach ($this->screenshots as $screenshot) {
+            if ($screenshot->id()->equals($screenshotId)) {
+                return $this->isLatestTry($screenshot) ? [$screenshot, $chainNumbers[$screenshot->firstTryId()->toString()]] : null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @throws \DomainException when the round is not an open unshared draft of $actorId; the round stays as it is
      */
     public function refuseUnlessEditableBy(UserId $actorId): void

@@ -396,8 +396,9 @@ final readonly class RoundPages
         $mediaIds = null === $beforeScreenshot ? [$screenshot->mediaId] : [$screenshot->mediaId, $beforeScreenshot->mediaId];
         $images = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, array_values(array_unique($mediaIds)), RoundCards::VARIANT, $now);
         $after = RoundCards::screenshotViewOf($picturesRound, $screenshot, $number, $images);
+        $afterSource = new ScreenshotSource($picturesRound->id, $screenshot->id, $picturesRound->ownerId);
         if (null === $previousRound || null === $beforeScreenshot) {
-            return new ShownScreenshot(\sprintf('Screenshot %d', $number), null, null, $after, null);
+            return new ShownScreenshot(\sprintf('Screenshot %d', $number), null, null, $after, null, $afterSource);
         }
 
         return new ShownScreenshot(
@@ -406,6 +407,7 @@ final readonly class RoundPages
             \sprintf('Before · round %d', $previousRound->number ?? 0),
             $after,
             \sprintf('After · round %d', $picturesRound->number ?? 0),
+            $afterSource,
         );
     }
 
@@ -546,6 +548,7 @@ final readonly class RoundPages
             $beforeCaption,
             self::viewOf($area, $area->after, 'after', \sprintf('After, round %d: %s', $round->number, $area->name), $images),
             \sprintf('After · round %d', $round->number),
+            new ScreenshotSource($round->id, $area->after->id, $round->ownerId),
         );
     }
 

@@ -12,6 +12,7 @@ use App\Media\Api\Uploads;
 use App\Media\Api\UploadSlot;
 use App\Media\Api\UploadTarget;
 use App\Media\Api\UploadTargetDenied;
+use App\Review\Api\CopiedDraftScreenshot;
 use App\Review\Api\OpenDraftQueries;
 use App\Review\Api\OpenDraftScreenshots;
 use App\Review\Api\RoundAccessFacts;
@@ -132,6 +133,11 @@ final class CreateUploadFakes implements CurrentApiToken, TicketKeyQueries, Tick
         $this->openDrafts[self::STARTED_DRAFT] = [$ticketId->toString(), $ownerId->toString()];
 
         return self::STARTED_DRAFT;
+    }
+
+    public function copyScreenshotToDraft(TicketId $ticketId, string $roundId, string $screenshotId, UserId $ownerId, \DateTimeImmutable $copiedAt): CopiedDraftScreenshot
+    {
+        throw new \LogicException('create_upload never copies a screenshot.');
     }
 
     public function isGranted(mixed $attribute, mixed $subject = null, ?AccessDecision $accessDecision = null): bool

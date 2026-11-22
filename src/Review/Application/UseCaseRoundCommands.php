@@ -6,6 +6,7 @@ namespace App\Review\Application;
 
 use App\Media\Api\UploadedMedia;
 use App\Review\Api\AddedDraftScreenshot;
+use App\Review\Api\CopiedDraftScreenshot;
 use App\Review\Api\DraftScreenshotCommands;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
@@ -162,6 +163,52 @@ final readonly class UseCaseRoundCommands implements RoundCommands, DraftScreens
         });
 
         return new AddedDraftScreenshot($screenshotId->toString(), false, \count($screenshot->pins));
+    }
+
+    public function copyScreenshotToDraft(TicketId $ticketId, string $roundId, string $screenshotId, UserId $ownerId, \DateTimeImmutable $copiedAt): CopiedDraftScreenshot
+    {
+        [$sourceRound, $source, $sourceNumber] = $this->sharedLatestTry($ticketId, $roundId, $screenshotId);
+        $draft = $this->rounds->openUnsharedDraftOf($ticketId, $ownerId);
+        $isDraftStarted = null === $draft;
+        if (null === $draft) {
+            $draftId = new RoundId($this->startDraft($ticketId, $ownerId, $copiedAt));
+            $draft = $this->rounds->get($draftId) ?? throw new \LogicException('The draft started a moment ago is stored.');
+        }
+        if (null !== $draft->screenshotOfMedia($source->mediaId())) {
+            throw new RoundRefused(RoundRefused::COPIED_ALREADY);
+        }
+        $copyId = $this->rounds->nextScreenshotIdentity();
+        $title = \sprintf('From round %d · Screenshot %d', $sourceRound->number() ?? Round::REPORT_NUMBER, $sourceNumber);
+
+        $this->changeAndSave($draft, $copiedAt, static function (Round $round) use ($ownerId, $copyId, $source, $title): void {
+            $round->addScreenshot($ownerId, $copyId, $source->mediaId());
+            $round->editScreenshotText($ownerId, $copyId, $title, null);
+        });
+
+        return new CopiedDraftScreenshot($draft->id()->toString(), $copyId->toString(), \count($draft->latestTries()), $isDraftStarted);
+    }
+
+    /**
+     * @return array{Round, Screenshot, int} the shared round, its latest try with that id, and the try's number from 1
+     *
+     * @throws RoundRefused SHARED_SCREENSHOT_NOT_FOUND unless $roundId is a shared round of $ticketId, a deleted draft
+     *                      neither, that holds $screenshotId as a latest try
+     */
+    private function sharedLatestTry(TicketId $ticketId, string $roundId, string $screenshotId): array
+    {
+        try {
+            $id = new RoundId($roundId);
+            $tryId = new ScreenshotId($screenshotId);
+        } catch (\InvalidArgumentException) {
+            throw new RoundRefused(RoundRefused::SHARED_SCREENSHOT_NOT_FOUND);
+        }
+        $round = $this->rounds->get($id);
+        if (null === $round || !$round->ticketId()->equals($ticketId) || $round->isUnsharedDraft() || null !== $round->deletedAt()) {
+            throw new RoundRefused(RoundRefused::SHARED_SCREENSHOT_NOT_FOUND);
+        }
+        [$latestTry, $number] = $round->latestTryWithNumber($tryId) ?? throw new RoundRefused(RoundRefused::SHARED_SCREENSHOT_NOT_FOUND);
+
+        return [$round, $latestTry, $number];
     }
 
     public function removeDraftScreenshot(string $roundId, UserId $ownerId, string $screenshotId, \DateTimeImmutable $at): void

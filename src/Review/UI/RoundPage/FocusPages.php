@@ -63,17 +63,17 @@ final readonly class FocusPages
         }
         if (self::REVIEW === $round->kind) {
             // ReviewRoundQueries reads a review round's pictures through its areas only.
-            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false, [], null, RoundPages::NO_AREAS);
+            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false, [], null, RoundPages::NO_AREAS, null);
         }
 
-        $screenshots = ($this->roundPages->screenshotsOf($visible, $round) ?? [null, []])[1];
+        [$picturesRound, $screenshots] = $this->roundPages->screenshotsOf($visible, $round) ?? [null, []];
         $shownIndex = null === $screenshotNumber ? 0 : $screenshotNumber - 1;
         if (null !== $screenshotNumber && !isset($screenshots[$shownIndex])) {
             return null;
         }
         $screenshot = $screenshots[$shownIndex] ?? null;
-        if (null === $screenshot) {
-            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false, [], null, RoundPages::NO_SCREENSHOTS);
+        if (null === $picturesRound || null === $screenshot) {
+            return new FocusPage($ticket->key, $roundLine, null, FocusPage::SIDE_AFTER, false, null, [], null, false, [], null, RoundPages::NO_SCREENSHOTS, null);
         }
 
         $number = $shownIndex + 1;
@@ -116,6 +116,7 @@ final readonly class FocusPages
             [RoundController::SCREENSHOT_PARAMETER => $number],
             ScreenshotPager::overScreenshots($number, $count),
             RoundPages::NO_SCREENSHOTS,
+            $isBefore ? null : new ScreenshotSource($picturesRound->id, $screenshot->id, $picturesRound->ownerId),
         );
     }
 
@@ -151,6 +152,7 @@ final readonly class FocusPages
             [RoundController::AREA_PARAMETER => $area->position],
             null,
             RoundPages::NO_AREAS,
+            $isBefore ? null : new ScreenshotSource($round->id, $area->after->id, $round->ownerId),
         );
     }
 

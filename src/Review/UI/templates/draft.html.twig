@@ -11,7 +11,7 @@
 
 {% block main %}
     <article class="round-page draft-page" aria-labelledby="round-{{ roundId }}-heading">
-        <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="roundId" />
+        <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="roundId" :shownNumber="shownNumber" />
         <section class="claude-code-box draft-page__claude-code" aria-labelledby="draft-claude-code">
             <h2 id="draft-claude-code" class="claude-code-box__title">For Claude Code</h2>
             {#- A field, not a code line: copy-text copies a field's value, and selects it when the browser refuses. -#}

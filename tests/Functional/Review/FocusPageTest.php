@@ -51,6 +51,11 @@ final class FocusPageTest extends WebTestCase
      */
     private const int PAGE_QUERIES = 22;
     /**
+     * The After also asks RoundPermission COPY_TO_OWN_DRAFT for "Pin this in my draft": the round's ticket facts, and
+     * DraftRoundCreationVoter's ticket facts and turn row. The Before offers no copy, so it asks nothing.
+     */
+    private const int COPY_VOTE_QUERIES = 3;
+    /**
      * VerdictControllerTest's ONE_VERDICT_QUERIES (38) without the second read of the round and its names for the round
      * page's tab and panel: the redirect reads the full-screen review again.
      */
@@ -546,7 +551,7 @@ final class FocusPageTest extends WebTestCase
         $fivePinsQueryCount = $this->queryCountOf(self::FOCUS_PAGE.'?side=before&pin=2');
 
         self::assertCount(5, $this->client->getCrawler()->filter('.focus-bar__stop'));
-        self::assertSame($noPinsQueryCount, $threePinsQueryCount);
+        self::assertSame($noPinsQueryCount, $threePinsQueryCount + self::COPY_VOTE_QUERIES);
         self::assertSame($threePinsQueryCount, $fivePinsQueryCount);
         self::assertSame(self::PAGE_QUERIES, $fivePinsQueryCount);
     }

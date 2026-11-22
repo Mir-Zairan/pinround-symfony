@@ -73,6 +73,9 @@
                 </section>
 
                 <div class="round-page__side">
+                    {% if copyToDraft is not null %}
+                        {{ include('@Review/_copy_to_draft_form.html.twig', {ticketKey: page.ticketKey, source: copyToDraft, csrfId: draftCsrfId, formClass: 'round-page__copy-to-draft', size: 'md'}, with_context = false) }}
+                    {% endif %}
                     {% if page.panel is not null %}
                         {{ include('@Review/_round_panel.html.twig', {panel: page.panel}) }}
                     {% elseif page.screenshotPanel is not null %}

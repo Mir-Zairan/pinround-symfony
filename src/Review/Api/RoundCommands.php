@@ -76,6 +76,27 @@ interface RoundCommands
     public function addDraftScreenshot(string $roundId, UserId $ownerId, string $mediaId, \DateTimeImmutable $addedAt): string;
 
     /**
+     * "Pin this in my draft": adds the picture of a shared round's screenshot to $ownerId's draft round on the ticket,
+     * after its last one, as a new screenshot titled "From round N · Screenshot k" with no summary, pins or verdict, so
+     * its owner pins it as their own. The new screenshot points to the same stored picture (no new upload, ADR-0011),
+     * which the round keeps, so the picture needs no check of who uploaded it. Starts the draft with startDraft first
+     * when the owner has no open one on the ticket. Who may copy (RoundPermission COPY_TO_OWN_DRAFT) is the caller's
+     * voter's to decide; the draft rules are RoundCommands'.
+     *
+     * @param string $roundId      a shared round of $ticketId: the report, a review round or a shared draft
+     * @param string $screenshotId the latest try of one of its screenshots
+     *
+     * @throws RoundRefused     SHARED_SCREENSHOT_NOT_FOUND (isNotFound) for any round or screenshot it does not find as
+     *                          its constant says; COPIED_ALREADY when the draft holds that picture already, so a second
+     *                          copy is refused rather than doubled; DRAFT_EXISTS when another request started the draft
+     *                          meanwhile; a full draft (isInvalidContent); DRAFT_CHANGED; nothing is saved, the draft
+     *                          neither
+     * @throws \DomainException Ticketing's TicketNotFound when the tenant has no ticket with that id; nothing is saved
+     * @throws \LogicException  when no transaction is open or no tenant is set
+     */
+    public function copyScreenshotToDraft(TicketId $ticketId, string $roundId, string $screenshotId, UserId $ownerId, \DateTimeImmutable $copiedAt): CopiedDraftScreenshot;
+
+    /**
      * Removes the picture with its pins; the others keep their places.
      *
      * @throws RoundRefused    NOT_FOUND, SCREENSHOT_NOT_FOUND, DRAFT_CHANGED, or when the draft is shared; nothing is saved

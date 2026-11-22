@@ -12,9 +12,11 @@ use App\Review\Api\RoundPermission;
 use App\Review\Api\VerdictPermission;
 use App\Review\Application\OpenSharedRound;
 use App\Review\UI\Component\RoundsSection;
+use App\Review\UI\DraftRoundController;
 use App\Review\UI\RoundPage\FocusPage;
 use App\Review\UI\RoundPage\FocusPages;
 use App\Review\UI\RoundPage\RoundPages;
+use App\Review\UI\RoundPage\ScreenshotSource;
 use App\Review\UI\RoundsController;
 use App\Review\UI\VisibleTicket;
 use App\Review\UI\VisibleTicketLookup;
@@ -35,6 +37,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * screenshot of a round without areas. On an open hand-off round the person whose turn it is also gets the ticket's
  * move-on verbs (MoveOnVerbQueries), which post to the ticket page's move and so close the round (ADR-0048), unless
  * their move would leave it open (OpenSharedRound::isClosedByMoveOf), as the owner's of a round shared with "Share now".
+ * Whoever RoundPermission COPY_TO_OWN_DRAFT lets copy the shown picture gets "Pin this in my draft"
+ * (DraftRoundController::copyScreenshot), on both pages.
  *
  * Runs in the request transaction. An unknown or malformed key or number, another organization's ticket, a ticket the
  * viewer may not see and a round RoundPermission VIEW denies all answer the same 404, so no answer tells that a hidden
@@ -99,7 +103,23 @@ final class RoundController extends AbstractController
             'focusRoute' => self::FOCUS_ROUTE,
             'fullScreenControlId' => self::FULL_SCREEN_CONTROL_ID,
             'moveOnForm' => self::isClosedByMoveOnOf($visible->actor->userId(), $round, $ticket->turnSnapshot->assigneeId) ? $this->moveOnVerbQueries->moveOnFormOf($ticket) : null,
+            'copyToDraft' => $this->copyableSourceOf($visible, $page->shown?->afterSource),
+            'draftCsrfId' => DraftRoundController::csrfIdOf($ticket->key),
         ]);
+    }
+
+    /**
+     * The screenshot "Pin this in my draft" copies, when RoundPermission COPY_TO_OWN_DRAFT is granted on its round; null
+     * otherwise, and the page offers no button. One vote for the one picture shown.
+     */
+    private function copyableSourceOf(VisibleTicket $visible, ?ScreenshotSource $source): ?ScreenshotSource
+    {
+        if (null === $source) {
+            return null;
+        }
+        $facts = new RoundAccessFacts($visible->actor->organizationId(), $source->roundId, $visible->ticket->id, $source->roundOwnerId, false, false);
+
+        return $this->isGranted(RoundPermission::COPY_TO_OWN_DRAFT, $facts) ? $source : null;
     }
 
     /**
@@ -160,6 +180,8 @@ final class RoundController extends AbstractController
             'returnParameters' => $isFromTicket ? [self::RETURN_PARAMETER => self::RETURN_TO_TICKET] : [],
             'sideParameter' => self::SIDE_PARAMETER,
             'pinParameter' => self::PIN_PARAMETER,
+            'copyToDraft' => $this->copyableSourceOf($visible, $page->pictureSource),
+            'draftCsrfId' => DraftRoundController::csrfIdOf($ticket->key),
         ]);
     }
 

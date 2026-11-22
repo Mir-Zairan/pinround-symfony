@@ -17,10 +17,12 @@ use Symfony\Component\Security\Core\Authorization\AccessDecisionManagerInterface
 use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 
 /**
- * Decides RoundPermission VIEW, EDIT and MOVE_TO_REPORT_DRAFT on one round (ADR-0013, ADR-0017, ADR-0044). An
- * unshared draft is its owner's alone: not a lead's or an admin's either, and its ticket is not read. A shared round is
- * whoever TicketPermission VIEW lets see its ticket for VIEW, and whoever TicketPermission VIEW and EDIT both grant for
- * EDIT; MOVE_TO_REPORT_DRAFT is nobody's on a shared round. A deleted draft is nobody's.
+ * Decides RoundPermission VIEW, EDIT, MOVE_TO_REPORT_DRAFT and COPY_TO_OWN_DRAFT on one round (ADR-0013, ADR-0017,
+ * ADR-0044). An unshared draft is its owner's alone: not a lead's or an admin's either, and its ticket is not read;
+ * COPY_TO_OWN_DRAFT is nobody's on it. A shared round is whoever TicketPermission VIEW lets see its ticket for VIEW,
+ * and whoever TicketPermission VIEW and EDIT both grant for EDIT; MOVE_TO_REPORT_DRAFT is nobody's on a shared round,
+ * and COPY_TO_OWN_DRAFT whoever TicketPermission VIEW lets see its ticket and RoundPermission DRAFT_CREATE lets start a
+ * draft on it, but not the round's owner. A deleted draft is nobody's.
  * Denied with nobody logged in, when the tenant is not the actor's organization, for a round of another organization,
  * and for a shared round whose ticket the tenant has not or whose facts cannot be read.
  *
@@ -44,7 +46,7 @@ final class RoundVoter extends DenyByDefaultVoter
 
     protected function attributes(): array
     {
-        return [RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT];
+        return [RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT, RoundPermission::COPY_TO_OWN_DRAFT];
     }
 
     protected function subjectClass(): string
@@ -63,9 +65,12 @@ final class RoundVoter extends DenyByDefaultVoter
             return false;
         }
         if ($subject->isUnsharedDraft) {
-            return $subject->ownerId->equals($actor->userId());
+            return RoundPermission::COPY_TO_OWN_DRAFT !== $attribute && $subject->ownerId->equals($actor->userId());
         }
         if (RoundPermission::MOVE_TO_REPORT_DRAFT === $attribute) {
+            return false;
+        }
+        if (RoundPermission::COPY_TO_OWN_DRAFT === $attribute && $subject->ownerId->equals($actor->userId())) {
             return false;
         }
         $ticket = $this->ticketOf($subject);
@@ -76,6 +81,7 @@ final class RoundVoter extends DenyByDefaultVoter
         return match ($attribute) {
             RoundPermission::VIEW => true,
             RoundPermission::EDIT => $this->accessDecisionManager->decide($token, [TicketPermission::EDIT], $ticket),
+            RoundPermission::COPY_TO_OWN_DRAFT => $this->accessDecisionManager->decide($token, [RoundPermission::DRAFT_CREATE], $subject->ticketId),
             default => false,
         };
     }

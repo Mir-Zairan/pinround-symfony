@@ -126,6 +126,7 @@ Legend: ✅ allowed · ⚠️ allowed with a condition (see note) · — not all
 | Start / edit / share a draft round | — | — | ⚠️ if assignee or it is their turn ⁸ | ⚠️ if assignee or it is their turn ⁸ | — | — |
 | See a draft round | ⚠️ only after shared (never unshared) | ⚠️ only after shared | ⚠️ owner, or after shared (a lead never sees others' unshared drafts) | ⚠️ owner, or after shared | ⚠️ after shared | — |
 | Make it a new ticket (draft round to report draft) | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | ⚠️ owner of an unshared draft only | — | — |
+| Pin this in my draft (copy a shared round's screenshot into my draft round) | — | — | ⚠️ if they may start a draft, not on their own round ⁸ | ⚠️ if they may start a draft, not on their own round ⁸ | — | — |
 | See, edit and send my report drafts ⁹ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |
 | See and edit my notebooks ¹⁰ | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only | ⚠️ own only |
 | Summarize with AI (shared summary) | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | ⚠️ AI policy | — | — |

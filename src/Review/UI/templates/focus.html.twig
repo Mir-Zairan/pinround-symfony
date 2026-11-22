@@ -35,6 +35,9 @@
                     {label: 'Before', href: path(focusRoute, shownQuery|merge({(sideParameter): 'before'})|merge(returnParameters)), isCurrent: page.side == 'before'},
                 ]" />
             {% endif %}
+            {% if copyToDraft is not null %}
+                {{ include('@Review/_copy_to_draft_form.html.twig', {ticketKey: ticketKey, source: copyToDraft, csrfId: draftCsrfId, formClass: 'focus-review__copy-to-draft', size: 'sm'}, with_context = false) }}
+            {% endif %}
             {% if page.pager is not null %}
                 {% set pager = page.pager %}
                 <nav class="focus-review__pager" aria-label="{{ constant('App\\Review\\UI\\RoundPage\\ScreenshotPager::NAV_LABEL') }}">

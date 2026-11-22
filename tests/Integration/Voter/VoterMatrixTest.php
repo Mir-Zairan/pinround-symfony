@@ -155,6 +155,7 @@ final class VoterMatrixTest extends KernelTestCase
         'Deleted draft round of Omar' => [self::ACME_FOODS, self::SHOP_TICKET, true, true],
         'Shared round of Omar on a team-only Shop ticket' => [self::ACME_FOODS, self::SHOP_TICKET, false, false],
         'Shared round of Omar on a team-only Support ticket' => [self::ACME_FOODS, self::SUPPORT_TICKET, false, false],
+        'Shared round of Omar on the Shop ticket in Testing, Mia\'s turn' => [self::ACME_FOODS, self::TESTING_TICKET, false, false],
         'Shared round of Omar on a ticket nobody has' => [self::ACME_FOODS, self::NO_TICKET, false, false],
         'Unshared draft round of Omar in another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, true, false],
         'Shared round of another organization' => [self::BETA_BAKERY, self::SHOP_TICKET, false, false],

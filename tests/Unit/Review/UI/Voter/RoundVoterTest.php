@@ -138,7 +138,7 @@ final class RoundVoterTest extends TestCase
         $deletedDraft = self::round(self::ACME_FOODS, self::SHOP_1, self::OMAR, true, true);
         $deletedSharedRound = self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, true);
 
-        foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT] as $attribute) {
+        foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT, RoundPermission::COPY_TO_OWN_DRAFT] as $attribute) {
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $deletedDraft, [$attribute]), $attribute);
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::LENA), $deletedSharedRound, [$attribute]), $attribute);
         }
@@ -189,6 +189,47 @@ final class RoundVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::LENA), $lenasSharedRound, [RoundPermission::EDIT]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::LENA), $lenasSharedRound, [RoundPermission::MOVE_TO_REPORT_DRAFT]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::SARA), $lenasSharedRound, [RoundPermission::MOVE_TO_REPORT_DRAFT]));
+    }
+
+    /**
+     * DRAFT_CREATE is decided by a voter that grants it to Mia and Omar on SHOP-1 alone, so each denial below is
+     * the rule it names. The token's user, the round's owner, the ticket, whether COPY_TO_OWN_DRAFT is granted.
+     *
+     * @return iterable<string, array{string, string, string, bool}>
+     */
+    public static function copiesToOwnDraft(): iterable
+    {
+        yield 'Mia, whose turn it is, on Lena\'s round' => [self::MIA, self::LENA, self::SHOP_1, true];
+        yield 'Omar, the assignee, on Lena\'s round' => [self::OMAR, self::LENA, self::SHOP_1, true];
+        yield 'Omar on his own round, though he may start a draft' => [self::OMAR, self::OMAR, self::SHOP_1, false];
+        yield 'Lena, who may not start a draft, on Omar\'s round' => [self::LENA, self::OMAR, self::SHOP_1, false];
+        yield 'Raj, a Manager who may see it, on Omar\'s round' => [self::RAJ, self::OMAR, self::SHOP_1, false];
+        yield 'Mia on a ticket where she may not start a draft' => [self::MIA, self::LENA, self::SHOP_2, false];
+        yield 'the Beta Bakery admin, who may not see SHOP-1' => [self::BETA_ADMIN, self::LENA, self::SHOP_1, false];
+    }
+
+    #[Test]
+    #[DataProvider('copiesToOwnDraft')]
+    public function copyingToOneOwnDraftNeedsTheRoundsTicketAndADraftStartAndIsNotTheOwners(string $userId, string $ownerId, string $ticketId, bool $isGranted): void
+    {
+        $voter = $this->voterUnder(self::ACME_FOODS, self::voterGrantingDraftCreate([self::MIA, self::OMAR], self::SHOP_1));
+        $sharedRound = self::round(self::ACME_FOODS, $ticketId, $ownerId, false, false);
+
+        self::assertSame($isGranted ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf($userId), $sharedRound, [RoundPermission::COPY_TO_OWN_DRAFT]));
+    }
+
+    /**
+     * Mia may start a draft on SHOP-1, so only the draft's being unshared or deleted denies her.
+     */
+    #[Test]
+    public function nobodyCopiesFromAnUnsharedOrDeletedDraftNotEvenItsOwner(): void
+    {
+        $voter = $this->voterUnder(self::ACME_FOODS, self::voterGrantingDraftCreate([self::MIA, self::OMAR], self::SHOP_1));
+
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::COPY_TO_OWN_DRAFT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::MIA), self::omarsDraft(), [RoundPermission::COPY_TO_OWN_DRAFT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::MIA), self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, true), [RoundPermission::COPY_TO_OWN_DRAFT]));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::MIA), self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, false), [RoundPermission::COPY_TO_OWN_DRAFT]));
     }
 
     #[Test]
@@ -364,6 +405,33 @@ final class RoundVoterTest extends TestCase
             'tester' === $rajsColumn ? $raj : null,
             'waiting-on person' === $rajsColumn ? $raj : null,
         );
+    }
+
+    /**
+     * Stands in for DraftRoundCreationVoter: grants DRAFT_CREATE on $ticketId to $userIds and denies it otherwise.
+     *
+     * @param list<string> $userIds
+     */
+    private static function voterGrantingDraftCreate(array $userIds, string $ticketId): VoterInterface
+    {
+        return new class($userIds, $ticketId) extends Voter {
+            /**
+             * @param list<string> $userIds
+             */
+            public function __construct(private readonly array $userIds, private readonly string $ticketId)
+            {
+            }
+
+            protected function supports(string $attribute, mixed $subject): bool
+            {
+                return RoundPermission::DRAFT_CREATE === $attribute && $subject instanceof TicketId;
+            }
+
+            protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
+            {
+                return $subject instanceof TicketId && $subject->toString() === $this->ticketId && \in_array($token->getUserIdentifier(), $this->userIds, true);
+            }
+        };
     }
 
     /**
