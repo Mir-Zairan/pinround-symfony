@@ -516,6 +516,28 @@ final class TicketListTest extends WebTestCase
         self::assertSame('No tickets match. Clear the search or pick another person.', $page->filter('.empty-state')->text());
     }
 
+    /**
+     * "Assigned to: Me" filters by assignee: Mia, the tester, has none, so the empty list says where her turns are
+     * rather than "pick another person".
+     */
+    #[Test]
+    public function meWithNothingAssignedSaysWhereTheTicketsThatWaitForYouAre(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.tickets__row'));
+        self::assertSame(TicketListController::NOTHING_ASSIGNED_TO_YOU, $page->filter('.empty-state')->text());
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString().'&q=gift');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(TicketListController::NO_MATCHES, $page->filter('.empty-state')->text(), 'With a search, the search may be what hides them.');
+    }
+
     #[Test]
     public function aPersonOutsideTheTeamFilteringByAnAssigneeStillSeesNoTeamOnlyTicket(): void
     {

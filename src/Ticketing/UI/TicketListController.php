@@ -53,6 +53,8 @@ final class TicketListController extends AbstractController
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
     public const string NO_MATCHES = 'No tickets match. Clear the search or pick another person.';
+    /** "Assigned to: Me" with nothing assigned, as for a tester: what waits for them is under Whose turn?. */
+    public const string NOTHING_ASSIGNED_TO_YOU = 'Nothing is assigned to you. Whose turn? shows what waits for you.';
     public const string SHOW_MORE_NOT_VALID = 'That "Show more" link is not valid.';
 
     public function __construct(
@@ -121,7 +123,11 @@ final class TicketListController extends AbstractController
             'queueStartUrl' => $this->generateUrl(QueueController::START_ROUTE, ['source' => QueueController::LIST_STEP_SOURCE, ...$listContext->query()]),
             'queueCsrfId' => QueueController::CSRF_ID,
             'queueStepField' => QueueController::STEP_FIELD,
-            'noTickets' => null === $searchText && null === $assigneeId ? self::NO_TICKETS : self::NO_MATCHES,
+            'noTickets' => match (true) {
+                null === $searchText && null === $assigneeId => self::NO_TICKETS,
+                null === $searchText && $assigneeId === $actor->userId()->toString() => self::NOTHING_ASSIGNED_TO_YOU,
+                default => self::NO_MATCHES,
+            },
             'filters' => [
                 'project' => $project?->key() ?? '',
                 'projectId' => $project?->id() ?? '',
