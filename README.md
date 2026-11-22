@@ -60,6 +60,10 @@ Two more tickets show the two other ways a ticket can go:
 ## Try the loop
 Report a bug in the bundled shop, fix it with Claude Code and hand it over, as the three demo people. `demo-shop/` has 4 planted bugs ([answers](demo-shop/BUGS.md)).
 
+<details>
+<summary>Show the steps: set up the shop, the extension and Claude Code, then report, fix and hand over one bug</summary>
+
+
 **Before you start** (after `make demo`, about 5 minutes; you also need Node 20+, Chrome and [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)). Or run `claude` in this folder and type `/pinround-setup`: it does the machine steps and stops only for what you must click.
 1. **The shop:** `make demo-shop`, then open http://localhost:8090.
 2. **The extension:** use the Chrome profile where you accepted the certificate warning on https://localhost (the extension's uploads to https://localhost:9443 rely on it). Open `chrome://extensions`, turn on **Developer mode**, **Load unpacked** › pick `extension/`. In its options, **Connect to pinround** with `https://localhost`, log in as Mia, **Allow**. Under **Allowed hosts**, add `http://localhost:8090`.
@@ -87,8 +91,14 @@ All demo people (`@acme-foods.example`): Mia (tester), Omar (developer), Lena (l
 
 Put the bugs back with `git restore demo-shop/src`.
 
+</details>
+
 ## Turn on Pinround-Symfony's AI
 Pinround-Symfony has its own AI for two buttons: **Check with AI** on **New ticket** (it checks a report before you send it) and **Summarize with AI** on a ticket. They do nothing until you choose one of the ways below. The AI only suggests; a person decides. Claude Code works without this.
+
+<details>
+<summary>Show how: Hugging Face, Anthropic or Ollama on your laptop</summary>
+
 
 The steps use the setup script. Set it once: `S=.claude/skills/pinround-setup/pinround-setup.sh`. At any time, `bash $S ai-status` shows what is set and what is missing.
 
@@ -114,6 +124,8 @@ Instead of the script, Sara can also paste a key for Acme Foods in **Admin › A
 On the laptop only **Summarize with AI** runs for now. Its answer is a proposal; a person makes it the ticket's summary. A team can also run one Ollama server for everyone: set `AI_OLLAMA_URL` ([config](docs/operations/config.md#ai)) and choose **Ollama server** under **Cloud AI › Provider**.
 
 **Try it:** as Mia, open **New ticket**, write a short report and press **Check with AI** (cloud only). On any ticket, press **Summarize with AI**.
+
+</details>
 
 ## What Pinround-Symfony does today
 - **Screenshots with pins:** from the web form, the extension (with a floating dock on the page) or Claude Code; up to 5 tries per screenshot; Before and After; full-screen review.
