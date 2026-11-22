@@ -34,7 +34,7 @@ It is also a full ticket tracker: **Whose turn?** and **My reports** views, sear
 5. **Testers add what they find.** They capture edge cases from the browser extension, or ask their own Claude Code to check, and share them as the next round. The developer fixes them the same way.
 
 ## Run it in 5 minutes
-You need Docker with Compose v2 (Docker Desktop on macOS or Windows with WSL 2), `make` and `git`. Ports 80 and 443 must be free.
+You need Docker with Compose v2 (Docker Desktop on macOS or Windows with WSL 2), `make` and `git`. Port 443 must be free; if another port is taken, `make demo` picks a free one and says so.
 
 ```bash
 git clone https://github.com/Mir-Zairan/pinround-symfony.git && cd pinround-symfony
@@ -134,7 +134,7 @@ On the laptop only **Summarize with AI** runs for now. Its answer is a proposal;
 
 ## Good to know
 - **Sample data:** setup adds about 40 sample `SHOP` tickets in every step, each with a one-line description in the shop's words but no screenshots, so lists, filters and **Whose turn?** have something to show. Omar and Lena are their assignees, so Mia's **Assigned to: Me** is empty: her turns are under **Whose turn?**. Your own report gets the next number.
-- **Start or stop later:** `make up` / `make down`. A port is taken? Set another in `.env.local`, for example `HTTPS_PORT=8443`.
+- **Start or stop later:** `make up` / `make down`. The ports `make demo` moved are in `.env.local`.
 - **Beyond the demo:** `make up` builds and starts the same stack for development ([step by step](docs/guides/demo.md#set-up-step-by-step)). A deployment for a team is not ready yet: that is the launch phase (P12); the settings are in [config.md](docs/operations/config.md).
 - **Guides:** [Claude Code](docs/guides/claude-code.md) · [Reporting with Claude Code](docs/guides/reporting-with-claude-code.md) · [Browser extension](docs/guides/browser-extension.md)
 

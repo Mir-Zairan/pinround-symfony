@@ -4,7 +4,7 @@ What `make demo` does, what it needs, and how to publish new ready-made images a
 
 ## What it does
 `make demo` runs `.claude/skills/pinround-setup/pinround-setup.sh demo`:
-1. Writes a random `DEMO_PASSWORD` to `.env.dev.local` if there is none, and turns demo mode on there (`PINROUND_DEMO_SKIP_2FA=1`, dev only, [ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md)) before the first start, so no restart is needed.
+1. Writes a random `DEMO_PASSWORD` to `.env.dev.local` if there is none, and turns demo mode on there (`PINROUND_DEMO_SKIP_2FA=1`, dev only, [ADR-0049](../03-adr/0049-demo-switch-for-two-step-login.md)) before the first start, so no restart is needed. Then checks the published ports while the stack is stopped: port 443 and 9443 must be free (`https://localhost` and the screenshot uploads depend on them), and it stops with a message naming the port if one is taken; any other taken port (80, 9000, 9001, 8025) moves to the next free one, 8080 or above for port 80, saved in `.env.local` and named in the output.
 2. Pulls the ready-made dev images by digest from `ghcr.io/mir-zairan` (amd64 and arm64) and tags them `pinround-app:dev` and `pinround-minio:dev`. `compose.yaml` keeps `pull_policy: never`: compose itself never pulls these names.
 3. Starts the app, applies the database roles and migrations (not the test database), starts the rest, loads the demo data and copies the local certificate for Claude Code (as `trust-ca` does).
 4. Prints the address and who to log in as. It never prints the password; `grep DEMO_PASSWORD .env.dev.local` shows it.

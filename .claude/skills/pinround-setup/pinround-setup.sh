@@ -482,12 +482,50 @@ use_ready_images() {
     docker tag "$ready_minio_image" pinround-minio:dev
 }
 
+# Whether something on this machine answers on 127.0.0.1:<port> (bash's /dev/tcp, so no ss or lsof is needed).
+port_is_taken() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
+
+# Before the first start: a published port another program holds moves to the next free one, saved in .env.local; the
+# two that https://localhost and the screenshot uploads depend on (HTTPS_PORT and the fixed 9443) must be freed instead.
+# Skipped while this stack runs, as its own ports are then taken by it.
+pick_free_ports() {
+    local spec key default port candidate limit chosen=' '
+    [[ -z $(compose ps -q 2> /dev/null) ]] || return 0
+    for port in "$(compose_setting HTTPS_PORT 443)" 9443; do
+        port_is_taken "$port" && fail "port $port is taken by another program, and https://localhost needs it; stop that program (for example another local web server) and run make demo again."
+    done
+    for spec in HTTP_PORT:80 MINIO_API_PORT:9000 MINIO_CONSOLE_PORT:9001 MAILPIT_UI_PORT:8025; do
+        key=${spec%%:*}
+        default=${spec#*:}
+        port=$(compose_setting "$key" "$default")
+        if ! port_is_taken "$port" && [[ $chosen != *" $port "* ]]; then
+            chosen+="$port "
+            continue
+        fi
+        # Above 1023, so no system port; each port once, as two services cannot share one.
+        candidate=$((port < 1024 ? 8080 : port + 1))
+        limit=$((candidate + 2000))
+        while { port_is_taken "$candidate" || [[ $chosen == *" $candidate "* ]]; } && ((candidate < limit)); do
+            candidate=$((candidate + 1))
+        done
+        { port_is_taken "$candidate" || [[ $chosen == *" $candidate "* ]]; } && fail "port $port is taken and no free port was found after it; set $key in .env.local."
+        chosen+="$candidate "
+        set_env_line .env.local "$key" "$candidate"
+        ok "port $port was taken, so $key=$candidate is saved in .env.local"
+    done
+    # compose_files was set before .env.local may have existed; compose must read the ports just saved.
+    if [[ -f .env.local && " ${compose_files[*]} " != *" .env.local "* ]]; then
+        compose_files+=(--env-file .env.local)
+    fi
+}
+
 cmd_demo() {
     if ! demo_password_is_set; then
         set_env_line .env.dev.local DEMO_PASSWORD "$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
     fi
     # Before the first start, so no restart is needed for it (ADR-0049: dev only, every page says so).
     set_env_line .env.dev.local PINROUND_DEMO_SKIP_2FA 1
+    pick_free_ports
     if ready_images_fit && use_ready_images; then
         ok 'ready-made images in place'
     else
