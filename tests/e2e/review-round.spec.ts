@@ -52,16 +52,23 @@ test('Mia opens the round from the Rounds section, switches area tabs and compar
   await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/${roundNumber}$`));
   await page.waitForLoadState('networkidle');
 
-  await expect(areaTab(page, REVIEW_AREAS[0])).toHaveAttribute('aria-current', 'page');
+  await expect(areaTab(page, REVIEW_AREAS[0])).toHaveAttribute('aria-selected', 'true');
   await expect(areaTab(page, REVIEW_AREAS[0])).toContainText('2 pins');
   await expect(areaTab(page, REVIEW_AREAS[1])).toContainText('Not reviewed');
   await expect(panel(page).getByRole('heading', { name: 'Pins from round 1' })).toBeVisible();
-  await expect(panel(page).locator('.round-panel__pin')).toHaveText([new RegExp(EARLIER_PIN_NOTES[0]), new RegExp(EARLIER_PIN_NOTES[1])]);
+  const earlierRows = panel(page).locator('.round-pin[data-pin-list="before"]');
+  await expect(earlierRows).toHaveText([new RegExp(EARLIER_PIN_NOTES[0]), new RegExp(EARLIER_PIN_NOTES[1])]);
+  await page.locator('figure.round-compare__side--before .pin[data-pin-number="2"]').click();
+  await expect(earlierRows.nth(1), 'a click on a marker selects its row in the panel').toHaveClass(/round-pin--selected/);
+  await expect(page.locator('figure.round-compare__side--before .pin[data-pin-number="2"]')).toHaveAttribute('aria-pressed', 'true');
+  await earlierRows.nth(0).locator('.round-pin__note').click();
+  await expect(page.locator('figure.round-compare__side--before .pin[data-pin-number="1"]'), 'and a click on a row rings its marker').toHaveAttribute('aria-pressed', 'true');
+  await expect(earlierRows.nth(1)).not.toHaveClass(/round-pin--selected/);
 
   await areaTab(page, REVIEW_AREAS[1]).click();
   await expect(page).toHaveURL(new RegExp(`\\?area=1$`));
-  await expect(areaTab(page, REVIEW_AREAS[1])).toHaveAttribute('aria-current', 'page');
-  await expect(areaTab(page, REVIEW_AREAS[0])).not.toHaveAttribute('aria-current', 'page');
+  await expect(areaTab(page, REVIEW_AREAS[1])).toHaveAttribute('aria-selected', 'true');
+  await expect(areaTab(page, REVIEW_AREAS[0])).not.toHaveAttribute('aria-selected', 'true');
   await expect(panel(page).getByRole('heading', { name: `Your verdict on ${REVIEW_AREAS[1]}` })).toBeVisible();
   await expect(panel(page)).toContainText('That round left no pins here.');
 
@@ -97,8 +104,8 @@ test('Mia opens the round from the Rounds section, switches area tabs and compar
 
 test('Mia marks pins Fixed and Still wrong, focus lands on each Undo, and Undo takes the verdict back', async ({ browser }) => {
   const { page, close } = await openRound(browser, MIA_STORAGE_STATE);
-  const firstPin = panel(page).locator('.round-panel__pin').filter({ hasText: EARLIER_PIN_NOTES[0] });
-  const secondPin = panel(page).locator('.round-panel__pin').filter({ hasText: EARLIER_PIN_NOTES[1] });
+  const firstPin = panel(page).locator('.round-pin[data-pin-list="before"]').filter({ hasText: EARLIER_PIN_NOTES[0] });
+  const secondPin = panel(page).locator('.round-pin[data-pin-list="before"]').filter({ hasText: EARLIER_PIN_NOTES[1] });
   const verdictTag = (pin: typeof firstPin) => pin.locator('.verdict-tag');
   await expect(verdictTag(firstPin)).toHaveText('Not checked yet');
 

@@ -5,9 +5,9 @@ export function roundPanel(page: Page) {
   return page.locator('aside#round-panel');
 }
 
-/** The tab of the screen area with that name. */
+/** The tab of the screen area with that name, in the round page's tab row. */
 export function areaTab(page: Page, name: string) {
-  return page.getByRole('navigation', { name: 'Screen areas' }).getByRole('link', { name: new RegExp(`^${name}`) });
+  return page.getByRole('tablist', { name: 'Screen areas' }).getByRole('tab', { name: new RegExp(`^${name}`) });
 }
 
 /** Clicks Save verdict in the panel and returns the HTTP status of the verdict POST. */

@@ -148,8 +148,8 @@ test('Mia reports with pins, Omar shares a pinned draft on hand-off, and Mia rev
     const panel = roundPanel(page);
     const nextStep = panel.getByRole('heading', { name: 'Next step' });
 
-    const firstPin = panel.locator('.round-panel__pin').filter({ hasText: EARLIER_PIN_NOTES[0] });
-    const secondPin = panel.locator('.round-panel__pin').filter({ hasText: EARLIER_PIN_NOTES[1] });
+    const firstPin = panel.locator('.round-pin[data-pin-list="before"]').filter({ hasText: EARLIER_PIN_NOTES[0] });
+    const secondPin = panel.locator('.round-pin[data-pin-list="before"]').filter({ hasText: EARLIER_PIN_NOTES[1] });
     await firstPin.getByRole('button', { name: 'Fixed' }).click();
     await expect(page.locator(TOAST_REGION)).toContainText('Pin 1 marked fixed.');
     await expect(firstPin.locator('.verdict-tag')).toHaveText('Fixed');

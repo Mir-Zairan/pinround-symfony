@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
@@ -5,7 +6,7 @@ import { seedDraftWithPicture } from './draft-picture';
 import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // The round page of a shared draft (P14.T8 step 1) in a real browser: one screenshot at a time, the right arrow showing
-// the next, and a click in the strip jumping to another. What the page shows for each round kind and query, and who is
+// the next, a click on a tab jumping to another. What the page shows for each round kind and query, and who is
 // answered 404, is proven in tests/Functional/Review/RoundPageScreenshotsTest.php.
 //
 // A picture upload needs the processing worker and a bucket, so the draft's first picture is seeded ready through the
@@ -38,7 +39,7 @@ function seedTwoMoreScreenshots(roundId: string): void {
 }
 
 test.describe('The round page of a shared draft', () => {
-  test('Mia opens Omar\'s shared draft at 1 of 3, the right arrow shows 2 of 3, and the strip jumps to 3', async ({ browser }) => {
+  test('Mia opens Omar\'s shared draft on its first tab, the right arrow shows the second, and a tab jumps to the third', async ({ browser }) => {
     test.setTimeout(120_000);
     const key = await makeTicketForOmar(browser, 'Round page check on the cart screenshots');
     seedDraftWithPicture(key);
@@ -59,24 +60,26 @@ test.describe('The round page of a shared draft', () => {
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
     // networkidle: the arrow keys need the screenshot-pager controller, which connects after the importmap modules load.
     await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
-    const strip = page.getByRole('navigation', { name: 'Screenshots', exact: true });
-    const position = page.locator('.screenshot-pager__position');
-    await expect(position).toHaveText('1 of 3');
-    await expect(strip.getByRole('link')).toHaveCount(3);
-    await expect(strip.locator('a[aria-current="page"] .screenshot-thumb__label')).toHaveText('Screenshot 1');
+    const tabs = page.getByRole('tablist', { name: 'Screenshots', exact: true });
+    const selectedTab = tabs.getByRole('tab', { selected: true });
+    const afterTitle = page.locator('.round-compare__side--after .screenshot__title');
+    await expect(tabs.getByRole('tab')).toHaveCount(3);
+    await expect(selectedTab).toHaveId('round-tab-1');
+    await expect(page.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'round-tab-1');
+    const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+    expect(violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical').map((violation) => violation.id)).toEqual([]);
 
     await page.keyboard.press('ArrowRight');
 
-    await expect(position).toHaveText('2 of 3');
     await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=2$`));
-    await expect(page.locator('.screenshot__title')).toHaveText('Screenshot copy 1');
+    await expect(selectedTab).toHaveId('round-tab-2');
+    await expect(afterTitle).toHaveText('Screenshot copy 1');
 
-    await strip.getByRole('link', { name: /^Screenshot 3/ }).click();
+    await tabs.getByRole('tab', { name: /^Screenshot copy 2/ }).click();
 
-    await expect(position).toHaveText('3 of 3');
-    await expect(strip.locator('a[aria-current="page"] .screenshot-thumb__label')).toHaveText('Screenshot 3');
-    await expect(page.locator('.screenshot__title')).toHaveText('Screenshot copy 2');
-    await expect(page.locator('.screenshot-pager__next')).toHaveAttribute('aria-disabled', 'true');
+    await expect(selectedTab).toHaveId('round-tab-3');
+    await expect(afterTitle).toHaveText('Screenshot copy 2');
+    await expect(tabs.locator('[data-screenshot-pager-target="next"]'), 'no screenshot after the last').toHaveCount(0);
     await context.close();
   });
 });

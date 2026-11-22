@@ -891,10 +891,12 @@ textarea.screenshot-report__input {
   background: var(--surface);
 }
 
-/* A phone keeps its screen for the pictures: the header scrolls away with the page. */
+/* A phone keeps its screen for the pictures: the header scrolls away with the page, inside the page's narrower padding. */
 @media (max-width: 640px) {
   .round-page__header {
     position: static;
+    margin: 0;
+    padding: 0;
   }
 }
 
@@ -1118,6 +1120,19 @@ textarea.screenshot-report__input {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* An earlier try's pin in the owner's draft editor (DraftRoundEditor). */
+.round-panel__pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.round-panel__pin .round-panel__note {
+  flex: 1 1 8rem;
+  overflow-wrap: anywhere;
 }
 
 .round-pin {

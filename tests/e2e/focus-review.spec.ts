@@ -118,7 +118,7 @@ test('Mia walks the pins with the keyboard only: Full screen, the arrows, Enter 
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`${roundPath()}\\?area=0$`));
   await expect(page.getByRole('link', { name: 'Full screen', exact: true }), 'focus is back on the link that opened it').toBeFocused();
-  const pinRow = (note: string) => page.locator('aside#round-panel .round-panel__pin').filter({ hasText: note });
+  const pinRow = (note: string) => page.locator('aside#round-panel .round-pin[data-pin-list="before"]').filter({ hasText: note });
   await expect(pinRow(EARLIER_PIN_NOTES[1]).locator('.verdict-tag'), 'the choice made in full screen').toHaveText('Fixed');
   await expect(pinRow(LONG_PIN_NOTE).locator('.verdict-tag')).toHaveText('Not checked yet');
 
@@ -150,17 +150,17 @@ test('Full screen opens from a shared draft, from Round 0 and from Round 0 on th
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/${draftNumber}/focus\\?screenshot=1$`));
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round ${draftNumber} · Screenshot 1 of 2`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^${reportKey} · Round ${draftNumber} · .+ · screenshot 1 of 2$`));
   await expect(shownStop(page).locator('.focus-bar__note')).toHaveText(EARLIER_PIN_NOTES[0]);
   await page.keyboard.press('ArrowRight');
   await expect(shownStop(page).locator('.focus-bar__note')).toHaveText(EARLIER_PIN_NOTES[1]);
   await page.getByRole('link', { name: 'Next', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/focus\\?screenshot=2$`));
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round ${draftNumber} · Screenshot 2 of 2`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^${reportKey} · Round ${draftNumber} · (.+ · s|S)creenshot 2 of 2$`));
   await page.waitForLoadState('networkidle');
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/${draftNumber}\\?screenshot=2$`));
-  await expect(page.locator('.screenshot-pager__position')).toHaveText('2 of 2');
+  await expect(page.getByRole('tablist', { name: 'Screenshots' }).getByRole('tab', { selected: true })).toHaveAttribute('href', new RegExp('screenshot=2$'));
   await expect(fullScreenLink).toBeFocused();
 
   await page.goto(`/t/${reportKey}/rounds/0`, { waitUntil: 'networkidle' });
@@ -168,7 +168,7 @@ test('Full screen opens from a shared draft, from Round 0 and from Round 0 on th
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/0/focus\\?screenshot=1$`));
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round 0 · Screenshot 1 of 1`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^${reportKey} · Round 0 · (.+ · s|S)creenshot 1 of 1$`));
   await expect(shownStop(page).locator('.focus-bar__note')).toHaveText(REPORT_PIN_NOTES[0]);
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/0\\?screenshot=1$`));
@@ -181,7 +181,7 @@ test('Full screen opens from a shared draft, from Round 0 and from Round 0 on th
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}/rounds/0/focus\\?from=ticket$`));
   await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(`${reportKey} · Round 0 · Screenshot 1 of 1`);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^${reportKey} · Round 0 · (.+ · s|S)creenshot 1 of 1$`));
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(new RegExp(`/t/${reportKey}$`));
   await expect(cardLink, 'focus is back on Round 0\'s link once the Rounds frame has loaded').toBeFocused();
