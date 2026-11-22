@@ -112,6 +112,20 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         ['Refund note is missing from the order email', 'The email for a refunded order does not say the amount or when it arrives.'],
     ];
 
+    /**
+     * As a real backlog: mostly normal, major and minor, with two blockers and two criticals only on tickets Omar builds
+     * or Mia tests (In progress and Testing), none waiting on Lena, so a person's new critical report reaches the lead's
+     * Home top five. Every priority still occurs once at least.
+     */
+    private static function priorityOf(int $index): Priority
+    {
+        return match ($index) {
+            2, 4 => Priority::Blocker,
+            10, 18 => Priority::Critical,
+            default => [Priority::Normal, Priority::Major, Priority::Normal, Priority::Minor, Priority::Normal][$index % 5],
+        };
+    }
+
     /** Whole words, so the page's cut at 700 characters ends at a word and the rest stays behind "Show the full ask". */
     private static function longAsk(): string
     {
@@ -199,7 +213,6 @@ final readonly class SeedDemoTickets implements DemoSeedStep
     ): void {
         $now = $this->clock->now();
         $types = TicketType::cases();
-        $priorities = Priority::cases();
         $key = $this->ticketCommands->create(
             $organizationId,
             $reporter,
@@ -207,7 +220,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             $title,
             $description,
             $types[$index % \count($types)]->value,
-            $priorities[($index + intdiv($index, \count(self::CORE_STEPS))) % \count($priorities)]->value,
+            self::priorityOf($index)->value,
             $assignee,
             $now,
         );
