@@ -382,6 +382,55 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertSame(['Customer'], $inputLabels, 'A waiting label says who, as workflow-engine.md describes it.');
     }
 
+    /**
+     * The clock stands at 2027-03-15 10:00 UTC (startWithPassword), so the ages are hours to five weeks before it.
+     */
+    #[Test]
+    public function theSeededTicketsGetVariedAgesFromTheClockAndTheirTurnsWaitAsLongAsTheyLastMoved(): void
+    {
+        $this->startWithPassword(self::PASSWORD);
+        $this->runSeed();
+        $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
+        $seeded = "(t.description = 'Seeded for the demo.' OR t.title = :long_ask)";
+
+        [$ages, $named, $turns] = $this->underTenant($acmeFoods, fn (): array => [
+            $this->connection()->fetchAssociative(
+                "SELECT count(*) AS tickets, count(DISTINCT t.updated_at) AS distinct_moves, min(t.updated_at) AS oldest, max(t.updated_at) AS newest,
+                 count(*) FILTER (WHERE t.created_at >= t.updated_at) AS made_after_move,
+                 count(*) FILTER (WHERE s.grp = 'done' AND t.closed_at IS DISTINCT FROM t.updated_at) AS done_closed_elsewhere
+                 FROM tkt_ticket t JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id WHERE {$seeded}",
+                ['long_ask' => SeedDemoTickets::LONG_ASK_TITLE],
+            ),
+            $this->connection()->fetchAllNumeric(
+                "SELECT t.title, to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI'), to_char(t.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI')
+                 FROM tkt_ticket t WHERE t.title IN ('Search box loses focus after typing', 'Price rounds wrong in basket') ORDER BY t.title",
+            ),
+            $this->connection()->fetchAssociative(
+                "SELECT count(*) AS turns, count(DISTINCT turn.waiting_since) AS distinct_waits,
+                 count(*) FILTER (WHERE turn.waiting_since IS DISTINCT FROM t.updated_at) AS waits_not_from_the_move
+                 FROM ins_ticket_turn turn JOIN tkt_ticket t ON t.organization_id = turn.organization_id AND t.id = turn.ticket_id WHERE {$seeded}",
+                ['long_ask' => SeedDemoTickets::LONG_ASK_TITLE],
+            ),
+        ]);
+
+        self::assertIsArray($ages);
+        self::assertSame(41, $ages['tickets']);
+        self::assertSame(16, $ages['distinct_moves'], 'every one of the 16 waits is used');
+        self::assertSame('2027-02-07 14:00:00+00', $ages['oldest'], '860 hours before the clock');
+        self::assertSame('2027-03-15 08:00:00+00', $ages['newest'], 'two hours before the clock');
+        self::assertSame(0, $ages['made_after_move']);
+        self::assertSame(0, $ages['done_closed_elsewhere']);
+        // Ticket 0 waits WAIT_HOURS[0] = 2 h and was made a day before; ticket 1 waits WAIT_HOURS[7] = 140 h, made two days before.
+        self::assertSame([
+            ['Price rounds wrong in basket', '2027-03-07 14:00', '2027-03-09 14:00'],
+            ['Search box loses focus after typing', '2027-03-14 08:00', '2027-03-15 08:00'],
+        ], $named);
+        self::assertIsArray($turns);
+        self::assertGreaterThan(20, $turns['turns']);
+        self::assertGreaterThan(10, $turns['distinct_waits']);
+        self::assertSame(0, $turns['waits_not_from_the_move']);
+    }
+
     #[Test]
     public function theProjectStepRefusesWhenTheShopTeamIsMissing(): void
     {

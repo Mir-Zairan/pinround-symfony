@@ -225,6 +225,7 @@ services:
     App\Workflow\Api\VerbFor: '@App\Workflow\Application\Turn\PlainVerbFor'
     App\Workflow\Api\TurnPeopleChoice: '@App\Workflow\Application\Turn\LoadBasedTurnPeopleChoice'
     App\Insight\Api\TurnProjector: '@App\Insight\Infrastructure\Doctrine\DbalTurnProjector'
+    App\Insight\Api\DemoTurnWaits: '@App\Insight\Infrastructure\Doctrine\DbalDemoTurnWaits'
     App\Insight\Application\Turn\TicketTurnSource: '@App\Insight\Infrastructure\Doctrine\DbalTicketTurnSource'
     App\Ticketing\Api\TicketTurnQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries'
     App\Ticketing\Api\LockedTicketTurnQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalTicketTurnQueries'

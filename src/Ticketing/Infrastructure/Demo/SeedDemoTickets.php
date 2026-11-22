@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Infrastructure\Demo;
 
 use App\Identity\Api\UserQueries;
+use App\Insight\Api\DemoTurnWaits;
 use App\Insight\Api\TurnProjector;
 use App\Organization\Api\DemoOrganizations;
 use App\Organization\Api\TeamQueries;
@@ -39,6 +40,12 @@ use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
  * UPDATE rather than TicketCommands::move: the seed places it, skipping the transition policy and the moved history row on
  * purpose, and sets directly the visibility, the reviewer in Code review, the tester in Testing and the label On hold
  * waits on, since no move stores them for a row written without one. Its turn row is refreshed after that.
+ *
+ * The tickets get different ages, so waits, Whose turn's meters and "Longest waits first" mean something: ticket n last
+ * moved WAIT_HOURS[n * 7 mod 16] hours before the clock's now (hours to five weeks, the same on every run) and was made
+ * one to five days before that. The age is set on created_at, updated_at, closed_at and the turn's waiting_since; the
+ * ticket's "made" history row keeps the seed's own time, as tkt_ticket_event has partitions only from the month the
+ * migrations ran.
  */
 #[AsTaggedItem(priority: 30)]
 final readonly class SeedDemoTickets implements DemoSeedStep
@@ -52,6 +59,8 @@ final readonly class SeedDemoTickets implements DemoSeedStep
     private const array CORE_STEPS = ['backlog', 'todo', 'progress', 'review', 'test', 'input', 'hold', 'done'];
     public const string LONG_ASK_TITLE = 'Pay button does nothing on a long basket';
     private const string SHORT_ASK = 'Seeded for the demo.';
+    /** How long ago a ticket last moved, in hours: from two hours to about five weeks. */
+    private const array WAIT_HOURS = [2, 7, 19, 30, 50, 74, 100, 140, 190, 260, 340, 430, 530, 640, 760, 860];
     private const array TITLES = [
         'Search box loses focus after typing',
         'Price rounds wrong in basket',
@@ -110,6 +119,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         private Projects $projects,
         private TicketCommands $ticketCommands,
         private TurnProjector $turnProjector,
+        private DemoTurnWaits $demoTurnWaits,
         private TenantContext $tenantContext,
         private EntityManagerInterface $entityManager,
         private Connection $connection,
@@ -204,8 +214,10 @@ final readonly class SeedDemoTickets implements DemoSeedStep
             throw new DemoSeedRefused(\sprintf('The demo ticket %s was not found after it was made.', $key));
         }
         $isWaiting = \in_array($coreCode, ['input', 'hold'], true);
+        $movedAt = self::movedAtOf($index, $now);
         $this->connection->executeStatement(
-            'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?, visibility = ?, reviewer_id = ?, tester_id = ?, waiting_on_label = ?, closed_at = ?
+            'UPDATE tkt_ticket SET step_id = ?, previous_step_id = ?, visibility = ?, reviewer_id = ?, tester_id = ?, waiting_on_label = ?, closed_at = ?,
+             created_at = ?, updated_at = ?
              WHERE organization_id = ? AND id = ?',
             [
                 $targetStep->id(),
@@ -214,12 +226,25 @@ final readonly class SeedDemoTickets implements DemoSeedStep
                 'review' === $coreCode ? $reviewer->toString() : null,
                 'test' === $coreCode ? $tester->toString() : null,
                 $isWaiting ? ('input' === $coreCode ? 'Customer' : 'Supplier delivery') : null,
-                'done' === $coreCode ? $now->format(\DateTimeInterface::ATOM) : null,
+                'done' === $coreCode ? $movedAt->format(\DateTimeInterface::ATOM) : null,
+                self::createdAtOf($index, $movedAt)->format(\DateTimeInterface::ATOM),
+                $movedAt->format(\DateTimeInterface::ATOM),
                 $organizationId->toString(),
                 $ticketId,
             ],
         );
         $this->turnProjector->refresh(new TicketId($ticketId));
+        $this->demoTurnWaits->backdate(new TicketId($ticketId), $movedAt);
+    }
+
+    private static function movedAtOf(int $index, \DateTimeImmutable $now): \DateTimeImmutable
+    {
+        return $now->modify(\sprintf('-%d hours', self::WAIT_HOURS[($index * 7) % \count(self::WAIT_HOURS)]));
+    }
+
+    private static function createdAtOf(int $index, \DateTimeImmutable $movedAt): \DateTimeImmutable
+    {
+        return $movedAt->modify(\sprintf('-%d days', 1 + $index % 5));
     }
 
     /**
