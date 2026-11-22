@@ -115,6 +115,7 @@ New rules are added as new guard classes plus a column in `wf_rule_set`, plus an
 | Needs changes | Testing | In progress | Tester | — | — | TicketMoved |
 | Input given · go on | Needs input | previous step (or To do) | Turn, or Lead | — | — | TicketMoved |
 | Go on | On hold | previous step (or In progress) | Lead | — | — | TicketMoved |
+| Test again | Done | Testing | Tester, Lead | — | clears `closed_at`; keeps the stored tester (2026-11-22: a pass that was too early) | TicketMoved |
 | Reopen | Done | In progress | Lead, Tester | — | clears `closed_at` | TicketMoved |
 | Put on hold | any except On hold and Done | On hold | Lead | — | remembers the previous step | TicketMoved |
 | Move on to <next core step> | a company or team step | next core step by group: To do → In progress, Doing → Code review, Checking → Testing, Waiting → previous step (or In progress; the button reads "Move on to the previous step" in the first case) | Assignee, Lead; in a Checking step also the Tester, whose turn it is there | none blocks it: `review_before_test` and `no_self_review` are about other core moves | — | TicketMoved |
@@ -154,6 +155,7 @@ stateDiagram-v2
   Testing --> Done: Pass it
   Testing --> InProgress: Needs changes
   Done --> InProgress: Reopen
+  Done --> Testing: Test again
   InProgress --> OnHold: Put on hold
   ToDo --> OnHold: Put on hold
   OnHold --> InProgress: Go on (back to previous)

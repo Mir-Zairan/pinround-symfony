@@ -141,6 +141,7 @@ final class TicketMoveTest extends WebTestCase
         yield 'needs changes, by the lead who tests' => ['Lena', ['step' => 'test'], 'needs_changes', 'progress', 'Sent back to Omar with your notes.'];
         yield 'input given, by the person waited on' => ['Omar', ['step' => 'input', 'waitingOn' => 'Omar'], 'input_given', 'todo', 'Back to work.'];
         yield 'go on, by the lead' => ['Lena', ['step' => 'hold'], 'go_on', 'progress', 'Back in progress.'];
+        yield 'test again, by the lead' => ['Lena', ['step' => 'done'], 'test_again', 'test', 'Back in testing. Lena’s turn to test.'];
         yield 'reopen, by the lead' => ['Lena', ['step' => 'done'], 'reopen', 'progress', 'Reopened. Back in progress.'];
         yield 'put on hold, by the lead' => ['Lena', ['step' => 'todo'], 'put_on_hold', 'hold', 'On hold. It waits on you.'];
         yield 'move on from a team step, by the assignee' => ['Omar', ['step' => 'pairing'], 'move_on', 'review', 'Moved to Code review.'];

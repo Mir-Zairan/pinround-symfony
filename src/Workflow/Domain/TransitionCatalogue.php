@@ -29,6 +29,8 @@ final readonly class TransitionCatalogue
             new Transition(Verb::NeedsChanges, 'Needs changes', [CoreStep::Test], CoreStep::Progress, [Mover::Tester], isPrimary: false),
             new Transition(Verb::InputGiven, 'Input given · go on', [CoreStep::Input], CoreStep::Todo, [Mover::WaitedOn, Mover::Lead], isPrimary: true),
             new Transition(Verb::GoOn, 'Go on', [CoreStep::Hold], CoreStep::Progress, [Mover::Lead], isPrimary: true),
+            // A pass that was too early: back to Testing, the tester's turn again, while Reopen sends it to the developer.
+            new Transition(Verb::TestAgain, 'Test again', [CoreStep::Done], CoreStep::Test, [Mover::Tester, Mover::Lead], isPrimary: false),
             new Transition(Verb::Reopen, 'Reopen', [CoreStep::Done], CoreStep::Progress, [Mover::Lead, Mover::Tester], isPrimary: false),
             new Transition(Verb::PutOnHold, 'Put on hold', [CoreStep::Backlog, CoreStep::Todo, CoreStep::Progress, CoreStep::Review, CoreStep::Test, CoreStep::Input], CoreStep::Hold, [Mover::Lead], isPrimary: false, fromCustomStep: true),
             new Transition(Verb::MoveOn, 'Move on to…', [], null, [Mover::Assignee, Mover::Lead, Mover::TesterInCheckingStep], isPrimary: true, fromCustomStep: true),

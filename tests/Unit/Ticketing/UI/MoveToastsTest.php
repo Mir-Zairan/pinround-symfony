@@ -46,7 +46,7 @@ final class MoveToastsTest extends TestCase
         $verbsNamingAPerson = array_values(array_filter(array_keys(MoveToasts::VERB_TOASTS), MoveToasts::namesPerson(...)));
         $verbsNamingAStep = array_values(array_filter(array_keys(MoveToasts::VERB_TOASTS), MoveToasts::namesStep(...)));
 
-        self::assertSame(['send_to_code_review', 'send_to_testing', 'approve_code', 'ask_for_changes', 'needs_changes'], $verbsNamingAPerson);
+        self::assertSame(['send_to_code_review', 'send_to_testing', 'approve_code', 'ask_for_changes', 'needs_changes', 'test_again'], $verbsNamingAPerson);
         self::assertSame(['move_on'], $verbsNamingAStep);
     }
 

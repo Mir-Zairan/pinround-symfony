@@ -29,6 +29,7 @@ final class TransitionCatalogueTest extends TestCase
             ['needs_changes', 'Needs changes', ['test'], 'progress', ['tester'], false, 'any', false, true],
             ['input_given', 'Input given · go on', ['input'], 'todo', ['waited_on', 'lead'], true, 'any', false, true],
             ['go_on', 'Go on', ['hold'], 'progress', ['lead'], true, 'any', false, true],
+            ['test_again', 'Test again', ['done'], 'test', ['tester', 'lead'], false, 'any', false, true],
             ['reopen', 'Reopen', ['done'], 'progress', ['lead', 'tester'], false, 'any', false, true],
             ['put_on_hold', 'Put on hold', ['backlog', 'todo', 'progress', 'review', 'test', 'input'], 'hold', ['lead'], false, 'any', true, true],
             ['move_on', 'Move on to…', [], null, ['assignee', 'lead', 'tester_in_checking_step'], true, 'any', true, true],

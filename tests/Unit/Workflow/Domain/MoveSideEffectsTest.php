@@ -60,7 +60,7 @@ final class MoveSideEffectsTest extends TestCase
             ++$checked;
         }
 
-        self::assertSame(11, $checked);
+        self::assertSame(12, $checked);
     }
 
     #[Test]

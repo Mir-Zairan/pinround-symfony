@@ -98,7 +98,7 @@ final class CatalogueTransitionPolicyMoveTest extends TestCase
         yield 'Needs input, the lead: Input given filled, Put on hold outline' => [GuardFixtures::ticket('input', 'wait', waitingOnUser: GuardFixtures::MIA), GuardFixtures::lena(), [['input_given', true], ['put_on_hold', false]]];
         yield 'Needs input, the person waited on' => [GuardFixtures::ticket('input', 'wait', waitingOnUser: GuardFixtures::MIA), GuardFixtures::mia(), [['input_given', true]]];
         yield 'On hold, the lead: Go on filled, Put on hold not offered' => [GuardFixtures::ticket('hold', 'wait'), GuardFixtures::lena(), [['go_on', true]]];
-        yield 'Done, the lead: Reopen is outline even alone' => [GuardFixtures::ticket('done', 'done'), GuardFixtures::lena(), [['reopen', false]]];
+        yield 'Done, the lead: Test again and Reopen are outline' => [GuardFixtures::ticket('done', 'done'), GuardFixtures::lena(), [['test_again', false], ['reopen', false]]];
         yield 'In progress, the assignee, review first off: only Send to code review filled' => [GuardFixtures::ticket('progress', 'doing', assignee: GuardFixtures::OMAR), GuardFixtures::omar(), [['send_to_code_review', true], ['send_to_testing', false]]];
         yield 'A team step, the lead: Put on hold outline, Move on filled' => [GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR), GuardFixtures::lena(), [['put_on_hold', false], ['move_on', true]]];
         yield 'A team step, the assignee: Move on filled' => [GuardFixtures::ticket(null, 'check', assignee: GuardFixtures::OMAR), GuardFixtures::omar(), [['move_on', true]]];

@@ -84,7 +84,7 @@ final class TicketMoveController extends AbstractController
      * The verbs of MoveToasts::VERB_TOASTS, as a route requirement must be a constant string: any other verb is not
      * found. TicketMoveControllerTest keeps the two the same.
      */
-    public const string VERB_REQUIREMENT = 'plan_it|start_work|send_to_code_review|send_to_testing|approve_code|ask_for_changes|pass_it|needs_changes|input_given|go_on|reopen|put_on_hold|move_on';
+    public const string VERB_REQUIREMENT = 'plan_it|start_work|send_to_code_review|send_to_testing|approve_code|ask_for_changes|pass_it|needs_changes|input_given|go_on|test_again|reopen|put_on_hold|move_on';
     public const string STEP_ID_REQUIREMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
     /** The flash type base.html.twig shows in its toast region. */

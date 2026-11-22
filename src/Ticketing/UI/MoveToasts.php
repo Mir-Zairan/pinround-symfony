@@ -29,6 +29,7 @@ final class MoveToasts
         'needs_changes' => 'Sent back to {person} with your notes.',
         'input_given' => 'Back to work.',
         'go_on' => 'Back in progress.',
+        'test_again' => 'Back in testing. {person}’s turn to test.',
         'reopen' => 'Reopened. Back in progress.',
         'put_on_hold' => 'On hold. It waits on you.',
         'move_on' => self::MOVED_TO,

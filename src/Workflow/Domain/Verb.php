@@ -21,6 +21,7 @@ enum Verb: string
     case NeedsChanges = 'needs_changes';
     case InputGiven = 'input_given';
     case GoOn = 'go_on';
+    case TestAgain = 'test_again';
     case Reopen = 'reopen';
     case PutOnHold = 'put_on_hold';
     case MoveOn = 'move_on';
