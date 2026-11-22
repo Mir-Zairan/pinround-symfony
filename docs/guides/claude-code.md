@@ -150,6 +150,7 @@ A notebook is your private set of pinned screenshots of your own app; only you s
 
 | Tool | Scope | What it does |
 |---|---|---|
+| `list_my_report_drafts` | `read` | Your own report drafts, the last changed first, at most 20 with `has_more`: `draft_id`, `project`, title, `screenshot_count`, `updated_at`, `url`. Add a picture to one with `add_report_screenshot`. |
 | `list_my_notebooks` | `read` | Your notebooks, the last used first, 20 a page: `notebook_id`, title, `screenshot_count`, `scenario_count`, `last_used_at`. Pass `next_cursor` as `cursor` for the next page. |
 | `get_notebook` | `read` | One notebook (`notebook`): its screenshots with signed image URLs, titles, summaries and pins, and its scenarios. |
 | `save_scenarios` | `notebooks:write` | Replaces all the notebook's scenarios (`notebook`, `scenarios`, at most 20); an empty list removes them all. The format is in [reporting-with-claude-code.md › Scenarios](reporting-with-claude-code.md#scenarios). |
