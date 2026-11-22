@@ -314,6 +314,24 @@ final readonly class RoundPages
     }
 
     /**
+     * The latest try that shows that picture and its number from 1, as the round page numbers it; a copy made by "Pin
+     * this in my draft" reuses its source's picture, so this finds the source in the round it came from.
+     *
+     * @return array{RoundScreenshotView, int}|null null when no latest try of the round shows it
+     */
+    public static function screenshotWithMediaOf(RoundView $round, string $mediaId): ?array
+    {
+        foreach (RoundCards::shownChainsOf($round) as $index => $tries) {
+            $latestTry = $tries[\count($tries) - 1];
+            if ($latestTry->mediaId === $mediaId) {
+                return [$latestTry, $index + 1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * The round with its screenshots, read alone, so a shared draft older than the rounds the ticket page lists is found
      * too.
      */

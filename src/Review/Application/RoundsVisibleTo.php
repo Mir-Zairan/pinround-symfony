@@ -61,4 +61,21 @@ interface RoundsVisibleTo
      * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query
      */
     public function previousHandOffRoundOf(TicketId $ticketId, TicketVisibility $viewer, int $number): ?RoundView;
+
+    /**
+     * Whether the picture $mediaId of round $roundId is a copy, which another round of the ticket also holds (deleted
+     * and unshared rounds included, as a fresh upload is held by its own round alone), and from which shared hand-off
+     * round below $belowNumber. One query over the ticket's rounds' screenshots, with no visibility check of the
+     * ticket: it gives no picture or text, only a round number, whose pictures sharedRoundOf reads after its own check.
+     *
+     * @param string $roundId     the round the picture is shown in, which is left out
+     * @param int    $belowNumber the source must have a number below it; RoundView::$number of a shared round, or a
+     *                            number above every round's for an unshared draft, which comes after them all
+     *
+     * @return ScreenshotCopySource|null null for a picture no other round of the ticket holds
+     *
+     * @throws \LogicException           when no transaction is open or no tenant is set, before any query
+     * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query
+     */
+    public function copySourceOf(TicketId $ticketId, TicketVisibility $viewer, string $roundId, string $mediaId, int $belowNumber): ?ScreenshotCopySource;
 }

@@ -414,6 +414,9 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame(DraftRoundController::COPIED_TO_NEW_DRAFT, $draftPage->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
         self::assertStringContainsString('From round 1 · Screenshot 2', (string) $this->client->getResponse()->getContent());
+        $before = $draftPage->filter('.draft-board__picture--before');
+        self::assertSame('Before · round 1', $before->filter('.round-compare__caption')->text());
+        self::assertSame('screenshot-'.$second, $before->filter('figure.screenshot')->attr('id'), 'The copy\'s Screenshot 1 has its source, Screenshot 2, as its Before, not Screenshot 1.');
         $copies = $this->screenshotRowsOf($drafts[0]['id']);
         self::assertSame([['From round 1 · Screenshot 2', null, null]], array_map(static fn (array $row): array => [$row['title'], $row['summary'], $row['verdict']], $copies));
         self::assertSame([], $this->pinRowsOf($drafts[0]['id']));
@@ -423,6 +426,44 @@ final class DraftRoundControllerTest extends WebTestCase
 
         self::assertSame(RoundRefused::COPIED_ALREADY, $this->toastAfterTheRedirect(), 'A second copy is refused, not doubled.');
         self::assertCount(1, $this->screenshotRowsOf($drafts[0]['id']));
+    }
+
+    /**
+     * A copy keeps its source's picture, so its Before is the source wherever it came from: the report's Screenshot 2
+     * though Round 1 is the hand-off round shared last, and none when no shared round holds its picture, as when only
+     * Omar's unshared draft does. A screenshot
+     * of its own still pairs by number.
+     */
+    #[Test]
+    public function aCopiedScreenshotHasItsSourceAsItsBeforeAndNoneWhenNoSharedRoundHoldsIt(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($report, $this->addMedia('ready', 'Mia'), 0, 'Report shot 1', null);
+        $reportSecondMedia = $this->addMedia('ready', 'Mia');
+        $reportSecond = $this->addScreenshot($report, $reportSecondMedia, 1, 'Report shot 2', null);
+        $roundOne = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $roundOneFirst = $this->addScreenshot($roundOne, $this->addMedia('ready'), 0, 'Round one shot 1', null);
+        $this->addScreenshot($roundOne, $this->addMedia('ready'), 1, 'Round one shot 2', null);
+        $omarsDraft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $unsharedMedia = $this->addMedia('ready');
+        $this->addScreenshot($omarsDraft, $unsharedMedia, 0, 'Omar\'s unshared shot', null);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Mia', null);
+        $this->addScreenshot($draft, $this->addMedia('ready', 'Mia'), 0, 'Own shot', null);
+        $this->addScreenshot($draft, $unsharedMedia, 1, 'Not shared', null);
+        $this->addScreenshot($draft, $reportSecondMedia, 2, 'From round 0 · Screenshot 2', null);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $own = $this->draftPage($draft)->filter('.draft-board__picture--before');
+        $heldByNoSharedRound = $this->client->request('GET', $this->draftPageUrl($draft).'?screenshot=2')->filter('.draft-round-editor');
+        self::assertResponseStatusCodeSame(200);
+        $fromTheReport = $this->client->request('GET', $this->draftPageUrl($draft).'?screenshot=3')->filter('.draft-board__picture--before');
+        self::assertResponseStatusCodeSame(200);
+
+        self::assertSame(['Before · round 1', 'screenshot-'.$roundOneFirst], [$own->filter('.round-compare__caption')->text(), $own->filter('figure.screenshot')->attr('id')]);
+        self::assertSame(['Before · round 0', 'screenshot-'.$reportSecond], [$fromTheReport->filter('.round-compare__caption')->text(), $fromTheReport->filter('figure.screenshot')->attr('id')]);
+        self::assertCount(1, $heldByNoSharedRound->filter('.draft-shot:not([hidden])'));
+        self::assertCount(0, $heldByNoSharedRound->filter('.draft-board__picture--before'), 'Round 1\'s Screenshot 2 is not its source.');
     }
 
     /**

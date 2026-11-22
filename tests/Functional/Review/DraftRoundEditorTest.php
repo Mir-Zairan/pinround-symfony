@@ -43,8 +43,11 @@ final class DraftRoundEditorTest extends WebTestCase
     private const string NOW = '2026-11-06 12:00:00 UTC';
     private const string OMAR_SHOT_TITLE = 'Omar first shot';
     private const string SHARED_AT = '2026-11-05 09:00:00+00';
-    /** With the hand-off round before the draft, whose picture of the shown number is its Before. */
-    private const int LIVE_ACTION_QUERIES = 30;
+    /**
+     * With the hand-off round before the draft, whose picture of the shown number is its Before, and the one query that
+     * finds the shown picture is no copy (RoundsVisibleTo::copySourceOf).
+     */
+    private const int LIVE_ACTION_QUERIES = 31;
     private const array STRANGERS = ['Lena', 'Mia', 'Sara', 'Raj', 'Ben'];
 
     private KernelBrowser $client;

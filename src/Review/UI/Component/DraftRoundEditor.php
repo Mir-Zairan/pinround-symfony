@@ -10,6 +10,7 @@ use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\RoundScreenshotView;
 use App\Review\Api\RoundView;
 use App\Review\Application\RoundsVisibleTo;
 use App\Review\UI\Controller\RoundController;
@@ -103,6 +104,10 @@ final class DraftRoundEditor
     private bool $isCardRead = false;
     private ?RoundView $previousHandOffRound = null;
     private bool $isPreviousHandOffRoundRead = false;
+    /** The draft draftCard read, with every try of each chain. */
+    private ?RoundView $draft = null;
+    /** @var array<int, array{RoundView, RoundScreenshotView, int}|null> pairedBefore's answers, by shown position */
+    private array $pairedBefores = [];
 
     public function __construct(
         private readonly VisibleTicketLookup $visibleTicketLookup,
@@ -258,6 +263,7 @@ final class DraftRoundEditor
             $visibleTicket = $this->visibleTicket();
             $draft = $this->roundQueries->draftOf($this->roundId, $visibleTicket->actor->userId());
             if (null !== $draft) {
+                $this->draft = $draft;
                 $this->card = $this->roundCards->forDraft($visibleTicket->visibility->organizationId(), $draft, $visibleTicket->ticket->turnSnapshot->assigneeId, $this->clock->now());
             }
         }
@@ -305,30 +311,27 @@ final class DraftRoundEditor
     }
 
     /**
-     * The shown screenshot's Before: the latest try of the screenshot with its number in the hand-off round shared last,
-     * or the report when none was (RoundPages::beforeScreenshotOf), signed now; null when that round has no screenshot
-     * with its number or the ticket has neither.
+     * The shown screenshot's Before as pairedBefore finds it, signed now; null when it has none.
      */
     public function before(): ?ScreenshotView
     {
-        $number = $this->shownPosition();
-        $previousRound = $this->previousHandOffRound();
-        $beforeScreenshot = RoundPages::beforeScreenshotOf($previousRound, $number);
-        if (null === $previousRound || null === $beforeScreenshot) {
+        $pairedBefore = $this->pairedBefore();
+        if (null === $pairedBefore) {
             return null;
         }
+        [$beforeRound, $beforeScreenshot, $beforeNumber] = $pairedBefore;
         $visibleTicket = $this->visibleTicket();
         $images = $this->signedUrls->forVariants($visibleTicket->visibility->organizationId(), [$beforeScreenshot->mediaId], RoundCards::VARIANT, $this->clock->now());
 
-        return RoundCards::screenshotViewOf($previousRound, $beforeScreenshot, $number, $images);
+        return RoundCards::screenshotViewOf($beforeRound, $beforeScreenshot, $beforeNumber, $images);
     }
 
-    /** "Before · round 2"; null when there is no round before the draft. */
+    /** "Before · round 2", of the round the Before is from; null when there is no round before the draft. */
     public function beforeCaption(): ?string
     {
-        $previousRound = $this->previousHandOffRound();
+        $beforeRound = $this->pairedBefore()[0] ?? $this->previousHandOffRound();
 
-        return null === $previousRound ? null : \sprintf('Before · round %d', $previousRound->number ?? 0);
+        return null === $beforeRound ? null : \sprintf('Before · round %d', $beforeRound->number ?? 0);
     }
 
     public function ticketTitle(): string
@@ -398,6 +401,45 @@ final class DraftRoundEditor
     private function visibleTicket(): VisibleTicket
     {
         return $this->visibleTicket ??= $this->visibleTicketLookup->visibleTicketOf($this->ticketKey);
+    }
+
+    /**
+     * The shown chain's Before, its round and its number from 1. A copy made by "Pin this in my draft" keeps its source's
+     * picture, so its Before is the source: found in the hand-off round shared last, else in the round copySourceOf
+     * names, and none when no shared round holds it, as when only another unshared draft does. Any other chain's Before
+     * is the screenshot with its number in the hand-off round shared last, or the report when none was
+     * (RoundPages::beforeScreenshotOf). Read once per shown chain; copySourceOf and sharedRoundOf are read only for a
+     * chain the hand-off round shared last does not hold.
+     *
+     * @return array{RoundView, RoundScreenshotView, int}|null
+     */
+    private function pairedBefore(): ?array
+    {
+        $number = $this->shownPosition();
+        if (\array_key_exists($number, $this->pairedBefores)) {
+            return $this->pairedBefores[$number];
+        }
+        $previousRound = $this->previousHandOffRound();
+        $firstTry = null === $this->draft ? null : (RoundCards::shownChainsOf($this->draft)[$number - 1][0] ?? null);
+        if (null === $previousRound || null === $this->draft || null === $firstTry) {
+            return $this->pairedBefores[$number] = null;
+        }
+        $heldByPreviousRound = RoundPages::screenshotWithMediaOf($previousRound, $firstTry->mediaId);
+        if (null !== $heldByPreviousRound) {
+            return $this->pairedBefores[$number] = [$previousRound, ...$heldByPreviousRound];
+        }
+
+        $visibleTicket = $this->visibleTicket();
+        $copySource = $this->roundsVisibleTo->copySourceOf($visibleTicket->ticket->id, $visibleTicket->visibility, $this->draft->id, $firstTry->mediaId, self::NUMBER_AFTER_EVERY_ROUND);
+        if (null === $copySource) {
+            $beforeScreenshot = RoundPages::beforeScreenshotOf($previousRound, $number);
+
+            return $this->pairedBefores[$number] = null === $beforeScreenshot ? null : [$previousRound, $beforeScreenshot, $number];
+        }
+        $sourceRound = null === $copySource->roundNumber ? null : $this->roundsVisibleTo->sharedRoundOf($visibleTicket->ticket->id, $visibleTicket->visibility, $copySource->roundNumber);
+        $heldBySourceRound = null === $sourceRound ? null : RoundPages::screenshotWithMediaOf($sourceRound, $copySource->mediaId);
+
+        return $this->pairedBefores[$number] = null === $sourceRound || null === $heldBySourceRound ? null : [$sourceRound, ...$heldBySourceRound];
     }
 
     /** Read once per render, and only for a draft with a screenshot to pair. */

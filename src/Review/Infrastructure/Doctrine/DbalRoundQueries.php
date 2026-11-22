@@ -21,6 +21,7 @@ use App\Review\Api\TicketRounds;
 use App\Review\Application\OpenSharedRound;
 use App\Review\Application\OpenSharedRoundQueries;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\Application\ScreenshotCopySource;
 use App\Review\Domain\DraftDecision;
 use App\Review\Domain\RoundId;
 use App\Review\Domain\ScreenshotId;
@@ -187,6 +188,35 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             new \DateTimeImmutable(self::text($roundRow['shared_at'], 'shared_at')),
             self::text($roundRow['state'], 'state'),
             $this->screenshotsOf($organizationId->toString(), [$roundId], [])[$roundId] ?? [],
+        );
+    }
+
+    public function copySourceOf(TicketId $ticketId, TicketVisibility $viewer, string $roundId, string $mediaId, int $belowNumber): ?ScreenshotCopySource
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        if (!$viewer->organizationId()->equals($organizationId)) {
+            throw new \InvalidArgumentException('The ticket visibility given is not one of the tenant\'s organization.');
+        }
+
+        // The ticket's rounds by rvw_round_ticket_id_number_key, then their screenshots by rvw_screenshot_round_id_id_key;
+        // a source is one of the kinds previousHandOffRoundOf takes, so the Before comes from the same rounds.
+        $sourceRow = $this->connection->fetchAssociative(
+            'SELECT round.number, (round.number < :below AND round.kind IN (\'review\', \'draft\', \'report\')'
+            .' AND round.shared_at IS NOT NULL AND round.deleted_at IS NULL) AS is_source'
+            .' FROM rvw_round AS round JOIN rvw_screenshot AS screenshot'
+            .' ON screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id'
+            .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
+            .' AND round.id <> CAST(:round AS uuid) AND screenshot.media_id = CAST(:media AS uuid)'
+            .' ORDER BY is_source DESC, round.number DESC NULLS LAST LIMIT 1',
+            ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'round' => $roundId, 'media' => $mediaId, 'below' => $belowNumber],
+        );
+        if (false === $sourceRow) {
+            return null;
+        }
+
+        return new ScreenshotCopySource(
+            $mediaId,
+            self::boolean($sourceRow['is_source'], 'is_source') ? self::integerOrNull($sourceRow['number'], 'number') : null,
         );
     }
 

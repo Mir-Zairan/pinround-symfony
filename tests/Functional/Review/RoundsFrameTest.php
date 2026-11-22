@@ -10,6 +10,7 @@ use App\Organization\Api\MemberNameQueries;
 use App\Review\Api\RoundView;
 use App\Review\Api\TicketRounds;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\Application\ScreenshotCopySource;
 use App\Review\UI\Checklist\ChecklistCard;
 use App\Review\UI\Checklist\ChecklistCards;
 use App\Review\UI\Component\DraftRoundEditor;
@@ -581,6 +582,12 @@ final class RoundsFrameTest extends WebTestCase
                 $isHandOffOrReport = \in_array($this->round->kind, ['review', 'draft', 'report'], true);
 
                 return $isHandOffOrReport && $number >= 1 && null !== $this->round->number && $this->round->number < $number ? $this->round : null;
+            }
+
+            /** As the real read for a picture no other round holds: the one round holds none of another round's. */
+            public function copySourceOf(TicketId $ticketId, TicketVisibility $viewer, string $roundId, string $mediaId, int $belowNumber): ?ScreenshotCopySource
+            {
+                return null;
             }
         };
         $roundCards = new RoundCards($roundsWithNoCount, self::getContainer()->get(MemberNameQueries::class), self::getContainer()->get(SignedUrls::class), self::getContainer()->get(ChecklistCards::class));
