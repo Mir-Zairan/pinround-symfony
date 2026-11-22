@@ -170,3 +170,8 @@ rows stay until the retention job purges them.
 - Plan: [phase 14](../05-plan/phase-14-tester-feedback.md), P14.T20.
 - Revisit when: fewer than 10% of new connections in 60 days use a pasted token (then pasted tokens may go for the
   extension), or the MCP authorization spec changes the flow Claude Code and the connector use.
+
+## Note of 2026-11-22: optional scopes on the consent page
+The consent page also lists, unticked, every scope the app did not ask for. A scope the person ticks joins the code's
+scopes; one the page did not offer is refused with `invalid_scope` and no code. This keeps ADR-0039 (report drafts and
+notebooks are only ever the person's own tick) and lets Claude Code file report drafts without a pasted token.
