@@ -41,8 +41,8 @@ use Symfony\Component\Uid\Uuid;
  * its own. No command makes a review round yet, so round 2 is written as rvw_round, rvw_screenshot and rvw_area rows.
  * For the full-screen review's layout checks, LONG_NOTE_OPTION gives the first pin a long note and PENDING_AFTER_OPTION
  * leaves one area's "after" picture pending. For the checklist card's checks, CHECKLIST_OPTION first gives the ticket the
- * reporter's Round 0 with one ready picture and REPORT_PIN_NOTES, and the checklist round the app makes from it, so the
- * draft and review rounds come after it. CLOSED_OPTION then closes the shared and review rounds, as a move on by the
+ * reporter's Round 0 with one ready picture and REPORT_PIN_NOTES, and the checklist the app makes from it, which has no
+ * number (ADR-0048, note of 2026-11-22), so the draft is round 1 and the review round 2 either way. CLOSED_OPTION then closes the shared and review rounds, as a move on by the
  * person whose turn it is would, so the assignee may share another round (ADR-0048).
  */
 // Never registered in prod, so no console call there can fake processed pictures or a round.
@@ -130,7 +130,7 @@ final class SeedReviewRoundCommand extends Command
         $this->entityManager->clear();
         $this->tenantContext->set($organizationId);
         try {
-            [$reviewNumber, $checklistNumber] = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition, $withChecklist, $isClosed): array {
+            $reviewNumber = $this->transactions->run(function () use ($organizationId, $key, $pinNotes, $pendingAfterPosition, $withChecklist, $isClosed): int {
                 $ticketId = $this->ticketKeyQueries->idOf($key) ?? throw new TicketNotFound('That ticket does not exist.');
                 $facts = $this->ticketTurnQueries->factsOf($ticketId) ?? throw new TicketNotFound('That ticket does not exist.');
                 $owner = $facts->assigneeId ?? throw new RoundRefused('That ticket is not given to anyone, so there is no one to own the rounds.');
@@ -138,7 +138,9 @@ final class SeedReviewRoundCommand extends Command
                     throw new RoundRefused('That ticket has rounds already; seed the review round on a new ticket.');
                 }
                 $now = $this->clock->now();
-                $checklistNumber = $withChecklist ? $this->addReportWithChecklist($organizationId, $ticketId, $facts->reporterId, $now) : null;
+                if ($withChecklist) {
+                    $this->addReportWithChecklist($organizationId, $ticketId, $facts->reporterId, $now);
+                }
                 [$earlierNumber, $earlierScreenshotIds] = $this->shareRoundWithPins($organizationId, $ticketId, $owner, $pinNotes, $now);
                 $reviewNumber = $earlierNumber + 1;
                 $this->addReviewRound($organizationId, $ticketId, $owner, $reviewNumber, $earlierScreenshotIds, $pendingAfterPosition, $now);
@@ -148,7 +150,7 @@ final class SeedReviewRoundCommand extends Command
                     }
                 }
 
-                return [$reviewNumber, $checklistNumber];
+                return $reviewNumber;
             });
         } catch (TicketNotFound|RoundRefused $refused) {
             $output->writeln(\sprintf('<error>%s</error>', $refused->getMessage()));
@@ -164,8 +166,8 @@ final class SeedReviewRoundCommand extends Command
         if (null !== $pendingAfterPosition) {
             $output->writeln(\sprintf('The "after" picture of %s is still processing.', self::AREA_NAMES[$pendingAfterPosition]));
         }
-        if (null !== $checklistNumber) {
-            $output->writeln(\sprintf('Checklist round %d on %s has %d open items.', $checklistNumber, $key, \count(self::REPORT_PIN_NOTES)));
+        if ($withChecklist) {
+            $output->writeln(\sprintf('The checklist from the report on %s has %d open items.', $key, \count(self::REPORT_PIN_NOTES)));
         }
         if ($isClosed) {
             $output->writeln(\sprintf('Rounds %d and %d on %s are closed.', $reviewNumber - 1, $reviewNumber, $key));
@@ -174,10 +176,7 @@ final class SeedReviewRoundCommand extends Command
         return Command::SUCCESS;
     }
 
-    /**
-     * @return int the checklist round's number
-     */
-    private function addReportWithChecklist(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, \DateTimeImmutable $now): int
+    private function addReportWithChecklist(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, \DateTimeImmutable $now): void
     {
         $pins = array_map(
             static fn (int $index, string $note): PlacedPin => new PlacedPin(25.0 + 40.0 * $index, 30.0 + 20.0 * $index, $note),
@@ -187,12 +186,13 @@ final class SeedReviewRoundCommand extends Command
         $this->roundCommands->createReport($ticketId, [new ScreenshotWithPins($this->readyPictureSeeds->add($organizationId, $reporter, $now), 'Checkout page', null, $pins)], $reporter, $now);
         // createReport makes the checklist itself for a ticket in To do; this makes it in any other step, as Start work does.
         $this->checklistCommands->createFromReport($ticketId, $now);
-        $number = $this->connection->fetchOne(
-            "SELECT number FROM rvw_round WHERE organization_id = ? AND ticket_id = ? AND kind = 'checklist'",
+        $hasChecklist = $this->connection->fetchOne(
+            "SELECT EXISTS (SELECT 1 FROM rvw_round WHERE organization_id = ? AND ticket_id = ? AND kind = 'checklist')",
             [$organizationId->toString(), $ticketId->toString()],
         );
-
-        return \is_int($number) ? $number : throw new \LogicException('A ticket with a new report and no other rounds gets a checklist round.');
+        if (true !== $hasChecklist) {
+            throw new \LogicException('A ticket with a new report and no other rounds gets a checklist.');
+        }
     }
 
     private function hasRounds(OrganizationId $organizationId, TicketId $ticketId): bool

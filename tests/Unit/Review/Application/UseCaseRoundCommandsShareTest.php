@@ -103,7 +103,7 @@ final class UseCaseRoundCommandsShareTest extends TestCase
 
         $this->inTransaction(function (): void {
             $this->rounds->add(Round::report(new RoundId(self::REPORT), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::LENA), [$this->screenshot()], self::earlier()));
-            $this->rounds->add($this->stored(self::CHECKLIST, self::ACME_FOODS, self::TICKET, RoundKind::Checklist, self::LENA, 1, RoundState::Open));
+            $this->rounds->add($this->stored(self::CHECKLIST, self::ACME_FOODS, self::TICKET, RoundKind::Checklist, self::LENA, null, RoundState::Open));
             $this->rounds->add($this->stored(self::CLOSED_REVIEW, self::ACME_FOODS, self::TICKET, RoundKind::Review, self::OMAR, 2, RoundState::Closed));
             $this->rounds->add($this->draftWithAScreenshot(self::OMARS_DRAFT, self::TICKET, self::OMAR));
             $this->rounds->add($this->draftWithAScreenshot(self::MIAS_DRAFT, self::TICKET, self::MIA));
@@ -652,7 +652,7 @@ final class UseCaseRoundCommandsShareTest extends TestCase
     /**
      * A round as a read gives it, with one screenshot, shared at an earlier time.
      */
-    private function stored(string $roundId, string $organizationId, string $ticketId, RoundKind $kind, string $ownerId, int $number, RoundState $state): Round
+    private function stored(string $roundId, string $organizationId, string $ticketId, RoundKind $kind, string $ownerId, ?int $number, RoundState $state): Round
     {
         return Round::restored(
             new RoundId($roundId),

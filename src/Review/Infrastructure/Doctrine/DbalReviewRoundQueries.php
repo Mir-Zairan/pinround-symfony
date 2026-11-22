@@ -50,7 +50,7 @@ final readonly class DbalReviewRoundQueries implements ReviewRoundQueries
             return null;
         }
 
-        // An unshared draft, and so a deleted one, has no number: it never matches.
+        // An unshared draft, and so a deleted one, and the checklist have no number: they never match.
         $roundRow = $this->connection->fetchAssociative(
             'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state, round.decision,'
             .' EXISTS (SELECT 1 FROM rvw_area AS area WHERE area.organization_id = round.organization_id AND area.round_id = round.id) AS has_areas'

@@ -142,7 +142,6 @@ final readonly class GetTicket implements AgentTool
                         'type' => ['object', 'null'],
                         'properties' => [
                             'round_id' => $string,
-                            'number' => ['type' => 'integer'],
                             'checked_ok_count' => ['type' => 'integer'],
                             'total' => ['type' => 'integer'],
                             'items' => [
@@ -160,7 +159,7 @@ final readonly class GetTicket implements AgentTool
                                 ],
                             ],
                         ],
-                        'required' => ['round_id', 'number', 'checked_ok_count', 'total', 'items'],
+                        'required' => ['round_id', 'checked_ok_count', 'total', 'items'],
                         'additionalProperties' => false,
                     ],
                 ],

@@ -43,7 +43,7 @@ final class ChecklistCardTest extends TestCase
             array_map(static fn (ChecklistRow $row): array => [$row->stateLabel, $row->stateClass, $row->mayMarkFixed, $row->mayCheck], $card->rows),
         );
         self::assertSame('1 of 4 checked OK', $card->status);
-        self::assertSame('Round 1 · Checklist from the report', $card->headline);
+        self::assertSame(ChecklistCard::HEADLINE, $card->headline);
     }
 
     /**
@@ -55,7 +55,7 @@ final class ChecklistCardTest extends TestCase
         $card = ChecklistCard::of(self::checklistOf([1 => ChecklistCommands::STATE_OPEN]), true, false);
 
         self::assertSame(
-            ['checklist-'.self::ROUND, 'round-'.self::ROUND.'-heading', 3, 'Round 1 · Checklist from the report', ChecklistCard::DESCRIPTION, false],
+            ['checklist-'.self::ROUND, 'round-'.self::ROUND.'-heading', 3, ChecklistCard::HEADLINE, ChecklistCard::DESCRIPTION, false],
             [$card->id, $card->headingId, $card->headingLevel, $card->headline, $card->description, $card->isFindings],
         );
     }

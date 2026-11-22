@@ -55,7 +55,7 @@ final class InMemoryChecklists implements Checklists
             $checklist->ticketId(),
             RoundKind::Checklist,
             $checklist->ownerId(),
-            $checklist->number(),
+            null,
             $checklist->createdAt(),
             RoundState::Open,
             1,
@@ -75,7 +75,8 @@ final class InMemoryChecklists implements Checklists
             if (!$existing->organizationId()->equals($round->organizationId()) || !$existing->ticketId()->equals($round->ticketId())) {
                 continue;
             }
-            if (RoundKind::Checklist === $existing->kind() || $existing->number() === $round->number()) {
+            // rvw_round_ticket_id_checklist_key; the checklist has no number, so rvw_round_ticket_id_number_key never meets it.
+            if (RoundKind::Checklist === $existing->kind()) {
                 throw new RoundSlotTaken('The ticket has this round already.');
             }
         }

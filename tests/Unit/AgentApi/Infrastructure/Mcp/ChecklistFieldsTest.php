@@ -29,7 +29,6 @@ final class ChecklistFieldsTest extends TestCase
 
         self::assertSame([
             'round_id' => self::ROUND,
-            'number' => 2,
             'checked_ok_count' => 1,
             'total' => 2,
             'items' => [

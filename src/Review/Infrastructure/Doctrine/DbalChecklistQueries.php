@@ -65,7 +65,7 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
     {
         $organizationId = $this->requireTransactionAndTenant()->toString();
         $itemRows = $this->connection->fetchAllAssociative(
-            'SELECT round.id AS round_id, round.number AS round_number, item.id AS item_id, pin.number AS pin_number, pin.note, item.state'
+            'SELECT round.id AS round_id, item.id AS item_id, pin.number AS pin_number, pin.note, item.state'
             .' FROM rvw_round AS round'
             .' JOIN rvw_check_item AS item ON item.organization_id = round.organization_id AND item.round_id = round.id'
             .' JOIN rvw_pin AS pin ON pin.organization_id = item.organization_id AND pin.id = item.pin_id'
@@ -80,7 +80,7 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
 
         return new ChecklistView(
             self::text($itemRows[0]['round_id'], 'round_id'),
-            self::integer($itemRows[0]['round_number'], 'round number'),
+            null,
             array_map(self::itemOf(...), $itemRows),
         );
     }
@@ -110,7 +110,8 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
             .' LEFT JOIN rvw_screenshot AS first_try ON first_try.organization_id = screenshot.organization_id AND first_try.id = screenshot.retake_of'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = CAST(:ticket AS uuid)'
             .' AND round.id = ANY(CAST(:rounds AS uuid[])) AND round.kind IN (:checklist, :findings)'
-            .' ORDER BY round.number, picture_position, pin.number',
+            // The checklist, with no number, first, as the ticket page lists it.
+            .' ORDER BY round.number NULLS FIRST, picture_position, pin.number',
             [
                 'organization' => $organizationId,
                 'ticket' => $ticketId->toString(),
@@ -137,7 +138,11 @@ final readonly class DbalChecklistQueries implements ChecklistQueries, RoundChec
         $checklists = [];
         foreach ($itemsByRound as $roundId => $items) {
             $checklists[$roundId] = new RoundChecklist(
-                new ChecklistView($roundId, self::integer($roundRows[$roundId]['round_number'], 'round number'), $items),
+                new ChecklistView(
+                    $roundId,
+                    RoundKind::Checklist->value === $roundRows[$roundId]['kind'] ? null : self::integer($roundRows[$roundId]['round_number'], 'round number'),
+                    $items,
+                ),
                 RoundKind::Draft->value === $roundRows[$roundId]['kind'],
                 $picturesByRound[$roundId],
             );

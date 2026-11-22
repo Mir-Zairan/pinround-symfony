@@ -14,7 +14,10 @@ use App\SharedKernel\Domain\UserId;
  */
 interface RoundQueries
 {
-    /** The newest rounds from Round 1 up that are loaded; Round 0 and the viewer's own unshared draft come on top. */
+    /**
+     * The newest rounds from Round 1 up that are loaded; Round 0, the checklist and the viewer's own unshared draft come
+     * on top.
+     */
     public const int MAX_NUMBERED_ROUNDS = 20;
 
     /**
@@ -22,7 +25,8 @@ interface RoundQueries
      * the ticket, then the rounds, their screenshots and those screenshots' pins, one query each; none of the last
      * three for a ticket the viewer may not see, and none for screenshots or pins that cannot exist.
      *
-     * Rounds come by number (Round 0, Round 1, then the rest), then the viewer's own unshared draft, which has none.
+     * Round 0 comes first, then the checklist, which has no number (ADR-0048, note of 2026-11-22), then the rounds from
+     * Round 1 up by number, then the viewer's own unshared draft, which has none either.
      * Another person's unshared draft is left out for everyone, the lead and admins included.
      *
      * Only Round 0 (the report) and drafts come with screenshots and pins; a checklist or review round has none loaded.
@@ -32,7 +36,7 @@ interface RoundQueries
      * Every round comes with its screenshotCount, the latest try of each screenshot it holds, counted in the rounds
      * query, also for a checklist or review round, whose screenshots are not loaded.
      *
-     * Round 0, the viewer's own unshared draft and the newest MAX_NUMBERED_ROUNDS numbered rounds from Round 1 up are
+     * Round 0, the checklist, the viewer's own unshared draft and the newest MAX_NUMBERED_ROUNDS rounds from Round 1 up are
      * loaded; the count of the older ones is in the answer. The cap is in the rounds query, so a ticket with a
      * thousand rounds still costs the same four queries.
      *

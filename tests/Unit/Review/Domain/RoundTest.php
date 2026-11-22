@@ -462,7 +462,7 @@ final class RoundTest extends TestCase
         yield 'an unshared draft' => [static fn (): Round => self::draftWithScreenshots(1), $notShared];
         yield 'a deleted draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::OMAR, null, RoundState::Closed, true), $notShared];
         yield 'Round 0' => [static fn (): Round => self::report([self::screenshot(0)]), $notShared];
-        yield 'the checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open), $notShared];
+        yield 'the checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, null, RoundState::Open), $notShared];
         yield 'a closed shared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 2, RoundState::Closed), 'This round is closed already.'];
         yield 'a closed review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::OMAR, 3, RoundState::Closed), 'This round is closed already.'];
     }
@@ -517,7 +517,7 @@ final class RoundTest extends TestCase
         yield 'an open review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open), true];
         yield 'a closed review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Closed), false];
         yield 'Round 0, open' => [static fn (): Round => self::report([self::screenshot(0)]), false];
-        yield 'the checklist round, open' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open), false];
+        yield 'the checklist round, open' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, null, RoundState::Open), false];
     }
 
     /**
@@ -550,7 +550,7 @@ final class RoundTest extends TestCase
         yield 'another person\'s deleted draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, null, RoundState::Closed, true)];
         yield 'another person\'s review round' => [static fn (): Round => self::storedRound(RoundKind::Review, self::LENA, 3, RoundState::Open)];
         yield 'another person\'s Round 0' => [static fn (): Round => self::report([self::screenshot(0)])];
-        yield 'the checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open)];
+        yield 'the checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, null, RoundState::Open)];
     }
 
     /**
@@ -592,7 +592,7 @@ final class RoundTest extends TestCase
         yield 'Omar moves on his turn: Mia\'s closed findings' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, 3, RoundState::Closed), self::OMAR, true, self::OMAR, false];
         yield 'Omar moves on his turn: Mia\'s unshared draft' => [static fn (): Round => self::storedRound(RoundKind::Draft, self::MIA, null, RoundState::Open), self::OMAR, true, self::OMAR, false];
         yield 'Omar moves on his turn: Round 0' => [static fn (): Round => self::report([self::screenshot(0)]), self::OMAR, true, self::OMAR, false];
-        yield 'Omar moves on his turn: the open checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, 1, RoundState::Open), self::OMAR, true, self::OMAR, false];
+        yield 'Omar moves on his turn: the open checklist round' => [static fn (): Round => self::storedRound(RoundKind::Checklist, self::LENA, null, RoundState::Open), self::OMAR, true, self::OMAR, false];
     }
 
     /**
@@ -1592,6 +1592,34 @@ final class RoundTest extends TestCase
         Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Draft, new UserId(self::OMAR), $number, $sharedAt, RoundState::Open, $version, [], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, $decision, $decidedAt);
     }
 
+    /**
+     * @return iterable<string, array{?int, ?\DateTimeImmutable}>
+     */
+    public static function storedChecklistsThatBreakItsRule(): iterable
+    {
+        yield 'a checklist with a number' => [1, new \DateTimeImmutable('2026-03-05 11:15:00+00:00')];
+        yield 'a checklist not shared' => [null, null];
+    }
+
+    #[Test]
+    #[DataProvider('storedChecklistsThatBreakItsRule')]
+    public function aStoredChecklistIsSharedWithNoNumberOrRefused(?int $number, ?\DateTimeImmutable $sharedAt): void
+    {
+        $this->expectExceptionObject(new \InvalidArgumentException('A checklist round is shared and has no number.'));
+
+        Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Checklist, new UserId(self::LENA), $number, $sharedAt, RoundState::Open, 1, [], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
+    }
+
+    #[Test]
+    public function aStoredChecklistSharedWithNoNumberIsRestored(): void
+    {
+        $sharedAt = new \DateTimeImmutable('2026-03-05 11:15:00+00:00');
+
+        $checklist = Round::restored(new RoundId(self::ROUND), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), RoundKind::Checklist, new UserId(self::LENA), null, $sharedAt, RoundState::Open, 1, [], new \DateTimeImmutable('2026-03-04 10:00:00+00:00'), null, null, null);
+
+        self::assertSame([null, $sharedAt, false], [$checklist->number(), $checklist->sharedAt(), $checklist->isUnsharedDraft()]);
+    }
+
     #[Test]
     public function aStoredSharedAndDecidedRoundIsRestoredWithEverythingItHad(): void
     {
@@ -1691,7 +1719,7 @@ final class RoundTest extends TestCase
     }
 
     /**
-     * A round as a read gives it at version 1, with one screenshot; shared exactly when it has a number.
+     * A round as a read gives it at version 1, with one screenshot; shared exactly when it has a number or is the checklist.
      */
     private static function storedRound(RoundKind $kind, string $ownerId, ?int $number, RoundState $state, bool $isDeleted = false, ?DraftDecision $decision = null): Round
     {
@@ -1704,7 +1732,7 @@ final class RoundTest extends TestCase
             $kind,
             new UserId($ownerId),
             $number,
-            null === $number ? null : new \DateTimeImmutable('2026-03-05 11:15:00+00:00'),
+            null === $number && RoundKind::Checklist !== $kind ? null : new \DateTimeImmutable('2026-03-05 11:15:00+00:00'),
             $state,
             1,
             [self::screenshot(0)],

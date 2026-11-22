@@ -86,7 +86,7 @@ final class CreateChecklistOnTicketEventsHandlerTest extends KernelTestCase
         $this->handle(self::ACME_FOODS, static fn (CreateChecklistOnTicketEventsHandler $handler) => $handler->onTicketMoved(self::moved('start_work')), 'progress');
         $this->handle(self::ACME_FOODS, static fn (CreateChecklistOnTicketEventsHandler $handler) => $handler->onTicketMoved(self::moved('start_work')), 'progress');
 
-        self::assertSame([[1, 'checklist']], $this->roundsOf(self::ACME_FOODS, self::TICKET));
+        self::assertSame([[null, 'checklist']], $this->roundsOf(self::ACME_FOODS, self::TICKET));
         self::assertSame(
             [[self::FIRST_PIN, 'open'], [self::SECOND_PIN, 'open']],
             $this->itemsOf(self::ACME_FOODS, self::TICKET),
@@ -108,7 +108,7 @@ final class CreateChecklistOnTicketEventsHandlerTest extends KernelTestCase
     {
         $this->handle(self::ACME_FOODS, static fn (CreateChecklistOnTicketEventsHandler $handler) => $handler->onTicketMoved(self::moved(null)), 'todo');
 
-        self::assertSame([[1, 'checklist']], $this->roundsOf(self::ACME_FOODS, self::TICKET));
+        self::assertSame([[null, 'checklist']], $this->roundsOf(self::ACME_FOODS, self::TICKET));
     }
 
     #[Test]
@@ -119,7 +119,7 @@ final class CreateChecklistOnTicketEventsHandlerTest extends KernelTestCase
 
         $this->handle(self::ACME_FOODS, static fn (CreateChecklistOnTicketEventsHandler $handler) => $handler->onTicketCreated(self::created()), 'todo');
 
-        self::assertSame([[1, 'checklist']], $this->roundsOf(self::ACME_FOODS, self::TICKET));
+        self::assertSame([[null, 'checklist']], $this->roundsOf(self::ACME_FOODS, self::TICKET));
         self::assertCount(2, $this->itemsOf(self::ACME_FOODS, self::TICKET));
     }
 
@@ -159,12 +159,12 @@ final class CreateChecklistOnTicketEventsHandlerTest extends KernelTestCase
     }
 
     /**
-     * @return list<list<mixed>> the number and kind of each round after Round 0
+     * @return list<list<mixed>> the number and kind of each round after Round 0, the checklist with none first
      */
     private function roundsOf(string $organizationId, string $ticketId): array
     {
         return $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->connection()->fetchAllNumeric(
-            'SELECT number, kind FROM rvw_round WHERE ticket_id = ? AND number > 0 ORDER BY number',
+            "SELECT number, kind FROM rvw_round WHERE ticket_id = ? AND kind <> 'report' ORDER BY number NULLS FIRST",
             [$ticketId],
         ));
     }

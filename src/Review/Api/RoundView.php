@@ -14,7 +14,7 @@ final readonly class RoundView
     public const string DRAFT = 'draft';
 
     /**
-     * @param int|null                  $number          null exactly while the round is an unshared draft
+     * @param int|null                  $number          null while the round is an unshared draft, and always for the checklist
      * @param string                    $kind            report, checklist, review or draft
      * @param string                    $state           open or closed
      * @param list<RoundScreenshotView> $screenshots     by the position of each one's chain's first try (ADR-0048), then by

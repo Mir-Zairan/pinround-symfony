@@ -165,6 +165,8 @@ final readonly class DbalRounds implements Rounds
         $organizationId = $this->requireTransactionAndTenant();
         $this->lockRoundNumbersOf($organizationId, $ticketId);
 
+        // MAX skips the checklist's NULL, so the first round shared after the report is Round 1 (ADR-0048, note of
+        // 2026-11-22).
         return self::integer($this->connection->fetchOne(
             'SELECT COALESCE(MAX(number), 0) + 1 FROM rvw_round WHERE organization_id = ? AND ticket_id = ?',
             [$organizationId->toString(), $ticketId->toString()],

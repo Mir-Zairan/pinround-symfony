@@ -52,7 +52,7 @@ final class DbalLowestOpenSharedRoundOfTest extends KernelTestCase
         self::addRounds(self::ACME_FOODS, [
             ['0197a3c0-0000-7000-8000-0000000f9a36', self::TICKET, 6, 'draft', self::MIA, self::SHARED_AT, 'open'],
             ['0197a3c0-0000-7000-8000-0000000f9a30', self::TICKET, 0, 'report', self::MIA, self::REPORTED_AT, 'open'],
-            ['0197a3c0-0000-7000-8000-0000000f9a31', self::TICKET, 1, 'checklist', self::MIA, self::SHARED_AT, 'open'],
+            ['0197a3c0-0000-7000-8000-0000000f9a31', self::TICKET, null, 'checklist', self::MIA, self::SHARED_AT, 'open'],
             ['0197a3c0-0000-7000-8000-0000000f9a32', self::TICKET, 2, 'review', self::LENA, self::SHARED_AT, 'closed'],
             ['0197a3c0-0000-7000-8000-0000000f9a35', self::TICKET, 5, 'review', self::LENA, self::SHARED_AT, 'open'],
             ['0197a3c0-0000-7000-8000-0000000f9a34', self::TICKET, 4, 'draft', self::OMAR, self::SHARED_AT, 'open'],

@@ -599,7 +599,7 @@ final class RoundShareDraftQuestionTest extends TestCase
             new TicketId(self::TICKET),
             RoundKind::Checklist,
             new UserId(self::LENA),
-            2,
+            null,
             $createdAt,
             RoundState::Open,
             1,

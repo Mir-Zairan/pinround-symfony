@@ -67,7 +67,7 @@ final readonly class InMemoryChecklistQueries implements ChecklistQueries
             }
             usort($sortableItems, static fn (array $first, array $second): int => [$first[0], $first[1]] <=> [$second[0], $second[1]]);
 
-            return new ChecklistView($round->id()->toString(), $round->number() ?? throw new \LogicException('A checklist round always has a number.'), array_column($sortableItems, 2));
+            return new ChecklistView($round->id()->toString(), null, array_column($sortableItems, 2));
         }
 
         return null;

@@ -108,32 +108,51 @@ final class UseCaseChecklistCommandsTest extends TestCase
     }
 
     #[Test]
-    public function theChecklistIsMadeFromRoundZerosPinsAsTheNextRoundOwnedByTheReporter(): void
+    public function theChecklistIsMadeFromRoundZerosPinsSharedWithNoNumberAndOwnedByTheReporter(): void
     {
         $roundId = $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
 
         $checklist = $this->storedRound($roundId);
-        self::assertSame([RoundKind::Checklist, 1, self::LENA], [$checklist->kind(), $checklist->number(), $checklist->ownerId()->toString()]);
+        self::assertSame(
+            [RoundKind::Checklist, null, self::CREATED_AT, self::LENA],
+            [$checklist->kind(), $checklist->number(), $checklist->sharedAt()?->format('Y-m-d H:i:sP'), $checklist->ownerId()->toString()],
+        );
         $items = $this->acmeItems();
         self::assertCount(3, $items);
         foreach ($items as $item) {
             self::assertSame([$roundId, CheckItemState::Open], [$item->roundId()->toString(), $item->state()]);
         }
-        self::assertSame([self::TICKET], $this->rounds->numberedTicketIds);
+        self::assertSame([], $this->rounds->numberedTicketIds, 'The checklist takes no round number, so it reads none.');
         self::assertSame([], $this->events->published());
     }
 
     #[Test]
-    public function aChecklistGoesPastARoundTheTicketHasShared(): void
+    public function theFirstRoundSharedAfterTheChecklistIsRoundOneAndTheNextIsRoundTwo(): void
     {
-        $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::OMAR), new \DateTimeImmutable(self::REPORTED_AT));
-        $draft->addScreenshot(new UserId(self::OMAR), $this->rounds->nextScreenshotIdentity(), self::MEDIA);
-        $draft->share(new UserId(self::OMAR), 1, new \DateTimeImmutable(self::REPORTED_AT));
-        $this->rounds->add($draft);
+        $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
+
+        self::assertSame(1, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET)), 'Only Round 0 and the checklist exist, so a share takes 1.');
+        $this->rounds->add($this->sharedDraftOf(self::OMAR, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET))));
+        $this->rounds->add($this->sharedDraftOf(self::MIA, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET))));
+
+        self::assertSame(
+            [[RoundKind::Report, 0], [RoundKind::Checklist, null], [RoundKind::Draft, 1], [RoundKind::Draft, 2]],
+            array_map(
+                static fn (Round $round): array => [$round->kind(), $round->number()],
+                array_values(array_filter($this->rounds->stored, static fn (Round $round): bool => self::TICKET === $round->ticketId()->toString())),
+            ),
+        );
+    }
+
+    #[Test]
+    public function aChecklistMadeAfterARoundTheTicketHasSharedTakesNoNumberEither(): void
+    {
+        $this->rounds->add($this->sharedDraftOf(self::OMAR, 1));
 
         $roundId = $this->commands->createFromReport(new TicketId(self::TICKET), new \DateTimeImmutable(self::CREATED_AT));
 
-        self::assertSame(2, $this->storedRound($roundId)->number());
+        self::assertNull($this->storedRound($roundId)->number());
+        self::assertSame(2, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET)));
     }
 
     #[Test]
@@ -576,7 +595,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     }
 
     /**
-     * The owner's draft of the ticket in Acme Foods, shared as Round 2: with $hasPins, pins 2 and 1 on its first
+     * The owner's draft of the ticket in Acme Foods, shared as Round 1, as the checklist has no number: with $hasPins, pins 2 and 1 on its first
      * picture, given out of order, and pin 1 on its second; else one picture without pins.
      */
     private function addSharedDraft(string $ownerId, string $ticketId, bool $hasPins): string
@@ -594,10 +613,23 @@ final class UseCaseChecklistCommandsTest extends TestCase
                 Pin::placedBy($this->rounds->nextPinIdentity(), 1, 10.0, 10.0, 'Cut off', $owner),
             ]);
         }
-        $draft->share($owner, 2, new \DateTimeImmutable(self::CREATED_AT));
+        $draft->share($owner, 1, new \DateTimeImmutable(self::CREATED_AT));
         $this->rounds->add($draft);
 
         return $draft->id()->toString();
+    }
+
+    /**
+     * The owner's draft of TICKET with one picture and no pins, shared as round $number.
+     */
+    private function sharedDraftOf(string $ownerId, int $number): Round
+    {
+        $owner = new UserId($ownerId);
+        $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), $owner, new \DateTimeImmutable(self::REPORTED_AT));
+        $draft->addScreenshot($owner, $this->rounds->nextScreenshotIdentity(), self::MEDIA);
+        $draft->share($owner, $number, new \DateTimeImmutable(self::REPORTED_AT));
+
+        return $draft;
     }
 
     private function addUnsharedDraft(): string

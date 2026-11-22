@@ -7,9 +7,9 @@ namespace App\Review\Domain;
 use App\SharedKernel\Domain\TicketId;
 
 /**
- * The checklist rounds of tickets with their items, and the items of findings rounds. A checklist round is a row of the ticket's rounds, so it takes a
- * round number as any shared round does (Rounds::nextFreeNumberOf). Each method needs an open transaction under the
- * organization as tenant, and reads or writes that organization's checklists only.
+ * The checklist rounds of tickets with their items, and the items of findings rounds. A checklist round is shared with
+ * no number (ADR-0048, note of 2026-11-22), so it never takes one a hand-off round could get. Each method needs an open
+ * transaction under the organization as tenant, and reads or writes that organization's checklists only.
  */
 interface Checklists
 {
@@ -18,7 +18,7 @@ interface Checklists
     /**
      * Writes the checklist round with its items, all or nothing.
      *
-     * @throws RoundSlotTaken  when the ticket has a checklist round already, or a round with the checklist's number
+     * @throws RoundSlotTaken  when the ticket has a checklist round already
      * @throws \LogicException when no transaction is open, the round id was added before (a bug or a redelivered
      *                         message, not a slot), or an item's id was added before or its pin is not stored or is in a
      *                         checklist already

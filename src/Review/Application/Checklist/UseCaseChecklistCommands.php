@@ -54,7 +54,6 @@ final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
             $organizationId,
             $ticketId,
             $report,
-            $this->rounds->nextFreeNumberOf($ticketId),
             $this->checklists->nextItemIdentity(...),
             $at,
         );
@@ -64,7 +63,7 @@ final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
         try {
             $this->checklists->add($checklist);
         } catch (RoundSlotTaken) {
-            // nextFreeNumberOf holds the ticket's numbers, so the slot taken is the ticket's one checklist round.
+            // The checklist takes no number, so the slot taken is the ticket's one checklist round.
             return null;
         }
 

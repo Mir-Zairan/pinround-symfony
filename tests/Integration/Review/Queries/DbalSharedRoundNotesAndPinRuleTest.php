@@ -71,7 +71,7 @@ final class DbalSharedRoundNotesAndPinRuleTest extends KernelTestCase
         self::addRows(self::ACME_FOODS, [
             // Inserted newest first, so neither insertion order nor id order is the number order.
             [self::REVIEW, self::TICKET, 4, 'review', self::MIA, self::SHARED_AT, 'open', null],
-            [self::CHECKLIST, self::TICKET, 3, 'checklist', self::MIA, self::SHARED_AT, 'open', null],
+            [self::CHECKLIST, self::TICKET, null, 'checklist', self::MIA, self::SHARED_AT, 'open', null],
             [self::OMARS_SHARED_DRAFT, self::TICKET, 2, 'draft', self::OMAR, self::SHARED_AT, 'open', null],
             [self::LENAS_SHARED_DRAFT, self::TICKET, 1, 'draft', self::LENA, self::SHARED_AT, 'open', null],
             [self::REPORT, self::TICKET, 0, 'report', self::MIA, self::SHARED_AT, 'open', null],

@@ -134,7 +134,7 @@ final class DbalChecklistQueriesTest extends KernelTestCase
         ]);
 
         self::assertIsString($roundId);
-        self::assertEquals(new ChecklistView($roundId, 1, [
+        self::assertEquals(new ChecklistView($roundId, null, [
             new CheckItemView($itemIds[0], 1, '', ChecklistCommands::STATE_OK),
             new CheckItemView($itemIds[1], 2, 'Wrong total.', ChecklistCommands::STATE_OPEN),
             new CheckItemView($itemIds[2], 1, 'Logo too small.', ChecklistCommands::STATE_OPEN),
@@ -200,7 +200,7 @@ final class DbalChecklistQueriesTest extends KernelTestCase
     /**
      * The findings round is asked first, in upper case and twice, beside the report, which has no items, the review
      * round, whose item its kind keeps out, another ticket's checklist round and an unknown round: only the ticket's
-     * checklist and findings rounds come back, by round number, each with its own items by picture position and pin number.
+     * checklist and findings rounds come back, the checklist, which has no number, first, then by round number, each with its own items by picture position and pin number.
      */
     #[Test]
     public function theRoundsAskedHaveTheirOwnItemsByRoundNumberAndOnlyTheFindingsRoundIsFindings(): void
@@ -219,7 +219,7 @@ final class DbalChecklistQueriesTest extends KernelTestCase
         });
 
         self::assertEquals([
-            $checklistRoundId => new RoundChecklist(new ChecklistView($checklistRoundId, 1, [
+            $checklistRoundId => new RoundChecklist(new ChecklistView($checklistRoundId, null, [
                 new CheckItemView($reportItemIds[0], 1, '', ChecklistCommands::STATE_OK),
                 new CheckItemView($reportItemIds[1], 2, 'Wrong total.', ChecklistCommands::STATE_OPEN),
                 new CheckItemView($reportItemIds[2], 1, 'Logo too small.', ChecklistCommands::STATE_OPEN),

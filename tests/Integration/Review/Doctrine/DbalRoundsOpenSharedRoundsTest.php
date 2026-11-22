@@ -246,7 +246,7 @@ final class DbalRoundsOpenSharedRoundsTest extends KernelTestCase
         $this->addCommitted(Round::report(new RoundId(self::REPORT), $acmeFoods, $ticket, $lena, [
             Screenshot::of(new ScreenshotId(self::REPORT_SCREENSHOT), self::MEDIA, 0, null, null, []),
         ], new \DateTimeImmutable(self::STARTED_AT)));
-        $this->addCommitted(Round::restored(new RoundId(self::CHECKLIST), $acmeFoods, $ticket, RoundKind::Checklist, $lena, 1, $sharedAt, RoundState::Open, 1, [], new \DateTimeImmutable(self::STARTED_AT), null, null, null));
+        $this->addCommitted(Round::restored(new RoundId(self::CHECKLIST), $acmeFoods, $ticket, RoundKind::Checklist, $lena, null, $sharedAt, RoundState::Open, 1, [], new \DateTimeImmutable(self::STARTED_AT), null, null, null));
         $this->addCommitted(self::reviewRound(self::CLOSED_REVIEW, self::ACME_FOODS, self::TICKET, 2, RoundState::Closed));
         $closedSharedDraft = $this->draftWithScreenshot(self::CLOSED_SHARED_DRAFT, self::ACME_FOODS, self::TICKET, self::OMAR, self::CLOSED_SHARED_SCREENSHOT);
         $closedSharedDraft->share(new UserId(self::OMAR), 4, $sharedAt);

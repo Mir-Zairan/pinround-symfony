@@ -116,7 +116,9 @@ final class RoundTablesTest extends KernelTestCase
         yield 'a pin fixed on a sixth try' => [[self::round([]), self::screenshot([]), self::pin(['verdict' => 'fixed', 'fixed_on_try' => 6])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
         yield 'a pin still wrong naming a try that fixed it' => [[self::round([]), self::screenshot([]), self::pin(['verdict' => 'still_wrong', 'fixed_on_try' => 2])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
         yield 'a pin with no verdict naming a try that fixed it' => [[self::round([]), self::screenshot([]), self::pin(['fixed_on_try' => 3])], 'rvw_pin_fixed_on_try_check', self::CHECK_VIOLATION];
-        yield 'a second checklist round of the ticket' => [[self::checklistRound([]), self::checklistRound(['id' => self::SECOND_CHECKLIST, 'number' => 2])], 'rvw_round_ticket_id_checklist_key', self::UNIQUE_VIOLATION];
+        yield 'a checklist round with a number' => [[self::checklistRound(['number' => 1])], 'rvw_round_shared_check', self::CHECK_VIOLATION];
+        yield 'a checklist round never shared' => [[self::checklistRound(['shared_at' => null])], 'rvw_round_shared_check', self::CHECK_VIOLATION];
+        yield 'a second checklist round of the ticket' => [[self::checklistRound([]), self::checklistRound(['id' => self::SECOND_CHECKLIST])], 'rvw_round_ticket_id_checklist_key', self::UNIQUE_VIOLATION];
         yield 'a check item in an unknown state' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'done'])], 'rvw_check_item_state_check', self::CHECK_VIOLATION];
         yield 'a check item changed by someone at no time' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'fixed', 'changed_by' => self::LENA])], 'rvw_check_item_changed_check', self::CHECK_VIOLATION];
         yield 'a check item changed at a time by nobody' => [[...self::reportWithPin(), self::checklistRound([]), self::checkItem(['state' => 'fixed', 'changed_at' => '2027-03-16 09:00:00+00'])], 'rvw_check_item_changed_check', self::CHECK_VIOLATION];
@@ -162,11 +164,11 @@ final class RoundTablesTest extends KernelTestCase
             self::draftRound(['id' => self::MISSING_ROUND, 'number' => 1, 'shared_at' => '2027-03-16 09:00:00+00', 'decision' => 'shared', 'decided_at' => '2027-03-16 09:00:00+00']),
         ]];
         yield 'an AI pin kept' => [[self::round([]), self::screenshot([]), self::pin(['source' => 'ai', 'ai_state' => 'kept'])]];
-        yield 'a checklist round with an open item and one confirmed OK, beside a shared draft' => [[
+        yield 'a checklist round with an open item and one confirmed OK, beside a shared draft that is Round 1' => [[
             ...self::reportWithPin(),
             self::pin(['id' => self::SECOND_PIN, 'number' => 2]),
             self::checklistRound([]),
-            self::draftRound(['id' => self::MISSING_ROUND, 'number' => 2, 'shared_at' => '2027-03-16 09:00:00+00']),
+            self::draftRound(['id' => self::MISSING_ROUND, 'number' => 1, 'shared_at' => '2027-03-16 09:00:00+00']),
             self::checkItem([]),
             self::checkItem(['id' => self::SECOND_CHECK_ITEM, 'pin_id' => self::SECOND_PIN, 'state' => 'ok', 'changed_by' => self::LENA, 'changed_at' => '2027-03-16 09:00:00+00']),
         ]];
@@ -322,13 +324,13 @@ final class RoundTablesTest extends KernelTestCase
     }
 
     /**
-     * @param array<string, mixed> $change the columns that differ from a valid checklist round 1 of the ticket
+     * @param array<string, mixed> $change the columns that differ from a valid checklist round of the ticket, shared with no number
      *
      * @return array{string, array<string, mixed>}
      */
     private static function checklistRound(array $change): array
     {
-        return self::round(['id' => self::CHECKLIST, 'kind' => 'checklist', 'number' => 1, ...$change]);
+        return self::round(['id' => self::CHECKLIST, 'kind' => 'checklist', 'number' => null, ...$change]);
     }
 
     /**

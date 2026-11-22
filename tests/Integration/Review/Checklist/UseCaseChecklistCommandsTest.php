@@ -8,6 +8,8 @@ use App\Review\Api\CheckItemChange;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\ChecklistRefused;
 use App\Review\Api\Event\ChecklistItemChanged;
+use App\Review\Domain\Round;
+use App\Review\Domain\Rounds;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
@@ -91,7 +93,7 @@ final class UseCaseChecklistCommandsTest extends KernelTestCase
     }
 
     #[Test]
-    public function theChecklistIsRoundOneOfRoundZerosPinsAndIsMadeOnce(): void
+    public function theChecklistIsSharedWithNoNumberFromRoundZerosPinsAndIsMadeOnce(): void
     {
         $roundId = $this->createChecklist();
         $secondRoundId = $this->createChecklist();
@@ -99,7 +101,7 @@ final class UseCaseChecklistCommandsTest extends KernelTestCase
         self::assertNotNull($roundId);
         self::assertNull($secondRoundId);
         self::assertSame(
-            [[$roundId, 1, self::LENA, true, 'open']],
+            [[$roundId, null, self::LENA, true, 'open']],
             $this->rowsAs("SELECT id, number, owner_id, shared_at IS NOT NULL, state FROM rvw_round WHERE kind = 'checklist'", [], all: true),
         );
         self::assertSame(
@@ -181,6 +183,34 @@ final class UseCaseChecklistCommandsTest extends KernelTestCase
         self::assertSame(['open'], $this->transactions()->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->connection()->fetchFirstColumn('SELECT state FROM rvw_check_item WHERE id = ?', [$betaItemId])));
         self::assertSame([], $this->outboxBodiesNaming(self::TICKET));
         self::assertSame([null, null, null], $this->rowsAs('SELECT cleared_reason FROM ntf_ping ORDER BY id', []));
+    }
+
+    #[Test]
+    public function aRoundSharedWhenOnlyRoundZeroAndTheChecklistExistIsRoundOneAndTheNextIsRoundTwo(): void
+    {
+        self::assertNotNull($this->createChecklist());
+
+        $numbers = $this->transactions()->committedAs(self::ACME_FOODS, static function (): array {
+            $rounds = self::getContainer()->get(Rounds::class);
+            $numbers = [];
+            foreach ([self::OMAR, self::MIA] as $ownerId) {
+                $owner = new UserId($ownerId);
+                $draft = Round::draft($rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), $owner, new \DateTimeImmutable(self::NOW));
+                $draft->addScreenshot($owner, $rounds->nextScreenshotIdentity(), self::MEDIA);
+                $number = $rounds->nextFreeNumberOf(new TicketId(self::TICKET));
+                $draft->share($owner, $number, new \DateTimeImmutable(self::NOW));
+                $rounds->add($draft);
+                $numbers[] = $number;
+            }
+
+            return $numbers;
+        });
+
+        self::assertSame([1, 2], $numbers);
+        self::assertSame(
+            [['report', 0], ['checklist', null], ['draft', 1], ['draft', 2]],
+            $this->rowsAs('SELECT kind, number FROM rvw_round WHERE ticket_id = ? ORDER BY COALESCE(number, 0), kind DESC', [self::TICKET], all: true),
+        );
     }
 
     private function createChecklist(): ?string

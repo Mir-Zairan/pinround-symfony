@@ -42,13 +42,13 @@ final class DbalPinProgressQueriesTest extends KernelTestCase
         $this->roundRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->roundRows()->addAllOf(self::ACME_FOODS, [
             ...$this->ticketRounds(self::ACME_FOODS, self::CHECKLIST_TICKET, [
-                ['checklist', 1, 'open', ['ok', 'fixed']],
+                ['checklist', null, 'open', ['ok', 'fixed']],
                 ['draft', 2, 'closed', ['ok', 'ok', 'ok']],
             ]),
             // Inserted highest number first, so the round picked is the highest number's, not the first row's.
             ...$this->ticketRounds(self::ACME_FOODS, self::FINDINGS_TICKET, [
                 ['draft', 3, 'open', ['ok', 'not_fixed', 'ok']],
-                ['checklist', 1, 'open', ['ok']],
+                ['checklist', null, 'open', ['ok']],
                 ['review', 2, 'open', []],
             ]),
             ...$this->ticketRounds(self::ACME_FOODS, self::DRAFT_TICKET, [
@@ -56,12 +56,12 @@ final class DbalPinProgressQueriesTest extends KernelTestCase
                 ['review', 1, 'open', []],
             ]),
             ...$this->ticketRounds(self::ACME_FOODS, self::NOT_ASKED_FOR_TICKET, [
-                ['checklist', 1, 'open', ['ok']],
+                ['checklist', null, 'open', ['ok']],
             ]),
         ]);
         // The same ticket id under another organization: only row-level security and the organization filter keep it out.
         $this->roundRows()->addAllOf(self::BETA_BAKERY, $this->ticketRounds(self::BETA_BAKERY, self::CHECKLIST_TICKET, [
-            ['checklist', 1, 'open', ['open', 'open', 'open', 'ok']],
+            ['checklist', null, 'open', ['open', 'open', 'open', 'ok']],
         ]));
     }
 
@@ -184,7 +184,7 @@ final class DbalPinProgressQueriesTest extends KernelTestCase
     {
         return ['rvw_round', [
             'organization_id' => $organizationId, 'id' => $roundId, 'ticket_id' => $ticketId, 'owner_id' => self::LENA, 'kind' => $kind,
-            'number' => $number, 'shared_at' => null === $number ? null : self::CREATED_AT, 'state' => $state, 'version' => 1,
+            'number' => $number, 'shared_at' => null === $number && 'checklist' !== $kind ? null : self::CREATED_AT, 'state' => $state, 'version' => 1,
             'created_at' => self::CREATED_AT,
         ]];
     }

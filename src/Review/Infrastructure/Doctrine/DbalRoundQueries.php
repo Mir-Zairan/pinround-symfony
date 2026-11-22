@@ -126,8 +126,8 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             return null;
         }
 
-        // By rvw_round_ticket_id_number_key; only a shared round has a number. has_screenshots spares the screenshot query
-        // of a round with none and of a checklist or review round, which is loaded with none.
+        // By rvw_round_ticket_id_number_key; only a shared round other than the checklist has a number. has_screenshots
+        // spares the screenshot query of a round with none and of a review round, which is loaded with none.
         $roundRow = $this->connection->fetchAssociative(
             'SELECT round.id, round.number, round.kind, round.owner_id, round.shared_at, round.state,'
             ." (round.kind IN ('report', 'draft') AND EXISTS (SELECT 1 FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = round.organization_id AND screenshot.round_id = round.id)) AS has_screenshots"
@@ -479,6 +479,11 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
     }
 
     /**
+     * A round with no number is the checklist, which comes right after Round 0, or an unshared draft, which only its owner
+     * gets, after every shared round. Round 0, the checklist and the draft are never capped: the numbered rounds (1 and
+     * up) are ranked newest first among themselves and only the newest MAX_NUMBERED_ROUNDS go on, with the size of the
+     * numbered group to tell how many were left out.
+     *
      * @param bool $loadsSharedDraftScreenshots false for the ticket page, which shows a shared draft as a row with its
      *                                          count: then only the report and the viewer's unshared draft are loaded
      *                                          with their screenshots
@@ -492,9 +497,6 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
 
         // screenshot_count is computed after the cap, so it costs nothing for a round the cap drops; it counts what the
         // team sees of a shared round (latestTrySql), and the chains of an unshared draft.
-        // A round with no number is an unshared draft; only its owner gets it, after every shared round. Round 0 and the
-        // draft are never capped: the numbered rounds (1 and up) are ranked newest first among themselves and only the
-        // newest MAX_NUMBERED_ROUNDS go on, with the size of the numbered group to tell how many were left out.
         $roundRows = $this->connection->fetchAllAssociative(
             'SELECT listed.id, listed.number, listed.kind, listed.owner_id, listed.shared_at, listed.state, listed.group_size,'
             .' (SELECT COUNT(*) FROM rvw_screenshot AS counted WHERE counted.organization_id = listed.organization_id AND counted.round_id = listed.id'
@@ -508,7 +510,8 @@ final readonly class DbalRoundQueries implements RoundQueries, OpenDraftQueries,
             .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid)) AND round.deleted_at IS NULL'
             .') AS listed'
             .' WHERE listed.number IS NULL OR listed.number = 0 OR listed.newest_rank <= :cap'
-            .' ORDER BY listed.number NULLS LAST, listed.id',
+            ." ORDER BY CASE WHEN listed.number = 0 THEN 0 WHEN listed.kind = 'checklist' THEN 1 WHEN listed.number IS NOT NULL THEN 2 ELSE 3 END,"
+            .' listed.number, listed.id',
             ['organization' => $organizationId->toString(), 'ticket' => $ticketId->toString(), 'viewer' => $viewer->toString(), 'cap' => self::MAX_NUMBERED_ROUNDS],
         );
         $olderRoundsNotShown = 0;

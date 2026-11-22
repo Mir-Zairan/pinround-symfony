@@ -73,11 +73,11 @@ final class SeedShowcaseTicketsTest extends KernelTestCase
         );
         self::assertSame(
             [
-                // Round 0 is Mia's report, round 1 the checklist made from its pins, round 2 Omar's fix, which the
+                // Round 0 is Mia's report, then the checklist made from its pins with no number, round 1 Omar's fix, which the
                 // reviewer's "Approve code" closed. On the orders ticket, Mia's "Needs changes" shared her findings.
-                SeedShowcaseTickets::TOTAL_TITLE => ['0 report open Mia: -', '1 checklist open Mia: -', '2 draft closed Omar: looks_right'],
-                SeedShowcaseTickets::ORDERS_TITLE => ['0 report open Mia: -', '1 checklist open Mia: -', '2 draft closed Omar: looks_right', '3 draft open Mia: not_right'],
-                SeedShowcaseTickets::SEARCH_TITLE => ['0 report open Mia: -', '1 checklist open Mia: -', '2 draft closed Omar: looks_right'],
+                SeedShowcaseTickets::TOTAL_TITLE => ['0 report open Mia: -', '- checklist open Mia: -', '1 draft closed Omar: looks_right'],
+                SeedShowcaseTickets::ORDERS_TITLE => ['0 report open Mia: -', '- checklist open Mia: -', '1 draft closed Omar: looks_right', '2 draft open Mia: not_right'],
+                SeedShowcaseTickets::SEARCH_TITLE => ['0 report open Mia: -', '- checklist open Mia: -', '1 draft closed Omar: looks_right'],
             ],
             $this->roundFacts(),
         );
@@ -237,17 +237,17 @@ final class SeedShowcaseTicketsTest extends KernelTestCase
     }
 
     /**
-     * @return array<string, list<string>> each ticket's rounds by number: kind, state, owner and screenshot verdicts
+     * @return array<string, list<string>> each ticket's rounds by number, the checklist ("-", no number) after Round 0: kind, state, owner and screenshot verdicts
      */
     private function roundFacts(): array
     {
         return $this->underAcmeFoods(fn (): array => $this->groupedRows(
-            "SELECT t.title, r.number || ' ' || r.kind || ' ' || r.state || ' ' || u.name || ': '
+            "SELECT t.title, coalesce(r.number::text, '-') || ' ' || r.kind || ' ' || r.state || ' ' || u.name || ': '
                     || coalesce((SELECT string_agg(coalesce(sc.verdict, '-'), ',' ORDER BY sc.position) FROM rvw_screenshot sc
                                  WHERE sc.organization_id = r.organization_id AND sc.round_id = r.id AND sc.verdict IS NOT NULL), '-')
              FROM rvw_round r JOIN tkt_ticket t ON t.organization_id = r.organization_id AND t.id = r.ticket_id
              JOIN idn_user u ON u.id = r.owner_id
-             WHERE t.title IN (?, ?, ?) ORDER BY t.title, r.number",
+             WHERE t.title IN (?, ?, ?) ORDER BY t.title, coalesce(r.number, 0), r.kind DESC",
         ));
     }
 

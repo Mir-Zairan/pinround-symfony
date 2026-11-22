@@ -146,7 +146,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
             [self::OMAR_SHARED_DRAFT, self::TICKET, 3, 'draft', self::OMAR, self::DRAFT_SHARED_AT, 'open'],
             [self::LENA_DRAFT, self::TICKET, null, 'draft', self::LENA, null, 'open'],
             [self::REPORT, self::TICKET, 0, 'report', self::MIA, self::REPORTED_AT, 'open'],
-            [self::ROUND_ONE, self::TICKET, 1, 'checklist', self::OMAR, self::ROUND_ONE_SHARED_AT, 'closed'],
+            [self::ROUND_ONE, self::TICKET, null, 'checklist', self::OMAR, self::ROUND_ONE_SHARED_AT, 'closed'],
             [self::TEAM_ONLY_REPORT, self::TEAM_ONLY_TICKET, 0, 'report', self::LENA, self::REPORTED_AT, 'open'],
             [self::QUIET_ROUND_ONE, self::QUIET_TICKET, 1, 'draft', self::OMAR, self::ROUND_ONE_SHARED_AT, 'open'],
             [self::QUIET_OMAR_DRAFT, self::QUIET_TICKET, null, 'draft', self::OMAR, null, 'open'],
@@ -186,7 +186,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
         self::addRoundRows(self::ACME_FOODS, [
             ...$cappedRounds,
             ...$exactRounds,
-            [self::ROW_CHECKLIST, self::ROW_ROUNDS_TICKET, 1, 'checklist', self::OMAR, self::ROUND_ONE_SHARED_AT, 'open'],
+            [self::ROW_CHECKLIST, self::ROW_ROUNDS_TICKET, null, 'checklist', self::OMAR, self::ROUND_ONE_SHARED_AT, 'open'],
             [self::ROW_REVIEW, self::ROW_ROUNDS_TICKET, 2, 'review', self::LENA, self::ROUND_TWO_SHARED_AT, 'open'],
         ], [
             [self::ROW_CHECKLIST_SCREENSHOT, self::ROW_CHECKLIST, self::FIRST_MEDIA, 0, null, null, null, null],
@@ -239,7 +239,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
                     new RoundPinView(self::SECOND_PIN_ONE, 1, 99.99, 50.0, 'Hidden here', 'fixed', 'ai', 'kept', new UserId(self::MIA), null),
                 ]),
             ], 2),
-            new RoundView(self::ROUND_ONE, 1, 'checklist', new UserId(self::OMAR), $sharedAt(self::ROUND_ONE_SHARED_AT), 'closed', [], 0),
+            new RoundView(self::ROUND_ONE, null, 'checklist', new UserId(self::OMAR), $sharedAt(self::ROUND_ONE_SHARED_AT), 'closed', [], 0),
             new RoundView(self::ROUND_TWO, 2, 'review', new UserId(self::LENA), $sharedAt(self::ROUND_TWO_SHARED_AT), 'open', [], 2),
             new RoundView(self::OMAR_SHARED_DRAFT, 3, 'draft', new UserId(self::OMAR), $sharedAt(self::DRAFT_SHARED_AT), 'open', [], 0),
             new RoundView(self::OMAR_DRAFT, null, 'draft', new UserId(self::OMAR), null, 'open', [
@@ -440,7 +440,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
             self::connection()->fetchOne('SELECT current_user'),
             self::connection()->fetchFirstColumn(
                 'SELECT round.id FROM rvw_round AS round WHERE round.ticket_id = CAST(:ticket AS uuid)'
-                .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid)) ORDER BY round.number NULLS LAST, round.id',
+                .' AND (round.shared_at IS NOT NULL OR round.owner_id = CAST(:viewer AS uuid)) ORDER BY CASE WHEN round.number = 0 THEN 0 WHEN round.kind = \'checklist\' THEN 1 WHEN round.number IS NOT NULL THEN 2 ELSE 3 END, round.number, round.id',
                 ['ticket' => self::TICKET, 'viewer' => self::OMAR],
             ),
             self::connection()->fetchFirstColumn(
@@ -514,7 +514,8 @@ final class DbalRoundQueriesTest extends KernelTestCase
     }
 
     /**
-     * An unshared draft has no number, so no number reads it, not even for its owner.
+     * An unshared draft has no number, so no number reads it, not even for its owner; nor the checklist, which has none
+     * either (ADR-0048, note of 2026-11-22): Round 1 of this ticket is no round.
      */
     #[Test]
     public function sharedRoundOfNeverGivesAnUnsharedDraft(): void
@@ -524,7 +525,7 @@ final class DbalRoundQueriesTest extends KernelTestCase
             $roundIds[] = $this->sharedRoundFor(self::TICKET, 'Omar', $number)?->id;
         }
 
-        self::assertSame([self::REPORT, self::ROUND_ONE, self::ROUND_TWO, self::OMAR_SHARED_DRAFT], $roundIds);
+        self::assertSame([self::REPORT, null, self::ROUND_TWO, self::OMAR_SHARED_DRAFT], $roundIds);
     }
 
     private function sharedRoundFor(string $ticketId, string $viewer, int $number): ?RoundView

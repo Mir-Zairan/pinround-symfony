@@ -10,7 +10,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * One round of a ticket with its screenshots (FR-RND-03, FR-RND-14). A round has a number exactly when it is shared:
- * the report is Round 0 from the start, a draft gets the next free number when its owner shares it (ADR-0017). Until
+ * the report is Round 0 from the start, a draft gets the next free number when its owner shares it (ADR-0017). The
+ * checklist from the report is the one round shared with no number (ADR-0048, note of 2026-11-22). Until
  * then only its owner sees it and changes it. Every accepted change adds one to the version; a refused one changes
  * nothing.
  */
@@ -100,7 +101,11 @@ final class Round
         if ($version < 1) {
             throw new \InvalidArgumentException('A round version starts at 1.');
         }
-        if ((null === $number) !== (null === $sharedAt) || (null === $decision) !== (null === $decidedAt)) {
+        // The checklist is shared from the start with no number (ADR-0048, note of 2026-11-22).
+        if (RoundKind::Checklist === $kind && (null !== $number || null === $sharedAt)) {
+            throw new \InvalidArgumentException('A checklist round is shared and has no number.');
+        }
+        if ((RoundKind::Checklist !== $kind && (null === $number) !== (null === $sharedAt)) || (null === $decision) !== (null === $decidedAt)) {
             throw new \InvalidArgumentException('A round has a number exactly when it is shared, and a decision exactly when it has its time.');
         }
 
@@ -469,7 +474,7 @@ final class Round
     }
 
     /**
-     * Null exactly while the round is an unshared draft.
+     * Null while the round is an unshared draft, and always for the checklist.
      */
     public function number(): ?int
     {

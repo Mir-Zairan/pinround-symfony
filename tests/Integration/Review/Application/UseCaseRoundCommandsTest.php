@@ -133,7 +133,7 @@ final class UseCaseRoundCommandsTest extends KernelTestCase
     public function anItemThatCannotBeWrittenRollsTheWholeShareBack(): void
     {
         $this->roundRows()->addAllOf(self::ACME_FOODS, [
-            self::round(self::ACME_FOODS, self::EARLIER_CHECKLIST, 'checklist', self::LENA, 5),
+            self::round(self::ACME_FOODS, self::EARLIER_CHECKLIST, 'checklist', self::LENA, null),
             ['rvw_check_item', [
                 'organization_id' => self::ACME_FOODS, 'id' => self::EARLIER_ITEM, 'round_id' => self::EARLIER_CHECKLIST,
                 'pin_id' => self::MIAS_DOUBLE_WARNING_PIN, 'state' => 'open', 'created_at' => self::CREATED_AT,
@@ -276,7 +276,7 @@ final class UseCaseRoundCommandsTest extends KernelTestCase
      */
     private static function round(string $organizationId, string $roundId, string $kind, string $ownerId, ?int $number): array
     {
-        $isShared = null !== $number;
+        $isShared = null !== $number || 'checklist' === $kind;
 
         return ['rvw_round', [
             'organization_id' => $organizationId, 'id' => $roundId, 'ticket_id' => self::TICKET, 'number' => $number, 'kind' => $kind,

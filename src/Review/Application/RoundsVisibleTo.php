@@ -28,15 +28,15 @@ interface RoundsVisibleTo
 
     /**
      * The one shared round of the ticket with that number, as RoundQueries::forTicket lists it (the latest try of each
-     * screenshot, with its pins; none loaded for a checklist or review round) but with no screenshot count, also when it
+     * screenshot, with its pins; none loaded for a review round) but with no screenshot count, also when it
      * is older than the newest RoundQueries::MAX_NUMBERED_ROUNDS. At most four queries whatever the number of rounds,
      * screenshots and pins: Ticketing's visibility check of the ticket, the round, its screenshots and their pins.
      *
      * @param int $number 0 for the report, from 1 for the rounds after it
      *
      * @return RoundView|null null for a ticket the viewer may not see, a negative number (without a query), a number the
-     *                        ticket has no round of and a deleted round; an unshared draft has no number, so it is never
-     *                        this
+     *                        ticket has no round of and a deleted round; an unshared draft and the checklist have no
+     *                        number, so neither is ever this
      *
      * @throws \LogicException           when no transaction is open or no tenant is set, before any query
      * @throws \InvalidArgumentException when $viewer is of another organization than the tenant, before any query
@@ -46,7 +46,7 @@ interface RoundsVisibleTo
     /**
      * The hand-off round shared just before round $number: of the ticket's shared drafts and review rounds that are not
      * deleted, the one with the highest number from 1 below $number; with none, the report (Round 0), whose pictures
-     * are then the Befores (ADR-0048, amended 2026-11-21). The checklist round is no hand-off, so it is never this. It
+     * are then the Befores (ADR-0048, amended 2026-11-21). The checklist has no number and is no hand-off, so it is never this. It
      * comes with the latest try of each screenshot and its pins, as sharedRoundOf gives a shared draft and the report,
      * and a review round with its "after" pictures by position; the round page pairs its screenshot N with round
      * $number's screenshot N as Before and After. At most four queries whatever the number of rounds, screenshots and

@@ -37,17 +37,17 @@ final readonly class DbalPinProgressQueries implements PinProgressQueries
             return [];
         }
 
-        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a TicketId holds no comma or brace. Only a
-        // shared round has a number; DISTINCT ON keeps each ticket's highest.
+        // pdo_pgsql binds no arrays, so the ids travel as one uuid[] literal; a TicketId holds no comma or brace. DISTINCT
+        // ON keeps each ticket's shared round with the highest number, the checklist, which has none, below every other.
         $rows = $this->connection->fetchAllAssociative(
             'SELECT DISTINCT ON (round.ticket_id) round.ticket_id,'
             .' count(*) FILTER (WHERE item.state = :ok) AS ok_count, count(*) AS pin_count'
             .' FROM rvw_round AS round'
             .' JOIN rvw_check_item AS item ON item.organization_id = round.organization_id AND item.round_id = round.id'
             .' WHERE round.organization_id = CAST(:organization AS uuid) AND round.ticket_id = ANY(CAST(:tickets AS uuid[]))'
-            .' AND round.kind IN (:checklist, :findings) AND round.state = :open AND round.number IS NOT NULL'
+            .' AND round.kind IN (:checklist, :findings) AND round.state = :open AND round.shared_at IS NOT NULL'
             .' GROUP BY round.ticket_id, round.id, round.number'
-            .' ORDER BY round.ticket_id, round.number DESC',
+            .' ORDER BY round.ticket_id, round.number DESC NULLS LAST',
             [
                 'organization' => $organizationId,
                 'tickets' => '{'.implode(',', array_map(static fn (TicketId $ticketId): string => $ticketId->toString(), $ticketIds)).'}',

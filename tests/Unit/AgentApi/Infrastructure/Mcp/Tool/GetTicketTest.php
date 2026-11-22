@@ -98,7 +98,6 @@ final class GetTicketTest extends TestCase
             ]],
             'checklist' => [
                 'round_id' => self::CHECKLIST_ROUND,
-                'number' => 2,
                 'checked_ok_count' => 0,
                 'total' => 1,
                 'items' => [['item_id' => self::CHECK_ITEM, 'pin_number' => 1, 'note' => '<untrusted_text>Total &lt;b&gt;wrong&lt;/b&gt;</untrusted_text>', 'state' => 'open']],

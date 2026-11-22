@@ -99,7 +99,7 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
 
         $round = static fn (string $id, string $ticketId, ?int $number, string $kind, string $ownerId, string $state = 'open'): array => ['rvw_round', [
             'organization_id' => self::ACME_FOODS, 'id' => $id, 'ticket_id' => $ticketId, 'number' => $number, 'kind' => $kind,
-            'owner_id' => $ownerId, 'shared_at' => null === $number ? null : self::SHARED_AT, 'state' => $state, 'version' => 1,
+            'owner_id' => $ownerId, 'shared_at' => null === $number && 'checklist' !== $kind ? null : self::SHARED_AT, 'state' => $state, 'version' => 1,
             'created_at' => self::CREATED_AT,
         ]];
         $screenshot = static fn (string $id, string $roundId, int $position, ?string $retakeOf = null): array => ['rvw_screenshot', [
@@ -115,11 +115,11 @@ final class DbalRoundQueriesPreviousHandOffRoundTest extends KernelTestCase
             $round(self::REPORT, self::TICKET, 0, 'report', self::MIA),
             $round(self::ROUND_ONE, self::TICKET, 1, 'draft', self::OMAR, 'closed'),
             $round(self::REVIEW_ROUND_TWO, self::TICKET, 2, 'review', self::LENA, 'closed'),
-            $round(self::CHECKLIST_ROUND_THREE, self::TICKET, 3, 'checklist', self::MIA),
+            $round(self::CHECKLIST_ROUND_THREE, self::TICKET, null, 'checklist', self::MIA),
             $round(self::ROUND_FOUR, self::TICKET, 4, 'draft', self::OMAR),
             $round(self::UNSHARED_DRAFT, self::TICKET, null, 'draft', self::OMAR),
             $round(self::OTHER_REPORT, self::OTHER_TICKET, 0, 'report', self::MIA),
-            $round(self::OTHER_CHECKLIST, self::OTHER_TICKET, 1, 'checklist', self::MIA),
+            $round(self::OTHER_CHECKLIST, self::OTHER_TICKET, null, 'checklist', self::MIA),
             $round(self::OTHER_ROUND_THREE, self::OTHER_TICKET, 3, 'draft', self::OMAR),
             $round(self::ROUND_ONE_WITHOUT_REPORT, self::TICKET_WITHOUT_REPORT, 1, 'draft', self::OMAR),
             $screenshot(self::B, self::ROUND_ONE, 1),

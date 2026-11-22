@@ -157,7 +157,6 @@ final class GetRoundNotesTest extends TestCase
             ],
             'checklist' => [
                 'round_id' => self::CHECKLIST,
-                'number' => 2,
                 'checked_ok_count' => 1,
                 'total' => 2,
                 'items' => [

@@ -115,11 +115,11 @@ final class DbalChecklistsTest extends KernelTestCase
     #[Test]
     public function aChecklistIsWrittenAsASharedRoundWithAnOpenItemPerPin(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
 
         self::assertSame(
             [[
-                'id' => self::CHECKLIST, 'ticket_id' => self::TICKET, 'number' => 1, 'kind' => 'checklist', 'owner_id' => self::LENA,
+                'id' => self::CHECKLIST, 'ticket_id' => self::TICKET, 'number' => null, 'kind' => 'checklist', 'owner_id' => self::LENA,
                 'shared_at_utc' => self::CREATED_AT_UTC, 'state' => 'open', 'version' => 1, 'created_at_utc' => self::CREATED_AT_UTC,
             ]],
             $this->rowsAs(self::ACME_FOODS, "SELECT id, ticket_id, number, kind, owner_id, shared_at AT TIME ZONE 'UTC' AS shared_at_utc, state, version, created_at AT TIME ZONE 'UTC' AS created_at_utc FROM rvw_round WHERE kind = 'checklist'"),
@@ -133,21 +133,21 @@ final class DbalChecklistsTest extends KernelTestCase
             $this->rowsAs(self::ACME_FOODS, "SELECT id, round_id, pin_id, state, changed_by, changed_at, created_at AT TIME ZONE 'UTC' AS created_at_utc FROM rvw_check_item ORDER BY id"),
         );
         self::assertSame([], $this->rowsAs(self::OTHER_ORGANIZATION, 'SELECT id FROM rvw_check_item'), 'Another organization sees the checklist items.');
-        self::assertSame(2, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->rounds()->nextFreeNumberOf(new TicketId(self::TICKET))));
+        self::assertSame(1, $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): int => $this->rounds()->nextFreeNumberOf(new TicketId(self::TICKET))), 'The checklist took a number.');
     }
 
     /**
      * Two requests that both found no checklist both add one; the second is refused by the ticket's checklist slot
-     * even under another number, writes nothing, and the caller's transaction goes on (DbalChecklists::add's savepoint).
+     * writes nothing, and the caller's transaction goes on (DbalChecklists::add's savepoint).
      */
     #[Test]
     public function aSecondChecklistOfTheTicketIsASlotTakenAndWritesNothing(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
 
         $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function (): ?RoundSlotTaken {
             try {
-                $this->checklists()->add(self::checklist(self::SECOND_CHECKLIST, 2, ['0197a3c0-0000-7000-8000-0000000f5354', '0197a3c0-0000-7000-8000-0000000f5355', '0197a3c0-0000-7000-8000-0000000f5356']));
+                $this->checklists()->add(self::checklist(self::SECOND_CHECKLIST, ['0197a3c0-0000-7000-8000-0000000f5354', '0197a3c0-0000-7000-8000-0000000f5355', '0197a3c0-0000-7000-8000-0000000f5356']));
             } catch (RoundSlotTaken $refusal) {
                 $this->rounds()->add(Round::draft(new RoundId(self::MIA_DRAFT), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT)));
 
@@ -172,7 +172,7 @@ final class DbalChecklistsTest extends KernelTestCase
     #[Test]
     public function deletingRound0FirstTakesTheChecklistItemsOfItsPinsAndNothingElse(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
         $itemsBefore = $this->roundRows()->runAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item');
         self::assertCount(3, $itemsBefore, 'No items to delete, so nothing below is proven.');
 
@@ -186,7 +186,7 @@ final class DbalChecklistsTest extends KernelTestCase
     }
 
     #[Test]
-    public function aChecklistOnANumberTheTicketHasIsASlotTakenAndWritesNothing(): void
+    public function aChecklistBesideASharedRoundOneTakesNoSlotOfIt(): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $draft = Round::draft(new RoundId(self::MIA_DRAFT), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT));
@@ -195,30 +195,24 @@ final class DbalChecklistsTest extends KernelTestCase
             $this->rounds()->add($draft);
         });
 
-        $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function (): ?RoundSlotTaken {
-            try {
-                $this->checklists()->add(self::checklist(self::CHECKLIST, 1));
-            } catch (RoundSlotTaken $refusal) {
-                return $refusal;
-            }
+        $this->addCommitted(self::checklist(self::CHECKLIST));
 
-            return null;
-        });
-
-        self::assertInstanceOf(RoundSlotTaken::class, $refusal);
-        self::assertSame([[self::REPORT], [self::MIA_DRAFT]], $this->numericRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_round ORDER BY id'));
-        self::assertSame([], $this->numericRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item'));
+        self::assertSame(
+            [[self::REPORT, 0], [self::CHECKLIST, null], [self::MIA_DRAFT, 1]],
+            $this->numericRowsAs(self::ACME_FOODS, 'SELECT id, number FROM rvw_round ORDER BY id'),
+        );
+        self::assertCount(3, $this->numericRowsAs(self::ACME_FOODS, 'SELECT id FROM rvw_check_item'));
     }
 
     /** A redelivered message adds the same checklist again: a bug to see, never a slot to tell the person about. */
     #[Test]
     public function theSameChecklistAddedAgainIsALogicExceptionAndNotASlot(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
 
         $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function (): ?\LogicException {
             try {
-                $this->checklists()->add(self::checklist(self::CHECKLIST, 1));
+                $this->checklists()->add(self::checklist(self::CHECKLIST));
             } catch (\LogicException $refusal) {
                 return $refusal;
             }
@@ -245,7 +239,6 @@ final class DbalChecklistsTest extends KernelTestCase
                 new OrganizationId(self::ACME_FOODS),
                 new TicketId(self::TICKET),
                 new ReportPins(new UserId(self::LENA), [new PinId(self::FIRST_PIN), new PinId(self::OTHER_ORGANIZATION_PIN)]),
-                1,
                 static fn (): CheckItemId => new CheckItemId(Uuid::v7()->toRfc4122()),
                 new \DateTimeImmutable(self::CREATED_AT),
             ) ?? throw new \LogicException('No pins.');
@@ -272,7 +265,7 @@ final class DbalChecklistsTest extends KernelTestCase
     {
         $item = CheckItem::open(new CheckItemId(self::FIRST_ITEM), new RoundId(self::CHECKLIST), new TicketId(self::TICKET), new PinId(self::FIRST_PIN));
         $calls = [
-            'add' => fn () => $this->checklists()->add(self::checklist(self::CHECKLIST, 1)),
+            'add' => fn () => $this->checklists()->add(self::checklist(self::CHECKLIST)),
             'reportPinsOf' => fn () => $this->checklists()->reportPinsOf(new TicketId(self::TICKET)),
             'lockedItem' => fn () => $this->checklists()->lockedItem(new CheckItemId(self::FIRST_ITEM)),
             'saveItem' => fn () => $this->checklists()->saveItem($item),
@@ -296,7 +289,7 @@ final class DbalChecklistsTest extends KernelTestCase
     #[Test]
     public function aLockedItemSavedComesBackWithItsStateAndWhoChangedItWhen(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
 
         $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
             $item = $this->checklists()->lockedItem(new CheckItemId(self::SECOND_ITEM)) ?? throw new \LogicException('No item.');
@@ -319,7 +312,7 @@ final class DbalChecklistsTest extends KernelTestCase
     #[Test]
     public function aSaveOverAStateTheItemNoLongerHasIsRefusedAndWritesNothing(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
 
         $refusal = $this->transactions()->committedAs(self::ACME_FOODS, function (): ?\LogicException {
             $item = $this->checklists()->lockedItem(new CheckItemId(self::FIRST_ITEM)) ?? throw new \LogicException('No item.');
@@ -343,7 +336,7 @@ final class DbalChecklistsTest extends KernelTestCase
     #[Test]
     public function anotherOrganizationNeitherLocksNorSavesTheItem(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
         $item = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ?CheckItem => $this->checklists()->lockedItem(new CheckItemId(self::FIRST_ITEM)));
         self::assertNotNull($item);
         $item->markFixed(new UserId(self::MIA), new \DateTimeImmutable(self::MARKED_AT));
@@ -372,7 +365,7 @@ final class DbalChecklistsTest extends KernelTestCase
     #[Test]
     public function aLockedItemHoldsItsRowAndOnlyItsRowUntilTheTransactionEnds(): void
     {
-        $this->addCommitted(self::checklist(self::CHECKLIST, 1));
+        $this->addCommitted(self::checklist(self::CHECKLIST));
         $tenantContext = self::getContainer()->get(TenantContext::class);
         $secondSession = SecondSession::besideTheApp($this->entityManager(), $tenantContext);
         $this->otherSession = $secondSession->entityManager;
@@ -404,7 +397,7 @@ final class DbalChecklistsTest extends KernelTestCase
     /**
      * @param list<string> $itemIds one per pin of the report, in its order
      */
-    private static function checklist(string $roundId, int $number, array $itemIds = [self::FIRST_ITEM, self::SECOND_ITEM, self::THIRD_ITEM]): Checklist
+    private static function checklist(string $roundId, array $itemIds = [self::FIRST_ITEM, self::SECOND_ITEM, self::THIRD_ITEM]): Checklist
     {
         $pinIds = [new PinId(self::FIRST_PIN), new PinId(self::SECOND_PIN), new PinId(self::THIRD_PIN)];
 
@@ -413,7 +406,6 @@ final class DbalChecklistsTest extends KernelTestCase
             new OrganizationId(self::ACME_FOODS),
             new TicketId(self::TICKET),
             new ReportPins(new UserId(self::LENA), $pinIds),
-            $number,
             static function () use (&$itemIds): CheckItemId {
                 return new CheckItemId(array_shift($itemIds) ?? throw new \LogicException('More items than ids.'));
             },

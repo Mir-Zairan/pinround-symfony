@@ -18,12 +18,13 @@ final readonly class ChecklistView
 
     /**
      * @param string                        $roundId the round's id, lowercase
-     * @param int                           $number  its round number on the ticket, from 1
+     * @param int|null                      $number  a findings round's number on the ticket, from 1; null for the checklist
+     *                                               from the report, which has none
      * @param non-empty-list<CheckItemView> $items   by the position of the pin's screenshot, then pin number
      */
     public function __construct(
         public string $roundId,
-        public int $number,
+        public ?int $number,
         public array $items,
     ) {
         $this->checkedOkCount = \count(array_filter($items, static fn (CheckItemView $item): bool => ChecklistCommands::STATE_OK === $item->state));

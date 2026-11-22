@@ -309,7 +309,7 @@ final class InMemoryRoundsTest extends TestCase
         $rounds = self::roundsOf(self::ACME_FOODS);
         $ticket = new TicketId(self::TICKET);
         $rounds->add(self::report($rounds, self::TICKET));
-        $rounds->add(self::stored($rounds, RoundKind::Checklist, self::TICKET, self::LENA, 1, RoundState::Open));
+        $rounds->add(self::stored($rounds, RoundKind::Checklist, self::TICKET, self::LENA, null, RoundState::Open));
         // Added before the review round it comes after, so the order is the number's.
         $omarsShared = self::stored($rounds, RoundKind::Draft, self::TICKET, self::OMAR, 3, RoundState::Open);
         $rounds->add($omarsShared);
@@ -492,7 +492,7 @@ final class InMemoryRoundsTest extends TestCase
     }
 
     /**
-     * A round of Acme Foods as a read gives it, with one screenshot; shared exactly when it has a number.
+     * A round of Acme Foods as a read gives it, with one screenshot; shared exactly when it has a number or is the checklist.
      */
     private static function stored(InMemoryRounds $rounds, RoundKind $kind, string $ticketId, string $ownerId, ?int $number, RoundState $state): Round
     {
@@ -503,7 +503,7 @@ final class InMemoryRoundsTest extends TestCase
             $kind,
             new UserId($ownerId),
             $number,
-            null === $number ? null : new \DateTimeImmutable('2026-03-05 08:00:00+00:00'),
+            null === $number && RoundKind::Checklist !== $kind ? null : new \DateTimeImmutable('2026-03-05 08:00:00+00:00'),
             $state,
             1,
             [Screenshot::of($rounds->nextScreenshotIdentity(), self::MEDIA, 0, null, null, [])],

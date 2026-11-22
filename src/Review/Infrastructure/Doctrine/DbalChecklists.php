@@ -57,16 +57,15 @@ final readonly class DbalChecklists implements Checklists
             $organizationId = $checklist->organizationId()->toString();
             $roundId = $checklist->id()->toString();
             $createdAt = $checklist->createdAt()->format(self::TIMESTAMP);
-            // DO NOTHING on any unique index: the number one and rvw_round_ticket_id_checklist_key are the slots a
-            // checklist takes, and two requests that both found no checklist both get here.
+            // DO NOTHING on any unique index: rvw_round_ticket_id_checklist_key is the slot a checklist takes, as it has
+            // no number, and two requests that both found no checklist both get here.
             $inserted = $this->connection->executeStatement(
                 'INSERT INTO rvw_round (organization_id, id, ticket_id, number, kind, owner_id, shared_at, state, version, created_at)'
-                .' VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?) ON CONFLICT DO NOTHING',
+                .' VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, ?) ON CONFLICT DO NOTHING',
                 [
                     $organizationId,
                     $roundId,
                     $checklist->ticketId()->toString(),
-                    $checklist->number(),
                     RoundKind::Checklist->value,
                     $checklist->ownerId()->toString(),
                     $createdAt,

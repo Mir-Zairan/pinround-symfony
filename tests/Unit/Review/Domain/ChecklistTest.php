@@ -32,12 +32,12 @@ final class ChecklistTest extends TestCase
     public function aChecklistHasOneOpenItemPerPinOfRoundZeroInItsOrderAndIsOwnedByTheReporter(): void
     {
         // Pins out of id order, so the items follow Round 0's order and not the ids'.
-        $checklist = self::checklistOf([self::THIRD_PIN, self::FIRST_PIN, self::SECOND_PIN], 2);
+        $checklist = self::checklistOf([self::THIRD_PIN, self::FIRST_PIN, self::SECOND_PIN]);
 
         self::assertNotNull($checklist);
         self::assertSame(
-            [self::ROUND, self::ACME_FOODS, self::TICKET, self::LENA, 2, self::CREATED_AT],
-            [$checklist->id()->toString(), $checklist->organizationId()->toString(), $checklist->ticketId()->toString(), $checklist->ownerId()->toString(), $checklist->number(), $checklist->createdAt()->format('Y-m-d H:i:sP')],
+            [self::ROUND, self::ACME_FOODS, self::TICKET, self::LENA, self::CREATED_AT],
+            [$checklist->id()->toString(), $checklist->organizationId()->toString(), $checklist->ticketId()->toString(), $checklist->ownerId()->toString(), $checklist->createdAt()->format('Y-m-d H:i:sP')],
         );
         self::assertSame(
             [
@@ -52,22 +52,7 @@ final class ChecklistTest extends TestCase
     #[Test]
     public function aRoundZeroWithNoPinsGetsNoChecklist(): void
     {
-        self::assertNull(self::checklistOf([], 1));
-    }
-
-    #[Test]
-    public function aChecklistIsNeverRoundZero(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageIsOrContains('A checklist round gets a number from 1; Round 0 is the report.');
-
-        self::checklistOf([self::FIRST_PIN], 0);
-    }
-
-    #[Test]
-    public function aChecklistTakesNumberOne(): void
-    {
-        self::assertSame(1, self::checklistOf([self::FIRST_PIN], 1)?->number());
+        self::assertNull(self::checklistOf([]));
     }
 
     #[Test]
@@ -76,13 +61,13 @@ final class ChecklistTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageIsOrContains('A checklist has one item per pin.');
 
-        self::checklistOf([self::FIRST_PIN, self::SECOND_PIN, strtoupper(self::FIRST_PIN)], 1);
+        self::checklistOf([self::FIRST_PIN, self::SECOND_PIN, strtoupper(self::FIRST_PIN)]);
     }
 
     /**
      * @param list<string> $pinIds
      */
-    private static function checklistOf(array $pinIds, int $number): ?Checklist
+    private static function checklistOf(array $pinIds): ?Checklist
     {
         $issuedItemIds = 0;
 
@@ -91,7 +76,6 @@ final class ChecklistTest extends TestCase
             new OrganizationId(self::ACME_FOODS),
             new TicketId(self::TICKET),
             new ReportPins(new UserId(self::LENA), array_map(static fn (string $pinId): PinId => new PinId($pinId), $pinIds)),
-            $number,
             static function () use (&$issuedItemIds): CheckItemId {
                 return new CheckItemId(\sprintf('0197a3c0-0000-7000-8000-%012x', 0x1E00 + ++$issuedItemIds));
             },

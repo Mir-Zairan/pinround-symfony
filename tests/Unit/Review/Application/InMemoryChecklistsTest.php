@@ -69,15 +69,15 @@ final class InMemoryChecklistsTest extends TestCase
     }
 
     #[Test]
-    public function aChecklistIsARoundOfTheTicketSoTheNextFreeNumberGoesPastIt(): void
+    public function aChecklistIsSharedWithNoNumberSoTheNextFreeNumberIsStillOne(): void
     {
         $this->addReport();
-        $checklist = $this->checklist(1);
+        $checklist = $this->checklist();
 
         $this->checklists->add($checklist);
 
-        self::assertSame([RoundKind::Checklist, 1, self::LENA], [$this->rounds->stored[1]->kind(), $this->rounds->stored[1]->number(), $this->rounds->stored[1]->ownerId()->toString()]);
-        self::assertSame(2, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET)));
+        self::assertSame([RoundKind::Checklist, null, true, self::LENA], [$this->rounds->stored[1]->kind(), $this->rounds->stored[1]->number(), null !== $this->rounds->stored[1]->sharedAt(), $this->rounds->stored[1]->ownerId()->toString()]);
+        self::assertSame(1, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET)));
         self::assertCount(3, $this->checklists->storedItems);
     }
 
@@ -85,12 +85,12 @@ final class InMemoryChecklistsTest extends TestCase
     public function aSecondChecklistOfTheTicketIsASlotTakenAndStoresNothing(): void
     {
         $this->addReport();
-        $this->checklists->add($this->checklist(1));
+        $this->checklists->add($this->checklist());
         $roundsBefore = $this->rounds->stored;
         $itemsBefore = $this->checklists->storedItems;
 
         try {
-            $this->checklists->add($this->checklist(2));
+            $this->checklists->add($this->checklist());
             self::fail('The second checklist was not refused.');
         } catch (RoundSlotTaken $refusal) {
             self::assertSame('The ticket has this round already.', $refusal->getMessage());
@@ -100,7 +100,7 @@ final class InMemoryChecklistsTest extends TestCase
     }
 
     #[Test]
-    public function aChecklistOnANumberTheTicketHasIsASlotTakenAndStoresNothing(): void
+    public function aChecklistBesideASharedRoundOneTakesNoSlotOfIt(): void
     {
         $this->addReport();
         $draft = Round::draft($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT));
@@ -108,19 +108,17 @@ final class InMemoryChecklistsTest extends TestCase
         $draft->share(new UserId(self::MIA), 1, new \DateTimeImmutable(self::CREATED_AT));
         $this->rounds->add($draft);
 
-        $this->expectException(RoundSlotTaken::class);
-        try {
-            $this->checklists->add($this->checklist(1));
-        } finally {
-            self::assertSame([2, []], [\count($this->rounds->stored), $this->checklists->storedItems]);
-        }
+        $this->checklists->add($this->checklist());
+
+        self::assertSame([3, 3], [\count($this->rounds->stored), \count($this->checklists->storedItems)]);
+        self::assertSame(2, $this->rounds->nextFreeNumberOf(new TicketId(self::TICKET)));
     }
 
     #[Test]
     public function theSameChecklistAddedAgainIsALogicExceptionAndNotASlot(): void
     {
         $this->addReport();
-        $checklist = $this->checklist(1);
+        $checklist = $this->checklist();
         $this->checklists->add($checklist);
 
         $this->expectExceptionObject(new \LogicException(\sprintf('Round %s is added already; a round is added once.', $checklist->id()->toString())));
@@ -135,7 +133,7 @@ final class InMemoryChecklistsTest extends TestCase
     public function anItemOnAPinNotStoredIsALogicExceptionAndStoresNothing(): void
     {
         $this->addReport();
-        $checklist = Checklist::fromReport($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new ReportPins(new UserId(self::LENA), [new PinId(self::UNKNOWN_PIN)]), 1, $this->checklists->nextItemIdentity(...), new \DateTimeImmutable(self::CREATED_AT));
+        $checklist = Checklist::fromReport($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new ReportPins(new UserId(self::LENA), [new PinId(self::UNKNOWN_PIN)]), $this->checklists->nextItemIdentity(...), new \DateTimeImmutable(self::CREATED_AT));
         self::assertNotNull($checklist);
 
         $this->expectExceptionObject(new \LogicException(InMemoryChecklists::ITEM_REFUSED));
@@ -150,7 +148,7 @@ final class InMemoryChecklistsTest extends TestCase
     public function aLockedItemIsSavedOverTheStateItWasReadAtAndAStaleSaveIsRefused(): void
     {
         $this->addReport();
-        $checklist = $this->checklist(1);
+        $checklist = $this->checklist();
         $this->checklists->add($checklist);
         $itemId = $checklist->items()[1]->id();
 
@@ -180,7 +178,7 @@ final class InMemoryChecklistsTest extends TestCase
     public function anotherOrganizationSeesNoneOfTheChecklistAndCannotSaveItsItems(): void
     {
         $this->addReport();
-        $checklist = $this->checklist(1);
+        $checklist = $this->checklist();
         $this->checklists->add($checklist);
         $item = $checklist->items()[0];
         $item->markFixed(new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT));
@@ -213,11 +211,11 @@ final class InMemoryChecklistsTest extends TestCase
         $this->rounds->add(Round::report($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), $lena, [$second, $first], new \DateTimeImmutable('2027-03-15 09:00:00+00:00')));
     }
 
-    private function checklist(int $number): Checklist
+    private function checklist(): Checklist
     {
         $reportPins = $this->checklists->reportPinsOf(new TicketId(self::TICKET)) ?? throw new \LogicException('The ticket has no Round 0.');
 
-        return Checklist::fromReport($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), $reportPins, $number, $this->checklists->nextItemIdentity(...), new \DateTimeImmutable(self::CREATED_AT))
+        return Checklist::fromReport($this->rounds->nextIdentity(), new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), $reportPins, $this->checklists->nextItemIdentity(...), new \DateTimeImmutable(self::CREATED_AT))
             ?? throw new \LogicException('Round 0 has no pins.');
     }
 }

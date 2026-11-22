@@ -73,7 +73,7 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
         $this->ticketRows()->addOf(self::ACME_FOODS, self::TICKET, self::SHOP_PROJECT, self::LENA);
         $this->roundRows()->addAllOf(self::ACME_FOODS, [
             self::round(self::ACME_FOODS, self::REPORT, 'report', 0, 'closed'),
-            self::round(self::ACME_FOODS, self::CHECKLIST, 'checklist', 1, 'open'),
+            self::round(self::ACME_FOODS, self::CHECKLIST, 'checklist', null, 'open'),
             self::round(self::ACME_FOODS, self::REVIEW, 'review', 2, 'open'),
             self::screenshot(self::ACME_FOODS, self::BEFORE, self::REPORT),
             self::screenshot(self::ACME_FOODS, self::AFTER, self::REVIEW),
@@ -319,7 +319,7 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
     /**
      * @return array{string, array<string, mixed>}
      */
-    private static function round(string $organizationId, string $roundId, string $kind, int $number, string $state): array
+    private static function round(string $organizationId, string $roundId, string $kind, ?int $number, string $state): array
     {
         return ['rvw_round', [
             'organization_id' => $organizationId, 'id' => $roundId, 'ticket_id' => self::TICKET, 'owner_id' => self::LENA, 'kind' => $kind,

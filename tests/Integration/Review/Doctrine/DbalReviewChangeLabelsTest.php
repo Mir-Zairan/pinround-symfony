@@ -48,7 +48,7 @@ final class DbalReviewChangeLabelsTest extends KernelTestCase
         $this->roundRows()->removeAllOf(self::ACME_FOODS, self::BETA_BAKERY);
         $this->roundRows()->addAllOf(self::ACME_FOODS, [
             self::round(self::ACME_FOODS, self::REPORT, 'report', 0),
-            self::round(self::ACME_FOODS, self::CHECKLIST, 'checklist', 1),
+            self::round(self::ACME_FOODS, self::CHECKLIST, 'checklist', null),
             self::round(self::ACME_FOODS, self::REVIEW, 'review', 2),
             self::screenshot(self::ACME_FOODS, self::CART_BEFORE, self::REPORT, 0),
             self::screenshot(self::ACME_FOODS, self::MENU_BEFORE, self::REPORT, 1),
@@ -158,7 +158,7 @@ final class DbalReviewChangeLabelsTest extends KernelTestCase
     /**
      * @return array{string, array<string, mixed>}
      */
-    private static function round(string $organizationId, string $roundId, string $kind, int $number): array
+    private static function round(string $organizationId, string $roundId, string $kind, ?int $number): array
     {
         return ['rvw_round', [
             'organization_id' => $organizationId, 'id' => $roundId, 'ticket_id' => self::TICKET, 'owner_id' => self::LENA, 'kind' => $kind,

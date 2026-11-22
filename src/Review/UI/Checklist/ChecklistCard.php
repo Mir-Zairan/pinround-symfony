@@ -16,6 +16,8 @@ use App\Review\Application\Checklist\RoundChecklist;
  */
 final readonly class ChecklistCard
 {
+    /** The checklist from the report has no round number (ADR-0048, note of 2026-11-22). */
+    public const string HEADLINE = 'Checklist from the report';
     public const string DESCRIPTION = 'Every pin from the report must be fixed by the developer and checked by the tester.';
     public const string FINDINGS_HEADLINE = 'Checklist';
     public const string FINDINGS_DESCRIPTION = 'Every pin of these findings must be fixed by the developer and checked by the tester.';
@@ -35,7 +37,7 @@ final readonly class ChecklistCard
     public string $headingId;
     /** 3 for the checklist round's card heading; 4 under a findings round's own h3. */
     public int $headingLevel;
-    /** For example "Round 1 · Checklist from the report", or FINDINGS_HEADLINE. */
+    /** HEADLINE or FINDINGS_HEADLINE. */
     public string $headline;
     /** DESCRIPTION or FINDINGS_DESCRIPTION. */
     public string $description;
@@ -51,7 +53,6 @@ final readonly class ChecklistCard
      */
     public function __construct(
         public string $roundId,
-        int $number,
         int $checkedOkCount,
         public array $rows,
         public bool $isFindings = false,
@@ -59,7 +60,7 @@ final readonly class ChecklistCard
         $this->id = 'checklist-'.$roundId;
         $this->headingId = ($isFindings ? $this->id : 'round-'.$roundId).'-heading';
         $this->headingLevel = $isFindings ? 4 : 3;
-        $this->headline = $isFindings ? self::FINDINGS_HEADLINE : \sprintf('Round %d · Checklist from the report', $number);
+        $this->headline = $isFindings ? self::FINDINGS_HEADLINE : self::HEADLINE;
         $this->description = $isFindings ? self::FINDINGS_DESCRIPTION : self::DESCRIPTION;
         $this->status = \sprintf('%d of %d checked OK', $checkedOkCount, \count($rows));
         $this->hasControls = [] !== array_filter($rows, static fn (ChecklistRow $row): bool => null !== $row->firstControlId());
@@ -77,7 +78,7 @@ final readonly class ChecklistCard
     {
         $checklist = $roundChecklist->checklist;
 
-        return new self($checklist->roundId, $checklist->number, $checklist->checkedOkCount, self::rowsOf($roundChecklist, $mayMarkFixed, $mayCheck), $roundChecklist->isFindings);
+        return new self($checklist->roundId, $checklist->checkedOkCount, self::rowsOf($roundChecklist, $mayMarkFixed, $mayCheck), $roundChecklist->isFindings);
     }
 
     /**
