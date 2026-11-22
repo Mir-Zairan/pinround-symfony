@@ -13,7 +13,6 @@ AI builds in minutes what used to take days, and the person who must check it ca
 It is also a full ticket tracker: **Whose turn?** and **My reports** views, search and filters, comments, questions that pause a ticket, pings, live updates, **Summarize with AI** and **Check with AI** (Hugging Face, Anthropic or Ollama on your laptop), separate data per organization and two-step login.
 
 ## Index
-- [Why Pinround-Symfony](#why-pinround-symfony): what each ticket shows, and for whom
 - [How it works](#how-it-works): the five steps from screenshot to verdict
 - [Run it in 5 minutes](#run-it-in-5-minutes): one command, then log in
 - [Built with](#built-with): Symfony AI, MCP, Symfony 8.1, PostgreSQL, the extension
@@ -25,21 +24,12 @@ It is also a full ticket tracker: **Whose turn?** and **My reports** views, sear
 - [Working on Pinround-Symfony](#working-on-pinround-symfony): where to start in the repo
 - [License](#license): MIT
 
-## Why Pinround-Symfony
-Every fix and every feature has its own ticket, and the ticket shows what was built for it.
-- **See what was built.** The screenshots of this fix or feature sit on its ticket, Before and After, with pins on what is still wrong.
-- **Know what to check.** Each round shows the reviewer and the tester which screenshots to look at, and they mark each one.
-- **See what AI did.** If you build with AI, you see its work as pictures, not only as code, so you can tell quickly whether it is what you asked for.
-- **Everyone sees the same rounds.** Pinround-Symfony is a ticketing app: the developer, reviewer, tester, lead and manager all see the rounds and whose turn it is.
-
 ## How it works
 1. **AI shows what it built.** While Claude Code builds or fixes, it takes screenshots and uploads them to the ticket in Pinround-Symfony, into your private draft round. Testers' captures from the browser extension land there too.
 2. **You pin what is wrong.** Put numbered pins on a screenshot, each with a note, and mark it **Looks right** or **Not right yet**.
 3. **AI fixes from your notes.** Claude Code reads the pins, fixes the code and adds a new try of each screenshot. Repeat until it looks right.
 4. **Hand it over with proof.** Share the draft as a round. The reviewer or tester sees each screenshot Before and After.
 5. **Testers add what they find.** They capture edge cases from the browser extension, or ask their own Claude Code to check, and share them as the next round. The developer fixes them the same way.
-
-AI only suggests and uploads. A person decides every verdict, and a report becomes a ticket only when a person presses **Send**.
 
 ## Run it in 5 minutes
 You need Docker with Compose v2 (Docker Desktop on macOS or Windows with WSL 2), `make` and `git`. Ports 80 and 443 must be free.
@@ -134,7 +124,7 @@ On the laptop only **Summarize with AI** runs for now. Its answer is a proposal;
 - **Safe by default:** each organization is isolated in the database, two-step login, permission checks on every action, a phone layout.
 
 ## Coming next
-- **Home** that ranks what needs you, with manager and admin views (P07).
+- **Home for managers and admins:** their own views beside today's "Needs you" top 5 (P07).
 - **Jira** import and two-way sync, and company login with SSO (P10).
 - **Full admin:** roles and invites, steps and rules, activity log, retention, export (P11).
 - **More AI:** "Explain it to me", summaries on sync, usage budgets, MCP tools to comment and move a ticket (P08, P09).
@@ -142,8 +132,6 @@ On the laptop only **Summarize with AI** runs for now. Its answer is a proposal;
 
 ## Good to know
 - **Sample data:** setup adds about 40 sample `SHOP` tickets in every step, each with a one-line description in the shop's words but no screenshots, so lists, filters and **Whose turn?** have something to show. Omar and Lena are their assignees, so Mia's **Assigned to: Me** is empty: her turns are under **Whose turn?**. Your own report gets the next number.
-- **Three tickets that show the loop:** setup also adds three `SHOP` bugs of the demo shop with real screenshots, pins and verdicts. [What to open first](#run-it-in-5-minutes) says what each one shows.
-- **Home is mostly empty** until P07 is built. Your tickets are under **Tickets**.
 - **Start or stop later:** `make up` / `make down`. A port is taken? Set another in `.env.local`, for example `HTTPS_PORT=8443`.
 - **Beyond the demo:** `make up` builds and starts the same stack for development ([step by step](docs/guides/demo.md#set-up-step-by-step)). A deployment for a team is not ready yet: that is the launch phase (P12); the settings are in [config.md](docs/operations/config.md).
 - **Guides:** [Claude Code](docs/guides/claude-code.md) · [Reporting with Claude Code](docs/guides/reporting-with-claude-code.md) · [Browser extension](docs/guides/browser-extension.md)
