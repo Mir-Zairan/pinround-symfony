@@ -2,7 +2,7 @@
 
 **A symfony of visibility between humans and AI.**
 
-AI builds in minutes what used to take days. The person who has to check it first, often the developer who asked for it, cannot test that much by hand. pinround is a web app where AI shows what it built as screenshots on a ticket. People pin and note what is wrong on them, AI reads the notes, fixes the code and adds the next try, and everyone sees Before and After. Developers check their own work before handing it over, testers add the edge cases they find as the next round, and every ticket says whose turn it is.
+AI builds in minutes what used to take days. The person who has to check it first, often the developer who asked for it, cannot test that much by hand. **Pinround** is a web app where AI shows what it built as screenshots on a ticket. People pin and note what is wrong on them, AI reads the notes, fixes the code and adds the next try, and everyone sees Before and After. Developers check their own work before handing it over, testers add the edge cases they find as the next round, and every ticket says whose turn it is.
 
 ## Index
 - [Why pinround](#why-pinround): what each ticket shows, and for whom
