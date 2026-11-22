@@ -45,14 +45,26 @@ async function seriousViolations(page: Page): Promise<string[]> {
     .map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`);
 }
 
-test('the page asks for the password and a code', async ({ page }) => {
+// A dev stack with PINROUND_DEMO_SKIP_2FA on shows the demo banner on every page and asks for the password only
+// (ADR-0049, note of 2026-11-22); DemoModeTest covers both sides of the switch on the server.
+async function isDemoModeOn(page: Page): Promise<boolean> {
+  return (await page.getByText('Demo mode: two-step login is skipped.').count()) > 0;
+}
+
+test('the page asks for the password and, unless demo mode skips two-step login, a code', async ({ page }) => {
   await openConfirmPage(page);
 
   const password = page.getByLabel('Password');
   await expect(password).toHaveAttribute('autocomplete', 'current-password');
   await expect(password).toBeFocused();
-  await expect(page.getByLabel('Code from your app')).toHaveAttribute('autocomplete', 'one-time-code');
-  await expect(page.getByText('6 digits. No phone with you? Type one of your recovery codes instead.')).toBeVisible();
+  if (await isDemoModeOn(page)) {
+    await expect(page.getByText('To do this, type your password again.')).toBeVisible();
+    await expect(page.getByLabel('Code from your app')).toHaveCount(0);
+  } else {
+    await expect(page.getByText('To do this, type your password and a code again.')).toBeVisible();
+    await expect(page.getByLabel('Code from your app')).toHaveAttribute('autocomplete', 'one-time-code');
+    await expect(page.getByText('6 digits. No phone with you? Type one of your recovery codes instead.')).toBeVisible();
+  }
   await expect(page.getByRole('button', { name: 'Confirm' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Cancel' })).toBeVisible();
 });
