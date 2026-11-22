@@ -613,6 +613,21 @@ test('the shrunk puck shows the captures waiting and opens the dock again; a dra
     assert.equal(inRoot('.dock').hidden, false, 'A press that barely moved is a click.');
 });
 
+test('the shrunk puck names one waiting capture in the singular', async () => {
+    const { page, inRoot } = await dockedPage({ answer: async () => ({ state: { ...NEW_REPORT_STATE, count: 1 } }) });
+    page.keydown(page.document.body, 'h');
+    const puck = inRoot('.dock-handle');
+
+    assert.deepEqual([puck.getAttribute('aria-label'), puck.querySelector('.dock__count').textContent], ['Open the pinround dock, 1 capture', '1']);
+});
+
+test('Pin, Capture, Play and Save draft carry their names in aria-label, so they keep them where a narrow screen hides the words', async () => {
+    const { root } = await dockedPage();
+    const labels = root.querySelectorAll('button').map((button) => button.getAttribute('aria-label'));
+
+    assert.deepEqual(labels.filter((label) => ['Pin', 'Capture', 'Play', 'Save draft, 3 in it'].includes(label)), ['Pin', 'Capture', 'Play', 'Save draft, 3 in it']);
+});
+
 test('picking a target asks the extension to remember it', async () => {
     const { page, inRoot } = await dockedPage();
     const picker = inRoot('select');

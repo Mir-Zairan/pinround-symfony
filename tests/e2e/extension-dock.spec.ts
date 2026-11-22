@@ -197,6 +197,22 @@ test('the note form of a pin dropped at the left or right edge of the page stays
   await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Basket is cut off']);
 });
 
+test('on a 360px wide phone the dock wraps inside the screen, and its buttons keep their names where their words are hidden', async ({ context, testPage }) => {
+  await answerPinroundApi(context);
+  await testPage.setViewportSize({ width: 360, height: 640 });
+  const popup = await pairedPopupFor(context, testPage);
+  const inspector = await openDockAndClosePopup(context, testPage, popup);
+  const controls: Array<[string, string]> = [['button', 'Move the dock'], ['combobox', 'Save to'], ['button', 'Pin'], ['button', 'Capture'], ['button', 'Play'], ['button', 'Save draft'], ['button', 'Letter keys'], ['button', 'Shrink the dock']];
+
+  for (const [role, name] of controls) {
+    const { backendNodeId } = await inspector.node(role, name);
+    const boxes = backendNodeId === undefined ? null : await inspector.boxesOf(backendNodeId);
+    expect(boxes, name).not.toBeNull();
+    expect(boxes?.border.left, name).toBeGreaterThanOrEqual(0);
+    expect(boxes?.border.right, name).toBeLessThanOrEqual(360);
+  }
+});
+
 test('with Letter keys off, P on the page does nothing while P in the dock still pins, and turned on again P on the page pins', async ({ context, testPage }) => {
   await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);

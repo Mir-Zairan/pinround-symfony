@@ -52,6 +52,7 @@ globalThis.pinroundDock ??= (() => {
         switchedOff: 'Off',
         busy: 'Still working on the last request. Try again when it is done.',
         open: 'Open the pinround dock',
+        openWithCount: (count) => `Open the pinround dock, ${count} ${1 === count ? 'capture' : 'captures'}`,
         notAnswered: 'The extension did not answer. Open its popup and try again.',
         savePanel: 'Save draft',
         saveCount: (count) => `Save ${count} ${1 === count ? 'capture' : 'captures'}`,
@@ -88,6 +89,9 @@ globalThis.pinroundDock ??= (() => {
             color: var(--dock-fg);
             box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
             white-space: nowrap;
+            /* A phone is narrower than the bar: it wraps onto a second row rather than leave the screen. */
+            flex-wrap: wrap;
+            max-width: calc(100vw - ${2 * EDGE_GAP_PX}px);
         }
         .dock button, .dock select, .dock input { font: inherit; color: inherit; }
         .dock__bar button {
@@ -443,6 +447,8 @@ globalThis.pinroundDock ??= (() => {
 
         const actionButton = (text, icon, key) => {
             const button = make('button', 'dock__action', { type: 'button' });
+            // The name even on a narrow screen, where the label is not shown.
+            button.setAttribute('aria-label', text);
             if (undefined !== icon) {
                 button.append(hiddenFromReaders(make('span', `dock__icon dock__icon--${icon}`)));
             }
@@ -667,7 +673,7 @@ globalThis.pinroundDock ??= (() => {
                 badge.textContent = null === shownCount ? '' : String(shownCount);
             }
             saveButton.setAttribute('aria-label', null === shownCount ? TEXTS.saveDraft : TEXTS.saveDraftCount(shownCount));
-            handle.setAttribute('aria-label', null === shownCount || 0 === shownCount ? TEXTS.open : `${TEXTS.open}, ${shownCount} captures`);
+            handle.setAttribute('aria-label', null === shownCount || 0 === shownCount ? TEXTS.open : TEXTS.openWithCount(shownCount));
         }
 
         function showState(state) {
