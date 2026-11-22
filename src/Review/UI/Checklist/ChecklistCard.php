@@ -103,6 +103,7 @@ final readonly class ChecklistCard
                 $class,
                 $mayMarkFixed && \in_array($item->state, [ChecklistCommands::STATE_OPEN, ChecklistCommands::STATE_NOT_FIXED], true),
                 $mayCheck && ChecklistCommands::STATE_FIXED === $item->state,
+                $picture->position,
             );
         }, $roundChecklist->checklist->items);
     }

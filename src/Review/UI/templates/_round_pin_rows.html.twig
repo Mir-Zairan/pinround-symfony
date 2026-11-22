@@ -1,0 +1,53 @@
+{#- The pins of one picture in the round page's side panel (PicturePinRow): rows, the picture's side ("before" or
+    "after"), whose markers round-pins ties them to, and emptyMessage. A pin that is a check item shows its state and the
+    checklist buttons the viewer may use: plain forms, which ChecklistController answers by coming back to this page
+    (returnFields). Expects ticketKey, checklistCsrfId and, when a row has buttons, returnFields. -#}
+{% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
+{% if rows is empty %}
+    <p class="round-panel__empty">{{ emptyMessage }}</p>
+{% else %}
+    {% set hasControls = rows|filter(row => row.check is not null and (row.check.mayMarkFixed or row.check.mayCheck)) is not empty %}
+    {% set csrfField = constant(checklistController ~ '::CSRF_FIELD') %}
+    {% set csrfToken = hasControls ? csrf_token(checklistCsrfId) : null %}
+    <ol class="round-panel__pins">
+        {% for row in rows %}
+            {% set noteId = 'round-pin-' ~ side ~ '-' ~ row.number %}
+            <li class="round-pin" value="{{ row.number }}" data-pin-list="{{ side }}" data-pin-number="{{ row.number }}">
+                <div class="round-pin__head">
+                    <span class="round-pin__number" aria-hidden="true">{{ row.number }}</span>
+                    <div class="round-pin__text">
+                        <p class="round-pin__note" id="{{ noteId }}">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
+                        {% if row.authorLine is not null %}
+                            <p class="round-pin__author">{{ row.authorLine }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if row.check is not null %}
+                    {% set check = row.check %}
+                    <div class="round-pin__actions">
+                        <twig:Tag class="check-state {{ check.stateClass }}">{{ check.stateLabel }}</twig:Tag>
+                        {% if check.mayMarkFixed %}
+                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="round-pin__form" data-turbo="false">
+                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                {{ returnFields }}
+                                <twig:Button type="submit" variant="tonal" size="sm" aria-describedby="{{ noteId }}">Mark fixed</twig:Button>
+                            </form>
+                        {% endif %}
+                        {% if check.mayCheck %}
+                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="round-pin__form" data-turbo="false">
+                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                {{ returnFields }}
+                                <twig:Button type="submit" variant="tonal" size="sm" aria-describedby="{{ noteId }}">OK</twig:Button>
+                            </form>
+                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="round-pin__form" data-turbo="false">
+                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                {{ returnFields }}
+                                <twig:Button type="submit" variant="outline" size="sm" aria-describedby="{{ noteId }}">Not fixed</twig:Button>
+                            </form>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ol>
+{% endif %}

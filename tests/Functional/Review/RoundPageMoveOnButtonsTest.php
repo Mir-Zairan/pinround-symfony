@@ -167,6 +167,11 @@ final class RoundPageMoveOnButtonsTest extends WebTestCase
         self::assertSame('Round 1', trim((string) preg_replace('/·.*\z/s', '', $page->filter('h1.round-page__title')->text())), 'The page itself shows.');
         self::assertCount(0, $page->filter('.round-move-on'));
         self::assertCount(0, $page->filter('form[action^="/t/SHOP-1/move/"]'));
+        self::assertSame(
+            ['Mia gives the verdict by moving SHOP-1 on.'],
+            $page->filter('.round-verdict-giver__sentence')->each(static fn (Crawler $sentence): string => $sentence->text()),
+            'In their place, the card names who gives the verdict.',
+        );
     }
 
     /**

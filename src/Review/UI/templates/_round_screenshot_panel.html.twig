@@ -1,0 +1,19 @@
+{#- The side panel of a screenshot of a round without screen areas (ScreenshotPanel): the Before's pins, when it has
+    one, and the screenshot's own. -#}
+{% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
+{% set returnFields %}
+    <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_ROUND_FIELD') }}" value="{{ roundNumber }}">
+    <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_SCREENSHOT_FIELD') }}" value="{{ page.shownParameters[constant('App\\Review\\UI\\Controller\\RoundController::SCREENSHOT_PARAMETER')] ?? '' }}">
+{% endset %}
+<aside class="round-panel" aria-label="Pins of {{ page.shown.name }}">
+    {% if panel.earlierPinsHeading is not null %}
+        <section class="round-panel__section" aria-labelledby="round-panel-pins">
+            <h2 id="round-panel-pins" class="round-panel__title">{{ panel.earlierPinsHeading }}</h2>
+            {{ include('@Review/_round_pin_rows.html.twig', {rows: panel.earlierPins, side: 'before', emptyMessage: 'That round left no pins here.'}) }}
+        </section>
+    {% endif %}
+    <section class="round-panel__section" aria-labelledby="round-panel-own-pins">
+        <h2 id="round-panel-own-pins" class="round-panel__title">{{ panel.ownPinsHeading }}</h2>
+        {{ include('@Review/_round_pin_rows.html.twig', {rows: panel.ownPins, side: 'after', emptyMessage: 'This screenshot has no pins.'}) }}
+    </section>
+</aside>

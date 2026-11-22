@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Review\UI\RoundPage;
 
 use App\Review\UI\RoundPage\ScreenshotPager;
-use App\Review\UI\RoundPage\ScreenshotThumb;
+use App\Review\UI\RoundPage\ScreenshotTab;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -58,12 +58,12 @@ final class ScreenshotPagerTest extends TestCase
     #[Test]
     public function screenAreasPageByTheirAreaQuery(): void
     {
-        $thumbs = [
-            new ScreenshotThumb(1, 'Cart', ['area' => 0], null, null, null, 'Passed', 'area-chip--passed', 'screenshot-thumb-state-0', false),
-            new ScreenshotThumb(2, 'Checkout', ['area' => 3], null, null, null, 'Not reviewed', 'area-chip--none', 'screenshot-thumb-state-3', true),
+        $tabs = [
+            new ScreenshotTab(1, 'Cart', ['area' => 0], 'Passed', 'area-chip--passed', 'screenshot-thumb-state-0', false),
+            new ScreenshotTab(2, 'Checkout', ['area' => 3], 'Not reviewed', 'area-chip--none', 'screenshot-thumb-state-3', true),
         ];
 
-        $pager = ScreenshotPager::over($thumbs);
+        $pager = ScreenshotPager::over($tabs);
 
         self::assertSame(['area' => 0], $pager->backParameters, 'The neighbour\'s own query, not its place in the strip.');
         self::assertNull($pager->nextParameters);
@@ -85,16 +85,16 @@ final class ScreenshotPagerTest extends TestCase
     #[DataProvider('shownCountsOtherThanOne')]
     public function aStripMustShowExactlyOneScreenshot(array $shownNumbers): void
     {
-        $thumbs = [
-            self::thumb(1, \in_array(1, $shownNumbers, true)),
-            self::thumb(2, \in_array(2, $shownNumbers, true)),
-            self::thumb(3, \in_array(3, $shownNumbers, true)),
+        $tabs = [
+            self::tab(1, \in_array(1, $shownNumbers, true)),
+            self::tab(2, \in_array(2, $shownNumbers, true)),
+            self::tab(3, \in_array(3, $shownNumbers, true)),
         ];
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageIsOrContains('A screenshot strip shows exactly one screenshot.');
+        $this->expectExceptionMessageIsOrContains('A tab row shows exactly one screenshot.');
 
-        ScreenshotPager::over($thumbs);
+        ScreenshotPager::over($tabs);
     }
 
     #[Test]
@@ -132,20 +132,20 @@ final class ScreenshotPagerTest extends TestCase
     }
 
     /**
-     * @return non-empty-list<ScreenshotThumb>
+     * @return non-empty-list<ScreenshotTab>
      */
     private static function strip(int $count, int $shownNumber): array
     {
-        $thumbs = [self::thumb(1, 1 === $shownNumber)];
+        $tabs = [self::tab(1, 1 === $shownNumber)];
         for ($number = 2; $number <= $count; ++$number) {
-            $thumbs[] = self::thumb($number, $number === $shownNumber);
+            $tabs[] = self::tab($number, $number === $shownNumber);
         }
 
-        return $thumbs;
+        return $tabs;
     }
 
-    private static function thumb(int $number, bool $isShown): ScreenshotThumb
+    private static function tab(int $number, bool $isShown): ScreenshotTab
     {
-        return new ScreenshotThumb($number, 'Screenshot '.$number, ['screenshot' => $number], null, null, null, '0 pins', 'screenshot-thumb__pins--none', null, $isShown);
+        return new ScreenshotTab($number, 'Screenshot '.$number, ['screenshot' => $number], '0 pins', 'screenshot-thumb__pins--none', null, $isShown);
     }
 }

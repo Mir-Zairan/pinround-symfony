@@ -134,6 +134,65 @@ final class ChecklistControllerTest extends WebTestCase
         self::assertSame(array_replace(self::STATES_AS_SEEDED, [4 => 'fixed']), $this->storedStates());
     }
 
+    /**
+     * The round page lists the checklist round's pictures, the report's, with each pin's check state and the tester's
+     * buttons; a plain form from it comes back to it, a refused one too, and one from the full-screen review to its pin.
+     */
+    #[Test]
+    public function theRoundPageShowsEachPinsCheckAndItsFormsComeBackToIt(): void
+    {
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
+
+        self::assertResponseStatusCodeSame(200);
+        $rows = $page->filter('.round-pin[data-pin-list="after"]');
+        self::assertSame(['Open', 'Fixed · to check', 'Checked OK', 'Not fixed', 'Fixed · to check'], $rows->filter('.check-state')->each(static fn (Crawler $chip): string => $chip->text()));
+        self::assertSame(
+            [[], ['OK', 'Not fixed'], [], [], ['OK', 'Not fixed']],
+            $rows->each(static fn (Crawler $row): array => $row->filter('button')->each(static fn (Crawler $button): string => $button->text())),
+        );
+        $okForm = $rows->eq(4)->filter('form')->first();
+        self::assertSame($this->itemUrl(5, 'ok'), $okForm->attr('action'));
+        self::assertSame(['1', '1'], [
+            $okForm->filter('input[name="'.ChecklistController::RETURN_ROUND_FIELD.'"]')->attr('value'),
+            $okForm->filter('input[name="'.ChecklistController::RETURN_SCREENSHOT_FIELD.'"]')->attr('value'),
+        ]);
+        $back = [ChecklistController::RETURN_ROUND_FIELD => '1', ChecklistController::RETURN_SCREENSHOT_FIELD => '1'];
+
+        $this->client->request('POST', $this->itemUrl(5, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()] + $back);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1', $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Pin 5 checked OK.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        self::assertSame('Checked OK', $page->filter('.round-pin[data-pin-list="after"]')->eq(4)->filter('.check-state')->text());
+        self::assertSame(array_replace(self::STATES_AS_SEEDED, [5 => 'ok']), $this->storedStates());
+
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', $this->itemUrl(2, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()] + $back);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1', $this->client->getResponse()->headers->get('Location'), 'A refusal comes back to the round page too.');
+        self::assertSame(array_replace(self::STATES_AS_SEEDED, [5 => 'ok']), $this->storedStates());
+
+        $this->client->request('POST', $this->itemUrl(1, 'fixed'), [
+            ChecklistController::CSRF_FIELD => $this->checklistToken(),
+            ChecklistController::RETURN_SIDE_FIELD => 'after',
+            ChecklistController::RETURN_PIN_FIELD => '1',
+        ] + $back);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1/rounds/1/focus?screenshot=1&side=after&pin=1', $this->client->getResponse()->headers->get('Location'));
+        self::assertSame(array_replace(self::STATES_AS_SEEDED, [1 => 'fixed', 5 => 'ok']), $this->storedStates());
+
+        $this->client->request('POST', $this->itemUrl(4, 'fixed'), [ChecklistController::CSRF_FIELD => $this->checklistToken(), ChecklistController::RETURN_ROUND_FIELD => '1/../../x']);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1#ticket-rounds', $this->client->getResponse()->headers->get('Location'), 'A malformed round number goes back to the ticket.');
+    }
+
     #[Test]
     public function theTesterChecksAPinOkAndSendsAnotherBack(): void
     {

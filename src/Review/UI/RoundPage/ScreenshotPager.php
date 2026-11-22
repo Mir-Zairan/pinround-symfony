@@ -7,14 +7,15 @@ namespace App\Review\UI\RoundPage;
 use App\Review\UI\Controller\RoundController;
 
 /**
- * Back, "2 of 3" and Next above the round page's one shown screenshot. Back and Next are links to the round page with
- * the neighbour's query, so they work without JavaScript; there is none past either end.
+ * The screenshots before and after the shown one: the full-screen review's Back and Next, and the round page's left and
+ * right arrow keys, which follow the neighbouring tabs. Each is the neighbour's query, so the links work without
+ * JavaScript; there is none past either end.
  */
 final readonly class ScreenshotPager
 {
     /**
-     * The pager nav's accessible name: it shares the round page with the strip, named "Screenshots" or "Screen areas",
-     * so it must not contain either word (WCAG 2.2 names each nav uniquely; Playwright matches names by substring).
+     * The full-screen review's pager nav's accessible name, which must not contain "Screenshots" or "Screen areas", the
+     * round page's tab rows (Playwright matches names by substring).
      */
     public const string NAV_LABEL = 'Back and next';
 
@@ -32,23 +33,23 @@ final readonly class ScreenshotPager
     }
 
     /**
-     * @param non-empty-list<ScreenshotThumb> $thumbs the strip, in order, exactly one of them shown
+     * @param non-empty-list<ScreenshotTab> $tabs the tab row, in order, exactly one of them shown
      *
-     * @throws \InvalidArgumentException when no thumb or more than one is shown
+     * @throws \InvalidArgumentException when no tab or more than one is shown
      */
-    public static function over(array $thumbs): self
+    public static function over(array $tabs): self
     {
-        $shownIndexes = array_keys(array_filter($thumbs, static fn (ScreenshotThumb $thumb): bool => $thumb->isShown));
+        $shownIndexes = array_keys(array_filter($tabs, static fn (ScreenshotTab $tab): bool => $tab->isShown));
         if (1 !== \count($shownIndexes)) {
-            throw new \InvalidArgumentException('A screenshot strip shows exactly one screenshot.');
+            throw new \InvalidArgumentException('A tab row shows exactly one screenshot.');
         }
         $shownIndex = $shownIndexes[0];
 
         return new self(
             $shownIndex + 1,
-            \count($thumbs),
-            ($thumbs[$shownIndex - 1] ?? null)?->parameters,
-            ($thumbs[$shownIndex + 1] ?? null)?->parameters,
+            \count($tabs),
+            ($tabs[$shownIndex - 1] ?? null)?->parameters,
+            ($tabs[$shownIndex + 1] ?? null)?->parameters,
         );
     }
 

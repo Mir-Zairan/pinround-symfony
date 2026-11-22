@@ -23,6 +23,12 @@ final class Screenshot
     /** The level of the title's heading, 1 to 6; a screenshot inside a card whose heading is an h3 passes 4. */
     public int $headingLevel = 3;
 
+    /**
+     * False leaves the title and summary out, for a page that shows them elsewhere: the round page puts them in a row
+     * of their own, so a Before and an After with texts of different lengths keep their pictures' tops in line.
+     */
+    public bool $showsText = true;
+
     public function titleTag(): string
     {
         return 'h'.max(1, min(6, $this->headingLevel));

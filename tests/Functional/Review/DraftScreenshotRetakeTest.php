@@ -172,10 +172,10 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('1 of 2', $page->filter('.screenshot-pager__position')->text());
+        self::assertSame('round-tab-1', $page->filter('a.round-tab[aria-selected="true"]')->attr('id'));
         self::assertSame(
-            ['Screenshot 1 1 pin', 'Screenshot 2 1 pin'],
-            $page->filter('nav.screenshot-strip a.screenshot-thumb')->each(static fn (Crawler $thumb): string => (string) preg_replace('/\s+/', ' ', trim($thumb->text()))),
+            ['Cart after the fix 1 pin', 'Checkout page 1 pin'],
+            $page->filter('[role="tablist"] a.round-tab')->each(static fn (Crawler $thumb): string => (string) preg_replace('/\s+/', ' ', trim($thumb->text()))),
         );
         self::assertSame([self::RETAKE_TITLE], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         $content = (string) $this->client->getResponse()->getContent();
@@ -309,7 +309,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/2/focus');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1 · Round 2 · Screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 2 · Cart fixed in round two · screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
         self::assertSame(
             [['After', '/t/SHOP-1/rounds/2/focus?screenshot=1&side=after', 'page'], ['Before', '/t/SHOP-1/rounds/2/focus?screenshot=1&side=before', null]],
             $page->filter(self::FOCUS_SIDES.' a')->each(static fn (Crawler $link): array => [$link->text(), $link->attr('href'), $link->attr('aria-current')]),

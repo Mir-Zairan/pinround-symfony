@@ -1,6 +1,0 @@
-{#- A thumb's pin count or area state (tagLabel, tagClass); with tagId, a verdict's Turbo Stream replaces it by that id. -#}
-{% if tagId is not null %}
-    <twig:Tag class="screenshot-thumb__tag {{ tagClass }}" id="{{ tagId }}">{{ tagLabel }}</twig:Tag>
-{% else %}
-    <twig:Tag class="screenshot-thumb__tag {{ tagClass }}">{{ tagLabel }}</twig:Tag>
-{% endif %}

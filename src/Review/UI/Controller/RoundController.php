@@ -94,6 +94,7 @@ final class RoundController extends AbstractController
             'roundRoute' => self::ROUND_ROUTE,
             'ticketKey' => $ticket->key,
             'verdictCsrfId' => VerdictController::csrfIdOf($ticket->key),
+            'checklistCsrfId' => ChecklistController::csrfIdOf($ticket->key),
             'roundNumber' => $round->number,
             'focusRoute' => self::FOCUS_ROUTE,
             'fullScreenControlId' => self::FULL_SCREEN_CONTROL_ID,
@@ -151,6 +152,7 @@ final class RoundController extends AbstractController
             'ticketKey' => $ticket->key,
             'roundNumber' => $round->number,
             'verdictCsrfId' => VerdictController::csrfIdOf($ticket->key),
+            'checklistCsrfId' => ChecklistController::csrfIdOf($ticket->key),
             'exitHref' => $isFromTicket
                 // The Rounds frame, not the link inside it: the frame loads only once it is scrolled into view.
                 ? $this->generateUrl(RoundsController::TICKET_ROUTE, ['key' => $ticket->key, '_fragment' => RoundsSection::FRAME_ID])

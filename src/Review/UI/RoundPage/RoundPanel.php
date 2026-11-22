@@ -30,6 +30,8 @@ final readonly class RoundPanel
      * @param int                 $areaPosition       from 0, the area's tab
      * @param string|null         $earlierPinsHeading for example "Pins from round 1"; null when the area has no earlier picture
      * @param list<EarlierPinRow> $earlierPins        the pins on the "before" picture, by number
+     * @param string              $ownPinsHeading     for example "Pins from round 2"
+     * @param list<PicturePinRow> $ownPins            the pins on the area's own picture, by number
      * @param string|null         $verdict            pass, needs_fix or question, the chip chosen; null before a reviewer decides
      * @param string|null         $verdictLabel       Pass, Needs fix or Question; null exactly when $verdict is
      * @param string|null         $note               the reviewer's note with the verdict
@@ -46,6 +48,8 @@ final readonly class RoundPanel
         public string $areaName,
         public ?string $earlierPinsHeading,
         public array $earlierPins,
+        public string $ownPinsHeading,
+        public array $ownPins,
         public ?string $verdict,
         public ?string $verdictLabel,
         public ?string $note,

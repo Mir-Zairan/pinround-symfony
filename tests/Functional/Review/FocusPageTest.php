@@ -214,7 +214,7 @@ final class FocusPageTest extends WebTestCase
         $roundPage = $this->client->request('GET', '/t/SHOP-1/rounds/2');
         self::assertSame(
             ['1 Planted wrong Mia · tester Fixed Undo', '2 Header cut Lena · team lead Not checked yet Fixed Still wrong', '3 (no note) Omar Still wrong Undo'],
-            $roundPage->filter('.round-panel__pin')->each(static fn (Crawler $row): string => (string) preg_replace('/\s+/', ' ', trim($row->text()))),
+            $roundPage->filter('.round-pin[data-pin-list="before"]')->each(static fn (Crawler $row): string => (string) preg_replace('/\s+/', ' ', trim($row->text()))),
             'The same records as the round page.',
         );
     }

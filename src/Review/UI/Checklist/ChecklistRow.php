@@ -10,14 +10,16 @@ namespace App\Review\UI\Checklist;
 final readonly class ChecklistRow
 {
     /**
-     * @param string $itemId       the check item's id, lowercase
-     * @param int    $pinNumber    the number of its pin on its picture, from 1; two pictures each have a pin 1
-     * @param string $pinLabel     the pin with its picture, for example "Screenshot 2 · pin 1"
-     * @param string $note         the pin's note as shown; "(no note)" for a pin with none
-     * @param string $stateLabel   for example "Fixed · to check"
-     * @param string $stateClass   the chip's colour class, for example "check-state--fixed"
-     * @param bool   $mayMarkFixed whether the row shows "Mark fixed"
-     * @param bool   $mayCheck     whether the row shows "OK" and "Not fixed"
+     * @param string $itemId          the check item's id, lowercase
+     * @param int    $pinNumber       the number of its pin on its picture, from 1; two pictures each have a pin 1
+     * @param string $pinLabel        the pin with its picture, for example "Screenshot 2 · pin 1"
+     * @param string $note            the pin's note as shown; "(no note)" for a pin with none
+     * @param string $stateLabel      for example "Fixed · to check"
+     * @param string $stateClass      the chip's colour class, for example "check-state--fixed"
+     * @param bool   $mayMarkFixed    whether the row shows "Mark fixed"
+     * @param bool   $mayCheck        whether the row shows "OK" and "Not fixed"
+     * @param int    $picturePosition the position of its pin's picture in that picture's round, from 0, which with
+     *                                $pinNumber finds the pin on the round page (RoundPages::checkRowsOf)
      */
     public function __construct(
         public string $itemId,
@@ -28,6 +30,7 @@ final readonly class ChecklistRow
         public string $stateClass,
         public bool $mayMarkFixed,
         public bool $mayCheck,
+        public int $picturePosition,
     ) {
     }
 

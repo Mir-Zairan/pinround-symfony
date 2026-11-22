@@ -1,0 +1,16 @@
+{#- One picture of the round page's Before / After (side, caption, view). Caption, title and summary, and picture are
+    the three rows review.css lines up across both sides, so the two pictures' tops stay level whatever their texts. -#}
+<figure class="round-compare__side round-compare__side--{{ side }}" data-pin-list="{{ side }}">
+    {% if caption is not null %}
+        <figcaption class="round-compare__caption">{{ caption }}</figcaption>
+    {% endif %}
+    <div class="round-compare__text">
+        {% if view.title is not null %}
+            <h2 class="screenshot__title round-compare__title">{{ view.title }}</h2>
+        {% endif %}
+        {% if view.summary is not null %}
+            <p class="screenshot__summary">{{ view.summary }}</p>
+        {% endif %}
+    </div>
+    <twig:Screenshot :view="view" :showsText="false" class="screenshot--markers round-compare__picture" />
+</figure>

@@ -18,35 +18,46 @@
             {% else %}
                 <ol class="round-panel__pins">
                     {% for row in panel.earlierPins %}
-                        <li class="round-panel__pin" value="{{ row.number }}">
-                            <span class="pin-list__number">{{ row.number }}</span>
-                            <p class="round-panel__note" id="round-panel-pin-{{ row.id }}">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
-                            {% if row.authorLine is not null %}
-                                <p class="round-panel__author">{{ row.authorLine }}</p>
-                            {% endif %}
-                            <twig:Tag class="verdict-tag {{ row.verdictClass }}">{{ row.verdictLabel }}</twig:Tag>
-                            {% if panel.mayGiveVerdicts %}
-                                {% if row.isChecked %}
-                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
-                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                        {% set undoId = constant(panelClass ~ '::UNDO_BUTTON_ID_PREFIX') ~ row.id %}
-                                        <twig:Button type="submit" variant="text" size="sm" id="{{ undoId }}" :autofocus="undoId is same as(focusedControlId)" aria-describedby="round-panel-pin-{{ row.id }}">Undo</twig:Button>
-                                    </form>
-                                {% else %}
-                                    <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
-                                        <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
-                                        {% set fixedId = constant(panelClass ~ '::FIXED_BUTTON_ID_PREFIX') ~ row.id %}
-                                        <twig:Button type="submit" variant="tonal" size="sm" id="{{ fixedId }}" :autofocus="fixedId is same as(focusedControlId)" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" aria-describedby="round-panel-pin-{{ row.id }}">Fixed</twig:Button>
-                                        <twig:Button type="submit" variant="outline" size="sm" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" aria-describedby="round-panel-pin-{{ row.id }}">Still wrong</twig:Button>
-                                    </form>
+                        <li class="round-pin" value="{{ row.number }}" data-pin-list="before" data-pin-number="{{ row.number }}">
+                            <div class="round-pin__head">
+                                <span class="round-pin__number" aria-hidden="true">{{ row.number }}</span>
+                                <div class="round-pin__text">
+                                    <p class="round-pin__note" id="round-panel-pin-{{ row.id }}">{% if row.note|trim is same as('') %}(no note){% else %}{{ row.note }}{% endif %}</p>
+                                    {% if row.authorLine is not null %}
+                                        <p class="round-pin__author">{{ row.authorLine }}</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="round-pin__actions">
+                                <twig:Tag class="verdict-tag {{ row.verdictClass }}">{{ row.verdictLabel }}</twig:Tag>
+                                {% if panel.mayGiveVerdicts %}
+                                    {% if row.isChecked %}
+                                        <form method="post" action="{{ path(constant(verdictController ~ '::PIN_UNDO_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
+                                            <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                            {% set undoId = constant(panelClass ~ '::UNDO_BUTTON_ID_PREFIX') ~ row.id %}
+                                            <twig:Button type="submit" variant="text" size="sm" id="{{ undoId }}" :autofocus="undoId is same as(focusedControlId)" aria-describedby="round-panel-pin-{{ row.id }}">Undo</twig:Button>
+                                        </form>
+                                    {% else %}
+                                        <form method="post" action="{{ path(constant(verdictController ~ '::PIN_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, pinId: row.id}) }}" class="round-panel__pin-form" data-turbo="true" data-failed-toast="{{ saveFailedToast }}">
+                                            <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                            {% set fixedId = constant(panelClass ~ '::FIXED_BUTTON_ID_PREFIX') ~ row.id %}
+                                            <twig:Button type="submit" variant="tonal" size="sm" id="{{ fixedId }}" :autofocus="fixedId is same as(focusedControlId)" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_FIXED') }}" aria-describedby="round-panel-pin-{{ row.id }}">Fixed</twig:Button>
+                                            <twig:Button type="submit" variant="outline" size="sm" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" aria-describedby="round-panel-pin-{{ row.id }}">Still wrong</twig:Button>
+                                        </form>
+                                    {% endif %}
                                 {% endif %}
-                            {% endif %}
+                            </div>
                         </li>
                     {% endfor %}
                 </ol>
             {% endif %}
         </section>
     {% endif %}
+
+    <section class="round-panel__section" aria-labelledby="round-panel-own-pins">
+        <h2 id="round-panel-own-pins" class="round-panel__title">{{ panel.ownPinsHeading }}</h2>
+        {{ include('@Review/_round_pin_rows.html.twig', {rows: panel.ownPins, side: 'after', emptyMessage: 'This screen area has no pins.'}) }}
+    </section>
 
     <section class="round-panel__section" aria-labelledby="round-panel-verdict">
         <h2 id="round-panel-verdict" class="round-panel__title">{{ panel.mayGiveVerdicts ? 'Your verdict' : 'Verdict' }} on {{ panel.areaName }}</h2>

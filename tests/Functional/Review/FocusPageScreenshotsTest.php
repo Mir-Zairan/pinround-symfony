@@ -52,10 +52,11 @@ final class FocusPageScreenshotsTest extends WebTestCase
     private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => RoundsSection::FRAME_ID];
     /**
      * Fewer than the round page's (RoundPageScreenshotsTest::DRAFT_PAGE_QUERIES): no move-on buttons, no "Ready for"
-     * header and no strip of small pictures to sign. Measured, and the same for 2 and 6 screenshots; the report's read as
-     * the first shared draft's Befores (four queries, ADR-0048 amended 2026-11-21) raised it from 24.
+     * header. Measured, and the same for 2 and 6 screenshots; the report's read as the first shared draft's Befores (four
+     * queries, ADR-0048 amended 2026-11-21) raised it from 24, and the read of the check items of the walked pins (the
+     * checklist round, then its items, RoundPages::checkRowsOf) from 28.
      */
-    private const int DRAFT_FOCUS_QUERIES = 28;
+    private const int DRAFT_FOCUS_QUERIES = 30;
 
     private KernelBrowser $client;
 
@@ -104,7 +105,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame('dark', $page->filter('html')->attr('data-theme'));
-        self::assertSame('SHOP-1 · Round 1 · Screenshot 1 of 3', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 1 · Draft shot 0 · screenshot 1 of 3', $page->filter('h1.focus-review__line')->text());
         self::assertSame('Draft shot 0', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'), 'Stored last first, shown in position order.');
         self::assertCount(0, $page->filter('.screenshot__text, .focus-review__sides'), 'No title above the picture and no earlier picture to switch to.');
         self::assertSame(
@@ -132,7 +133,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', self::DRAFT_FOCUS.'?'.RoundController::SCREENSHOT_PARAMETER.'=2&'.RoundController::PIN_PARAMETER.'=2');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1 · Round 1 · Screenshot 2 of 3', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 1 · Draft shot 1 · screenshot 2 of 3', $page->filter('h1.focus-review__line')->text());
         self::assertSame('Draft shot 1', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
         self::assertSame('This screenshot has no pins.', $page->filter('.focus-review__none')->text());
         self::assertCount(0, $page->filter('.focus-bar, button.pin'));
@@ -201,7 +202,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
         $page = $this->client->click($fullScreen->link());
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1 · Round 1 · Screenshot 2 of 3', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 1 · Draft shot 1 · screenshot 2 of 3', $page->filter('h1.focus-review__line')->text());
         self::assertSame(['Note 1', 'Note 2'], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()));
     }
 
@@ -227,7 +228,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', $fullScreen->attr('href'));
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1 · Round 0 · Screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 0 · Report shot 0 · screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
         self::assertSame('Report shot 0', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
         self::assertSame('/t/SHOP-1#'.RoundsSection::FRAME_ID, $page->filter('a.focus-review__exit')->attr('href'));
         self::assertSame('/t/SHOP-1/rounds/0/focus?screenshot=2&from=ticket', $page->filter('.focus-review__next')->attr('href'), 'Paging keeps the way back.');
@@ -299,7 +300,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1 · Round 1 · Screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 1 · Report shot 0 · screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
         self::assertSame('Report shot 0', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
         self::assertSame(['Note 1', 'A checked note'], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()));
 
@@ -438,7 +439,7 @@ final class FocusPageScreenshotsTest extends WebTestCase
         $this->queryCountOf('/t/SHOP-2/rounds/1/focus?screenshot=2');
         $sixScreenshotsQueryCount = $this->queryCountOf('/t/SHOP-2/rounds/1/focus?screenshot=2');
 
-        self::assertSame('SHOP-2 · Round 1 · Screenshot 2 of 6', $this->client->getCrawler()->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-2 · Round 1 · Draft shot 1 · screenshot 2 of 6', $this->client->getCrawler()->filter('h1.focus-review__line')->text());
         self::assertCount(3, $this->client->getCrawler()->filter('.focus-bar__stop'));
         self::assertSame($twoScreenshotsQueryCount, $sixScreenshotsQueryCount);
         self::assertSame(self::DRAFT_FOCUS_QUERIES, $sixScreenshotsQueryCount);

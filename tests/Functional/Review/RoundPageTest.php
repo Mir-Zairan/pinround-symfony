@@ -49,9 +49,10 @@ final class RoundPageTest extends WebTestCase
      * ins_ticket_turn for a viewer who may move the ticket, which raised it from 25 (task 8e), but Omar owns this review
      * round, which nobody shares in a move, so his own move never closes it and his page skips that read (HandOffRound,
      * task 16l). The header's Ready for line (RoundReadyFor) reads whose turn it is on ins_ticket_turn once more, which
-     * raised it from 25; the name comes with the ticket's names.
+     * raised it from 25; the name comes with the ticket's names. The tab row has no small pictures, whose signing read
+     * the media rows, which lowered it from 26.
      */
-    private const int PAGE_QUERIES = 26;
+    private const int PAGE_QUERIES = 25;
     private const string PRIVATE_TITLE = 'Lena private draft picture';
 
     private KernelBrowser $client;
@@ -117,9 +118,9 @@ final class RoundPageTest extends WebTestCase
         self::assertSame('· shot today, 10:12 · '.$readyForLine, $page->filter('h1.round-page__title .round-page__detail')->text(), 'The rest of the header is muted.');
         self::assertSame(
             ['Per order Passed', 'Per product 3 pins', 'Combined Needs fix', 'Totals Question', 'Footer Not reviewed'],
-            $page->filter('nav.screenshot-strip a.screenshot-thumb')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
+            $page->filter('[role="tablist"] a.round-tab')->each(static fn (Crawler $tab): string => (string) preg_replace('/\s+/', ' ', trim($tab->text()))),
         );
-        self::assertSame('Per order', $page->filter('nav.screenshot-strip a[aria-current="page"] .screenshot-thumb__label')->text());
+        self::assertSame('Per order', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
         self::assertSame(['Cart total shows the wrong sum', '/t/SHOP-1'], [$page->filter('.round-page__ticket a.round-page__ticket-link')->text(), $page->filter('.round-page__ticket a.round-page__ticket-link')->attr('href')]);
         $compare = $page->filter('.round-compare-control[role="group"][aria-label="Compare"][hidden]');
         self::assertSame(
@@ -140,7 +141,7 @@ final class RoundPageTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUND_PAGE.'?'.RoundController::AREA_PARAMETER.'=1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Per product', $page->filter('nav.screenshot-strip a[aria-current="page"] .screenshot-thumb__label')->text());
+        self::assertSame('Per product', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
         self::assertSame(['Before · round 1', 'After · round 2'], $page->filter('.round-compare__caption')->each(static fn (Crawler $caption): string => $caption->text()));
         self::assertSame(['Before title 1', 'After title 1'], $page->filter('.screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertSame(['Before summary 1', 'After summary 1'], $page->filter('.screenshot__summary')->each(static fn (Crawler $summary): string => $summary->text()));
@@ -150,12 +151,12 @@ final class RoundPageTest extends WebTestCase
         self::assertSame(['Pin 1: Planted wrong', 'Pin 2: Header cut', 'Pin 3: Kept AI idea'], $before->filter('button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('aria-label')));
         self::assertSame(['Pin 1: Still cut'], $after->filter('button.pin')->each(static fn (Crawler $pin): string => (string) $pin->attr('aria-label')));
         self::assertSame(
-            ['Pins from round 1', 'Verdict on Per product'],
+            ['Pins from round 1', 'Pins from round 2', 'Verdict on Per product'],
             $page->filter('.round-panel__title')->each(static fn (Crawler $title): string => $title->text()),
         );
         self::assertSame(
             ['1 Planted wrong Mia · tester Fixed', '2 Header cut Mia · tester Still wrong', '3 Kept AI idea Mia · tester Not checked yet'],
-            $page->filter('.round-panel__pin')->each(static fn (Crawler $row): string => (string) preg_replace('/\s+/', ' ', trim($row->text()))),
+            $page->filter('.round-pin[data-pin-list="before"]')->each(static fn (Crawler $row): string => (string) preg_replace('/\s+/', ' ', trim($row->text()))),
         );
         self::assertSame('No verdict yet.', $page->filter('.round-panel__section')->last()->filter('.round-panel__empty')->text());
         $content = (string) $this->client->getResponse()->getContent();
@@ -191,7 +192,7 @@ final class RoundPageTest extends WebTestCase
             $page = $this->client->request('GET', self::ROUND_PAGE.'?'.$query);
 
             self::assertResponseStatusCodeSame(200);
-            self::assertSame('Per order', $page->filter('nav.screenshot-strip a[aria-current="page"] .screenshot-thumb__label')->text());
+            self::assertSame('Per order', $page->filter('a.round-tab[aria-selected="true"] .round-tab__label')->text());
         }
     }
 
@@ -282,7 +283,7 @@ final class RoundPageTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Round 1 · shot yesterday, 10:00 · Ready for Mia', $page->filter('h1.round-page__title')->text());
         self::assertSame('This round has no screen areas.', $page->filter('.empty-state')->text());
-        self::assertCount(0, $page->filter('nav.screenshot-strip, .screenshot-pager, .round-compare-control'));
+        self::assertCount(0, $page->filter('[role="tablist"], .screenshot-pager, .round-compare-control'));
 
         $this->addRound($ticketId, 2, 'review', 'Omar', '2026-10-30 18:05:00+00');
         $page = $this->client->request('GET', '/t/SHOP-1/rounds/2');
@@ -462,7 +463,7 @@ final class RoundPageTest extends WebTestCase
         $this->queryCountOf('/t/SHOP-2/rounds/2?area=1');
         $manyAreasQueryCount = $this->queryCountOf('/t/SHOP-2/rounds/2?area=1');
 
-        self::assertCount(5, $this->client->getCrawler()->filter('a.screenshot-thumb'));
+        self::assertCount(5, $this->client->getCrawler()->filter('a.round-tab'));
         self::assertCount(3, $this->client->getCrawler()->filter('.round-compare__side--before button.pin'));
         self::assertStringEndsWith('· Ready for Mia', $this->client->getCrawler()->filter('h1.round-page__title')->text(), 'The count holds the read of whose turn it is.');
         self::assertSame($oneAreaQueryCount, $manyAreasQueryCount);

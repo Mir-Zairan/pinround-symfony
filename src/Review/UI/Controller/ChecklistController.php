@@ -13,6 +13,7 @@ use App\Review\Api\ChecklistRefused;
 use App\Review\UI\Checklist\ChecklistCard;
 use App\Review\UI\Checklist\ChecklistCards;
 use App\Review\UI\Component\RoundsSection;
+use App\Review\UI\RoundPage\FocusPage;
 use App\Review\UI\RoundsController;
 use App\Review\UI\VisibleTicketLookup;
 use App\SharedKernel\Application\TenantContext;
@@ -35,7 +36,8 @@ use Symfony\UX\Turbo\TurboBundle;
  * Rounds) and a findings round's (FR-RND-17): "Mark fixed" for the ticket's assignee, "OK" and "Not fixed" for its
  * tester. A change answers a Turbo form with a stream that replaces the changed item's card, with focus on the button
  * that took the clicked one's place, and the toast; any other form with a redirect to the ticket's Rounds section with
- * the toast flashed. A refusal changes nothing and answers with its toast the same two ways, as a 403 or 422 stream.
+ * the toast flashed, or, for a form of the round page or its full-screen review (RETURN_ROUND_FIELD), with a redirect
+ * back to that page. A refusal changes nothing and answers with its toast the same two ways, as a 403 or 422 stream.
  *
  * Without the request transaction, as VerdictController: each action runs in a transaction of its own, so a refused
  * command leaves nothing. In that order: a ticket the person may not see is the ticket page's 404; an item id
@@ -50,6 +52,18 @@ final class ChecklistController extends AbstractController
     public const string MARK_NOT_FIXED_ROUTE = 'review_checklist_mark_not_fixed';
 
     public const string CSRF_FIELD = '_csrf_token';
+
+    /**
+     * With a round number: the form is on that round's page or its full-screen review, which the answer goes back to
+     * with the toast flashed, in place of the ticket's Rounds section.
+     */
+    public const string RETURN_ROUND_FIELD = 'return_round';
+    /** With RETURN_ROUND_FIELD: the "?screenshot=N" to go back to. */
+    public const string RETURN_SCREENSHOT_FIELD = 'return_screenshot';
+    /** With RETURN_ROUND_FIELD: FocusPage::SIDE_AFTER or SIDE_BEFORE, the full-screen review's picture to go back to. */
+    public const string RETURN_SIDE_FIELD = 'return_side';
+    /** With RETURN_SIDE_FIELD: the full-screen review's "?pin=N" to go back to. */
+    public const string RETURN_PIN_FIELD = 'return_pin';
 
     /** With the pin's number and the tester's first name. */
     public const string MARKED_FIXED = 'Pin %d marked fixed. %s checks it.';
@@ -149,6 +163,7 @@ final class ChecklistController extends AbstractController
             throw $this->createAccessDeniedException();
         }
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $returnUrl = $this->returnUrlOf($request, $key);
 
         try {
             $answer = $this->transactions->run(function () use ($key, $itemId, $permission, $deniedToast, $csrfToken, $change, $toastOf): array {
@@ -185,16 +200,45 @@ final class ChecklistController extends AbstractController
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(RoundsController::NOT_FOUND);
         } catch (RefusedWithToast $refused) {
-            return $this->refusalAnswers->answer($request, $refused, fn (string $toast): Response => $this->redirectToRounds($key, $toast));
+            return $this->refusalAnswers->answer($request, $refused, fn (string $toast): Response => $this->redirectBack($key, $returnUrl, $toast));
         }
 
-        return $this->respondToChanged($request, $key, $answer['toast'], $answer['checklist'], $answer['itemId']);
+        return $this->respondToChanged($request, $key, $returnUrl, $answer['toast'], $answer['checklist'], $answer['itemId']);
     }
 
-    private function respondToChanged(Request $request, string $key, string $toast, ChecklistCard $checklist, string $itemId): Response
+    /**
+     * The round page or full-screen review the form names in its RETURN_* fields, built from the route, so no form can
+     * send the person off the site; null when it names no round number, and then the answer is the ticket's Rounds.
+     */
+    private function returnUrlOf(Request $request, string $key): ?string
+    {
+        $fields = $request->request->all();
+        $roundNumber = RoundController::positionOf($fields[self::RETURN_ROUND_FIELD] ?? null);
+        if (null === $roundNumber) {
+            return null;
+        }
+        $parameters = ['key' => $key, 'number' => $roundNumber];
+        $screenshotNumber = RoundController::positionOf($fields[self::RETURN_SCREENSHOT_FIELD] ?? null);
+        if (null !== $screenshotNumber) {
+            $parameters[RoundController::SCREENSHOT_PARAMETER] = $screenshotNumber;
+        }
+        $side = $fields[self::RETURN_SIDE_FIELD] ?? null;
+        if (!\in_array($side, [FocusPage::SIDE_AFTER, FocusPage::SIDE_BEFORE], true)) {
+            return $this->generateUrl(RoundController::ROUND_ROUTE, $parameters);
+        }
+        $parameters[RoundController::SIDE_PARAMETER] = $side;
+        $pinPosition = RoundController::positionOf($fields[self::RETURN_PIN_FIELD] ?? null);
+        if (null !== $pinPosition) {
+            $parameters[RoundController::PIN_PARAMETER] = $pinPosition;
+        }
+
+        return $this->generateUrl(RoundController::FOCUS_ROUTE, $parameters);
+    }
+
+    private function respondToChanged(Request $request, string $key, ?string $returnUrl, string $toast, ChecklistCard $checklist, string $itemId): Response
     {
         if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
-            return $this->redirectToRounds($key, $toast);
+            return $this->redirectBack($key, $returnUrl, $toast);
         }
 
         return $this->render(
@@ -210,9 +254,15 @@ final class ChecklistController extends AbstractController
         );
     }
 
-    private function redirectToRounds(string $key, string $toast): Response
+    /**
+     * @param string|null $returnUrl as returnUrlOf gives it; null goes to the ticket's Rounds section
+     */
+    private function redirectBack(string $key, ?string $returnUrl, string $toast): Response
     {
         $this->addFlash(self::TOAST, $toast);
+        if (null !== $returnUrl) {
+            return $this->redirect($returnUrl, Response::HTTP_SEE_OTHER);
+        }
 
         return $this->redirectToRoute(RoundsController::TICKET_ROUTE, ['key' => $key, '_fragment' => RoundsSection::FRAME_ID], Response::HTTP_SEE_OTHER);
     }

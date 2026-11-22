@@ -70,7 +70,16 @@ final readonly class RoundReadyFor
      */
     public function readyForLineOf(VisibleTicket $visible, OpenSharedRound $round): ?string
     {
-        $readyForId = $this->userIdOf($visible->ticket, $round);
+        return $this->readyForLineOfUser($visible, $this->userIdOf($visible->ticket, $round));
+    }
+
+    /**
+     * readyForLineOf for a caller who already has userIdOf's answer. Reads as firstNameOf.
+     *
+     * @param UserId|null $readyForId as userIdOf gives it
+     */
+    public function readyForLineOfUser(VisibleTicket $visible, ?UserId $readyForId): ?string
+    {
         if (null === $readyForId) {
             return null;
         }

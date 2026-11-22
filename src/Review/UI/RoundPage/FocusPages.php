@@ -9,6 +9,7 @@ use App\Review\Api\AreaView;
 use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
+use App\Review\UI\Checklist\ChecklistRow;
 use App\Review\UI\Controller\RoundController;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCards;
@@ -24,8 +25,9 @@ use App\Ticketing\Api\TicketPageView;
  * (RoundPages::beforeScreenshotOf).
  *
  * Its reads do not grow with the screenshots or pins: one signing call, and, for a round without areas other than a
- * review round, RoundPages' read of the one round whose screenshots it shows and, for a shared draft, its read of the
- * hand-off round before it or the report.
+ * review round, RoundPages' read of the one round whose screenshots it shows, for a shared draft its read of the
+ * hand-off round before it or the report, and RoundPages::checkRowsOf's reads of the check items, whose buttons the
+ * walked pins that are check items show.
  */
 final readonly class FocusPages
 {
@@ -82,7 +84,8 @@ final readonly class FocusPages
         $shown = $isBefore ? $before : $screenshot;
         // Each picture walks its own pins, as each side of the round page's Before / After draws its own.
         $pins = array_values(array_filter($shown->pins, RoundCards::isShownPin(...)));
-        $stops = self::stopsOf($ticket, $pins);
+        $checkRows = $this->roundPages->checkRowsOf($visible, $round, $previousRound)[$isBefore ? 'before' : 'after'];
+        $stops = self::stopsOf($ticket, $pins, $shown->position, $checkRows);
         $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$shown->mediaId], RoundCards::VARIANT, $now)[$shown->mediaId] ?? null;
         $picture = RoundCards::viewOfPicture(
             'focus-picture',
@@ -99,7 +102,9 @@ final readonly class FocusPages
 
         return new FocusPage(
             $ticket->key,
-            \sprintf('%s · Screenshot %d of %d', $roundLine, $number, $count),
+            null === $screenshot->title
+                ? \sprintf('%s · Screenshot %d of %d', $roundLine, $number, $count)
+                : \sprintf('%s · %s · screenshot %d of %d', $roundLine, $screenshot->title, $number, $count),
             null,
             $isBefore ? FocusPage::SIDE_BEFORE : FocusPage::SIDE_AFTER,
             null !== $before,
@@ -118,7 +123,8 @@ final readonly class FocusPages
         $shown = FocusPage::SIDE_BEFORE === $side ? ($area->before ?? $area->after) : $area->after;
         $isBefore = $shown !== $area->after;
         $pins = $area->before->pins ?? [];
-        $stops = self::stopsOf($ticket, $pins);
+        // An earlier round's pins take pin verdicts here, not checklist changes.
+        $stops = self::stopsOf($ticket, $pins, 0, []);
         $image = $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, [$shown->mediaId], RoundCards::VARIANT, $now)[$shown->mediaId] ?? null;
         $picture = RoundCards::viewOfPicture(
             'focus-picture',
@@ -158,11 +164,13 @@ final readonly class FocusPages
     }
 
     /**
-     * @param list<RoundPinView> $pins
+     * @param list<RoundPinView>          $pins            on one picture
+     * @param int                         $picturePosition that picture's position in its round, from 0
+     * @param array<string, ChecklistRow> $checkRows       by RoundPages::checkKeyOf
      *
      * @return list<FocusPinStop>
      */
-    private static function stopsOf(TicketPageView $ticket, array $pins): array
+    private static function stopsOf(TicketPageView $ticket, array $pins, int $picturePosition, array $checkRows): array
     {
         $count = \count($pins);
         $stops = [];
@@ -179,6 +187,7 @@ final readonly class FocusPages
                 null !== $pin->verdict,
                 FocusPage::previousPositionBefore($position, $count),
                 FocusPage::nextPositionAfter($position, $count),
+                $checkRows[RoundPages::checkKeyOf($picturePosition, $pin->number)] ?? null,
             );
         }
 

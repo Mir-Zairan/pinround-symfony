@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Review\UI\RoundPage;
 
 use App\Media\Api\MediaImage;
-use App\Media\Api\MediaImageStatus;
 use App\Media\Api\SignedUrls;
 use App\Review\Api\AreaState;
 use App\Review\Api\AreaView;
+use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
@@ -16,6 +16,9 @@ use App\Review\Api\RoundView;
 use App\Review\Api\VerdictCommands;
 use App\Review\Application\OpenSharedRound;
 use App\Review\Application\RoundsVisibleTo;
+use App\Review\UI\Checklist\ChecklistCard;
+use App\Review\UI\Checklist\ChecklistCards;
+use App\Review\UI\Checklist\ChecklistRow;
 use App\Review\UI\Controller\RoundController;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCards;
@@ -29,15 +32,17 @@ use App\SharedKernel\UI\RelativeTime;
 use App\Ticketing\Api\TicketPageView;
 
 /**
- * Builds the round page of any round kind for one viewer (FR-RND-05): the header, a strip of every screenshot as a
- * small picture, and one screenshot shown large with its pins. A review round's screenshots are its screen areas, each
- * with the earlier round's picture of the place and a side panel; the report's and a shared draft's are the latest try
- * of each chain, numbered as RoundCards numbers them; a checklist round shows the report's, whose pins it checks.
+ * Builds the round page of any round kind for one viewer (FR-RND-05, the prototype's Review board): the header, a tab
+ * per screenshot, and one screenshot shown large with its pins and a side panel. A review round's screenshots are its
+ * screen areas, each with the earlier round's picture of the place; the report's and a shared draft's are the latest
+ * try of each chain, numbered as RoundCards numbers them; a checklist round shows the report's, whose pins it checks.
+ * The panel lists the pins of both pictures; a pin that is a check item (the report's, a findings round's) carries its
+ * state and the checklist buttons the viewer may use.
  *
- * Its reads do not grow with the screenshots or pins: two signing calls (the shown pictures, then every small picture,
- * one more per SignedUrls::MAX_MEDIA_IDS of them), for a round without areas other than a review round, RoundsVisibleTo's
- * read of the one round whose screenshots it shows, for a shared draft its read of the hand-off round before it or, with
- * none, of the report, whose pictures are the Befores, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
+ * Its reads do not grow with the screenshots or pins: one signing call for the shown pictures, for a round without areas
+ * other than a review round, RoundsVisibleTo's read of the one round whose screenshots it shows, for a shared draft its
+ * read of the hand-off round before it or, with none, of the report, whose pictures are the Befores, checkRowsOf's
+ * reads of the check items, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
  */
 final readonly class RoundPages
 {
@@ -48,11 +53,13 @@ final readonly class RoundPages
         VerdictCommands::AREA_QUESTION => 'Question',
     ];
 
-    /** With the area's position: the id of its thumb's state tag, which a verdict's stream replaces. */
-    public const string AREA_STATE_ID_PREFIX = 'screenshot-thumb-state-';
+    /** With the area's position: the id of its tab's state tag, which a verdict's stream replaces. */
+    public const string AREA_STATE_ID_PREFIX = 'screenshot-tab-state-';
 
-    public const string AREAS_STRIP_LABEL = 'Screen areas';
-    public const string SCREENSHOTS_STRIP_LABEL = 'Screenshots';
+    public const string AREAS_TABS_LABEL = 'Screen areas';
+    public const string SCREENSHOTS_TABS_LABEL = 'Screenshots';
+    /** With a round number: the heading of a picture's pins in the side panel. */
+    public const string PINS_FROM_ROUND = 'Pins from round %d';
     public const string NO_AREAS = 'This round has no screen areas.';
     public const string NO_SCREENSHOTS = 'This round has no screenshots.';
 
@@ -71,6 +78,8 @@ final readonly class RoundPages
         private SignedUrls $signedUrls,
         private RoundsVisibleTo $roundsVisibleTo,
         private RoundReadyFor $roundReadyFor,
+        private ChecklistQueries $checklistQueries,
+        private ChecklistCards $checklistCards,
     ) {
     }
 
@@ -91,27 +100,32 @@ final readonly class RoundPages
     {
         $ticket = $visible->ticket;
         $title = \sprintf('Round %d', $round->number);
-        $detail = $this->detailOf($visible, $round, $now, $viewerTimeZone);
+        $openRound = OpenSharedRound::ofReviewRound($round);
+        $readyForId = null === $openRound ? null : $this->roundReadyFor->userIdOf($ticket, $openRound);
+        $detail = $this->detailOf($visible, $round, $readyForId, $now, $viewerTimeZone);
+        $verdictGiverName = $this->verdictGiverNameOf($visible, $readyForId);
         $selected = self::areaAt($round, $areaPosition ?? 0);
         if (null !== $selected) {
-            $thumbs = $this->areaThumbsOf($ticket, $round, $selected, $now);
+            $tabs = self::areaTabsOf($round, $selected);
 
             return new RoundPage(
                 $ticket->key,
                 $ticket->title,
                 $title,
                 $detail,
-                self::AREAS_STRIP_LABEL,
-                $thumbs,
-                ScreenshotPager::over($thumbs),
+                self::AREAS_TABS_LABEL,
+                $tabs,
+                ScreenshotPager::over($tabs),
                 $this->selectedAreaOf($ticket, $round, $selected, $now),
                 self::panelOf($ticket, $round, $selected, $isVerdictGranted, $visible->actor->userId()),
+                null,
+                $verdictGiverName,
                 self::NO_AREAS,
             );
         }
         if (self::REVIEW === $round->kind) {
             // ReviewRoundQueries reads a review round's pictures through its areas only.
-            return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::AREAS_STRIP_LABEL, [], null, null, null, self::NO_AREAS);
+            return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::AREAS_TABS_LABEL, [], null, null, null, null, $verdictGiverName, self::NO_AREAS);
         }
 
         [$picturesRound, $screenshots] = $this->screenshotsOf($visible, $round) ?? [null, []];
@@ -120,23 +134,130 @@ final readonly class RoundPages
             return null;
         }
         if (null === $picturesRound || [] === $screenshots) {
-            return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::SCREENSHOTS_STRIP_LABEL, [], null, null, null, self::NO_SCREENSHOTS);
+            return new RoundPage($ticket->key, $ticket->title, $title, $detail, self::SCREENSHOTS_TABS_LABEL, [], null, null, null, null, $verdictGiverName, self::NO_SCREENSHOTS);
         }
-        $thumbs = $this->screenshotThumbsOf($ticket, $screenshots, $shownIndex, $now);
+        $tabs = self::screenshotTabsOf($screenshots, $shownIndex);
         $previousRound = $this->previousHandOffRoundOf($visible, $round);
+        $number = $shownIndex + 1;
+        $screenshot = $screenshots[$shownIndex];
+        $beforeScreenshot = self::beforeScreenshotOf($previousRound, $number);
+        $checkRows = $this->checkRowsOf($visible, $round, $previousRound);
 
         return new RoundPage(
             $ticket->key,
             $ticket->title,
             $title,
             $detail,
-            self::SCREENSHOTS_STRIP_LABEL,
-            $thumbs,
-            ScreenshotPager::over($thumbs),
-            $this->shownScreenshotOf($ticket, $picturesRound, $screenshots[$shownIndex], $shownIndex + 1, $previousRound, $now),
+            self::SCREENSHOTS_TABS_LABEL,
+            $tabs,
+            ScreenshotPager::over($tabs),
+            $this->shownScreenshotOf($ticket, $picturesRound, $screenshot, $number, $previousRound, $now),
             null,
+            new ScreenshotPanel(
+                null === $previousRound || null === $beforeScreenshot ? null : \sprintf(self::PINS_FROM_ROUND, $previousRound->number ?? 0),
+                null === $beforeScreenshot ? [] : self::picturePinRowsOf($ticket, $beforeScreenshot, $checkRows['before']),
+                \sprintf(self::PINS_FROM_ROUND, $picturesRound->number ?? 0),
+                self::picturePinRowsOf($ticket, $screenshot, $checkRows['after']),
+            ),
+            $verdictGiverName,
             self::NO_SCREENSHOTS,
         );
+    }
+
+    /**
+     * The check items on the pins of the pictures a round without areas shows, the After's and the Before's apart: the
+     * checklist round's on the report's pictures, a findings round's on its own; a self-check round's pins are none.
+     * Reads ChecklistQueries once when the report's pictures are shown, to find the checklist round, and ChecklistCards'
+     * queries when either side may have items. Runs inside the request transaction whose tenant is the viewer's
+     * organization.
+     *
+     * @param RoundView|null $previousRound as previousHandOffRoundOf gives it
+     *
+     * @return array{after: array<string, ChecklistRow>, before: array<string, ChecklistRow>} each by checkKeyOf
+     */
+    public function checkRowsOf(VisibleTicket $visible, ReviewRoundView $round, ?RoundView $previousRound): array
+    {
+        $ticketId = $visible->ticket->id;
+        $checklistRoundId = null;
+        if (\in_array(self::REPORT, [$round->kind, $previousRound?->kind], true)) {
+            $checklistRoundId = $this->checklistQueries->forTicket($ticketId)?->roundId;
+        }
+        $afterRoundId = match ($round->kind) {
+            self::REPORT => $checklistRoundId,
+            self::CHECKLIST, RoundView::DRAFT => $round->id,
+            default => null,
+        };
+        $beforeRoundId = match ($previousRound?->kind) {
+            self::REPORT => $checklistRoundId,
+            RoundView::DRAFT => $previousRound->id,
+            default => null,
+        };
+        $roundIds = array_values(array_unique(array_map(strtolower(...), array_filter([$afterRoundId, $beforeRoundId], static fn (?string $id): bool => null !== $id))));
+        $cards = [] === $roundIds ? [] : $this->checklistCards->forRounds($visible->actor->organizationId(), $ticketId, $roundIds);
+
+        return [
+            'after' => self::checkRowsByPinOf($cards[strtolower($afterRoundId ?? '')] ?? null),
+            'before' => self::checkRowsByPinOf($cards[strtolower($beforeRoundId ?? '')] ?? null),
+        ];
+    }
+
+    /**
+     * The key checkRowsOf gives a pin's check row: the pin's picture and its number, as pin numbers start at 1 on each
+     * picture.
+     *
+     * @param int $picturePosition the picture's position in its round, from 0
+     */
+    public static function checkKeyOf(int $picturePosition, int $pinNumber): string
+    {
+        return $picturePosition.':'.$pinNumber;
+    }
+
+    /**
+     * @return array<string, ChecklistRow> by checkKeyOf
+     */
+    private static function checkRowsByPinOf(?ChecklistCard $card): array
+    {
+        $rows = [];
+        foreach ($card->rows ?? [] as $row) {
+            $rows[self::checkKeyOf($row->picturePosition, $row->pinNumber)] = $row;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The picture's pins as the side panel lists them, every pin but a dismissed AI suggestion, each with its check row.
+     *
+     * @param array<string, ChecklistRow> $checkRows by checkKeyOf
+     *
+     * @return list<PicturePinRow> by number
+     */
+    private static function picturePinRowsOf(TicketPageView $ticket, RoundScreenshotView $picture, array $checkRows): array
+    {
+        $rows = [];
+        foreach ($picture->pins as $pin) {
+            if (RoundCards::isShownPin($pin)) {
+                $rows[] = new PicturePinRow($pin->number, $pin->note, self::authorLineOf($pin->authorId, $ticket), $checkRows[self::checkKeyOf($picture->position, $pin->number)] ?? null);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Whoever else the open round is ready for, by first name, who gives its verdict; the round page names them where
+     * the viewer would get the move-on buttons. Reads as RoundReadyFor::firstNameOf.
+     *
+     * @param UserId|null $readyForId as RoundReadyFor::userIdOf gives it
+     */
+    private function verdictGiverNameOf(VisibleTicket $visible, ?UserId $readyForId): ?string
+    {
+        if (null === $readyForId || $readyForId->equals($visible->actor->userId())) {
+            return null;
+        }
+        $firstName = $this->roundReadyFor->firstNameOf($readyForId, $visible->ticket);
+
+        return null === $firstName || '' === trim($firstName) ? null : $firstName;
     }
 
     /**
@@ -211,61 +332,51 @@ final readonly class RoundPages
     /**
      * @param AreaView $selected one of the round's areas
      *
-     * @return non-empty-list<ScreenshotThumb> by position, each with its area's state as tabsOf gives it
+     * @return non-empty-list<ScreenshotTab> by position, each with its area's state as tabsOf gives it
      */
-    private function areaThumbsOf(TicketPageView $ticket, ReviewRoundView $round, AreaView $selected, \DateTimeImmutable $now): array
+    private static function areaTabsOf(ReviewRoundView $round, AreaView $selected): array
     {
-        $images = $this->thumbImagesOf($ticket, array_map(static fn (AreaView $area): string => $area->after->mediaId, $round->areas), $now);
-        $thumbs = [];
+        $tabs = [];
         foreach (self::tabsOf($round, $selected) as $index => $tab) {
-            $image = self::readyImageOf($images[$round->areas[$index]->after->mediaId] ?? null);
-            $thumbs[] = new ScreenshotThumb(
+            $tabs[] = new ScreenshotTab(
                 $index + 1,
                 $tab->name,
                 [RoundController::AREA_PARAMETER => $tab->position],
-                $image?->url,
-                $image?->width,
-                $image?->height,
                 $tab->stateLabel,
                 $tab->stateClass,
                 self::AREA_STATE_ID_PREFIX.$tab->position,
                 $tab->isSelected,
             );
         }
-        if ([] === $thumbs) {
+        if ([] === $tabs) {
             throw new \LogicException('A round with a selected area has areas.');
         }
 
-        return $thumbs;
+        return $tabs;
     }
 
     /**
      * @param non-empty-list<RoundScreenshotView> $screenshots the latest try of each chain, in order
      *
-     * @return non-empty-list<ScreenshotThumb>
+     * @return non-empty-list<ScreenshotTab>
      */
-    private function screenshotThumbsOf(TicketPageView $ticket, array $screenshots, int $shownIndex, \DateTimeImmutable $now): array
+    private static function screenshotTabsOf(array $screenshots, int $shownIndex): array
     {
-        $images = $this->thumbImagesOf($ticket, array_map(static fn (RoundScreenshotView $screenshot): string => $screenshot->mediaId, $screenshots), $now);
-        $thumbs = [];
+        $tabs = [];
         foreach ($screenshots as $index => $screenshot) {
             $pinCount = \count(RoundCards::shownPinsOf($screenshot));
-            $image = self::readyImageOf($images[$screenshot->mediaId] ?? null);
-            $thumbs[] = new ScreenshotThumb(
+            $tabs[] = new ScreenshotTab(
                 $index + 1,
-                \sprintf('Screenshot %d', $index + 1),
+                $screenshot->title ?? \sprintf('Screenshot %d', $index + 1),
                 [RoundController::SCREENSHOT_PARAMETER => $index + 1],
-                $image?->url,
-                $image?->width,
-                $image?->height,
                 1 === $pinCount ? '1 pin' : $pinCount.' pins',
-                0 === $pinCount ? 'screenshot-thumb__pins--none' : 'screenshot-thumb__pins',
+                0 === $pinCount ? 'screenshot-tab__pins--none' : 'screenshot-tab__pins',
                 null,
                 $index === $shownIndex,
             );
         }
 
-        return $thumbs;
+        return $tabs;
     }
 
     /**
@@ -293,26 +404,6 @@ final readonly class RoundPages
             $after,
             \sprintf('After · round %d', $picturesRound->number ?? 0),
         );
-    }
-
-    /**
-     * @param list<string> $mediaIds
-     *
-     * @return array<string, MediaImage> by media id
-     */
-    private function thumbImagesOf(TicketPageView $ticket, array $mediaIds, \DateTimeImmutable $now): array
-    {
-        $images = [];
-        foreach (array_chunk(array_values(array_unique($mediaIds)), SignedUrls::MAX_MEDIA_IDS) as $mediaIdsOfOneCall) {
-            $images += $this->signedUrls->forVariants($ticket->visibilityFacts->organizationId, $mediaIdsOfOneCall, RoundCards::THUMB_VARIANT, $now);
-        }
-
-        return $images;
-    }
-
-    private static function readyImageOf(?MediaImage $image): ?MediaImage
-    {
-        return null !== $image && MediaImageStatus::Ready === $image->status ? $image : null;
     }
 
     /**
@@ -391,8 +482,10 @@ final readonly class RoundPages
             $area->id,
             $area->position,
             $area->name,
-            null === $area->beforeRoundNumber ? null : \sprintf('Pins from round %d', $area->beforeRoundNumber),
+            null === $area->beforeRoundNumber ? null : \sprintf(self::PINS_FROM_ROUND, $area->beforeRoundNumber),
             $earlierPins,
+            \sprintf(self::PINS_FROM_ROUND, $round->number),
+            self::picturePinRowsOf($ticket, $area->after, []),
             $area->verdict,
             null === $area->verdict ? null : (self::AREA_VERDICT_LABELS[$area->verdict] ?? null),
             $area->note,
@@ -520,12 +613,13 @@ final readonly class RoundPages
     /**
      * "shot <when>", then, on an open hand-off round, the round bar's "Ready for" line, which names nobody on a closed
      * round, the report or a checklist round.
+     *
+     * @param UserId|null $readyForId as RoundReadyFor::userIdOf gives it on an open hand-off round; null on any other
      */
-    private function detailOf(VisibleTicket $visible, ReviewRoundView $round, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
+    private function detailOf(VisibleTicket $visible, ReviewRoundView $round, ?UserId $readyForId, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
         $parts = ['shot '.self::whenOf($round->sharedAt, $now, $viewerTimeZone)];
-        $openRound = OpenSharedRound::ofReviewRound($round);
-        $readyForLine = null === $openRound ? null : $this->roundReadyFor->readyForLineOf($visible, $openRound);
+        $readyForLine = $this->roundReadyFor->readyForLineOfUser($visible, $readyForId);
         if (null !== $readyForLine) {
             $parts[] = $readyForLine;
         }

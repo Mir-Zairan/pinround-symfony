@@ -118,21 +118,21 @@ final class VerdictControllerTest extends WebTestCase
         $this->logIn($this->client, $this->people[$person]);
         $page = $this->client->request('GET', self::ROUND_PAGE);
         self::assertCount(0, $page->filter('[autofocus]'), 'Only the stream of a verdict moves the focus.');
-        $firstPin = $page->filter('.round-panel__pin')->first();
+        $firstPin = $page->filter('.round-pin[data-pin-list="before"]')->first();
         self::assertSame(['Fixed', 'Still wrong'], $firstPin->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
         self::assertSame('/t/SHOP-1/rounds/2/pins/'.$this->pins[1].'/verdict', $firstPin->filter('form')->attr('action'));
         self::assertSame('true', $firstPin->filter('form')->attr('data-turbo'));
         self::assertSame(
             ['Mia · tester', 'Lena · team lead', 'Omar'],
-            $page->filter('.round-panel__pin .round-panel__author')->each(static fn (Crawler $line): string => $line->text()),
+            $page->filter('.round-pin[data-pin-list="before"] .round-pin__author')->each(static fn (Crawler $line): string => $line->text()),
         );
 
         $this->postAsTurbo($this->pinUrl(1), [VerdictController::VERDICT_FIELD => 'fixed']);
 
         self::assertSame('Pin 1 marked fixed.', $this->toastOfTheStream(200));
         $stream = $this->streamedPanel();
-        self::assertSame('Fixed', $stream->filter('.round-panel__pin')->first()->filter('.tag')->text());
-        self::assertSame(['Undo'], $stream->filter('.round-panel__pin')->first()->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame('Fixed', $stream->filter('.round-pin[data-pin-list="before"]')->first()->filter('.tag')->text());
+        self::assertSame(['Undo'], $stream->filter('.round-pin[data-pin-list="before"]')->first()->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
         self::assertSame(['round-panel-undo-'.$this->pins[1]], $this->autofocusedIdsOf($stream), 'Focus goes to the Undo that replaced the button clicked.');
         self::assertSame([1 => 'fixed', 2 => null, 3 => null, 4 => null], $this->pinVerdicts());
 
@@ -165,12 +165,12 @@ final class VerdictControllerTest extends WebTestCase
 
         self::assertSame('Verdict saved. Lena can see it.', $this->toastOfTheStream(200));
         $content = (string) $this->client->getResponse()->getContent();
-        $matched = preg_match_all('#<turbo-stream action="replace" target="(screenshot-thumb-state-\d+)"><template>(.*?)</template></turbo-stream>#s', $content, $stateTags, \PREG_SET_ORDER);
+        $matched = preg_match_all('#<turbo-stream action="replace" target="(screenshot-tab-state-\d+)"><template>(.*?)</template></turbo-stream>#s', $content, $stateTags, \PREG_SET_ORDER);
         self::assertSame(2, $matched, 'Each area\'s state tag in the strip is shown again.');
         self::assertSame(
             [
-                ['screenshot-thumb-state-0', 'screenshot-thumb-state-0', '3 pins', 'tag screenshot-thumb__tag area-chip--pins'],
-                ['screenshot-thumb-state-1', 'screenshot-thumb-state-1', 'Needs fix', 'tag screenshot-thumb__tag area-chip--needs-fix'],
+                ['screenshot-tab-state-0', 'screenshot-tab-state-0', '3 pins', 'tag round-tab__tag area-chip--pins'],
+                ['screenshot-tab-state-1', 'screenshot-tab-state-1', 'Needs fix', 'tag round-tab__tag area-chip--needs-fix'],
             ],
             array_map(static function (array $stateTag): array {
                 $tag = new Crawler($stateTag[2]);

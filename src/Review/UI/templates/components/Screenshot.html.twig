@@ -1,5 +1,5 @@
 <figure{{ attributes.defaults({class: 'screenshot', id: this.view.domId}) }}>
-    {% if this.view.title is not null or this.view.summary is not null %}
+    {% if this.showsText and (this.view.title is not null or this.view.summary is not null) %}
         <figcaption class="screenshot__text">
             {% if this.view.title is not null %}
                 <{{ this.titleTag }} class="screenshot__title">{{ this.view.title }}</{{ this.titleTag }}>
