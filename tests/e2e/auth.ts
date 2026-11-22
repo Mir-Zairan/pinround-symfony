@@ -18,6 +18,10 @@ export const LENA_TEAM_PAGE_STORAGE_STATE = path.join(__dirname, 'test-results',
 export const OMAR_EMAIL = 'omar@acme-foods.example';
 export const OMAR_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'omar.json');
 
+// Omar's second session, for the own-change toast test of live-updates.spec.ts alone, which reads the toast its
+// comment's redirect flashed; OMAR_STORAGE_STATE's session is shared and loses flashes as LENA_TEAM_PAGE_STORAGE_STATE says.
+export const OMAR_OWN_CHANGE_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'omar-own-change.json');
+
 // Ben leads Ovens, the team of Beta Bakery, the one demo organization under the step policy team.
 export const BEN_EMAIL = 'ben@beta-bakery.example';
 export const BEN_STORAGE_STATE = path.join(__dirname, 'test-results', '.auth', 'ben.json');

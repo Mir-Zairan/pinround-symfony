@@ -1,7 +1,7 @@
 import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { LENA_EMAIL, LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
+import { LENA_EMAIL, LENA_STORAGE_STATE, MIA_EMAIL, MIA_STORAGE_STATE, OMAR_OWN_CHANGE_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { bellButton, bellPopover, expectOmarUnderBellCaps, openBellPopover } from './bell';
 import { runAsDatabaseOwner } from './database';
 import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
@@ -104,9 +104,13 @@ async function settleCreationSignal(page: Page, key: string): Promise<void> {
 }
 
 /** Lena makes a ticket for Omar, who opens its thread once no signal of the creation is left to come. */
-async function openNewTicketAsOmar(browser: Browser, title: string): Promise<{ key: string; omar: { context: BrowserContext; page: Page } }> {
+async function openNewTicketAsOmar(
+  browser: Browser,
+  title: string,
+  omarStorageState: string = OMAR_STORAGE_STATE,
+): Promise<{ key: string; omar: { context: BrowserContext; page: Page } }> {
   const key = await makeTicketForOmar(browser, title);
-  const omar = await openAs(browser, OMAR_STORAGE_STATE);
+  const omar = await openAs(browser, omarStorageState);
   const creationSignalSettled = settleCreationSignal(omar.page, key);
   await openFollowedThread(omar.page, key);
   await creationSignalSettled;
@@ -487,7 +491,7 @@ test.describe('two people on one ticket', () => {
 
 test.describe("the signal of Omar's own change", () => {
   test("the page his comment form redirects to shows its toast, though his page fetched the signal's refresh first", async ({ browser }) => {
-    const { key, omar } = await openNewTicketAsOmar(browser, `The receipt prints twice ${randomUUID().slice(0, 8)}`);
+    const { key, omar } = await openNewTicketAsOmar(browser, `The receipt prints twice ${randomUUID().slice(0, 8)}`, OMAR_OWN_CHANGE_STORAGE_STATE);
     const ownSignalFetch = pageFetchAfterNow(omar.page, key);
     // The comment's redirect reaches the browser only once the refresh its signal sends has its answer, so that answer
     // is read with the toast still in his session. A route sees no redirected request, so the redirect itself waits.

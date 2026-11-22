@@ -9,6 +9,7 @@ import {
   MIA_EMAIL,
   MIA_STORAGE_STATE,
   OMAR_EMAIL,
+  OMAR_OWN_CHANGE_STORAGE_STATE,
   OMAR_STORAGE_STATE,
   RAJ_EMAIL,
   RAJ_STORAGE_STATE,
@@ -27,7 +28,7 @@ function avatarOf(page: Page, firstName: string) {
 }
 
 // One login per session for the whole run: the login limiter allows five tries per email and address in 15 minutes
-// (a successful login clears that count, so Lena's two logins leave it as one).
+// (a successful login clears that count, so a person's second login leaves it as one).
 async function logIn(page: Page, email: string, firstName: string, storageState: string): Promise<void> {
   await submitPassword(page, email);
   await expect(avatarOf(page, firstName)).toBeVisible();
@@ -44,6 +45,10 @@ setup('log in as Lena for the team page', async ({ page }) => {
 
 setup('log in as Omar', async ({ page }) => {
   await logIn(page, OMAR_EMAIL, 'Omar', OMAR_STORAGE_STATE);
+});
+
+setup('log in as Omar for his own change', async ({ page }) => {
+  await logIn(page, OMAR_EMAIL, 'Omar', OMAR_OWN_CHANGE_STORAGE_STATE);
 });
 
 setup('log in as Ben', async ({ page }) => {
