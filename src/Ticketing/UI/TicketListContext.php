@@ -115,9 +115,12 @@ final readonly class TicketListContext
         return null;
     }
 
-    public function filterFor(TicketVisibility $visibility): ListFilter
+    /**
+     * @param list<string> $turnTicketIds for "Me", the tickets waiting on the viewer's turn (ListTurnTickets::of)
+     */
+    public function filterFor(TicketVisibility $visibility, array $turnTicketIds = []): ListFilter
     {
-        return new ListFilter($visibility, $this->project?->id(), $this->showsDone, $this->searchText, $this->assigneeId);
+        return new ListFilter($visibility, $this->project?->id(), $this->showsDone, $this->searchText, $this->assigneeId, null === $this->assigneeId ? [] : $turnTicketIds);
     }
 
     /**

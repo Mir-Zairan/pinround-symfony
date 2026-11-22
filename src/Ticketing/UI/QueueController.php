@@ -46,6 +46,7 @@ final class QueueController extends AbstractController
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
         private readonly RoleTicketVisibilities $ticketVisibilities,
+        private readonly ListTurnTickets $listTurnTickets,
         private readonly ProjectQueries $projectQueries,
         private readonly TicketQueries $ticketQueries,
     ) {
@@ -69,7 +70,7 @@ final class QueueController extends AbstractController
             throw $this->createNotFoundException(self::NO_STEP);
         }
         $listContext = TicketListContext::fromRequest($request, $actor, $this->projectQueries);
-        $filter = $listContext->filterFor($this->ticketVisibilities->ofActor($actor));
+        $filter = $listContext->filterFor($this->ticketVisibilities->ofActor($actor), $this->listTurnTickets->of($listContext, $actor->userId()));
 
         $step = self::stepIn($this->ticketQueries->list($filter), $stepId) ?? throw $this->createNotFoundException(self::NO_STEP);
         $label = $step->name;

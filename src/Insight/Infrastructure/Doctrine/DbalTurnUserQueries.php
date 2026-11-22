@@ -49,4 +49,28 @@ final readonly class DbalTurnUserQueries implements TurnUserQueries
 
         return $turnUsers;
     }
+
+    public function ticketIdsWaitingOn(UserId $userId, int $max): array
+    {
+        if ($max < 1) {
+            throw new \InvalidArgumentException('At least one ticket id must be asked for.');
+        }
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('Turn users are read in a transaction under the organization as tenant; none is open.');
+        }
+
+        $ticketIds = $this->connection->fetchFirstColumn(
+            'SELECT ticket_id FROM ins_ticket_turn WHERE organization_id = CAST(:organization AS uuid)'
+            .' AND turn_user_id = CAST(:user AS uuid) ORDER BY base_score DESC, ticket_id LIMIT '.$max,
+            ['organization' => $this->tenantContext->require()->toString(), 'user' => $userId->toString()],
+        );
+
+        return array_map(static function (mixed $ticketId): string {
+            if (!\is_string($ticketId)) {
+                throw new \LogicException('A ticket id from the database is not a string.');
+            }
+
+            return $ticketId;
+        }, $ticketIds);
+    }
 }

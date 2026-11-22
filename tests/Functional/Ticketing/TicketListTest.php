@@ -517,13 +517,41 @@ final class TicketListTest extends WebTestCase
     }
 
     /**
-     * "Assigned to: Me" filters by assignee: Mia, the tester, has none, so the empty list says where her turns are
-     * rather than "pick another person".
+     * "Me" is the tickets assigned to the viewer and those waiting on their turn: Mia, the tester, sees Omar's ticket she
+     * must test, not the one waiting on Lena, and Omar's own chip ("Omar" for Lena) stays "assigned to" only.
      */
     #[Test]
-    public function meWithNothingAssignedSaysWhereTheTicketsThatWaitForYouAre(): void
+    public function meShowsTheTicketsWaitingOnTheViewersTurnBesidesTheAssignedOnes(): void
     {
-        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar']);
+        $this->addTicket('check', 'Cart total disappears', 'normal', ['assignee' => 'Omar', 'turn' => 'Mia']);
+        $this->addTicket('check', 'Add a gift note', 'normal', ['assignee' => 'Omar', 'turn' => 'Lena']);
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-1'], $page->filter('.tickets__row')->each(static fn (Crawler $row): ?string => $row->attr('data-ticket-key')), 'SHOP-1 is the one to test.');
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Omar']->id()->toString());
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(2, $page->filter('.tickets__row'), 'Omar is the assignee of both.');
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString().'&q=gift');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(TicketListController::NO_MATCHES, $page->filter('.empty-state')->text(), 'A search keeps "Me" to her own tickets.');
+
+        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString().'&q=cart');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.tickets__row'), 'and finds her turn\'s ticket by its title.');
+    }
+
+    #[Test]
+    public function meWithNothingAssignedOrWaitingSaysSo(): void
+    {
+        $this->addTicket('todo', 'Add a gift note', 'normal', ['assignee' => 'Omar', 'turn' => 'Omar']);
         $this->logIn($this->client, $this->people['Mia']);
 
         $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString());
@@ -531,11 +559,6 @@ final class TicketListTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(0, $page->filter('.tickets__row'));
         self::assertSame(TicketListController::NOTHING_ASSIGNED_TO_YOU, $page->filter('.empty-state')->text());
-
-        $page = $this->client->request('GET', self::TICKETS.'?person='.$this->people['Mia']->id()->toString().'&q=gift');
-
-        self::assertResponseStatusCodeSame(200);
-        self::assertSame(TicketListController::NO_MATCHES, $page->filter('.empty-state')->text(), 'With a search, the search may be what hides them.');
     }
 
     #[Test]

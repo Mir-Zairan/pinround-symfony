@@ -44,4 +44,18 @@ final class InMemoryTurnUserQueries implements TurnUserQueries
 
         return $turnUsers;
     }
+
+    public function ticketIdsWaitingOn(UserId $userId, int $max): array
+    {
+        if ($max < 1) {
+            throw new \InvalidArgumentException('At least one ticket id must be asked for.');
+        }
+        if (!$this->isTransactionOpen) {
+            throw new \LogicException('Turn users are read in a transaction under the organization as tenant; none is open.');
+        }
+        $ticketIds = array_keys(array_filter($this->turnUserIdsByTicketId, static fn (?string $turnUserId): bool => $turnUserId === $userId->toString()));
+        sort($ticketIds);
+
+        return \array_slice(array_map(strval(...), $ticketIds), 0, $max);
+    }
 }

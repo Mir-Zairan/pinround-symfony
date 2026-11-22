@@ -337,6 +337,10 @@ final readonly class DbalTicketQueries implements TicketQueries
         if (null !== $filter->assigneeId) {
             $parameters['assignee'] = $filter->assigneeId;
         }
+        if ([] !== $filter->alsoTicketIds) {
+            // Canonical uuids (ListFilter checks them), so the array literal needs no quoting.
+            $parameters['also_tickets'] = '{'.implode(',', $filter->alsoTicketIds).'}';
+        }
 
         return $parameters;
     }
@@ -560,7 +564,8 @@ final readonly class DbalTicketQueries implements TicketQueries
         $parameters['search_is_admin'] = $visibility->isAdmin() ? 'true' : 'false';
         $parameters['search_is_triager'] = $visibility->isTriager() ? 'true' : 'false';
         $parameters['search_project'] = $filter->projectId;
-        $parameters['search_assignee'] = $filter->assigneeId;
+        // With tickets besides the assignee's, the function may not keep only the assignee's: the outer condition does.
+        $parameters['search_assignee'] = [] === $filter->alsoTicketIds ? $filter->assigneeId : null;
 
         // The score as search_ticket_ids orders by it; the function owns the formula, this only repeats it.
         $matchScore = "ts_rank(ticket.search, websearch_to_tsquery('simple', tkt_unaccent(CAST(:search_text AS text)))) * 0.6"
@@ -590,7 +595,13 @@ final readonly class DbalTicketQueries implements TicketQueries
 
     private static function assigneeConditionOf(ListFilter $filter, string $alias): string
     {
-        return null === $filter->assigneeId ? '' : ' AND '.$alias.'.assignee_id = CAST(:assignee AS uuid)';
+        if (null === $filter->assigneeId) {
+            return '';
+        }
+
+        return [] === $filter->alsoTicketIds
+            ? ' AND '.$alias.'.assignee_id = CAST(:assignee AS uuid)'
+            : ' AND ('.$alias.'.assignee_id = CAST(:assignee AS uuid) OR '.$alias.'.id = ANY(CAST(:also_tickets AS uuid[])))';
     }
 
     /**

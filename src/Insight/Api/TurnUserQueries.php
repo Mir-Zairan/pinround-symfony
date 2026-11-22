@@ -25,4 +25,17 @@ interface TurnUserQueries
      * @throws \LogicException when no transaction is open or no tenant is set, before any query
      */
     public function turnUsersOf(array $ticketIds): array;
+
+    /**
+     * The tickets whose turn is that person's now, at most $max of them, highest base score first; one query by
+     * ins_ticket_turn_turn_user_id_base_score_idx. It does not filter on visibility: the caller's list applies its own.
+     *
+     * @param int $max at least 1
+     *
+     * @return list<string> ticket ids as canonical uuids
+     *
+     * @throws \LogicException           when no transaction is open or no tenant is set, before any query
+     * @throws \InvalidArgumentException when $max is below 1, before any query
+     */
+    public function ticketIdsWaitingOn(UserId $userId, int $max): array;
 }

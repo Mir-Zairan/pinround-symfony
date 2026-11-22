@@ -52,6 +52,7 @@ final class TicketShowController extends AbstractController
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
         private readonly RoleTicketVisibilities $ticketVisibilities,
+        private readonly ListTurnTickets $listTurnTickets,
         private readonly TicketQueries $ticketQueries,
         private readonly ClockInterface $clock,
         private readonly CurrentTimeZone $currentTimeZone,
@@ -76,7 +77,7 @@ final class TicketShowController extends AbstractController
         $position = null;
         $positionContext = $listContext;
         if (null === $queueBar) {
-            $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility));
+            $position = $this->ticketQueries->positionOf($ticket->key, $listContext->filterFor($visibility, $this->listTurnTickets->of($listContext, $actor->userId())));
             if (null === $position && !$listContext->isPlainList()) {
                 $positionContext = new TicketListContext();
                 $position = $this->ticketQueries->positionOf($ticket->key, $positionContext->filterFor($visibility));

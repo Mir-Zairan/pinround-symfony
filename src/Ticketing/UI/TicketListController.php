@@ -53,14 +53,15 @@ final class TicketListController extends AbstractController
     public const string ALL_TICKETS = 'All tickets';
     public const string NO_TICKETS = 'No tickets here yet.';
     public const string NO_MATCHES = 'No tickets match. Clear the search or pick another person.';
-    /** "Assigned to: Me" with nothing assigned, as for a tester: what waits for them is under Whose turn?. */
-    public const string NOTHING_ASSIGNED_TO_YOU = 'Nothing is assigned to you. Whose turn? shows what waits for you.';
+    /** "Me" with nothing assigned to the viewer and nothing waiting on their turn (ListTurnTickets). */
+    public const string NOTHING_ASSIGNED_TO_YOU = 'Nothing is assigned to you or waiting for your turn.';
     public const string SHOW_MORE_NOT_VALID = 'That "Show more" link is not valid.';
 
     public function __construct(
         private readonly TenantContext $tenantContext,
         private readonly CurrentActor $currentActor,
         private readonly RoleTicketVisibilities $ticketVisibilities,
+        private readonly ListTurnTickets $listTurnTickets,
         private readonly ProjectQueries $projectQueries,
         private readonly TicketQueries $ticketQueries,
         private readonly ClockInterface $clock,
@@ -106,7 +107,7 @@ final class TicketListController extends AbstractController
         }
 
         $visibility = $this->ticketVisibilities->ofActor($actor);
-        $groups = $this->ticketQueries->list($listContext->filterFor($visibility), $cursor);
+        $groups = $this->ticketQueries->list($listContext->filterFor($visibility, $this->listTurnTickets->of($listContext, $actor->userId())), $cursor);
         $collapsedStepIds = CollapsedSteps::idsIn($request->getSession());
 
         // A frame of this page (the list after a filter change, or "Show more") replaces only its own frame, so it gets

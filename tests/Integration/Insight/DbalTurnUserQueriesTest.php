@@ -68,6 +68,36 @@ final class DbalTurnUserQueriesTest extends KernelTestCase
         self::assertSame([self::LENAS_TURN => self::LENA, self::OMARS_TURN => self::OMAR], self::idsOf($turnUsers));
     }
 
+    /**
+     * The tickets list's "Me": only the tickets whose turn is that person's, of the tenant only (Beta Bakery's row for the
+     * same ticket id is Ben's), and none of a label's turn.
+     */
+    #[Test]
+    public function itGivesTheTicketsWaitingOnOnePersonOfTheTenantOnly(): void
+    {
+        $tenantTransactions = new TenantTransactions($this->entityManager(), $this->tenantContext());
+
+        self::assertSame([self::LENAS_TURN], $tenantTransactions->rolledBackAs(self::ACME_FOODS, fn (): array => $this->turnUserQueries()->ticketIdsWaitingOn(new UserId(self::LENA), 10)));
+        self::assertSame([self::OMARS_TURN], $tenantTransactions->rolledBackAs(self::ACME_FOODS, fn (): array => $this->turnUserQueries()->ticketIdsWaitingOn(new UserId(self::OMAR), 10)));
+        self::assertSame([], $tenantTransactions->rolledBackAs(self::ACME_FOODS, fn (): array => $this->turnUserQueries()->ticketIdsWaitingOn(new UserId(self::BEN), 10)));
+        self::assertSame([self::LENAS_TURN], $tenantTransactions->rolledBackAs(self::BETA_BAKERY, fn (): array => $this->turnUserQueries()->ticketIdsWaitingOn(new UserId(self::BEN), 10)));
+    }
+
+    #[Test]
+    public function aMaxBelowOneOrNoTransactionIsRefusedBeforeAnyQuery(): void
+    {
+        $tenantTransactions = new TenantTransactions($this->entityManager(), $this->tenantContext());
+        try {
+            $tenantTransactions->rolledBackAs(self::ACME_FOODS, fn (): array => $this->turnUserQueries()->ticketIdsWaitingOn(new UserId(self::LENA), 0));
+            self::fail('A max of 0 is refused.');
+        } catch (\InvalidArgumentException $refused) {
+            self::assertSame('At least one ticket id must be asked for.', $refused->getMessage());
+        }
+
+        $this->expectException(\LogicException::class);
+        $this->turnUserQueries()->ticketIdsWaitingOn(new UserId(self::LENA), 10);
+    }
+
     #[Test]
     public function eachOrganizationReadsOnlyItsOwnTurnRows(): void
     {
