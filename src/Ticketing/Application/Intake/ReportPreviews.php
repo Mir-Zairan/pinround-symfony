@@ -23,10 +23,12 @@ final readonly class ReportPreviews
 
     /**
      * @param list<string> $pinNotes
+     * @param bool         $showsDuplicates false for a page that shows no possible duplicates (a report draft's), whose
+     *                                      send names none, so no "maybe the same as" reason is promised; no query then
      */
-    public function of(TicketVisibility $reporter, string $title, string $detail, array $pinNotes, bool $hasTeam): ReportPreviewFacts
+    public function of(TicketVisibility $reporter, string $title, string $detail, array $pinNotes, bool $hasTeam, bool $showsDuplicates = true): ReportPreviewFacts
     {
-        $duplicates = $this->duplicateSuggestions->for($reporter, $title, $detail, $pinNotes);
+        $duplicates = $showsDuplicates ? $this->duplicateSuggestions->for($reporter, $title, $detail, $pinNotes) : [];
         $draft = new DraftReport($title, $detail, $pinNotes);
         $reasons = $this->checkReasons->for($draft, new ReportContext(hasTeam: $hasTeam, pinCount: \count($pinNotes), wasDuplicateShown: [] !== $duplicates));
 

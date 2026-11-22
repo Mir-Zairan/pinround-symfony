@@ -16,6 +16,7 @@ use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\NewTicketReport;
 use App\Ticketing\Api\NewTicketReportRefused;
+use App\Ticketing\Api\PostedWhereItGoes;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketCommands;
@@ -72,8 +73,8 @@ final class NewTicketController extends AbstractController
     /** By the value TicketCommands::create takes, in the order the form shows them. */
     public const array TYPE_LABELS = ['bug' => 'Bug', 'story' => 'Story', 'task' => 'Task'];
     public const array PRIORITY_LABELS = ['critical' => 'Critical', 'major' => 'Major', 'normal' => 'Normal', 'minor' => 'Minor'];
-    public const string DEFAULT_TYPE = 'bug';
-    public const string DEFAULT_PRIORITY = 'normal';
+    public const string DEFAULT_TYPE = PostedWhereItGoes::DEFAULT_TYPE;
+    public const string DEFAULT_PRIORITY = PostedWhereItGoes::DEFAULT_PRIORITY;
 
     /** In characters, as CreateTicket counts them: the title after trimming, the description as sent. */
     public const int TITLE_MAX_LENGTH = 200;

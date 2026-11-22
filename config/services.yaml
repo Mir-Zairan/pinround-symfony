@@ -240,8 +240,8 @@ services:
     App\Ticketing\Api\TicketSummaryCommands: '@App\Ticketing\Application\CheckedTicketSummaryCommands'
     App\Ticketing\Api\DraftReportChecks: '@App\Ticketing\Application\Intake\WordListDraftReportChecks'
     App\Ticketing\Api\IntakeCandidateQueries: '@App\Ticketing\Infrastructure\Doctrine\DbalIntakeCandidateQueries'
-    # Report a problem's own choices, so a report draft's Send offers the same "Give it to".
-    App\Ticketing\Api\ReportGiveToQueries: '@App\Ticketing\UI\ReportFormChoices'
+    # Report a problem's own "Where it goes", so a report draft's page and Send offer the same choices and words.
+    App\Ticketing\Api\WhereItGoesRules: '@App\Ticketing\UI\ReportWhereItGoesRules'
     App\Ticketing\Api\MoveOnVerbQueries: '@App\Ticketing\UI\TurnMoveOnVerbs'
     # Ticketing's port that Review implements, so a move asks about the mover's draft round without depending on Review.
     App\Ticketing\Api\ShareDraftQuestion: '@App\Review\Application\RoundShareDraftQuestion'

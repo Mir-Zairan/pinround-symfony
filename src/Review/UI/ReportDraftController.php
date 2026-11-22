@@ -13,15 +13,16 @@ use App\Review\Api\ReportDraftPermission;
 use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
 use App\Review\Api\ReportDraftView;
+use App\Review\Api\ReportDraftWhereItGoes;
 use App\Review\Api\ScreenshotWithPins;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
-use App\Ticketing\Api\ProjectQueries;
-use App\Ticketing\Api\ReportGiveTo;
-use App\Ticketing\Api\ReportGiveToQueries;
+use App\Ticketing\Api\PostedWhereItGoes;
+use App\Ticketing\Api\WhereItGoesRules;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -33,8 +34,11 @@ use Symfony\Component\Routing\Attribute\Route;
  *
  * The pages read in the request transaction. Save, Send and Delete run without it, each in a transaction of its own, so
  * a refusal leaves nothing and the toast is set only once the change is committed. Send needs ReportDraftPermission
- * SEND, which a personal access token never has. The page offers Report a problem's "Give it to" for the project's
- * team (P14.T9); ReportDrafts::send refuses a person it does not offer.
+ * SEND, which a personal access token never has. The page shows Report a problem's "Where it goes" (Ticketing's
+ * WhereItGoesFields: team, give it to, project, type, priority) starting at the draft's project, and its "When you
+ * send:" words, which the report-form controller asks PREVIEW_ROUTE for again as the person types and picks;
+ * ReportDrafts::send refuses a pick Report a problem would refuse. The picks are not saved with the draft: Save keeps
+ * only its text and pictures.
  */
 final class ReportDraftController extends AbstractController
 {
@@ -43,10 +47,11 @@ final class ReportDraftController extends AbstractController
     public const string SAVE_ROUTE = 'review_report_draft_save';
     public const string SEND_ROUTE = 'review_report_draft_send';
     public const string DELETE_ROUTE = 'review_report_draft_delete';
+    public const string PREVIEW_ROUTE = 'review_report_draft_preview';
     public const string CSRF_FIELD = '_csrf_token';
     public const string VERSION_FIELD = 'version';
     /** "Give it to": a person's id, or empty for the team, as Report a problem posts it. */
-    public const string ASSIGNEE_FIELD = 'assignee_id';
+    public const string ASSIGNEE_FIELD = PostedWhereItGoes::ASSIGNEE_FIELD;
     public const string SAVED = 'Report draft saved.';
     /** With the new ticket's key. */
     public const string SENT = 'Sent. It is ticket %s now.';
@@ -70,8 +75,7 @@ final class ReportDraftController extends AbstractController
         private readonly Transactions $transactions,
         private readonly ScreenshotWithPinsViews $screenshotViews,
         private readonly ClockInterface $clock,
-        private readonly ProjectQueries $projectQueries,
-        private readonly ReportGiveToQueries $reportGiveToQueries,
+        private readonly WhereItGoesRules $whereItGoesRules,
     ) {
     }
 
@@ -137,9 +141,9 @@ final class ReportDraftController extends AbstractController
                 $this->refuseAnExpiredForm($draft->id, $request);
                 $postedVersion = $request->request->getInt(self::VERSION_FIELD);
                 $this->reportDrafts->update($draft->id, $draft->ownerId, $postedVersion, self::postedContentOf($draft, $request), $now);
-                $assigneeId = $request->request->getString(self::ASSIGNEE_FIELD);
+                $whereItGoes = $this->postedWhereItGoesOf($draft, $request);
 
-                return $this->reportDrafts->send($draft->id, $draft->ownerId, $postedVersion + 1, '' === $assigneeId ? null : $assigneeId, $now);
+                return $this->reportDrafts->send($draft->id, $draft->ownerId, $postedVersion + 1, new ReportDraftWhereItGoes($whereItGoes->teamId, $whereItGoes->projectId, $whereItGoes->assigneeId, $whereItGoes->type, $whereItGoes->priority), $now);
             });
         } catch (ReportDraftRefused $refused) {
             return $this->renderRefusedForm($id, $request, $refused);
@@ -170,6 +174,18 @@ final class ReportDraftController extends AbstractController
         $this->addFlash(self::TOAST, self::DELETED);
 
         return $this->redirectToRoute(self::LIST_ROUTE, [], Response::HTTP_SEE_OTHER);
+    }
+
+    /**
+     * The "When you send:" words for the form as typed and picked, for the report-form controller; it reads and saves
+     * nothing, so it needs no form token, and answers only the draft's owner (the same 404 as the page otherwise).
+     */
+    #[Route('/report-drafts/{id}/preview', name: self::PREVIEW_ROUTE, methods: ['POST'])]
+    public function preview(string $id, Request $request): JsonResponse
+    {
+        $draft = $this->ownDraft($id, ReportDraftPermission::VIEW);
+
+        return new JsonResponse(['preview' => $this->previewOf($this->postedWhereItGoesOf($draft, $request), self::postedContentOf($draft, $request))]);
     }
 
     /**
@@ -282,6 +298,8 @@ final class ReportDraftController extends AbstractController
     private function renderPage(ReportDraftView $draft, ?string $error, int $status, ?Request $postedForm = null): Response
     {
         $views = $this->screenshotViews->viewsOf($this->tenantContext->require(), $draft->screenshots, 'draft-shot', 'Screenshot %d of the report');
+        $whereItGoes = null === $postedForm ? $this->defaultWhereItGoesOf($draft) : $this->postedWhereItGoesOf($draft, $postedForm);
+        $content = null === $postedForm ? new ReportDraftContent($draft->title, $draft->detail, $draft->screenshots) : self::postedContentOf($draft, $postedForm);
 
         return $this->render('@Review/report_draft.html.twig', [
             'draft' => $draft,
@@ -289,8 +307,9 @@ final class ReportDraftController extends AbstractController
             'error' => $error,
             'title' => $postedForm?->request->getString('title') ?? $draft->title,
             'detail' => $postedForm?->request->getString('detail') ?? $draft->detail,
-            'giveTo' => $this->giveToOf($draft),
-            'assigneeId' => $postedForm?->request->getString(self::ASSIGNEE_FIELD) ?? '',
+            'reporter' => $this->actor(),
+            'whereItGoes' => $whereItGoes,
+            'preview' => $this->previewOf($whereItGoes, $content),
             'csrfId' => self::csrfIdOf($draft->id),
         ], new Response(null, $status));
     }
@@ -340,17 +359,39 @@ final class ReportDraftController extends AbstractController
     }
 
     /**
-     * The "Give it to" Report a problem shows for the project's team, or null when the person has no role in it or the
-     * project lost its team, so Send gives the report to the team.
+     * Report a problem's first picks for the draft's project: its team, the project, the team decides, Bug, Normal.
      */
-    private function giveToOf(ReportDraftView $draft): ?ReportGiveTo
+    private function defaultWhereItGoesOf(ReportDraftView $draft): PostedWhereItGoes
     {
-        $teamId = $this->projectQueries->projectByKey($draft->projectKey)?->teamId();
-        if (null === $teamId) {
-            return null;
-        }
         $actor = $this->actor();
 
-        return $this->reportGiveToQueries->giveToOf($actor->organizationId(), $actor->userId(), $teamId);
+        return $this->whereItGoesRules->defaultFor($actor->organizationId(), $actor->userId(), $draft->projectKey);
+    }
+
+    /**
+     * The posted picks under Report a problem's field names; a part the form did not post keeps its first pick, so a
+     * Send from a page made before "Where it goes" was shown goes where that page said.
+     */
+    private function postedWhereItGoesOf(ReportDraftView $draft, Request $request): PostedWhereItGoes
+    {
+        $default = $this->defaultWhereItGoesOf($draft);
+        $posted = $request->request;
+        $textOf = static fn (string $field, string $first): string => $posted->has($field) ? $posted->getString($field) : $first;
+
+        return new PostedWhereItGoes(
+            strtolower($textOf(PostedWhereItGoes::TEAM_FIELD, $default->teamId)),
+            strtolower($textOf(PostedWhereItGoes::PROJECT_FIELD, $default->projectId)),
+            strtolower(trim($textOf(PostedWhereItGoes::ASSIGNEE_FIELD, $default->assigneeId))),
+            $textOf(PostedWhereItGoes::TYPE_FIELD, $default->type),
+            $textOf(PostedWhereItGoes::PRIORITY_FIELD, $default->priority),
+        );
+    }
+
+    private function previewOf(PostedWhereItGoes $whereItGoes, ReportDraftContent $content): string
+    {
+        $actor = $this->actor();
+        $pinNotes = array_merge([], ...array_map(static fn (ScreenshotWithPins $screenshot): array => array_map(static fn (PlacedPin $pin): string => $pin->note, $screenshot->pins), $content->screenshots));
+
+        return $this->whereItGoesRules->previewOf($actor->organizationId(), $actor->userId(), $whereItGoes, $content->title, $content->detail, $pinNotes);
     }
 }

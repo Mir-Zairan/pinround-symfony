@@ -11,6 +11,7 @@ use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
 use App\Review\Api\ReportDraftsPage;
 use App\Review\Api\ReportDraftView;
+use App\Review\Api\ReportDraftWhereItGoes;
 use App\Review\Api\ScreenshotWithPins;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
@@ -82,7 +83,7 @@ final class ScriptedReportDrafts implements ReportDrafts
         throw new \LogicException('add_report_screenshot deletes no draft.');
     }
 
-    public function send(string $draftId, UserId $owner, int $expectedVersion, ?string $assigneeId, \DateTimeImmutable $at): string
+    public function send(string $draftId, UserId $owner, int $expectedVersion, ReportDraftWhereItGoes $whereItGoes, \DateTimeImmutable $at): string
     {
         throw new \LogicException('add_report_screenshot sends no draft.');
     }

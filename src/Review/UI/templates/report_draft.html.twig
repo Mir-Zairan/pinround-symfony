@@ -1,14 +1,15 @@
 {% extends '@Web/base.html.twig' %}
 
 {#- One of the person's report drafts (ReportDraftController::page): edit the text, then in the ScreenshotEditor, one
-    picture at a time, each picture's title, summary and pin notes, or remove it; then Send (makes the ticket with
-    Round 0) or Delete. Pins keep their spots here. -#}
+    picture at a time, each picture's title, summary and pin notes, or remove it; then Report a problem's "Where it goes"
+    and its "When you send:" words; then Send (makes the ticket with Round 0) or Delete. Pins keep their spots here. -#}
 
 {% block title %}{{ draft.title }} · Report draft · pinround{% endblock %}
 
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/review.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/screenshot-editor.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/profile.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report.css') }}">
     <link rel="stylesheet" href="{{ asset('styles/report-drafts.css') }}">
 {% endblock %}
@@ -22,7 +23,10 @@
             <p class="report-draft__error" role="alert" id="report-draft-error">{{ error }}</p>
         {% endif %}
 
-        <form class="report-draft__form" method="post" action="{{ path('review_report_draft_save', {id: draft.id}) }}" {% if error %}aria-describedby="report-draft-error"{% endif %}>
+        <form class="report-draft__form" method="post" action="{{ path('review_report_draft_save', {id: draft.id}) }}" {% if error %}aria-describedby="report-draft-error"{% endif %}
+            data-controller="report-form"
+            data-report-form-preview-url-value="{{ path('review_report_draft_preview', {id: draft.id}) }}"
+            data-action="input->report-form#schedulePreview change->report-form#schedulePreview">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
             <input type="hidden" name="version" value="{{ draft.version }}">
             <label class="form-field">
@@ -38,24 +42,9 @@
                 <twig:ScreenshotEditor :screenshots="screenshots" fieldId="draft-shots" :canAdd="false" />
             {% endif %}
 
-            {#- Report a problem's "Give it to" for the project's team; only Send reads it, a draft does not keep it. -#}
-            {% if giveTo %}
-                <fieldset class="report__chips">
-                    <legend class="report__label">Give it to</legend>
-                    <div class="report__chip-row">
-                        <label class="chip report__chip">
-                            <input class="visually-hidden" type="radio" name="assignee_id" value=""{% if not giveTo.offers(assigneeId) %} checked{% endif %}>
-                            The team{% if giveTo.leadFirstName is not null %} ({{ giveTo.leadFirstName }} decides){% endif %}
-                        </label>
-                        {% for person in giveTo.people %}
-                            <label class="chip report__chip">
-                                <input class="visually-hidden" type="radio" name="assignee_id" value="{{ person.id }}"{% if person.id == assigneeId %} checked{% endif %}>
-                                {{ person.label }}
-                            </label>
-                        {% endfor %}
-                    </div>
-                </fieldset>
-            {% endif %}
+            {#- Ticketing's "Where it goes" by its component name; only Send reads it, a draft does not keep it. -#}
+            {{ component('WhereItGoesFields', {organizationId: reporter.organizationId, reporterId: reporter.userId, input: whereItGoes}) }}
+            <p class="report__preview" role="status" aria-live="polite"{% if preview == '' %} hidden{% endif %} data-report-form-target="previewLine"><strong>When you send:</strong> <span data-report-form-target="preview">{{ preview }}</span></p>
 
             {#- Save changes comes first, so Enter in a field saves rather than sends. Send saves what is typed, then sends it. -#}
             <p class="report-draft__actions">

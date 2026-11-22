@@ -1,9 +1,7 @@
 {% extends '@Web/base.html.twig' %}
 
 {#- Report a problem (ReportController, report-a-problem.md): the title, the detail, the screenshot with pins, then
-    "Where it goes". Team, Give it to, Project, Type and Priority are radio chips. Each team's "Give it to" and projects
-    are their own group; the report-form controller shows the chosen team's and clears "Give it to" on a team change.
-    Without script the reporter's own team's groups show, and the server refuses a pick that does not fit the team. -#}
+    "Where it goes" (_report_where_it_goes.html.twig, which a report draft's page shows too). -#}
 
 {% block title %}Report a problem · pinround{% endblock %}
 
@@ -62,92 +60,7 @@
                 <twig:ScreenshotReportField :uploadTargetKind="uploadTargetKind" :uploadTargetId="uploadProjectKey" :postedReport="report" :error="errors.screenshot|default(null)" :offersCapture="true" :usesScreenshotEditor="true" />
             {% endif %}
 
-            <fieldset class="where-it-goes report__where">
-                <legend class="where-it-goes__title">Where it goes</legend>
-                {# Assist's check by its component name, as Ticketing's UI may not use Assist (deptrac.yaml); inside the form, so its button posts the typed fields. #}
-                {{ component('IntakeCheck') }}
-
-                <fieldset class="report__chips"{% if errors.team is defined %} aria-describedby="report-team-error"{% endif %}>
-                    <legend class="report__label">Team</legend>
-                    <div class="report__chip-row">
-                        {% for team in teams %}
-                            <label class="chip report__chip">
-                                <input class="visually-hidden" type="radio" name="team_id" value="{{ team.id.toString }}"{% if team.id.toString == input.teamId %} checked{% endif %}
-                                    data-report-form-target="team" data-action="report-form#chooseTeam">
-                                {{ team.name }}
-                            </label>
-                        {% endfor %}
-                        <label class="chip report__chip">
-                            <input class="visually-hidden" type="radio" name="team_id" value="{{ noTeam }}"{% if input.teamId == noTeam %} checked{% endif %}
-                                data-report-form-target="team" data-action="report-form#chooseTeam">
-                            Not sure
-                        </label>
-                    </div>
-                    {% if errors.team is defined %}
-                        <p class="profile__error" id="report-team-error">{{ errors.team }}</p>
-                    {% endif %}
-                </fieldset>
-
-                {% for team in teams|filter(team => team.isOwn) %}
-                    <fieldset class="report__chips" data-report-form-target="giveTo" data-team="{{ team.id.toString }}"{% if team.id.toString != input.teamId %} hidden{% endif %}
-                        {%- if errors.assignee is defined %} aria-describedby="report-assignee-error"{% endif %}>
-                        <legend class="report__label">Give it to</legend>
-                        <div class="report__chip-row">
-                            <label class="chip report__chip">
-                                <input class="visually-hidden" type="radio" name="assignee_id" value=""{% if input.assigneeId == '' %} checked{% endif %}{% if team.id.toString != input.teamId %} disabled{% endif %}>
-                                The team{% if team.giveTo.leadFirstName is not null %} ({{ team.giveTo.leadFirstName }} decides){% endif %}
-                            </label>
-                            {% for person in team.giveTo.people %}
-                                <label class="chip report__chip">
-                                    <input class="visually-hidden" type="radio" name="assignee_id" value="{{ person.id }}"{% if person.id == input.assigneeId and team.id.toString == input.teamId %} checked{% endif %}{% if team.id.toString != input.teamId %} disabled{% endif %}>
-                                    {{ person.label }}
-                                </label>
-                            {% endfor %}
-                        </div>
-                    </fieldset>
-                {% endfor %}
-                {% if errors.assignee is defined %}
-                    <p class="profile__error" id="report-assignee-error">{{ errors.assignee }}</p>
-                {% endif %}
-
-                {% for team in teams %}
-                    {% include '@Ticketing/_report_projects.html.twig' with {groupTeam: team.id.toString, projects: team.projects, isShown: team.id.toString == input.teamId} %}
-                {% endfor %}
-                {% include '@Ticketing/_report_projects.html.twig' with {groupTeam: noTeam, projects: notSureProjects, isShown: input.teamId == noTeam} %}
-                {% if errors.project is defined %}
-                    <p class="profile__error" id="report-project-error">{{ errors.project }}</p>
-                {% endif %}
-
-                <fieldset class="report__chips"{% if errors.type is defined %} aria-describedby="report-type-error"{% endif %}>
-                    <legend class="report__label">Type</legend>
-                    <div class="report__chip-row">
-                        {% for value, typeLabel in typeLabels %}
-                            <label class="chip report__chip">
-                                <input class="visually-hidden" type="radio" name="type" value="{{ value }}"{% if value == input.type %} checked{% endif %}>
-                                {{ typeLabel }}
-                            </label>
-                        {% endfor %}
-                    </div>
-                    {% if errors.type is defined %}
-                        <p class="profile__error" id="report-type-error">{{ errors.type }}</p>
-                    {% endif %}
-                </fieldset>
-
-                <fieldset class="report__chips"{% if errors.priority is defined %} aria-describedby="report-priority-error"{% endif %}>
-                    <legend class="report__label">Priority</legend>
-                    <div class="report__chip-row">
-                        {% for value, priorityLabel in priorityLabels %}
-                            <label class="chip report__chip">
-                                <input class="visually-hidden" type="radio" name="priority" value="{{ value }}"{% if value == input.priority %} checked{% endif %}>
-                                {{ priorityLabel }}
-                            </label>
-                        {% endfor %}
-                    </div>
-                    {% if errors.priority is defined %}
-                        <p class="profile__error" id="report-priority-error">{{ errors.priority }}</p>
-                    {% endif %}
-                </fieldset>
-            </fieldset>
+            {% include '@Ticketing/_report_where_it_goes.html.twig' with {showsIntakeCheck: true} %}
 
             <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrfId) }}">
             <div class="report__footer">

@@ -12,6 +12,7 @@ use App\Review\Api\ReportDraftRefused;
 use App\Review\Api\ReportDrafts;
 use App\Review\Api\ReportDraftsPage;
 use App\Review\Api\ReportDraftView;
+use App\Review\Api\ReportDraftWhereItGoes;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundRefused;
 use App\Review\Api\ScreenshotWithPins;
@@ -21,26 +22,25 @@ use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AssigneeRefused;
+use App\Ticketing\Api\PostedWhereItGoes;
 use App\Ticketing\Api\ProblemReport;
 use App\Ticketing\Api\ProjectChoice;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ReportGiveTo;
-use App\Ticketing\Api\ReportGiveToQueries;
 use App\Ticketing\Api\TicketCommands;
 use App\Ticketing\Api\TicketKeyQueries;
+use App\Ticketing\Api\WhereItGoesRefused;
+use App\Ticketing\Api\WhereItGoesRules;
 
 /**
  * ReportDrafts on rvw_report_draft (ADR-0039, ADR-0040). Send makes the ticket through Ticketing's TicketCommands::report,
- * as the person reporting it, in the project's team, with the default type and priority of Report a problem (Bug,
- * Normal) and the person "Give it to" offered, or none, so it starts in To do or Backlog with the check reasons and
- * visibility its words give; then Round 0 through RoundCommands::createReport; then removes the draft.
- * Holds no state (ADR-0008).
+ * as the person reporting it, where the page's "Where it goes" says once Ticketing's WhereItGoesRules found it among the
+ * choices Report a problem offers them: the team or "Not sure", the project, the person or none (so it starts in To do
+ * or Backlog), the type and the priority, with the check reasons and visibility its words give; then Round 0 through
+ * RoundCommands::createReport; then removes the draft. Holds no state (ADR-0008).
  */
 final readonly class UseCaseReportDrafts implements ReportDrafts
 {
-    private const string DEFAULT_TYPE = 'bug';
-    private const string DEFAULT_PRIORITY = 'normal';
-
     public function __construct(
         private ReportDraftRows $rows,
         private ProjectQueries $projectQueries,
@@ -50,7 +50,7 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         private PicturesToKeep $picturesToKeep,
         private TenantContext $tenantContext,
         private DraftRoundContents $draftRoundContents,
-        private ReportGiveToQueries $reportGiveToQueries,
+        private WhereItGoesRules $whereItGoesRules,
     ) {
     }
 
@@ -139,15 +139,24 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         }
     }
 
-    public function send(string $draftId, UserId $owner, int $expectedVersion, ?string $assigneeId, \DateTimeImmutable $at): string
+    public function send(string $draftId, UserId $owner, int $expectedVersion, ReportDraftWhereItGoes $whereItGoes, \DateTimeImmutable $at): string
     {
         $organizationId = $this->tenantContext->require();
         $draft = $this->rows->ofOwner($draftId, $owner, lock: true) ?? throw ReportDraftRefused::notFound();
         if ($draft->version !== $expectedVersion) {
             throw ReportDraftRefused::because(ReportDraftRefused::DRAFT_CHANGED);
         }
-        $project = $this->reportableProject($draft->projectKey);
-        $assignee = $this->offeredAssigneeOf($organizationId, $owner, $project, $assigneeId);
+        try {
+            $checked = $this->whereItGoesRules->checkedOf($organizationId, $owner, new PostedWhereItGoes(
+                strtolower($whereItGoes->teamId),
+                strtolower($whereItGoes->projectId),
+                strtolower(trim($whereItGoes->assigneeId)),
+                $whereItGoes->type,
+                $whereItGoes->priority,
+            ));
+        } catch (WhereItGoesRefused $refused) {
+            throw ReportDraftRefused::because($refused->getMessage(), $refused);
+        }
 
         $pinNotes = array_merge([], ...array_map(static fn (ScreenshotWithPins $screenshot): array => array_map(static fn (PlacedPin $pin): string => $pin->note, $screenshot->pins), $draft->screenshots));
         // Through report, as Report a problem makes a ticket: Ticketing works out the check reasons and team-only
@@ -156,13 +165,13 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
             $key = $this->ticketCommands->report(new ProblemReport(
                 $organizationId,
                 $owner,
-                $project->id(),
-                $project->teamId(),
+                $checked->projectId,
+                $checked->teamId,
                 $draft->title,
                 $draft->detail,
-                self::DEFAULT_TYPE,
-                self::DEFAULT_PRIORITY,
-                $assignee,
+                $checked->type,
+                $checked->priority,
+                $checked->assignee,
                 $pinNotes,
                 $at,
             ))->key;
@@ -196,24 +205,6 @@ final readonly class UseCaseReportDrafts implements ReportDrafts
         }
 
         return $project;
-    }
-
-    /**
-     * @throws ReportDraftRefused ReportGiveTo::NOT_OFFERED for a person "Give it to" does not offer $owner, also when
-     *                            $owner has no role in the project's team
-     */
-    private function offeredAssigneeOf(OrganizationId $organizationId, UserId $owner, ProjectChoice $project, ?string $assigneeId): ?UserId
-    {
-        if (null === $assigneeId) {
-            return null;
-        }
-        $teamId = $project->teamId();
-        $giveTo = null === $teamId ? null : $this->reportGiveToQueries->giveToOf($organizationId, $owner, $teamId);
-        if (null === $giveTo || !$giveTo->offers($assigneeId)) {
-            throw ReportDraftRefused::because(ReportGiveTo::NOT_OFFERED);
-        }
-
-        return new UserId($assigneeId);
     }
 
     /**

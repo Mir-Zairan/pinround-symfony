@@ -105,19 +105,18 @@ interface ReportDrafts
     /**
      * Makes the ticket from the draft, as $owner reports it at $at, with its pictures as Round 0, then removes the
      * draft, all in the caller's transaction: on a refusal the caller rolls back and the draft stays. Only the person's
-     * own click in the app may call it, never a token path (ADR-0039). With a person, the ticket starts in To do with
-     * them as assignee; without, in Backlog for the team's lead to plan, as Report a problem makes it.
-     *
-     * @param string|null $assigneeId a person Report a problem's "Give it to" offers $owner for the project's team
-     *                                (Ticketing's ReportGiveToQueries), or null for "The team (<lead> decides)"
+     * own click in the app may call it, never a token path (ADR-0039). The ticket goes where $whereItGoes says, checked
+     * as Report a problem checks its own (Ticketing's WhereItGoesRules): with a person, it starts in To do with them as
+     * assignee; without, in Backlog for the team's lead to plan. The draft's own project only says what the page offers
+     * first.
      *
      * @return string the new ticket's key, for example SHOP-12
      *
      * @throws ReportDraftRefused NOT_FOUND for a draft that is not $owner's; DRAFT_CHANGED when its version is not
-     *                            $expectedVersion; PROJECT_NOT_FOUND or PROJECT_HAS_NO_TEAM; Ticketing's
-     *                            ReportGiveTo::NOT_OFFERED for an $assigneeId "Give it to" does not offer $owner; a
-     *                            RoundRefused MEDIA_ text for a picture still processing or rejected
+     *                            $expectedVersion; Ticketing's WhereItGoesRefused message for a team, project, person,
+     *                            type or priority Report a problem would refuse $owner, ReportGiveTo::NOT_OFFERED for
+     *                            the person; a RoundRefused MEDIA_ text for a picture still processing or rejected
      * @throws \LogicException    when no transaction is open or no tenant is set
      */
-    public function send(string $draftId, UserId $owner, int $expectedVersion, ?string $assigneeId, \DateTimeImmutable $at): string;
+    public function send(string $draftId, UserId $owner, int $expectedVersion, ReportDraftWhereItGoes $whereItGoes, \DateTimeImmutable $at): string;
 }

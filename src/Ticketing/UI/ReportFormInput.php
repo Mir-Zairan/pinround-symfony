@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI;
 
+use App\Ticketing\Api\PostedWhereItGoes;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -12,7 +13,7 @@ use Symfony\Component\HttpFoundation\Request;
  */
 final readonly class ReportFormInput
 {
-    public const string NO_TEAM = 'none';
+    public const string NO_TEAM = PostedWhereItGoes::NO_TEAM;
 
     /**
      * @param array{media_id: mixed, title: mixed, summary: mixed, pins: mixed} $report the screenshot part in the shape
@@ -55,6 +56,11 @@ final readonly class ReportFormInput
     public function isNotSure(): bool
     {
         return self::NO_TEAM === $this->teamId;
+    }
+
+    public function whereItGoes(): PostedWhereItGoes
+    {
+        return new PostedWhereItGoes($this->teamId, $this->projectId, $this->assigneeId, $this->type, $this->priority);
     }
 
     /**

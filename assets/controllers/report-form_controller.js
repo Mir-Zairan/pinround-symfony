@@ -1,6 +1,7 @@
 import { Controller } from '@hotwired/stimulus';
 
-// On Report a problem's form (report.html.twig).
+// On Report a problem's form (report.html.twig) and a report draft's form (report_draft.html.twig), whose detail and
+// pin notes post under their own names and whose answer has no duplicates.
 // Picking a team shows that team's "Give it to" and project chips and hides the others; the radios of a hidden group
 // are disabled, so they are not posted. "Give it to" goes back to "The team decides" and the team's first project is
 // picked, as report-a-problem.md asks.
@@ -10,9 +11,10 @@ import { Controller } from '@hotwired/stimulus';
 // No call is made while the fields the answer depends on are as they were for the shown answer (the page's own at
 // first) or for the call still running, so picking a type or a priority, or typing a picture's title, asks nothing.
 const DEBOUNCE_MS = 400;
-// What ReportController::liveParts reads, with every pins[n][note]: the notes and their count change the check reasons.
-const PREVIEW_FIELDS = new Set(['title', 'description', 'team_id', 'project_id', 'assignee_id', 'screenshot_media_id']);
-const PIN_NOTE_FIELD = /^pins\[\d+\]\[note\]$/;
+// What ReportController::liveParts and ReportDraftController::preview read, with every pin note: the notes and their
+// count change the check reasons. A draft names a pin's note screenshots[i][pins][p], and a removed picture drops its pins.
+const PREVIEW_FIELDS = new Set(['title', 'description', 'detail', 'team_id', 'project_id', 'assignee_id', 'screenshot_media_id']);
+const PIN_NOTE_FIELD = /^(?:pins\[\d+\]\[note\]|screenshots\[\d+\]\[(?:pins\]\[\d+|remove)\])$/;
 
 export default class extends Controller {
   static targets = ['team', 'giveTo', 'projects', 'duplicates', 'preview', 'previewLine'];

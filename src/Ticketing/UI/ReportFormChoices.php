@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Ticketing\UI;
 
 use App\Organization\Api\ActorContext;
-use App\Organization\Api\MembershipQueries;
 use App\Organization\Api\PossibleAssignee;
 use App\Organization\Api\TeamPeopleQueries;
 use App\Organization\Api\TeamQueries;
@@ -15,7 +14,6 @@ use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\AssigneeTicketCounts;
 use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ReportGiveTo;
-use App\Ticketing\Api\ReportGiveToQueries;
 use App\Ticketing\Api\TeamProjectChoice;
 use App\Ticketing\Api\TicketVisibilities;
 
@@ -23,10 +21,10 @@ use App\Ticketing\Api\TicketVisibilities;
  * The choices of Report a problem's "Where it goes" (report-a-problem.md): every team that owns a project, the
  * reporter's own teams first; for an own team, "Give it to" up to four people who are not testers, those with the fewest
  * open tickets first. Reads under row-level security: one query for the teams, one for the projects, one for the
- * counts, and the cached team people (no query on a hit) of the reporter's own teams only. A report draft's Send offers
- * the same "Give it to" through giveToOf.
+ * counts, and the cached team people (no query on a hit) of the reporter's own teams only. A report draft's page and
+ * Send offer the same choices through ReportWhereItGoesRules.
  */
-final readonly class ReportFormChoices implements ReportGiveToQueries
+final readonly class ReportFormChoices
 {
     public const int MAX_GIVE_TO = 4;
 
@@ -36,7 +34,6 @@ final readonly class ReportFormChoices implements ReportGiveToQueries
         private TeamPeopleQueries $teamPeopleQueries,
         private AssigneeTicketCounts $assigneeTicketCounts,
         private TicketVisibilities $ticketVisibilities,
-        private MembershipQueries $membershipQueries,
     ) {
     }
 
@@ -66,16 +63,6 @@ final readonly class ReportFormChoices implements ReportGiveToQueries
         }
 
         return [...$this->withPeople($actor, $own), ...$others];
-    }
-
-    public function giveToOf(OrganizationId $organizationId, UserId $reporter, TeamId $teamId): ?ReportGiveTo
-    {
-        if (!$this->membershipQueries->rolesOf($reporter, $organizationId)->isInTeam($teamId)) {
-            return null;
-        }
-        $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
-
-        return self::giveToAmong($reporter, $people, $this->openTicketCountsOf($organizationId, $reporter, $people));
     }
 
     /**

@@ -4,23 +4,15 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI;
 
-use App\Identity\Api\UserQueries;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\CurrentActor;
-use App\Organization\Api\PossibleAssignee;
-use App\Organization\Api\SettingsQueries;
-use App\Organization\Api\TeamPeopleQueries;
-use App\Organization\Api\TeamQueries;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
-use App\SharedKernel\Domain\TeamId;
-use App\SharedKernel\Domain\UserId;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
 use App\Ticketing\Api\IntakeCandidate;
 use App\Ticketing\Api\NewTicketReport;
 use App\Ticketing\Api\NewTicketReportRefused;
 use App\Ticketing\Api\ProblemReport;
-use App\Ticketing\Api\ProjectQueries;
 use App\Ticketing\Api\ReportedTicket;
 use App\Ticketing\Api\ReportGiveTo;
 use App\Ticketing\Api\TeamProjectChoice;
@@ -67,9 +59,9 @@ final class ReportController extends AbstractController
      */
     public const string UPLOAD_TARGET_KIND = 'new_report';
 
-    public const string TEAM_UNKNOWN = 'Pick a team, or Not sure.';
-    public const string PROJECT_UNKNOWN = 'Pick a project of that team.';
-    public const string NO_PROJECT_YET = 'No project takes reports yet. Ask a team lead to add one.';
+    public const string TEAM_UNKNOWN = ReportWhereItGoesRules::TEAM_UNKNOWN;
+    public const string PROJECT_UNKNOWN = ReportWhereItGoesRules::PROJECT_UNKNOWN;
+    public const string NO_PROJECT_YET = ReportWhereItGoesRules::NO_PROJECT_YET;
     public const string ASSIGNEE_UNKNOWN = ReportGiveTo::NOT_OFFERED;
     public const string TITLE_MISSING = 'Say what is wrong in one line.';
     /** With the key. */
@@ -89,13 +81,9 @@ final class ReportController extends AbstractController
         private readonly TicketCommands $ticketCommands,
         private readonly TicketKeyQueries $ticketKeyQueries,
         private readonly NewTicketReport $newTicketReport,
-        private readonly TeamQueries $teamQueries,
-        private readonly TeamPeopleQueries $teamPeopleQueries,
-        private readonly SettingsQueries $settingsQueries,
-        private readonly UserQueries $userQueries,
         private readonly ReportPreviews $reportPreviews,
         private readonly RoleTicketVisibilities $ticketVisibilities,
-        private readonly ProjectQueries $projectQueries,
+        private readonly ReportWhereItGoesRules $whereItGoesRules,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -126,7 +114,7 @@ final class ReportController extends AbstractController
                 if (!$this->isCsrfTokenValid(self::CSRF_ID, $csrfToken)) {
                     throw new TicketFormRefused($this->renderReportPage($actor, $teams, $input, ['form' => NewTicketController::FORM_EXPIRED]));
                 }
-                [$team, $project, $assignee, $errors] = $this->whereItGoes($teams, $input);
+                [$team, $project, $assignee, $errors] = $this->whereItGoesRules->picksAmong($teams, $input->whereItGoes());
                 $errors = [...$errors, ...self::fieldErrorsOf($input)];
                 $screenshotRefusal = $this->newTicketReport->refusalOf($actor->organizationId(), $actor->userId(), $input->report);
                 if (null !== $screenshotRefusal) {
@@ -209,41 +197,6 @@ final class ReportController extends AbstractController
     }
 
     /**
-     * The team (null for "Not sure"), the project and the person the form picked, each checked against the choices it
-     * offered, and the field errors of those that are not among them.
-     *
-     * @param list<ReportTeamChoice> $teams
-     *
-     * @return array{?ReportTeamChoice, ?TeamProjectChoice, ?UserId, array<string, string>}
-     */
-    private function whereItGoes(array $teams, ReportFormInput $input): array
-    {
-        if ([] === $teams) {
-            return [null, null, null, ['form' => self::NO_PROJECT_YET]];
-        }
-        $team = null;
-        if (!$input->isNotSure()) {
-            $team = array_values(array_filter($teams, static fn (ReportTeamChoice $choice): bool => $choice->id->toString() === $input->teamId))[0] ?? null;
-            if (null === $team) {
-                return [null, null, null, ['team' => self::TEAM_UNKNOWN]];
-            }
-        }
-        $projects = $team->projects ?? array_merge(...array_map(static fn (ReportTeamChoice $choice): array => $choice->projects, $teams));
-        $project = array_values(array_filter($projects, static fn (TeamProjectChoice $choice): bool => $choice->id() === $input->projectId))[0] ?? null;
-        $errors = null === $project ? ['project' => self::PROJECT_UNKNOWN] : [];
-        $assignee = null;
-        if ('' !== $input->assigneeId) {
-            if (true === $team?->giveTo?->offers($input->assigneeId)) {
-                $assignee = new UserId($input->assigneeId);
-            } else {
-                $errors['assignee'] = self::ASSIGNEE_UNKNOWN;
-            }
-        }
-
-        return [$team, $project, $assignee, $errors];
-    }
-
-    /**
      * @return array<string, string>
      */
     private static function fieldErrorsOf(ReportFormInput $input): array
@@ -258,12 +211,6 @@ final class ReportController extends AbstractController
         if (mb_strlen($input->description) > NewTicketController::DESCRIPTION_MAX_LENGTH) {
             $errors['description'] = NewTicketController::DESCRIPTION_OVER_LIMIT;
         }
-        if (!\array_key_exists($input->type, NewTicketController::TYPE_LABELS)) {
-            $errors['type'] = NewTicketController::TYPE_UNKNOWN;
-        }
-        if (!\array_key_exists($input->priority, NewTicketController::PRIORITY_LABELS)) {
-            $errors['priority'] = NewTicketController::PRIORITY_UNKNOWN;
-        }
 
         return $errors;
     }
@@ -277,7 +224,7 @@ final class ReportController extends AbstractController
         if ([] === $reported->checkReasons) {
             return \sprintf(self::CREATED_UNCHECKED, $reported->key);
         }
-        $checker = $this->checkerNameOf($actor, $team);
+        $checker = $this->whereItGoesRules->checkerNameOf($actor, $team?->id);
 
         return match ($checker) {
             null => \sprintf(self::CREATED_NO_CHECKER, $reported->key),
@@ -292,64 +239,15 @@ final class ReportController extends AbstractController
     }
 
     /**
-     * The possible duplicates and the "When you send:" words, or empty words while the posted project is not one of the
-     * picked team's (of any team for "Not sure"). The preview runs this on every pause in typing, so it reads the posted
-     * project and the picked team's cached people only, never the form's choices with their ticket counts. A picked
-     * tester, or anyone when the reporter is not in the team, reads as "the team decides", as the create refuses them.
+     * The possible duplicates and the "When you send:" words (ReportWhereItGoesRules::sentenceOf).
      *
      * @return array{list<IntakeCandidate>, string}
      */
     private function liveParts(ActorContext $actor, ReportFormInput $input): array
     {
         $facts = $this->previewFactsOf($actor, $input, !$input->isNotSure());
-        $nextKey = $this->projectQueries->nextTicketKeyOf($input->projectId);
-        $teamId = $nextKey?->teamId;
-        if (null === $nextKey || null === $teamId || (!$input->isNotSure() && $teamId->toString() !== $input->teamId)) {
-            return [$facts->duplicates, ''];
-        }
-        if ($input->isNotSure()) {
-            return [$facts->duplicates, ReportPreviewSentence::of($nextKey->key, $facts->reasonPhrases, $this->checkerNameOf($actor, null), null, null, $facts->isTeamOnly)];
-        }
-        $people = $this->teamPeopleQueries->namedPossibleAssigneesOf($teamId);
-        $lead = ReportTeamPeople::leadOf($people);
-        $checker = null === $lead ? null : ($lead->userId->equals($actor->userId()) ? 'You' : $lead->firstName);
 
-        return [$facts->duplicates, ReportPreviewSentence::of($nextKey->key, $facts->reasonPhrases, $checker, $this->pickedPersonOf($actor, $teamId, $people, $input->assigneeId), $lead?->firstName, $facts->isTeamOnly)];
-    }
-
-    /**
-     * @param list<PossibleAssignee> $people the team's
-     *
-     * @return string|null the picked person's first name, "you" for the reporter, or null for "the team decides"
-     */
-    private function pickedPersonOf(ActorContext $actor, TeamId $teamId, array $people, string $assigneeId): ?string
-    {
-        if ('' === $assigneeId || !$actor->roles()->isInTeam($teamId)) {
-            return null;
-        }
-        $picked = array_values(array_filter(ReportTeamPeople::giveToPeopleOf($people), static fn (PossibleAssignee $person): bool => $person->userId->toString() === $assigneeId))[0] ?? null;
-        if (null === $picked) {
-            return null;
-        }
-
-        return $picked->userId->equals($actor->userId()) ? 'you' : $picked->firstName;
-    }
-
-    /**
-     * "You" when the reporter checks, the checker's first name, or null when nobody is chosen: the team's lead, or the
-     * organization's triager for no team.
-     */
-    private function checkerNameOf(ActorContext $actor, ?ReportTeamChoice $team): ?string
-    {
-        $checkerId = null === $team ? $this->settingsQueries->triagerOf($actor->organizationId()) : $this->teamQueries->leadOf($team->id);
-        if (null === $checkerId) {
-            return null;
-        }
-        if ($checkerId->equals($actor->userId())) {
-            return 'You';
-        }
-
-        return ($this->userQueries->byIds([$checkerId])[$checkerId->toString()] ?? null)?->firstName();
+        return [$facts->duplicates, $this->whereItGoesRules->sentenceOf($actor, $input->whereItGoes(), $facts)];
     }
 
     /**
