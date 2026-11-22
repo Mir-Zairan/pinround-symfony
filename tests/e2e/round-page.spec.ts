@@ -82,11 +82,11 @@ test.describe('The round page of a shared draft', () => {
     await context.close();
   });
 
-  // Who may give it, and what a refused post changes, is proven in
-  // tests/Functional/Review/VerdictControllerScreenshotsTest.php.
-  test('Mia gives the shared screenshot Needs fix with a note, and Omar reads it on the same page', async ({ browser }) => {
+  // Who may add one, what a refused post changes and a closed round's read-only list are proven in
+  // tests/Functional/Review/GeneralNoteControllerTest.php.
+  test('Mia adds a general note with Needs fix, and Omar reads it on the same page', async ({ browser }) => {
     test.setTimeout(120_000);
-    const key = await makeTicketForOmar(browser, 'Round page verdict on the cart screenshot');
+    const key = await makeTicketForOmar(browser, 'Round page general note on the cart');
     seedDraftWithPicture(key);
     const omar = await openAs(browser, OMAR_STORAGE_STATE);
     await openOwnDraft(omar.page, key);
@@ -95,29 +95,28 @@ test.describe('The round page of a shared draft', () => {
 
     const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
     await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
-    const verdict = page.locator('#round-screenshot-verdict');
-    await expect(verdict.getByRole('heading', { level: 2 })).toHaveText(/^Your verdict on /);
-    await expect(verdict).toContainText('No verdict yet.');
-    await expect(verdict).toContainText('Then: Lena, team lead');
+    const notes = page.locator('#round-general-notes');
+    await expect(notes.getByRole('heading', { level: 2 })).toHaveText('General notes on this round');
+    await expect(notes).toContainText('No general notes yet.');
 
-    await verdict.getByText('Needs fix', { exact: true }).click();
-    await verdict.getByLabel('Note (optional)').fill('The total still shows the old price.');
-    await verdict.getByRole('button', { name: 'Save verdict' }).click();
+    await notes.getByText('Needs fix', { exact: true }).click();
+    await notes.getByLabel('Add a note for the whole round').fill('The footer is gone on every page.');
+    await notes.getByRole('button', { name: 'Add note' }).click();
 
-    await expect(page.locator(TOAST_REGION)).toContainText('Verdict saved. Lena can see it.');
+    await expect(page.locator(TOAST_REGION)).toContainText('Note added.');
     // fragment-focus focuses the section the redirect names, then drops the fragment from the address.
     await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=1$`));
-    await expect(verdict, 'the redirect brings Mia back to the verdict').toBeFocused();
-    await expect(verdict.locator('.round-panel__verdict')).toHaveText('Needs fix');
-    await expect(verdict.getByRole('radio', { name: 'Needs fix' })).toBeChecked();
+    await expect(notes, 'the redirect brings Mia back to the notes').toBeFocused();
+    await expect(notes.locator('.round-general-notes__item')).toHaveCount(1);
+    await expect(notes.locator('.round-general-notes__verdict')).toHaveText('Needs fix');
+    await expect(notes.locator('.round-general-notes__note')).toHaveText('The footer is gone on every page.');
     await context.close();
 
     await omar.page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
-    const omarsView = omar.page.locator('#round-screenshot-verdict');
-    await expect(omarsView.getByRole('heading', { level: 2 })).toHaveText(/^Verdict on /);
-    await expect(omarsView.locator('.round-panel__verdict')).toHaveText('Needs fix');
-    await expect(omarsView.locator('.round-panel__note')).toHaveText('The total still shows the old price.');
-    await expect(omarsView.getByRole('button')).toHaveCount(0);
+    const omarsView = omar.page.locator('#round-general-notes');
+    await expect(omarsView.locator('.round-general-notes__author')).toHaveText('Mia');
+    await expect(omarsView.locator('.round-general-notes__note')).toHaveText('The footer is gone on every page.');
+    await expect(omarsView.getByRole('button', { name: 'Add note' }), 'Omar may add one too').toBeVisible();
     await omar.context.close();
   });
 });

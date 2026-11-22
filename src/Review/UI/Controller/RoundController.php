@@ -66,6 +66,9 @@ final class RoundController extends AbstractController
     public const string NOT_FOUND = 'No round you may see has that number.';
     public const string SCREENSHOT_NOT_FOUND = 'This round has no screenshot with that number.';
 
+    /** ReviewRoundView's state of an open round. */
+    private const string OPEN = 'open';
+
     public function __construct(
         private readonly MoveOnVerbQueries $moveOnVerbQueries,
         private readonly VisibleTicketLookup $visibleTicketLookup,
@@ -88,6 +91,11 @@ final class RoundController extends AbstractController
             self::numberParameterOf($request, self::AREA_PARAMETER),
             self::screenshotNumberOf($request),
             $this->isGranted(VerdictPermission::SET, $facts),
+            // The form shows on an open round without areas. RoundPermission ADD_GENERAL_NOTE is granted on a shared
+            // round exactly when VIEW is (RoundVoterTest::aSharedRoundFollowsWhoMaySeeAndEditItsTicket), and
+            // visibleRoundOf has VIEW granted on this shared round, so the page asks no second vote and reads the
+            // ticket's facts once; GeneralNoteController asks ADD_GENERAL_NOTE itself before it adds a note.
+            [] === $round->areas && self::OPEN === $round->state,
             $this->clock->now(),
             $this->currentTimeZone->zone(),
         ) ?? throw new NotFoundHttpException(self::SCREENSHOT_NOT_FOUND);
@@ -105,6 +113,7 @@ final class RoundController extends AbstractController
             'moveOnForm' => self::isClosedByMoveOnOf($visible->actor->userId(), $round, $ticket->turnSnapshot->assigneeId) ? $this->moveOnVerbQueries->moveOnFormOf($ticket) : null,
             'copyToDraft' => $this->copyableSourceOf($visible, $page->shown?->afterSource),
             'draftCsrfId' => DraftRoundController::csrfIdOf($ticket->key),
+            'generalNoteCsrfId' => GeneralNoteController::csrfIdOf($ticket->key),
         ]);
     }
 

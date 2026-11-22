@@ -96,6 +96,7 @@ final class RoundVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::VIEW]));
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::EDIT]));
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::MOVE_TO_REPORT_DRAFT]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), self::omarsDraft(), [RoundPermission::ADD_GENERAL_NOTE]), 'General notes are for shared rounds only.');
         self::assertSame([], $this->ticketTurnQueries->askedTicketIds);
     }
 
@@ -117,7 +118,7 @@ final class RoundVoterTest extends TestCase
             'the Beta Bakery admin' => self::BETA_ADMIN,
         ];
         foreach ($others as $case => $userId) {
-            foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT] as $attribute) {
+            foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT, RoundPermission::ADD_GENERAL_NOTE] as $attribute) {
                 yield $case.' '.$attribute => [$userId, $attribute];
             }
         }
@@ -138,7 +139,7 @@ final class RoundVoterTest extends TestCase
         $deletedDraft = self::round(self::ACME_FOODS, self::SHOP_1, self::OMAR, true, true);
         $deletedSharedRound = self::round(self::ACME_FOODS, self::SHOP_1, self::LENA, false, true);
 
-        foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT, RoundPermission::COPY_TO_OWN_DRAFT] as $attribute) {
+        foreach ([RoundPermission::VIEW, RoundPermission::EDIT, RoundPermission::MOVE_TO_REPORT_DRAFT, RoundPermission::COPY_TO_OWN_DRAFT, RoundPermission::ADD_GENERAL_NOTE] as $attribute) {
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::OMAR), $deletedDraft, [$attribute]), $attribute);
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf(self::LENA), $deletedSharedRound, [$attribute]), $attribute);
         }
@@ -175,6 +176,8 @@ final class RoundVoterTest extends TestCase
 
         self::assertSame($mayView ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf($userId), $sharedRound, [RoundPermission::VIEW]));
         self::assertSame($mayEdit ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf($userId), $sharedRound, [RoundPermission::EDIT]));
+        // A general note follows who may see the ticket, as a comment does, not who may edit it.
+        self::assertSame($mayView ? VoterInterface::ACCESS_GRANTED : VoterInterface::ACCESS_DENIED, $voter->vote(self::tokenOf($userId), $sharedRound, [RoundPermission::ADD_GENERAL_NOTE]));
     }
 
     /**

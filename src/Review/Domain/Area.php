@@ -142,12 +142,9 @@ final readonly class Area
     }
 
     /**
-     * The note a verdict keeps, an area's or a shared draft screenshot's (DraftScreenshotVerdict): trimmed, and none
-     * when blank.
-     *
      * @throws \InvalidArgumentException when the trimmed note is over NOTE_MAX_LENGTH characters
      */
-    public static function noteOf(?string $note): ?string
+    private static function noteOf(?string $note): ?string
     {
         $trimmedNote = trim($note ?? '');
         if (mb_strlen($trimmedNote) > self::NOTE_MAX_LENGTH) {

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Review\Api;
 
 /**
- * A verdict was not saved. The message is the reason to show the person (422), except the four not-found ones, which
+ * A verdict was not saved. The message is the reason to show the person (422), except the three not-found ones, which
  * the caller answers as a missing page (404).
  */
 final class VerdictRefused extends \DomainException
@@ -16,8 +16,6 @@ final class VerdictRefused extends \DomainException
     public const string AREA_NOT_FOUND = 'This round has no such area.';
     /** An unknown or malformed pin id, or a pin on no "before" picture of the round's areas. */
     public const string PIN_NOT_FOUND = 'This round has no such pin to check.';
-    /** An unknown or malformed screenshot id, or one the round's page does not show (another round's, an earlier try). */
-    public const string SCREENSHOT_NOT_FOUND = 'This round has no such screenshot.';
     /** The same text as Area::VERDICT_MISSING, the prototype's toast. */
     public const string PICK_A_VERDICT = 'Pick Pass, Needs fix or Question first.';
     public const string UNKNOWN_PIN_VERDICT = 'Choose Fixed or Still wrong.';
@@ -26,6 +24,6 @@ final class VerdictRefused extends \DomainException
 
     public function isNotFound(): bool
     {
-        return \in_array($this->getMessage(), [self::NOT_FOUND, self::AREA_NOT_FOUND, self::PIN_NOT_FOUND, self::SCREENSHOT_NOT_FOUND], true);
+        return \in_array($this->getMessage(), [self::NOT_FOUND, self::AREA_NOT_FOUND, self::PIN_NOT_FOUND], true);
     }
 }

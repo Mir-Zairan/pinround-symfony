@@ -7,20 +7,17 @@ namespace App\Tests\Unit\Review\Application\Verdict;
 use App\Review\Domain\Area;
 use App\Review\Domain\AreaId;
 use App\Review\Domain\Areas;
-use App\Review\Domain\DraftScreenshotVerdict;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinToCheck;
 use App\Review\Domain\ReviewedRound;
 use App\Review\Domain\RoundId;
-use App\Review\Domain\ScreenshotId;
 use App\SharedKernel\Application\TenantContext;
 
 /**
  * Like DbalAreas: every read and write needs the tenant and sees its rows only; an area is found in its own round
  * only, and a pin only in the rounds with an area whose "before" picture holds it. saveVerdict of an area that is not
  * stored is a LogicException, and savePinVerdict writes only while the stored verdict is still the one read (false
- * otherwise). A screenshot verdict is saved only on a shown screenshot of its round, else a LogicException, and takes
- * the place of an earlier one. Each call is logged by name, so a test can show the round was locked first.
+ * otherwise). Each call is logged by name, so a test can show the round was locked first.
  */
 final class InMemoryAreas implements Areas
 {
@@ -46,12 +43,6 @@ final class InMemoryAreas implements Areas
     /** @var array<string, array<string, list<string>>> by organization id, then pin id: the rounds it is checked in */
     private array $pinRounds = [];
 
-    /** @var array<string, array<string, string>> by organization id, then shown screenshot id: its round's id */
-    private array $shownScreenshots = [];
-
-    /** @var array<string, array<string, DraftScreenshotVerdict>> by organization id, then screenshot id */
-    private array $screenshotVerdicts = [];
-
     public function __construct(private readonly TenantContext $tenantContext)
     {
     }
@@ -75,19 +66,6 @@ final class InMemoryAreas implements Areas
         $this->pinRounds[$organizationId][$pin->id()->toString()] = $roundIds;
     }
 
-    /**
-     * A screenshot the round's page shows, the latest try of its chain.
-     */
-    public function addShownScreenshot(string $organizationId, string $roundId, string $screenshotId): void
-    {
-        $this->shownScreenshots[$organizationId][$screenshotId] = $roundId;
-    }
-
-    public function storedScreenshotVerdict(string $organizationId, string $screenshotId): ?DraftScreenshotVerdict
-    {
-        return $this->screenshotVerdicts[$organizationId][$screenshotId] ?? null;
-    }
-
     public function storedArea(string $organizationId, string $areaId): ?Area
     {
         return $this->areas[$organizationId][$areaId] ?? null;
@@ -107,11 +85,11 @@ final class InMemoryAreas implements Areas
     }
 
     /**
-     * @return array{array<string, array<string, Area>>, array<string, array<string, PinToCheck>>, array<string, array<string, DraftScreenshotVerdict>>} every stored area, pin and screenshot verdict
+     * @return array{array<string, array<string, Area>>, array<string, array<string, PinToCheck>>} every stored area and pin
      */
     public function snapshot(): array
     {
-        return [$this->areas, $this->pins, $this->screenshotVerdicts];
+        return [$this->areas, $this->pins];
     }
 
     public function lockRound(RoundId $roundId): ?ReviewedRound
@@ -166,23 +144,6 @@ final class InMemoryAreas implements Areas
         $this->pins[$organizationId][$read->id()->toString()] = $changed;
 
         return true;
-    }
-
-    public function isShownScreenshotOf(RoundId $roundId, ScreenshotId $screenshotId): bool
-    {
-        $this->calls[] = 'isShownScreenshotOf';
-
-        return ($this->shownScreenshots[$this->tenant()][$screenshotId->toString()] ?? null) === $roundId->toString();
-    }
-
-    public function saveScreenshotVerdict(DraftScreenshotVerdict $verdict): void
-    {
-        $this->calls[] = 'saveScreenshotVerdict';
-        $organizationId = $this->tenant();
-        if (($this->shownScreenshots[$organizationId][$verdict->screenshotId->toString()] ?? null) !== $verdict->roundId->toString()) {
-            throw new \LogicException(\sprintf('Screenshot %s is not one of round %s.', $verdict->screenshotId->toString(), $verdict->roundId->toString()));
-        }
-        $this->screenshotVerdicts[$organizationId][$verdict->screenshotId->toString()] = $verdict;
     }
 
     private function tenant(): string

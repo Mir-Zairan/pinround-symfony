@@ -59,7 +59,7 @@ use App\Workflow\Api\WorkflowPermission;
  * extend: the STEP_CHANGE_TEAM and RULES_CHANGE_TEAM rows hold under extend only. WorkflowVoterTest has the locked and
  * team cases.
  *
- * Or a round (RoundPermission VIEW, EDIT, MOVE_TO_REPORT_DRAFT, COPY_TO_OWN_DRAFT): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
+ * Or a round (RoundPermission VIEW, EDIT, MOVE_TO_REPORT_DRAFT, COPY_TO_OWN_DRAFT, ADD_GENERAL_NOTE): "Unshared draft round of Omar" or "Deleted draft round of Omar" on a Shop ticket,
  *            "Shared round of Omar on a team-only Shop ticket" or "… Support ticket", "… on a ticket nobody has",
  *            "Shared round of Omar on the Shop ticket in Testing, Mia's turn", or
  *            "Shared round of another organization" or "Unshared draft round of Omar in another organization". Or a ticket for DRAFT_CREATE: "Unassigned Shop ticket", "Shop ticket
@@ -488,6 +488,16 @@ return [
     ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Lena', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
     ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
     ['source' => $makeItANewTicket, 'attribute' => RoundPermission::MOVE_TO_REPORT_DRAFT, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar in another organization', 'expected' => 'denied'],
+    // A general note on a shared round (ADR-0048, note of 2026-11-22) follows "Comment, reply": whoever may see the ticket.
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Mia', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Raj', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Sara', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'granted'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Noor', 'subject' => 'Shared round of Omar on a team-only Shop ticket', 'expected' => 'denied'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Omar', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Mia', 'subject' => 'Unshared draft round of Omar', 'expected' => 'denied'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Omar', 'subject' => 'Deleted draft round of Omar', 'expected' => 'denied'],
+    ['source' => $commentAndReply, 'attribute' => RoundPermission::ADD_GENERAL_NOTE, 'actor' => 'Lena', 'subject' => 'Shared round of another organization', 'expected' => 'denied'],
     ['source' => $pinInMyDraft, 'attribute' => RoundPermission::COPY_TO_OWN_DRAFT, 'actor' => 'Mia', 'subject' => 'Shared round of Omar on the Shop ticket in Testing, Mia\'s turn', 'expected' => 'granted'],
     ['source' => $pinInMyDraft, 'attribute' => RoundPermission::COPY_TO_OWN_DRAFT, 'actor' => 'Omar', 'subject' => 'Shared round of Omar on the Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],
     ['source' => $pinInMyDraft, 'attribute' => RoundPermission::COPY_TO_OWN_DRAFT, 'actor' => 'Lena', 'subject' => 'Shared round of Omar on the Shop ticket in Testing, Mia\'s turn', 'expected' => 'denied'],

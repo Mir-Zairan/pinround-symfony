@@ -7,7 +7,6 @@ namespace App\Review\Application\Verdict;
 use App\Review\Api\Event\AreaVerdictSaved;
 use App\Review\Api\Event\PinVerdictSet;
 use App\Review\Api\Event\PinVerdictUndone;
-use App\Review\Api\Event\ScreenshotVerdictSaved;
 use App\Review\Api\VerdictCommands;
 use App\Review\Api\VerdictRefused;
 use App\Review\Application\ReviewEvents;
@@ -15,14 +14,11 @@ use App\Review\Domain\Area;
 use App\Review\Domain\AreaId;
 use App\Review\Domain\Areas;
 use App\Review\Domain\AreaVerdict;
-use App\Review\Domain\DraftScreenshotVerdict;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinToCheck;
 use App\Review\Domain\PinVerdict;
 use App\Review\Domain\ReviewedRound;
 use App\Review\Domain\RoundId;
-use App\Review\Domain\RoundKind;
-use App\Review\Domain\ScreenshotId;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\UserId;
 
@@ -88,7 +84,12 @@ final readonly class UseCaseVerdictCommands implements VerdictCommands
         $organizationId = $this->tenantContext->require();
         $round = $this->lockOpenRound($roundId);
         $area = $this->areaOf($round, $areaId);
-        $areaVerdict = self::areaVerdictOf($verdict);
+        $areaVerdict = match ($verdict) {
+            self::AREA_PASS => AreaVerdict::Pass,
+            self::AREA_NEEDS_FIX => AreaVerdict::NeedsFix,
+            self::AREA_QUESTION => AreaVerdict::Question,
+            default => throw new VerdictRefused(VerdictRefused::PICK_A_VERDICT),
+        };
 
         try {
             $decided = $area->decide($actor, $areaVerdict, $note, $at);
@@ -107,55 +108,6 @@ final readonly class UseCaseVerdictCommands implements VerdictCommands
             $actor->toString(),
             $at,
         ));
-    }
-
-    public function saveScreenshotVerdict(string $roundId, string $screenshotId, UserId $actor, ?string $verdict, ?string $note, \DateTimeImmutable $at): void
-    {
-        $organizationId = $this->tenantContext->require();
-        $round = $this->lockOpenRound($roundId);
-        if (RoundKind::Draft !== $round->kind) {
-            // A review round's screenshots are its areas', which take saveAreaVerdict.
-            throw new VerdictRefused(VerdictRefused::SCREENSHOT_NOT_FOUND);
-        }
-        try {
-            $id = new ScreenshotId($screenshotId);
-        } catch (\InvalidArgumentException) {
-            throw new VerdictRefused(VerdictRefused::SCREENSHOT_NOT_FOUND);
-        }
-        if (!$this->areas->isShownScreenshotOf($round->id, $id)) {
-            throw new VerdictRefused(VerdictRefused::SCREENSHOT_NOT_FOUND);
-        }
-
-        try {
-            $decided = DraftScreenshotVerdict::decide($round->id, $id, $actor, self::areaVerdictOf($verdict), $note, $at);
-        } catch (\DomainException|\InvalidArgumentException $refused) {
-            throw new VerdictRefused($refused->getMessage(), 0, $refused);
-        }
-        $this->areas->saveScreenshotVerdict($decided);
-
-        $this->reviewEvents->publish(new ScreenshotVerdictSaved(
-            $organizationId->toString(),
-            $round->ticketId->toString(),
-            $round->id->toString(),
-            $id->toString(),
-            $decided->verdict->value,
-            null !== $decided->note,
-            $actor->toString(),
-            $at,
-        ));
-    }
-
-    /**
-     * @throws VerdictRefused PICK_A_VERDICT for no verdict or one that is not an area verdict
-     */
-    private static function areaVerdictOf(?string $verdict): AreaVerdict
-    {
-        return match ($verdict) {
-            self::AREA_PASS => AreaVerdict::Pass,
-            self::AREA_NEEDS_FIX => AreaVerdict::NeedsFix,
-            self::AREA_QUESTION => AreaVerdict::Question,
-            default => throw new VerdictRefused(VerdictRefused::PICK_A_VERDICT),
-        };
     }
 
     /**

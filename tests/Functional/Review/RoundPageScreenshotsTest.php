@@ -59,8 +59,9 @@ final class RoundPageScreenshotsTest extends WebTestCase
      * screenshots and their pins; ADR-0048, amended 2026-11-21) raised it from 28. The tab row has no small pictures to
      * sign, and the side panel reads the check items of the report's pins (the checklist round, then its items), which
      * raised it from 32. The one query that finds the shown picture is no copy (RoundsVisibleTo::copySourceOf,
-     * RoundPages::pairedBeforeOf) raised it from 33. The side panel's read of the shown screenshot's verdict
-     * (DraftScreenshotVerdictQueries, by its key, ADR-0048 note of 2026-11-22) raised it from 34.
+     * RoundPages::pairedBeforeOf) raised it from 33. The one read of the round's general notes (GeneralNoteQueries, ADR-0048
+     * note of 2026-11-22; the authors' names come from the ticket's page, so none here) raised it from 34; the form
+     * asks no second vote, as RoundPermission ADD_GENERAL_NOTE follows the VIEW already granted.
      */
     private const int DRAFT_PAGE_QUERIES = 35;
 

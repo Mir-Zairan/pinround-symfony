@@ -57,6 +57,9 @@
 
         {% if shown is null %}
             <twig:EmptyState message="{{ page.emptyMessage }}" />
+            {% if page.generalNotes is not null %}
+                {{ include('@Review/_round_general_notes.html.twig', {section: page.generalNotes}) }}
+            {% endif %}
             {% if moveOnForm is not null %}
                 <twig:MoveOnButtons :form="moveOnForm" :roundNumber="roundNumber" />
             {% endif %}
@@ -82,6 +85,9 @@
                         {{ include('@Review/_round_panel.html.twig', {panel: page.panel}) }}
                     {% elseif page.screenshotPanel is not null %}
                         {{ include('@Review/_round_screenshot_panel.html.twig', {panel: page.screenshotPanel}) }}
+                    {% endif %}
+                    {% if page.generalNotes is not null %}
+                        {{ include('@Review/_round_general_notes.html.twig', {section: page.generalNotes}) }}
                     {% endif %}
                     {% if moveOnForm is not null %}
                         <twig:MoveOnButtons :form="moveOnForm" :roundNumber="roundNumber" />

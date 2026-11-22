@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Review\Api;
 
 /**
- * The voter attributes for rounds (ADR-0013, ADR-0017); RoundVoter decides VIEW, EDIT, MOVE_TO_REPORT_DRAFT and
- * COPY_TO_OWN_DRAFT, DraftRoundCreationVoter DRAFT_CREATE.
+ * The voter attributes for rounds (ADR-0013, ADR-0017); RoundVoter decides VIEW, EDIT, MOVE_TO_REPORT_DRAFT,
+ * COPY_TO_OWN_DRAFT and ADD_GENERAL_NOTE, DraftRoundCreationVoter DRAFT_CREATE.
  *
  * A caller answers a denied VIEW, EDIT or MOVE_TO_REPORT_DRAFT with 404, the same as a round id RoundQueries::accessFactsOf does not know, so
  * another person's unshared draft cannot be told from a missing round.
@@ -40,4 +40,13 @@ final class RoundPermission
      * except the round's owner, who retakes in a draft instead. Nobody's on an unshared or deleted draft.
      */
     public const string COPY_TO_OWN_DRAFT = 'ROUND_COPY_TO_OWN_DRAFT';
+
+    /**
+     * Add a general note to a shared round (GeneralNoteCommands, ADR-0048 note of 2026-11-22); the subject is its
+     * RoundAccessFacts. Whoever may see the round and write in its ticket's thread: as ConversationPermission COMMENT,
+     * whoever TicketPermission VIEW lets see the ticket, so exactly whoever VIEW grants on a shared round, which the round
+     * page relies on to show the form without a second vote. Nobody's on an unshared or deleted draft. That the round is
+     * open and no checklist is GeneralNoteCommands' rule, checked on the locked round.
+     */
+    public const string ADD_GENERAL_NOTE = 'ROUND_ADD_GENERAL_NOTE';
 }

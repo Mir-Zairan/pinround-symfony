@@ -8,8 +8,7 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * The reviewer's verdicts in a review round (FR-RND-05): Fixed or Still wrong on each pin of the earlier round, and
- * Pass, Needs fix or Question with an optional note on each screen area; and the same Pass, Needs fix or Question with
- * a note on each screenshot of a shared draft (ADR-0048, note of 2026-11-22). No verdict moves the ticket; the round page
+ * Pass, Needs fix or Question with an optional note on each screen area. No verdict moves the ticket; the round page
  * offers the matching verb once every area has one (phase 5 design notes).
  *
  * Each method runs in the caller's open transaction under the actor's organization as tenant, locks the round first,
@@ -55,19 +54,4 @@ interface VerdictCommands
      * @throws \LogicException when no transaction is open or no tenant is set
      */
     public function saveAreaVerdict(string $roundId, string $areaId, UserId $actor, ?string $verdict, ?string $note, \DateTimeImmutable $at): void;
-
-    /**
-     * Saves the verdict and note on a screenshot of a shared draft in place of any earlier one; publishes
-     * ScreenshotVerdictSaved.
-     *
-     * @param string      $screenshotId the latest try of one of the round's chains, the screenshot its page shows
-     * @param string|null $verdict      AREA_PASS, AREA_NEEDS_FIX or AREA_QUESTION; null when no chip was chosen
-     * @param string|null $note         trimmed; a blank one is none
-     *
-     * @throws VerdictRefused  NOT_FOUND or SCREENSHOT_NOT_FOUND (answer 404); PICK_A_VERDICT with no or an unknown
-     *                         verdict; otherwise the reason to show, such as a closed round, a round that is no shared
-     *                         draft or review round, or a note over 1,000 characters; nothing is saved
-     * @throws \LogicException when no transaction is open or no tenant is set
-     */
-    public function saveScreenshotVerdict(string $roundId, string $screenshotId, UserId $actor, ?string $verdict, ?string $note, \DateTimeImmutable $at): void;
 }

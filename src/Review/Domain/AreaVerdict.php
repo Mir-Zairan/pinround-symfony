@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Review\Domain;
 
 /**
- * A reviewer's verdict on one screen area of a review round, or on one screenshot of a shared draft
- * (DraftScreenshotVerdict). None of them moves the ticket (phase 5 design notes).
+ * A reviewer's verdict on one screen area of a review round, and the optional one of a general note on a shared
+ * round (GeneralNote). None of them moves the ticket (phase 5 design notes).
  */
 enum AreaVerdict: string
 {

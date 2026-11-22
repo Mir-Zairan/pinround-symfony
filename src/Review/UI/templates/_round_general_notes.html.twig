@@ -1,0 +1,42 @@
+{#- "General notes on this round" (GeneralNotesSection, ADR-0048 note of 2026-11-22): the round's notes, newest first,
+    and the form to add one. GeneralNoteController comes back to this section (its id as fragment, which fragment-focus
+    focuses); a refused Turbo form gets only a toast, so the typed note stays. -#}
+{% set controller = 'App\\Review\\UI\\Controller\\GeneralNoteController' %}
+<section class="round-panel__section round-general-notes" id="{{ constant(controller ~ '::SECTION_ID') }}" tabindex="-1" data-controller="fragment-focus" aria-labelledby="round-general-notes-title">
+    <h2 id="round-general-notes-title" class="round-panel__title">General notes on this round</h2>
+    {% if section.notes is empty %}
+        <p class="round-panel__empty">No general notes yet.</p>
+    {% else %}
+        <ul class="round-general-notes__list">
+            {% for note in section.notes %}
+                <li class="round-general-notes__item">
+                    <p class="round-general-notes__meta">
+                        <span class="round-general-notes__author">{{ note.authorName ?? 'Someone' }}</span>
+                        {% if note.verdictLabel is not null %}<twig:Tag class="round-general-notes__verdict">{{ note.verdictLabel }}</twig:Tag>{% endif %}
+                        <time class="round-general-notes__when" datetime="{{ note.createdAt|date('c') }}">{{ note.when }}</time>
+                    </p>
+                    <p class="round-general-notes__note">{{ note.note }}</p>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    {% if section.mayAddNote %}
+        {% set verdictField = constant(controller ~ '::VERDICT_FIELD') %}
+        <form method="post" action="{{ path(constant(controller ~ '::ROUTE'), {key: ticketKey, number: roundNumber}) }}" class="round-general-notes__form">
+            <input type="hidden" name="{{ constant(controller ~ '::CSRF_FIELD') }}" value="{{ csrf_token(generalNoteCsrfId) }}">
+            <input type="hidden" name="{{ constant(controller ~ '::RETURN_SCREENSHOT_FIELD') }}" value="{{ page.shownParameters[constant('App\\Review\\UI\\Controller\\RoundController::SCREENSHOT_PARAMETER')] ?? '' }}">
+            <fieldset class="round-panel__choices">
+                <legend class="visually-hidden">Verdict for the whole round (optional)</legend>
+                {% for value, choiceLabel in constant('App\\Review\\UI\\RoundPage\\RoundPages::AREA_VERDICT_LABELS') %}
+                    <label class="chip round-panel__choice">
+                        <input type="radio" name="{{ verdictField }}" value="{{ value }}">
+                        {{ choiceLabel }}
+                    </label>
+                {% endfor %}
+            </fieldset>
+            <label class="round-panel__label" for="round-general-note">Add a note for the whole round</label>
+            <textarea id="round-general-note" class="text-field round-panel__note-field" name="{{ constant(controller ~ '::NOTE_FIELD') }}" placeholder="Something the screenshots don't show, or a change for the whole round" maxlength="{{ constant(controller ~ '::NOTE_MAX_LENGTH') }}" rows="3" required></textarea>
+            <twig:Button type="submit" class="round-panel__save">Add note</twig:Button>
+        </form>
+    {% endif %}
+</section>

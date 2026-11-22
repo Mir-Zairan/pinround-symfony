@@ -11,18 +11,20 @@ namespace App\Review\UI\RoundPage;
 final readonly class RoundPage
 {
     /**
-     * @param string               $title            for example "Round 2"
-     * @param string               $detail           the header's muted rest after the title, for example "shot today, 09:12 · Ready for Mia"
-     * @param string               $tabsLabel        the tab row's accessible name: "Screen areas" or "Screenshots"
-     * @param list<ScreenshotTab>  $tabs             in order; none for a round with nothing to show. The page shows the
-     *                                               row only with two or more
-     * @param ScreenshotPager|null $pager            null exactly when $tabs is empty
-     * @param ShownScreenshot|null $shown            null exactly when $tabs is empty
-     * @param RoundPanel|null      $panel            the shown screen area's; null for a round without areas
-     * @param ScreenshotPanel|null $screenshotPanel  the shown screenshot's, for a round without areas; null otherwise
-     * @param string|null          $verdictGiverName the first name of whoever else the open round is ready for, who
-     *                                               gives its verdict; null when it is the viewer or nobody is named
-     * @param string               $emptyMessage     what the page says when $tabs is empty
+     * @param string                   $title            for example "Round 2"
+     * @param string                   $detail           the header's muted rest after the title, for example "shot today, 09:12 · Ready for Mia"
+     * @param string                   $tabsLabel        the tab row's accessible name: "Screen areas" or "Screenshots"
+     * @param list<ScreenshotTab>      $tabs             in order; none for a round with nothing to show. The page shows the
+     *                                                   row only with two or more
+     * @param ScreenshotPager|null     $pager            null exactly when $tabs is empty
+     * @param ShownScreenshot|null     $shown            null exactly when $tabs is empty
+     * @param RoundPanel|null          $panel            the shown screen area's; null for a round without areas
+     * @param ScreenshotPanel|null     $screenshotPanel  the shown screenshot's, for a round without areas; null otherwise
+     * @param string|null              $verdictGiverName the first name of whoever else the open round is ready for, who
+     *                                                   gives its verdict; null when it is the viewer or nobody is named
+     * @param string                   $emptyMessage     what the page says when $tabs is empty
+     * @param GeneralNotesSection|null $generalNotes     "General notes on this round", for a shared round without areas;
+     *                                                   null otherwise
      */
     public function __construct(
         public string $ticketKey,
@@ -37,6 +39,7 @@ final readonly class RoundPage
         public ?ScreenshotPanel $screenshotPanel,
         public ?string $verdictGiverName,
         public string $emptyMessage,
+        public ?GeneralNotesSection $generalNotes = null,
     ) {
     }
 

@@ -1411,14 +1411,60 @@ button.round-tab {
   margin: 0;
 }
 
-.round-panel__section:has(#round-panel-verdict),
-.round-panel__section--verdict {
+.round-panel__section:has(#round-panel-verdict) {
   padding: 18px;
   border-radius: var(--radius-card);
   background: var(--s-c);
 }
 
 .round-panel__verdict-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: var(--space-12) 0 0;
+}
+
+/* "General notes on this round" (_round_general_notes.html.twig), under the side panel's pin lists. */
+.round-general-notes {
+  padding: 18px;
+  border-radius: var(--radius-card);
+  background: var(--s-c);
+}
+
+.round-general-notes__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.round-general-notes__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.round-general-notes__author {
+  font-weight: 600;
+}
+
+.round-general-notes__when {
+  color: var(--on-surface-var);
+  font-size: 14px;
+}
+
+.round-general-notes__note {
+  margin: var(--space-4) 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.round-general-notes__form {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
