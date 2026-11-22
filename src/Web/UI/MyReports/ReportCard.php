@@ -20,6 +20,10 @@ final readonly class ReportCard
      * @param string      $nowText         what happens now, for example "Omar builds it"
      * @param bool        $isAnswerOffered whether the card offers "Answer" (Needs you)
      * @param string|null $pinProgressText for example "1 of 2 pins OK"; null when the ticket has no checklist
+     * @param string|null $pingFirstName   the first name of the person whose turn it is, whom the card offers to ping
+     *                                     ("Ping Omar") on a Stuck or Moving report; null on a Needs you or done
+     *                                     report, or when it is the viewer's turn, a label's, nobody's, or the person
+     *                                     left
      */
     public function __construct(
         public string $key,
@@ -33,6 +37,7 @@ final readonly class ReportCard
         public string $nowText,
         public bool $isAnswerOffered,
         public ?string $pinProgressText,
+        public ?string $pingFirstName,
     ) {
     }
 }

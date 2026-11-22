@@ -88,16 +88,36 @@ final class ReportCardsTest extends TestCase
         self::assertSame([self::ticketIdOf(1), self::ticketIdOf(2), self::ticketIdOf(3), self::ticketIdOf(4), self::ticketIdOf(5), self::ticketIdOf(6)], array_keys($cards));
         self::assertSame(
             [
-                ['SHOP-1', 'Ticket 1', '/t/SHOP-1', 'changed recently', false, ReportStage::Building, false, 'Omar Haddad', 'Omar builds it', false],
-                ['SHOP-2', 'Ticket 2', '/t/SHOP-2', 'updated 1 Oct', false, ReportStage::Building, true, 'Mia Lund', 'A question waits for your answer', true],
-                ['SHOP-3', 'Ticket 3', '/t/SHOP-3', 'no change for 17 days', true, ReportStage::Building, true, null, 'Waiting on Customer', false],
-                ['SHOP-4', 'Ticket 4', '/t/SHOP-4', 'changed recently', false, ReportStage::Done, false, null, 'Done', false],
-                ['SHOP-5', 'Ticket 5', '/t/SHOP-5', 'updated 1 Nov', false, ReportStage::Checking, false, null, 'Someone tests it', false],
-                ['SHOP-6', 'Ticket 6', '/t/SHOP-6', 'changed recently', false, ReportStage::Reported, true, 'Omar Haddad', 'Omar answers the question', false],
+                ['SHOP-1', 'Ticket 1', '/t/SHOP-1', 'changed recently', false, ReportStage::Building, false, 'Omar Haddad', 'Omar builds it', false, 'Omar'],
+                ['SHOP-2', 'Ticket 2', '/t/SHOP-2', 'updated 1 Oct', false, ReportStage::Building, true, 'Mia Lund', 'A question waits for your answer', true, null],
+                ['SHOP-3', 'Ticket 3', '/t/SHOP-3', 'no change for 17 days', true, ReportStage::Building, true, null, 'Waiting on Customer', false, null],
+                ['SHOP-4', 'Ticket 4', '/t/SHOP-4', 'changed recently', false, ReportStage::Done, false, null, 'Done', false, null],
+                ['SHOP-5', 'Ticket 5', '/t/SHOP-5', 'updated 1 Nov', false, ReportStage::Checking, false, null, 'Someone tests it', false, null],
+                ['SHOP-6', 'Ticket 6', '/t/SHOP-6', 'changed recently', false, ReportStage::Reported, true, 'Omar Haddad', 'Omar answers the question', false, 'Omar'],
             ],
             array_values(array_map(static fn (ReportCard $card): array => [
-                $card->key, $card->title, $card->url, $card->sideText, $card->isStuck, $card->stage, $card->isWaiting, $card->avatarName, $card->nowText, $card->isAnswerOffered,
+                $card->key, $card->title, $card->url, $card->sideText, $card->isStuck, $card->stage, $card->isWaiting, $card->avatarName, $card->nowText, $card->isAnswerOffered, $card->pingFirstName,
             ], $cards)),
+        );
+    }
+
+    /**
+     * Omar's stuck build offers "Ping Omar"; Mia's own build, Stuck or Moving, offers no ping, as nobody pings themselves.
+     */
+    #[Test]
+    public function aStuckOrMovingReportOffersToPingTheTurnPersonUnlessItIsTheViewer(): void
+    {
+        $reports = [
+            self::report(1, self::DOING_STEP, '2026-10-01 09:00:00', turn: [self::OMAR, 'build']),
+            self::report(2, self::DOING_STEP, '2026-10-01 09:00:00', turn: [self::MIA, 'build']),
+            self::report(3, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'build']),
+        ];
+
+        $cards = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $reports, new \DateTimeImmutable(self::NOW));
+
+        self::assertSame(
+            [[true, 'Omar'], [true, null], [false, null]],
+            array_values(array_map(static fn (ReportCard $card): array => [$card->isStuck, $card->pingFirstName], $cards)),
         );
     }
 

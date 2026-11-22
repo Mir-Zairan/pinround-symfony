@@ -1,14 +1,27 @@
 /* My reports (src/Web/UI/templates/my_reports/show.html.twig, my-reports.md): the groups of report cards. */
 
+/* One centred column, as in the prototype. */
 .my-reports {
   display: flex;
   flex-direction: column;
   gap: 28px;
-  max-width: 880px;
+  width: 100%;
+  max-width: 930px;
+  margin-inline: auto;
 }
 
+/* The heading and intro on the left, Report a problem at the right, under them on a narrow screen. */
 .my-reports__header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.my-reports__heading {
+  display: flex;
+  flex: 1 1 300px;
   flex-direction: column;
   gap: 6px;
 }
@@ -158,8 +171,23 @@
 
 .my-reports__actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-left: auto;
+}
+
+/* The menu's items are links to the ticket page, styled as the menu's buttons. */
+.my-reports__menu .menu__item {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.my-reports__menu-trigger {
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .my-reports__more > summary,

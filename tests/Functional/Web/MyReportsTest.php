@@ -287,16 +287,18 @@ final class MyReportsTest extends WebTestCase
     }
 
     /**
-     * Only SHOP-1's question waits on Mia; SHOP-2's waits on Lena, and the stuck and done reports offer nothing yet
-     * (Ping and the menu are P07.T7).
+     * Only SHOP-1's question waits on Mia, so only it offers Answer. SHOP-3 is stuck on Omar and SHOP-2 moving with
+     * Lena, so they offer to ping them (tonal when stuck); SHOP-4 is done and SHOP-5 waits on Mia's own build, so they
+     * offer no ping. Every card has the "⋯" menu. Cards in page order: Needs you, Stuck, Moving, then Done.
      */
     #[Test]
-    public function onlyAReportThatNeedsTheViewerOffersAnswerAndNoCardHasMoreThanTwoButtons(): void
+    public function aCardOffersAnswerOrPingAndTheMenuAndNoMoreThanTwoButtons(): void
     {
         $this->addReport('Mia', 'SHOP-1', '2026-09-01 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'answer']);
         $this->addReport('Mia', 'SHOP-2', '2026-09-02 09:00:00', '2026-11-05 09:00:00', turn: ['Lena', 'answer']);
         $this->addReport('Mia', 'SHOP-3', '2026-09-03 09:00:00', '2026-10-01 09:00:00', turn: ['Omar', 'build']);
         $this->addReport('Mia', 'SHOP-4', '2026-09-04 09:00:00', '2026-11-05 09:00:00', closedAt: '2026-11-05 09:00:00');
+        $this->addReport('Mia', 'SHOP-5', '2026-09-05 09:00:00', '2026-11-05 09:00:00', turn: ['Mia', 'build']);
         $this->logIn($this->client, $this->people['Mia']);
 
         $page = $this->client->request('GET', self::MY_REPORTS);
@@ -306,10 +308,26 @@ final class MyReportsTest extends WebTestCase
         self::assertSame(['Answer on SHOP-1 → /t/SHOP-1'], $answers->each(static fn (Crawler $answer): string => $answer->text().' → '.$answer->attr('href')));
         self::assertSame(' on SHOP-1', $answers->filter('.visually-hidden')->text(normalizeWhitespace: false));
         self::assertCount(1, $page->filter('.my-reports__group--needs_you a.my-reports__answer'));
+        self::assertSame(
+            ['Ping Omar about SHOP-3 → /t/SHOP-3#ticket-people-heading · btn btn-tonal btn-sm my-reports__ping', 'Ping Lena about SHOP-2 → /t/SHOP-2#ticket-people-heading · btn btn-text btn-sm my-reports__ping'],
+            $page->filter('a.my-reports__ping')->each(static fn (Crawler $ping): string => $ping->text().' → '.$ping->attr('href').' · '.$ping->attr('class')),
+        );
+        self::assertSame(
+            ['SHOP-1', 'SHOP-3', 'SHOP-5', 'SHOP-2', 'SHOP-4'],
+            $page->filter('.my-reports__card')->each(static fn (Crawler $card): string => $card->filter('.my-reports__key')->text()),
+        );
         $buttonCounts = $page->filter('.my-reports__card')->each(static fn (Crawler $card): int => $card->filter('.btn, button')->count());
-        self::assertCount(4, $buttonCounts);
-        self::assertSame([1, 0, 0, 0], $buttonCounts);
-        self::assertLessThanOrEqual(2, max($buttonCounts));
+        self::assertSame([2, 2, 1, 2, 1], $buttonCounts);
+        $menus = $page->filter('.my-reports__card .my-reports__menu');
+        self::assertCount(5, $menus);
+        $stuckMenu = $menus->eq(1);
+        self::assertSame('More for SHOP-3', $stuckMenu->filter('button[aria-haspopup="menu"]')->attr('aria-label'));
+        self::assertSame('my-reports-menu-SHOP-3', $stuckMenu->filter('button[aria-haspopup="menu"]')->attr('aria-controls'));
+        self::assertSame(
+            ['Open ticket → /t/SHOP-3', 'Add more info → /t/SHOP-3#thread-composer-body'],
+            $stuckMenu->filter('#my-reports-menu-SHOP-3[role="menu"][hidden] a[role="menuitem"]')->each(static fn (Crawler $item): string => $item->text().' → '.$item->attr('href')),
+        );
+        self::assertSame(['Report a problem → /report'], $page->filter('.my-reports__header a.my-reports__report')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')));
     }
 
     #[Test]
@@ -324,7 +342,7 @@ final class MyReportsTest extends WebTestCase
         self::assertSame('When you report a problem, you can follow it here until it is fixed.', $page->filter('main .empty-state > p')->text());
         $reportAProblem = $page->filter('main .empty-state a.btn');
         self::assertSame(['Report a problem → /report'], $reportAProblem->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')));
-        self::assertCount(0, $page->filter('.my-reports__group, .my-reports__pages, .my-reports__key, .my-reports__intro'));
+        self::assertCount(0, $page->filter('.my-reports__group, .my-reports__pages, .my-reports__key, .my-reports__intro, .my-reports__header .my-reports__report'));
     }
 
     /**

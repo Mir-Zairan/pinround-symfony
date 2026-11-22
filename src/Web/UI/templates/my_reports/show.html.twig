@@ -6,8 +6,9 @@
     <link rel="stylesheet" href="{{ asset('styles/my-reports.css') }}">
 {% endblock %}
 
-{#- The cards of ReportCards (my-reports.md, Card). At most two buttons a card; Answer is the only one until P07.T7
-    adds Ping and the "⋯" menu. -#}
+{#- The cards of ReportCards (my-reports.md, Card). At most two buttons a card: Answer or "Ping <name>", and the "⋯"
+    menu. Ping opens the ticket at its People, whose Ping button sends it under the ticket's own rules; the menu holds
+    only what the ticket page already does. -#}
 {% macro cards(cards, stageLabels) %}
     {# No hover prefetch: each link would cost a ticket page's queries. #}
     <ul class="my-reports__rows" data-turbo-prefetch="false">
@@ -26,11 +27,23 @@
                     {% if card.avatarName is not null %}<twig:Avatar name="{{ card.avatarName }}" class="my-reports__avatar" />{% endif %}
                     <p class="my-reports__now">{{ card.nowText }}</p>
                     {% if card.pinProgressText is not null %}<span class="my-reports__pins">{{ card.pinProgressText }}</span>{% endif %}
-                    {% if card.isAnswerOffered %}
-                        <div class="my-reports__actions">
+                    {%- set menuId = 'my-reports-menu-' ~ card.key -%}
+                    <div class="my-reports__actions">
+                        {% if card.isAnswerOffered %}
                             <twig:Button size="sm" href="{{ card.url }}" class="my-reports__answer">Answer<span class="visually-hidden"> on {{ card.key }}</span></twig:Button>
+                        {% elseif card.pingFirstName is not null %}
+                            <twig:Button variant="{{ card.isStuck ? 'tonal' : 'text' }}" size="sm" href="{{ card.url }}#ticket-people-heading" class="my-reports__ping">Ping {{ card.pingFirstName }}<span class="visually-hidden"> about {{ card.key }}</span></twig:Button>
+                        {% endif %}
+                        <div class="menu my-reports__menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">
+                            <button type="button" class="icon-btn my-reports__menu-trigger" aria-label="More for {{ card.key }}" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ menuId }}"
+                                {{ stimulus_target('menu', 'trigger') }} data-action="menu#toggle keydown->menu#triggerKey click@window->menu#closeOnOutsideClick">⋯</button>
+                            <div id="{{ menuId }}" class="menu__list" role="menu" aria-label="More for {{ card.key }}" hidden
+                                {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#navigate click->menu#closeOnSelect">
+                                <a class="menu__item" role="menuitem" tabindex="-1" href="{{ card.url }}" {{ stimulus_target('menu', 'item') }}>Open ticket</a>
+                                <a class="menu__item" role="menuitem" tabindex="-1" href="{{ card.url }}#thread-composer-body" {{ stimulus_target('menu', 'item') }}>Add more info</a>
+                            </div>
                         </div>
-                    {% endif %}
+                    </div>
                 </div>
             </li>
         {% endfor %}
@@ -42,16 +55,22 @@
     {%- set hints = {needs_you: 'Someone waits for your answer', stuck: 'No change for more than 7 days. A ping can help.', moving: 'Nothing to do. Just follow along.'} -%}
     <div class="my-reports">
         <header class="my-reports__header">
-            <h1>My reports</h1>
-            {% if totals is not null %}
-                <p class="my-reports__intro">
-                    {{- totals.reportCount|number_format }} {{ totals.reportCount == 1 ? 'ticket' : 'tickets' }} you reported.
-                    {% if totals.needsYouCount > 0 -%}
-                        {{ totals.needsYouCount|number_format }} {{ totals.needsYouCount == 1 ? 'needs' : 'need' }} your answer.
-                    {%- else -%}
-                        None needs you right now.
-                    {%- endif -%}
-                </p>
+            <div class="my-reports__heading">
+                <h1>My reports</h1>
+                {% if totals is not null %}
+                    <p class="my-reports__intro">
+                        {{- totals.reportCount|number_format }} {{ totals.reportCount == 1 ? 'ticket' : 'tickets' }} you reported.
+                        {% if totals.needsYouCount > 0 -%}
+                            {{ totals.needsYouCount|number_format }} {{ totals.needsYouCount == 1 ? 'needs' : 'need' }} your answer.
+                        {%- else -%}
+                            None needs you right now.
+                        {%- endif -%}
+                    </p>
+                {% endif %}
+            </div>
+            {#- The empty state has its own Report a problem button. -#}
+            {% if hasReports %}
+                <twig:Button href="{{ path('ticketing_report') }}" class="my-reports__report">Report a problem</twig:Button>
             {% endif %}
         </header>
 
