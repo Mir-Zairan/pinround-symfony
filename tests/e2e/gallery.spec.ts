@@ -28,6 +28,13 @@ for (const scheme of ['light', 'dark'] as const) {
     test(`looks the same as the ${scheme} baseline`, async ({ page }) => {
       test.skip(!!process.env.CI, 'Baselines come from a developer machine and CI fonts render differently; run make e2e locally.');
       await openGallery(page, scheme);
+      // The demo banner shows only on a dev stack with PINROUND_DEMO_SKIP_2FA on (ADR-0049) and pushes the whole page
+      // down; the baseline has none, as in shell.spec.ts.
+      await page.locator('.demo-mode-banner').evaluateAll((banners) => {
+        for (const banner of banners) {
+          banner.remove();
+        }
+      });
       await expect(page).toHaveScreenshot(`gallery-${scheme}.png`, { fullPage: true });
     });
   });
