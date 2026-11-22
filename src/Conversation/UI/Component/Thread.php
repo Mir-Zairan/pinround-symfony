@@ -54,6 +54,8 @@ final class Thread
     public const string COMMENT_PLACEHOLDER = 'Write a comment';
     public const string COMMENT_NOTE = 'A comment does not change the status and sends no notification.';
     public const string COMMENT_BUTTON = 'Comment';
+    /** The toast when My reports' "Add more info" opens the ticket on the composer (thread-composer's ?write=comment). */
+    public const string WRITE_INFO_TOAST = 'Write your info in the comment box.';
     public const string ASK_PLACEHOLDER = 'What do you need to know?';
     /** With the first name of the person asked. */
     public const string ASK_NOTE = 'A question pauses the ticket until %s answers. They get one notification.';

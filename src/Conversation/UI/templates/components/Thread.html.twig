@@ -18,7 +18,7 @@
     {% endif %}
 {% endset %}
 {% if not isListOnly %}
-<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer')|stimulus_controller('ask-choices', {mayAsk: mayAsk}) }} data-action="turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer">
+<div{{ attributes.defaults({class: 'thread__content'}) }} {{ stimulus_controller('thread-composer', {writeToast: constant('App\\Conversation\\UI\\Component\\Thread::WRITE_INFO_TOAST')})|stimulus_controller('ask-choices', {mayAsk: mayAsk}) }} data-action="turbo:submit-start->thread-composer#rememberMessage turbo:submit-end->thread-composer#settleComposer">
 {% endif %}
 {#- The permanent composer is not rendered again by a Turbo Stream or a live reload, so the list carries whether a question is open, which turns the composer's Ask a question off, and whom the viewer may ask now, which ask-choices copies into the composer. -#}
 <div id="{{ constant('App\\Conversation\\UI\\Component\\Thread::MESSAGES_ID') }}" class="thread__list" {{ stimulus_target('thread-composer', 'messages')|stimulus_target('ask-choices', 'messages') }} data-has-open-question="{{ hasOpenQuestion ? 'true' : 'false' }}" data-ask-choices="{{ askChoices|escape('html_attr') }}">

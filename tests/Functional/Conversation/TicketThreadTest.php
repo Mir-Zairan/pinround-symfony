@@ -193,6 +193,11 @@ final class TicketThreadTest extends WebTestCase
         self::assertSame(Thread::COMMENT_NOTE, $composer->filter('.thread__composer-note')->text());
         self::assertSame(Thread::COMMENT_BUTTON, trim($composer->filter('button.thread__composer-send')->text()));
         self::assertSame('submit', $composer->filter('button.thread__composer-send')->attr('type'));
+        self::assertSame(
+            'Write your info in the comment box.',
+            $page->filter('turbo-frame#'.Thread::FRAME_ID.' [data-controller~="thread-composer"]')->attr('data-thread-composer-write-toast-value'),
+            'The toast thread-composer shows when My reports\' "Add more info" opens the ticket with ?write=comment.',
+        );
     }
 
     /**

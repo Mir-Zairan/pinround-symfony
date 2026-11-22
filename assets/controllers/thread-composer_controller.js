@@ -1,4 +1,5 @@
 import { Controller } from '@hotwired/stimulus';
+import { showToast } from '../toast_region.js';
 
 // The ticket thread: keeps the composer's button disabled while the text is empty or only spaces (the button starts
 // enabled in the HTML and the field is `required`, so the form still works without JavaScript), and puts focus back
@@ -11,12 +12,36 @@ import { Controller } from '@hotwired/stimulus';
 // changes its header. ask-choices, on the same element, keeps Ask a question and the people in step with the list.
 // The review round page's "Ask <lead>" link opens the thread page with ?ask=<user id> (Review's RoundPanel::ASK_PARAMETER).
 const ASK_PARAMETER = 'ask';
+// My reports' "Add more info" opens the ticket page with ?write=comment#ticket-thread (Web's my_reports/show.html.twig).
+const WRITE_PARAMETER = 'write';
+const WRITE_COMMENT = 'comment';
 
 export default class extends Controller {
   static targets = ['body', 'submit', 'messages', 'label', 'note', 'commentChip', 'askChip', 'people', 'person', 'askedUser'];
+  static values = { writeToast: String };
 
   connect() {
     this.askThePersonInTheAddress();
+    this.writeTheCommentInTheAddress();
+  }
+
+  // The composer takes focus as a comment and the toast says where to write. The parameter leaves the address, so a
+  // reconnect after a live refresh or a post neither takes focus again nor repeats the toast.
+  writeTheCommentInTheAddress() {
+    const address = new URL(window.location.href);
+    if (address.searchParams.get(WRITE_PARAMETER) !== WRITE_COMMENT) {
+      return;
+    }
+    address.searchParams.delete(WRITE_PARAMETER);
+    window.history.replaceState(window.history.state, '', address);
+    if (!this.hasBodyTarget) {
+      return;
+    }
+    if (this.hasCommentChipTarget) {
+      this.writeComment();
+    }
+    this.focusBodyOnceLoaded();
+    showToast(this.writeToastValue);
   }
 
   // Starts a question to the person the address names, while they may be asked; otherwise the composer stays a comment.

@@ -46,7 +46,7 @@
                             <div id="{{ menuId }}" class="menu__list" role="menu" aria-label="More for {{ card.key }}" hidden
                                 {{ stimulus_target('menu', 'list') }} data-action="keydown->menu#navigate click->menu#closeOnSelect">
                                 <a class="menu__item" role="menuitem" tabindex="-1" href="{{ card.url }}" {{ stimulus_target('menu', 'item') }}>Open ticket</a>
-                                <a class="menu__item" role="menuitem" tabindex="-1" href="{{ card.url }}#thread-composer-body" {{ stimulus_target('menu', 'item') }}>Add more info</a>
+                                <a class="menu__item" role="menuitem" tabindex="-1" href="{{ card.url }}?write=comment#ticket-thread" {{ stimulus_target('menu', 'item') }}>Add more info</a>
                             </div>
                         </div>
                     </div>

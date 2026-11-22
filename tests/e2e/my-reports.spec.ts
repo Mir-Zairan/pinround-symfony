@@ -82,6 +82,21 @@ test('Ping on a card opens the ping sheet on My reports, sends from there and le
   await expect(ping, 'the pinged state takes the button\'s place').toBeHidden();
 });
 
+test('Add more info opens the ticket on its comment box, focused, with the toast saying where to write', async ({ browser, page }) => {
+  const key = await makeTicketForOmar(browser, `Gift card total rounds down ${randomUUID().slice(0, 8)}`);
+  await openMyReports(page);
+  const card = page.locator('.my-reports__card').filter({ has: page.locator(`a.my-reports__link[href="/t/${key}"]`) });
+
+  await card.getByRole('button', { name: `More for ${key}` }).click();
+  await card.getByRole('menuitem', { name: 'Add more info' }).click();
+
+  const composer = page.locator('turbo-frame#ticket-thread #thread-composer-body');
+  await expect(composer).toBeFocused();
+  await expect(page.locator('#toast-region')).toHaveText('Write your info in the comment box.');
+  await expect(page.getByRole('group', { name: 'What to write' }).getByRole('button', { name: 'Comment' })).toHaveAttribute('aria-pressed', 'true');
+  expect(new URL(page.url()).search, 'the parameter leaves the address, so a reload does not repeat it').toBe('');
+});
+
 test('no card shows more than two buttons, and Answer names its ticket', async ({ page }) => {
   await openMyReports(page);
 

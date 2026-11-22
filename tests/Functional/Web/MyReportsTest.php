@@ -337,7 +337,7 @@ final class MyReportsTest extends WebTestCase
         self::assertSame('More for SHOP-3', $stuckMenu->filter('button[aria-haspopup="menu"]')->attr('aria-label'));
         self::assertSame('my-reports-menu-SHOP-3', $stuckMenu->filter('button[aria-haspopup="menu"]')->attr('aria-controls'));
         self::assertSame(
-            ['Open ticket → /t/SHOP-3', 'Add more info → /t/SHOP-3#thread-composer-body'],
+            ['Open ticket → /t/SHOP-3', 'Add more info → /t/SHOP-3?write=comment#ticket-thread'],
             $stuckMenu->filter('#my-reports-menu-SHOP-3[role="menu"][hidden] a[role="menuitem"]')->each(static fn (Crawler $item): string => $item->text().' → '.$item->attr('href')),
         );
         self::assertSame(['Report a problem → /report'], $page->filter('.my-reports__header a.my-reports__report')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')));
