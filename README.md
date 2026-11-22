@@ -62,7 +62,7 @@ Report a bug in the bundled shop, fix it with Claude Code and hand it over, as t
 
 **Before you start** (after `make demo`, about 5 minutes; you also need Node 20+, Chrome and [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)). Or run `claude` in this folder and type `/pinround-setup`: it does the machine steps and stops only for what you must click.
 1. **The shop:** `make demo-shop`, then open http://localhost:8090.
-2. **The extension:** in Chrome open `chrome://extensions`, turn on **Developer mode**, **Load unpacked** › pick `extension/`. In its options, **Connect to pinround** with `https://localhost`, log in as Mia, **Allow**. Under **Allowed hosts**, add `http://localhost:8090`.
+2. **The extension:** use the Chrome profile where you accepted the certificate warning on https://localhost (the extension's uploads to https://localhost:9443 rely on it). Open `chrome://extensions`, turn on **Developer mode**, **Load unpacked** › pick `extension/`. In its options, **Connect to pinround** with `https://localhost`, log in as Mia, **Allow**. Under **Allowed hosts**, add `http://localhost:8090`.
 3. **Claude Code** (for the AI steps): it signs in, no token needed.
    ```bash
    cd demo-shop
@@ -133,7 +133,7 @@ On the laptop only **Summarize with AI** runs for now. Its answer is a proposal;
 - **Launch hardening:** load tests, security and accessibility audits, backups (P12).
 
 ## Good to know
-- **Sample data:** setup adds about 40 sample `SHOP` tickets in every step, so each page has something to show. Your own report gets the next number.
+- **Sample data:** setup adds about 40 sample `SHOP` tickets in every step, each with a one-line description in the shop's words but no screenshots, so lists, filters and **Whose turn?** have something to show. Omar and Lena are their assignees, so Mia's **Assigned to: Me** is empty: her turns are under **Whose turn?**. Your own report gets the next number.
 - **Three tickets that show the loop:** setup also adds three `SHOP` bugs of the demo shop with real screenshots, pins and verdicts. [What to open first](#run-it-in-5-minutes) says what each one shows.
 - **Home is mostly empty** until P07 is built. Your tickets are under **Tickets**.
 - **Start or stop later:** `make up` / `make down`. A port is taken? Set another in `.env.local`, for example `HTTPS_PORT=8443`.

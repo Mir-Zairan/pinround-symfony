@@ -391,7 +391,8 @@ final class DemoSeedCommandTest extends KernelTestCase
         $this->startWithPassword(self::PASSWORD);
         $this->runSeed();
         $acmeFoods = $this->organizationIdOf('sara@acme-foods.example');
-        $seeded = "(t.description = 'Seeded for the demo.' OR t.title = :long_ask)";
+        $seeded = 't.title = ANY(CAST(:titles AS text[]))';
+        $titles = '{'.implode(',', array_map(static fn (string $title): string => '"'.str_replace('"', '\\"', $title).'"', SeedDemoTickets::titles())).'}';
 
         [$ages, $named, $turns] = $this->underTenant($acmeFoods, fn (): array => [
             $this->connection()->fetchAssociative(
@@ -399,17 +400,17 @@ final class DemoSeedCommandTest extends KernelTestCase
                  count(*) FILTER (WHERE t.created_at >= t.updated_at) AS made_after_move,
                  count(*) FILTER (WHERE s.grp = 'done' AND t.closed_at IS DISTINCT FROM t.updated_at) AS done_closed_elsewhere
                  FROM tkt_ticket t JOIN wf_step s ON s.organization_id = t.organization_id AND s.id = t.step_id WHERE {$seeded}",
-                ['long_ask' => SeedDemoTickets::LONG_ASK_TITLE],
+                ['titles' => $titles],
             ),
             $this->connection()->fetchAllNumeric(
                 "SELECT t.title, to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI'), to_char(t.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI')
-                 FROM tkt_ticket t WHERE t.title IN ('Search box loses focus after typing', 'Price rounds wrong in basket') ORDER BY t.title",
+                 FROM tkt_ticket t WHERE t.title IN ('Search box loses focus after typing', 'Price rounds wrong in the cart') ORDER BY t.title",
             ),
             $this->connection()->fetchAssociative(
                 "SELECT count(*) AS turns, count(DISTINCT turn.waiting_since) AS distinct_waits,
                  count(*) FILTER (WHERE turn.waiting_since IS DISTINCT FROM t.updated_at) AS waits_not_from_the_move
                  FROM ins_ticket_turn turn JOIN tkt_ticket t ON t.organization_id = turn.organization_id AND t.id = turn.ticket_id WHERE {$seeded}",
-                ['long_ask' => SeedDemoTickets::LONG_ASK_TITLE],
+                ['titles' => $titles],
             ),
         ]);
 
@@ -422,7 +423,7 @@ final class DemoSeedCommandTest extends KernelTestCase
         self::assertSame(0, $ages['done_closed_elsewhere']);
         // Ticket 0 waits WAIT_HOURS[0] = 2 h and was made a day before; ticket 1 waits WAIT_HOURS[7] = 140 h, made two days before.
         self::assertSame([
-            ['Price rounds wrong in basket', '2027-03-07 14:00', '2027-03-09 14:00'],
+            ['Price rounds wrong in the cart', '2027-03-07 14:00', '2027-03-09 14:00'],
             ['Search box loses focus after typing', '2027-03-14 08:00', '2027-03-15 08:00'],
         ], $named);
         self::assertIsArray($turns);

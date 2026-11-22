@@ -58,51 +58,58 @@ final readonly class SeedDemoTickets implements DemoSeedStep
     /** The core steps in workflow order; ticket n goes to step n modulo their count. */
     private const array CORE_STEPS = ['backlog', 'todo', 'progress', 'review', 'test', 'input', 'hold', 'done'];
     public const string LONG_ASK_TITLE = 'Pay button does nothing on a long basket';
-    private const string SHORT_ASK = 'Seeded for the demo.';
+
+    /**
+     * @return list<string> every sample ticket's title, the long ask's included
+     */
+    public static function titles(): array
+    {
+        return [...array_column(self::TICKETS, 0), self::LONG_ASK_TITLE];
+    }
     /** How long ago a ticket last moved, in hours: from two hours to about five weeks. */
     private const array WAIT_HOURS = [2, 7, 19, 30, 50, 74, 100, 140, 190, 260, 340, 430, 530, 640, 760, 860];
-    private const array TITLES = [
-        'Search box loses focus after typing',
-        'Price rounds wrong in basket',
-        'Add a gift note to the order',
-        'Show delivery date on the product page',
-        'Checkout button stays disabled after a coupon',
-        'Let shoppers save a basket for later',
-        'Product photos load slowly on mobile',
-        'Out-of-stock items still show Add to basket',
-        'Order email says the wrong shop name',
-        'Filter by dietary label on the category page',
-        'Quantity field accepts negative numbers',
-        'Remember the chosen delivery slot',
-        'Wishlist heart icon has no label for screen readers',
-        'Receipt PDF cuts off long product names',
-        'Add a reorder button to past orders',
-        'Basket count is wrong after removing an item',
-        'Sort products by price, low to high',
-        'Postcode check rejects valid codes with a space',
-        'Promo banner overlaps the menu on small screens',
-        'Show unit price next to the pack price',
-        'Login page keeps the old error after a retry',
-        'Add organic and vegan badges to product cards',
-        'Delivery fee is missing from the order summary',
-        'Product page title is not unique',
-        'Basket drawer does not close with the Escape key',
-        'Add a store pickup option at checkout',
-        'Search ignores accents in product names',
-        'Tidy the footer links on the help pages',
-        'Reviews show in the wrong order',
-        'Free-shipping bar ignores discounts',
-        'Allow guest checkout with an email only',
-        'Stock level shows zero for pre-order items',
-        'Date picker starts on the wrong weekday',
-        'Newsletter sign-up fails on long addresses',
-        'Add allergens list to the product page',
-        'Currency symbol appears twice in the basket',
-        'Back button leaves the checkout in a broken state',
-        'Support chat button hides the Pay now button',
-        'Show how many items are left when stock is low',
-        'Refund note is missing from the order email',
-        self::LONG_ASK_TITLE,
+    /** Each sample ticket's title and one-line ask, in the shop's words; LONG_ASK_TITLE comes last. */
+    private const array TICKETS = [
+        ['Search box loses focus after typing', 'Type two letters in Search on Products: the box loses focus, so the third letter goes nowhere.'],
+        ['Price rounds wrong in the cart', 'Three Coffee beans at €8.50 show €25.49 in the cart instead of €25.50.'],
+        ['Add a gift note to the order', 'Let shoppers add a short gift note at Checkout and print it on the packing slip.'],
+        ['Show delivery date on the product page', 'Show "Arrives Thursday" under the price, from the next free delivery slot.'],
+        ['Checkout button stays disabled after a coupon', 'Apply WELCOME10, then remove it: Go to checkout stays grey until the page is reloaded.'],
+        ['Let shoppers save a cart for later', 'A "Save for later" link on each cart line moves it to a list under the cart.'],
+        ['Product photos load slowly on mobile', 'On a phone the product photos take about 4 seconds on 4G; serve smaller pictures.'],
+        ['Out-of-stock items still show Add to cart', 'Tomatoes 1 kg is out of stock but still has an Add to cart button that does nothing.'],
+        ['Order email says the wrong shop name', 'The order email is signed "Test shop" instead of Acme Foods.'],
+        ['Filter by dietary label on the category page', 'Add Vegan, Gluten-free and Organic filters above the product list.'],
+        ['Quantity field accepts negative numbers', 'Typing -2 in a cart quantity takes €3.70 off the total.'],
+        ['Remember the chosen delivery slot', 'Going back from Pay to Checkout clears the delivery slot the shopper picked.'],
+        ['Wishlist heart icon has no label for screen readers', 'A screen reader says only "button" on the heart icon; it should say "Add to wishlist".'],
+        ['Receipt PDF cuts off long product names', '"Apples, pack of 6, organic" ends at "Apples, pack o" on the receipt PDF.'],
+        ['Add a reorder button to past orders', 'A Reorder button on each past order puts the same items back in the cart.'],
+        ['Cart count is wrong after removing an item', 'Remove one Oat milk from a cart of two: the header still says Cart (2).'],
+        ['Sort products by price, low to high', 'Add "Price, low to high" to the sort menu on Products.'],
+        ['Postcode check rejects valid codes with a space', '"1012 AB" is refused at Checkout; "1012AB" is taken.'],
+        ['Promo banner overlaps the menu on small screens', 'Under 400 px wide the promo banner covers the Cart and Orders links.'],
+        ['Show unit price next to the pack price', 'Show €0.49 per item under "Apples, pack of 6 · €2.95".'],
+        ['Login page keeps the old error after a retry', 'After a wrong password, a right one still shows "Wrong password" for a moment.'],
+        ['Add organic and vegan badges to product cards', 'Small badges on the product cards, from the labels the products already have.'],
+        ['Delivery fee is missing from the order summary', 'The order summary on Pay shows the subtotal and total but not the €3.95 delivery fee.'],
+        ['Product page title is not unique', 'Every product page has the browser title "Acme Foods shop"; add the product name.'],
+        ['Cart drawer does not close with the Escape key', 'The cart drawer closes only with its X button; Escape should close it too.'],
+        ['Add a store pickup option at checkout', 'Let shoppers pick "Collect in store" instead of delivery, with no delivery fee.'],
+        ['Search ignores accents in product names', 'Searching "creme" does not find "Crème fraîche".'],
+        ['Tidy the footer links on the help pages', 'The help pages repeat Contact twice in the footer and miss Returns.'],
+        ['Reviews show in the wrong order', 'Product reviews list the oldest first; show the newest first.'],
+        ['Free-shipping bar ignores discounts', 'The bar says "€5 to free shipping" from the total before the discount code.'],
+        ['Allow guest checkout with an email only', 'Let shoppers pay without an account, with only their email for the receipt.'],
+        ['Stock level shows zero for pre-order items', 'Pre-order products show "0 in stock" instead of "Pre-order: ships in May".'],
+        ['Date picker starts on the wrong weekday', 'The delivery date picker starts weeks on Sunday; the shop uses Monday.'],
+        ['Newsletter sign-up fails on long addresses', 'An email address over 40 characters gets "Something went wrong".'],
+        ['Add allergens list to the product page', 'List the allergens under the ingredients, in bold, as the label shows them.'],
+        ['Currency symbol appears twice in the cart', 'The cart total reads "€€12.40".'],
+        ['Back button leaves the checkout in a broken state', 'Browser Back from Pay shows an empty Checkout page with no cart lines.'],
+        ['Support chat button hides the Pay now button', 'On a phone the round chat button sits on top of Pay now.'],
+        ['Show how many items are left when stock is low', 'Show "Only 3 left" on products with fewer than 5 in stock.'],
+        ['Refund note is missing from the order email', 'The email for a refunded order does not say the amount or when it arrives.'],
     ];
 
     /** Whole words, so the page's cut at 700 characters ends at a word and the rest stays behind "Show the full ask". */
@@ -137,7 +144,7 @@ final readonly class SeedDemoTickets implements DemoSeedStep
 
         $created = $this->inTransactionOf($organizationId, fn (): int => $this->seedTickets($organizationId));
 
-        return \sprintf('Tickets: created %d, kept %d.', $created, \count(self::TITLES) - $created);
+        return \sprintf('Tickets: created %d, kept %d.', $created, \count(self::TICKETS) + 1 - $created);
     }
 
     private function seedTickets(OrganizationId $organizationId): int
@@ -163,14 +170,14 @@ final readonly class SeedDemoTickets implements DemoSeedStep
         }
 
         $created = 0;
-        foreach (self::TITLES as $index => $title) {
+        foreach ([...self::TICKETS, [self::LONG_ASK_TITLE, self::longAsk()]] as $index => [$title, $ask]) {
             if (isset($existingTitles[$title])) {
                 continue;
             }
             $coreCode = self::CORE_STEPS[$index % \count(self::CORE_STEPS)];
             $targetStep = $stepsByCoreCode[$coreCode] ?? throw new DemoSeedRefused(\sprintf('The Shop team has no %s step.', $coreCode));
             $assignee = 'backlog' === $coreCode ? null : (0 === $index % 2 ? $omar : $lena);
-            $this->seedTicket($organizationId, $projectId, $lena, $title, self::LONG_ASK_TITLE === $title ? self::longAsk() : self::SHORT_ASK, $index, $assignee, $targetStep, $stepsByCoreCode['progress'] ?? throw new DemoSeedRefused('The Shop team has no progress step.'), $mia, $lena);
+            $this->seedTicket($organizationId, $projectId, $lena, $title, $ask, $index, $assignee, $targetStep, $stepsByCoreCode['progress'] ?? throw new DemoSeedRefused('The Shop team has no progress step.'), $mia, $lena);
             ++$created;
         }
 
