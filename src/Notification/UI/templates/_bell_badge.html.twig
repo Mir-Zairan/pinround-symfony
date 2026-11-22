@@ -1,5 +1,5 @@
 {#- The bell's count of open notifications, which a stream answer replaces by its id. The number is drawn for the eye;
-    the button names the badge as its description, so a screen reader reads "Pings, 3 open". -#}
+    the button's name takes the spoken count after its own word, so a screen reader reads "Pings 3 open". -#}
 <span id="bell-badge">
     {%- if openCount > 0 -%}
         <span class="badge bell__badge" aria-hidden="true">{{ openCount > 99 ? '99+' : openCount }}</span>

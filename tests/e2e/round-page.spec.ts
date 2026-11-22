@@ -64,7 +64,8 @@ test.describe('The round page of a shared draft', () => {
     await expect(tabs.getByRole('link')).toHaveCount(3);
     await expect(selectedTab).toHaveId('round-tab-1');
     const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
-    expect(violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical').map((violation) => violation.id)).toEqual([]);
+    expect(violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
+      .map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`)).toEqual([]);
 
     await page.keyboard.press('ArrowRight');
 

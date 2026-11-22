@@ -157,6 +157,10 @@ final class BellTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('4', $home->filter('header .bell__trigger .bell__badge')->text());
         self::assertSame('4 open', $home->filter('header #bell-badge .visually-hidden')->text());
+        // Named by its spoken text, so the name holds the count the eye sees (WCAG 2.5.3 Label in Name).
+        $trigger = $home->filter('header .bell__trigger');
+        self::assertNull($trigger->attr('aria-label'));
+        self::assertSame(['Pings', '4 open'], $trigger->filter('.visually-hidden')->each(static fn (Crawler $spoken): string => $spoken->text()));
 
         $client->request('POST', $this->groupUrl($this->lena, $this->shop1, 'done'), [BellController::CSRF_FIELD => $this->csrfToken($client)]);
 
