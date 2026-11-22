@@ -194,6 +194,30 @@ final class ChecklistControllerTest extends WebTestCase
     }
 
     #[Test]
+    public function theFullScreenBarOfAPinThatIsACheckItemShowsItsStateAndTheViewersButtons(): void
+    {
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus?screenshot=1&pin=2');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('.focus-review__picture.screenshot--markers'), 'Markers, whose notes are in the bar only.');
+        $bars = $page->filter('.focus-bar__stop');
+        self::assertSame(['Open', 'Fixed · to check', 'Checked OK', 'Not fixed', 'Fixed · to check'], $bars->filter('.check-state')->each(static fn (Crawler $chip): string => $chip->text()));
+        $secondBar = $bars->eq(1);
+        self::assertNull($secondBar->attr('hidden'));
+        self::assertSame(['OK', 'Not fixed'], $secondBar->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame($this->itemUrl(2, 'ok'), $secondBar->filter('form')->first()->attr('action'));
+        self::assertSame(['1', '1', 'after', '2'], [
+            $secondBar->filter('input[name="'.ChecklistController::RETURN_ROUND_FIELD.'"]')->first()->attr('value'),
+            $secondBar->filter('input[name="'.ChecklistController::RETURN_SCREENSHOT_FIELD.'"]')->first()->attr('value'),
+            $secondBar->filter('input[name="'.ChecklistController::RETURN_SIDE_FIELD.'"]')->first()->attr('value'),
+            $secondBar->filter('input[name="'.ChecklistController::RETURN_PIN_FIELD.'"]')->first()->attr('value'),
+        ]);
+        self::assertCount(0, $bars->eq(0)->filter('form'), 'An open pin is the assignee\'s to mark fixed, not the tester\'s.');
+    }
+
+    #[Test]
     public function theTesterChecksAPinOkAndSendsAnotherBack(): void
     {
         $this->logIn($this->client, $this->people['Mia']);

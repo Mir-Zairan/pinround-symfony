@@ -1347,8 +1347,8 @@ textarea.screenshot-report__input {
   gap: var(--space-8);
 }
 
-/* A size container, so the image below can be capped at the height of the picture's row (100cqh). A long note's bubble
-   is cut at the row's edge rather than making the page scroll: the pin bar shows the whole note. */
+/* A size container, so the image below can be capped at the height of the picture's row (100cqh). The pins are
+   numbered markers with no bubble: the pin bar shows the note. */
 .focus-review__picture {
   container-type: size;
   overflow: clip;
@@ -1367,6 +1367,19 @@ textarea.screenshot-report__input {
 
 /* A picture still processing or refused has no image to size it, so its placeholder keeps the column's full width,
    and no more of the row's height than there is. */
+.focus-review__picture.screenshot--markers .pin-layer {
+  --pin-size: 34px;
+}
+
+.focus-review__picture.screenshot--markers .pin {
+  box-shadow: 0 2px 8px rgb(0 0 0 / 50%);
+  font-size: 14px;
+}
+
+.focus-review__picture.screenshot--markers .pin--selected {
+  box-shadow: 0 0 0 4px var(--primary), 0 2px 8px rgb(0 0 0 / 50%);
+}
+
 .focus-review__picture .screenshot__frame--placeholder {
   align-self: stretch;
   max-height: 100cqh;
@@ -1398,8 +1411,9 @@ textarea.screenshot-report__input {
   align-items: center;
   gap: var(--space-12);
   padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--outline-var);
   border-radius: 18px;
-  background: var(--s-high);
+  background: var(--s-c);
 }
 
 .focus-bar__stop[hidden] {

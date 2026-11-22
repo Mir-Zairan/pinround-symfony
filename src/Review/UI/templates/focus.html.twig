@@ -3,7 +3,9 @@
 {#- The full-screen review of one round (RoundController::focus, full-screen-review.md): a screen area, or a screenshot
     of a round without areas. The server shows the bar of the "?pin=" pin and hides the others; Previous, Next, the
     screenshots' Back and Next and After/Before are links and the verdicts plain forms, so the walk works without
-    JavaScript. pin-walker switches bars in place, moves the selected ring, and adds the arrow keys and Escape. -#}
+    JavaScript. pin-walker switches bars in place, moves the selected ring, and adds the arrow keys and Escape. The pins
+    are numbered markers with no note beside them: the bar shows it, with the area's pin verdicts or, for a pin that is
+    a check item, the checklist buttons, whose forms come back here (ChecklistController). -#}
 
 {% block title %}Full screen · Round {{ roundNumber }} · {{ ticketKey }} · pinround{% endblock %}
 
@@ -45,7 +47,7 @@
         {% if page.picture is null %}
             <twig:EmptyState message="{{ page.emptyMessage }}" />
         {% else %}
-            <twig:Screenshot :view="page.picture" :selectedNumber="page.current.number ?? null" class="focus-review__picture" />
+            <twig:Screenshot :view="page.picture" :selectedNumber="page.current.number ?? null" class="screenshot--markers focus-review__picture" />
 
             {% if page.current is null %}
                 <p class="focus-review__none">{{ page.areaPosition is null ? 'This screenshot has no pins.' : 'There are no earlier pins to check here.' }}</p>
@@ -56,6 +58,9 @@
                 {% set focusAreaField = constant(verdictController ~ '::FOCUS_AREA_FIELD') %}
                 {% set focusPinField = constant(verdictController ~ '::FOCUS_PIN_FIELD') %}
                 {% set csrfToken = page.mayGiveVerdicts ? csrf_token(verdictCsrfId) : null %}
+                {% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
+                {% set hasCheckControls = page.stops|filter(stop => stop.check is not null and (stop.check.mayMarkFixed or stop.check.mayCheck)) is not empty %}
+                {% set checklistToken = hasCheckControls ? csrf_token(checklistCsrfId) : null %}
                 <div class="focus-bar" aria-live="polite">
                     {% for stop in page.stops %}
                         {% set isCurrent = stop.position == page.current.position %}
@@ -90,6 +95,35 @@
                                             <twig:Button type="submit" variant="text" name="{{ verdictField }}" value="{{ constant('App\\Review\\Api\\VerdictCommands::PIN_STILL_WRONG') }}" data-pin-walker-control="still-wrong">Still wrong</twig:Button>
                                         </form>
                                     {% endif %}
+                                {% endif %}
+                                {% if stop.check is not null %}
+                                    {% set check = stop.check %}
+                                    {% set checkFields %}
+                                        <input type="hidden" name="{{ constant(checklistController ~ '::CSRF_FIELD') }}" value="{{ checklistToken }}">
+                                        <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_ROUND_FIELD') }}" value="{{ roundNumber }}">
+                                        <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_SCREENSHOT_FIELD') }}" value="{{ page.shownParameters[constant(roundController ~ '::SCREENSHOT_PARAMETER')] ?? '' }}">
+                                        <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_SIDE_FIELD') }}" value="{{ page.side }}">
+                                        <input type="hidden" name="{{ constant(checklistController ~ '::RETURN_PIN_FIELD') }}" value="{{ stop.position }}">
+                                    {% endset %}
+                                    <div class="focus-bar__choices">
+                                        <twig:Tag class="check-state {{ check.stateClass }}">{{ check.stateLabel }}</twig:Tag>
+                                        {% if check.mayMarkFixed %}
+                                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="focus-bar__choices" data-turbo="false">
+                                                {{ checkFields }}
+                                                <twig:Button type="submit" variant="tonal" data-pin-walker-control="mark-fixed">Mark fixed</twig:Button>
+                                            </form>
+                                        {% endif %}
+                                        {% if check.mayCheck %}
+                                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_OK_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="focus-bar__choices" data-turbo="false">
+                                                {{ checkFields }}
+                                                <twig:Button type="submit" variant="tonal" data-pin-walker-control="ok">OK</twig:Button>
+                                            </form>
+                                            <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: check.itemId}) }}" class="focus-bar__choices" data-turbo="false">
+                                                {{ checkFields }}
+                                                <twig:Button type="submit" variant="text" data-pin-walker-control="not-fixed">Not fixed</twig:Button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
                                 {% endif %}
                             </div>
                             <a class="icon-btn focus-bar__step" href="{{ path(focusRoute, stopQuery|merge({(pinParameter): stop.nextPosition})) }}" aria-label="Next pin" data-pin-walker-control="next" data-action="pin-walker#next">
