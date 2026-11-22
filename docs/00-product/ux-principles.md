@@ -122,7 +122,7 @@ Colors follow Material 3 tonal palettes generated from the seed **#2A6F65** (tea
 | `--ai`, `--ai-container`, `--on-ai-container` | `#4f51be`, `#e1e0ff`, `#06006c` | AI chips, AI pins, AI boxes |
 | `--scrim` | `rgba(0,0,0,.32)` | Behind dialogs |
 
-Human pins use a fixed orange (`#b4470a` fill, white border) in both themes so they stand out on any screenshot.
+Pins on a screenshot are see-through rings, so they never hide what they point at: a 28 px circle with a white 2 px border between two `#161d1b` rings, no fill, and the number in a small `#161d1b` pill with white text off the ring's top-right. The colours are fixed in both themes, as a picture does not change with the theme. A selected pin adds a 6 px `--primary` ring; an AI suggestion has a dashed `--ai` border. (The prototype fills them orange; the product does not, so the spot under a pin stays readable.)
 
 Dark theme: the `.dark` set in the prototype; the product follows `prefers-color-scheme` with a manual override saved per user.
 

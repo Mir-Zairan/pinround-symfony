@@ -113,39 +113,38 @@
 }
 
 .pin--selected {
-  border: 2px solid var(--primary);
-  box-shadow: 0 0 0 2px var(--pin-inner), 0 0 0 4px var(--pin-outer);
+  box-shadow: 0 0 0 2px var(--pin-outer), inset 0 0 0 2px var(--pin-outer), 0 0 0 6px var(--primary);
+}
+
+.pin--ai.pin--selected {
+  box-shadow: 0 0 0 2px var(--pin-inner), 0 0 0 4px var(--pin-outer), 0 0 0 8px var(--primary);
 }
 
 .pin:focus-visible {
   outline: 2px solid var(--primary);
-  /* 5px, not base.css's 2px: the selected and AI rings reach 4px out and would hide the outline. */
-  outline-offset: 5px;
+  /* 10px, not base.css's 2px: the selected ring reaches 8px out and would hide the outline. */
+  outline-offset: 10px;
 }
 
+/* The number sits in a badge off the ring's top-right, so the ring's centre shows what the pin points at. */
 .pin__tab {
   position: absolute;
-  top: -12px;
-  right: -12px;
-  min-width: 20px;
+  top: -10px;
+  right: -10px;
+  min-width: 18px;
   padding: 0 var(--space-4);
-  border-radius: var(--radius-tag);
-  background: var(--inverse-surface);
-  color: var(--inverse-on-surface);
-  font-size: 12px;
+  border-radius: 999px;
+  background: var(--pin-outer);
+  color: var(--pin-inner);
+  font-size: 0.7rem;
   font-weight: 700;
-  line-height: 20px;
+  line-height: 18px;
   text-align: center;
 }
 
 .pin--ai .pin__tab {
   background: var(--ai-container);
   color: var(--on-ai-container);
-}
-
-.pin--selected .pin__tab {
-  background: var(--primary);
-  color: var(--on-primary);
 }
 
 .pin__bubble {
@@ -1444,48 +1443,8 @@ button.round-tab {
   gap: var(--space-8);
 }
 
-/* Numbered markers, as on the prototype's boards: the round page and the full-screen review show each pin's note in
-   their list or bar, so no bubble opens beside a marker. */
-.screenshot--markers .pin-layer {
-  --pin-size: 30px;
-}
-
-.screenshot--markers .pin {
-  display: grid;
-  place-items: center;
-  border: 2px solid var(--on-marker);
-  background: var(--marker);
-  box-shadow: 0 2px 6px rgb(0 0 0 / 30%);
-  color: var(--on-marker);
-  font-size: 13px;
-  font-weight: 700;
-  transition: transform 120ms;
-}
-
-.screenshot--markers .pin:hover {
-  transform: translate(-50%, -50%) scale(1.12);
-}
-
-.screenshot--markers .pin--ai {
-  border: 2px dashed var(--ai);
-  background: var(--ai-container);
-  color: var(--on-ai-container);
-}
-
-.screenshot--markers .pin--selected {
-  box-shadow: 0 0 0 3px var(--primary), 0 2px 6px rgb(0 0 0 / 30%);
-}
-
-.screenshot--markers .pin__tab {
-  position: static;
-  min-width: 0;
-  padding: 0;
-  background: none;
-  color: inherit;
-  font-size: inherit;
-  line-height: 1;
-}
-
+/* The round page and the full-screen review show each pin's note in their list or bar, so no bubble opens beside a
+   ring there. */
 .screenshot--markers .pin__bubble {
   display: none;
 }
@@ -1536,8 +1495,8 @@ button.round-tab {
   gap: var(--space-8);
 }
 
-/* A size container, so the image below can be capped at the height of the picture's row (100cqh). The pins are
-   numbered markers with no bubble: the pin bar shows the note. */
+/* A size container, so the image below can be capped at the height of the picture's row (100cqh). The pins have
+   no bubble: the pin bar shows the note. */
 .focus-review__picture {
   container-type: size;
   overflow: clip;
@@ -1556,19 +1515,6 @@ button.round-tab {
 
 /* A picture still processing or refused has no image to size it, so its placeholder keeps the column's full width,
    and no more of the row's height than there is. */
-.focus-review__picture.screenshot--markers .pin-layer {
-  --pin-size: 34px;
-}
-
-.focus-review__picture.screenshot--markers .pin {
-  box-shadow: 0 2px 8px rgb(0 0 0 / 50%);
-  font-size: 14px;
-}
-
-.focus-review__picture.screenshot--markers .pin--selected {
-  box-shadow: 0 0 0 4px var(--primary), 0 2px 8px rgb(0 0 0 / 50%);
-}
-
 .focus-review__picture .screenshot__frame--placeholder {
   align-self: stretch;
   max-height: 100cqh;

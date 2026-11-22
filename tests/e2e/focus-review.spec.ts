@@ -200,6 +200,39 @@ test('the full-screen review has no serious accessibility violations, wide or at
   await context.close();
 });
 
+test('a pin on the full screen is a see-through 28px ring with its number in a badge off its top-right', async ({ browser }) => {
+  const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+  await drawThePictures(context);
+  await page.goto(focusPath(0), { waitUntil: 'networkidle' });
+
+  const pins = page.locator('.focus-review__picture .pin');
+  await expect(pins).toHaveCount(2);
+  const looks = await pins.evaluateAll((elements) =>
+    elements.map((element) => {
+      const ring = element.getBoundingClientRect();
+      const badge = element.querySelector('.pin__tab')?.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        fill: style.backgroundColor,
+        width: ring.width,
+        height: ring.height,
+        isSelected: element.getAttribute('aria-pressed') === 'true',
+        shadow: style.boxShadow,
+        badgeIsTopRight: badge !== undefined && badge.right > ring.right && badge.top < ring.top,
+      };
+    }),
+  );
+  expect(looks.length).toBe(2);
+  for (const look of looks) {
+    expect(look.fill, 'the ring has no fill').toBe('rgba(0, 0, 0, 0)');
+    expect([look.width, look.height]).toEqual([28, 28]);
+    expect(look.badgeIsTopRight, 'the number sits off the ring, not over its centre').toBe(true);
+    expect(look.shadow.includes(' 0px 0px 6px'), 'only the selected pin has the 6px ring').toBe(look.isSelected);
+  }
+  expect(looks.filter((look) => look.isSelected)).toHaveLength(1);
+  await context.close();
+});
+
 const SMALL_SCREENS = [
   { name: 'at 360px wide', viewport: { width: 360, height: 800 } },
   { name: 'at 200% zoom of a 1280×720 screen', viewport: { width: 640, height: 360 } },
