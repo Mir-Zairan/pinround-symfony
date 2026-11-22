@@ -116,8 +116,9 @@ test('two captures on two pages for "A new report" make one report draft with bo
     [`/api/v1/reports/${draft.id}/screenshots`, 200],
   ]);
   expect(posts.filter((request) => request.path === '/api/v1/uploads').map((request) => request.body?.project)).toEqual(['SHOP', 'SHOP']);
-  expect(posts[1].body?.screenshots).toEqual([{ upload_id: 'upload-1', title: 'Acme Foods shop', summary: expect.stringMatching(/^Page: http:\/\/shop\.acme-foods\.test\/ · Window \d+×\d+ · /), pins: draft.screenshots[0].pins }]);
-  expect(posts[3].body).toEqual({ upload_id: 'upload-2', title: 'Acme Foods basket', summary: expect.stringMatching(/^Page: http:\/\/shop\.acme-foods\.test\/basket · Window \d+×\d+ · /), pins: draft.screenshots[1].pins });
+  // The summary starts empty, and an empty one is not sent.
+  expect(posts[1].body?.screenshots).toEqual([{ upload_id: 'upload-1', title: 'Acme Foods shop', pins: draft.screenshots[0].pins }]);
+  expect(posts[3].body).toEqual({ upload_id: 'upload-2', title: 'Acme Foods basket', pins: draft.screenshots[1].pins });
   const [firstKey, secondKey] = [posts[1].idempotencyKey, posts[3].idempotencyKey];
   expect(firstKey).toMatch(IDEMPOTENCY_KEY_PATTERN);
   expect(secondKey).toMatch(IDEMPOTENCY_KEY_PATTERN);
@@ -160,7 +161,7 @@ test('a capture for "My draft round on SHOP-7" goes to that draft round and to n
   expect(stub.myReportDrafts()).toEqual([]);
 });
 
-test('the title and summary start from the page, its title cleaned and its address without credentials, query or fragment, and stay editable', async ({ context, testPage }) => {
+test('the title starts from the page\'s cleaned title and the summary empty, both stay editable, and nothing sent carries the address\'s credentials or query', async ({ context, testPage }) => {
   const stub = await answerPinroundApi(context, { tickets: TICKETS });
   // The request URL keeps the credentials, so the fixture's route for TEST_PAGE_ORIGIN does not match it.
   await context.route('http://omar:s3cret@shop.acme-foods.test/**', (route) => route.fulfill({ path: TEST_PAGE_FILE, contentType: 'text/html' }));
@@ -169,20 +170,21 @@ test('the title and summary start from the page, its title cleaned and its addre
     document.title = '\uFEFFBestellübersicht\r\n– 注文\u2028Acme Foods';
   });
   const popup = await pairedPopupFor(context, testPage);
-  const summary = /^Page: http:\/\/shop\.acme-foods\.test\/ · Window \d+×\d+ · \S.* \d+(\.\d+)*$/;
 
   await expect(popup.getByLabel('Title · optional')).toHaveValue('Bestellübersicht – 注文 Acme Foods');
-  await expect(popup.getByLabel('What this picture shows · optional')).toHaveValue(summary);
+  await expect(popup.getByLabel('What this picture shows · optional')).toHaveValue('');
   await popup.getByLabel('Title · optional').fill('Order list is empty');
+  await popup.getByLabel('What this picture shows · optional').fill('March orders are missing');
   await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'My draft round on SHOP-12' });
   await popup.getByRole('button', { name: 'Capture this page' }).click();
 
   await expect(popup.getByRole('status')).toHaveText('Added to your draft round on SHOP-12. Only you see it.');
   const [, addition] = postsOf(stub);
   expect(addition.body?.title).toBe('Order list is empty');
-  expect(addition.body?.summary).toMatch(summary);
+  expect(addition.body?.summary).toBe('March orders are missing');
   expect(JSON.stringify(stub.requests)).not.toMatch(/abc123|s3cret/);
   await expect(popup.getByLabel('Title · optional')).toHaveValue('Bestellübersicht – 注文 Acme Foods');
+  await expect(popup.getByLabel('What this picture shows · optional')).toHaveValue('');
 });
 
 test('a capture for a notebook of mine lands in it through the notebook routes; another person\'s notebook is never offered', async ({ context, testPage }) => {

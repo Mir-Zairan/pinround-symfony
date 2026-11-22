@@ -1,12 +1,10 @@
 import type { BrowserContext, Page } from '@playwright/test';
 import {
   CAPTURE_HOST_PERMISSIONS,
-  PINROUND_TEST_ORIGIN,
   PageInspector,
   TEST_PAGE_ORIGIN,
   TEST_PAGE_URL,
   answerPinroundApi,
-  chooseNewReport,
   expect,
   pairedPopupFor,
   test,
@@ -102,59 +100,69 @@ async function popupWithBasketNotebook(context: BrowserContext, testPage: Page):
   return { stub, popup };
 }
 
-test('a tester pins, removes a pin, captures twice and saves one report draft from the dock without opening the popup again', async ({ context, testPage }) => {
+test('a tester pins, removes a pin, captures twice and saves one report draft with the title typed in the dock, without opening the popup again', async ({ context, testPage }) => {
   const stub = await answerPinroundApi(context);
-  await context.route(`${PINROUND_TEST_ORIGIN}/report-drafts/**`, (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Report draft</title>' }));
   const popup = await pairedPopupFor(context, testPage);
-  await chooseNewReport(popup);
-  await popup.getByLabel('What is wrong, in one line').press('Tab');
+  await popup.getByLabel('Put the screenshot in').selectOption({ label: 'A new report' });
+  await popup.getByLabel('Project key').fill('SHOP');
+  await popup.getByLabel('Project key').press('Tab');
   await expect.poll(() => popup.evaluate(async () => {
     const { chrome } = globalThis as unknown as ExtensionPageGlobals;
-    const kept = (await chrome.storage.session.get('pinroundNewReport')).pinroundNewReport as { project?: string; reportTitle?: string } | undefined;
-    return [kept?.project, kept?.reportTitle];
-  })).toEqual(['SHOP', 'Basket total is wrong']);
+    const kept = (await chrome.storage.session.get('pinroundNewReport')).pinroundNewReport as { project?: string } | undefined;
+    return kept?.project;
+  })).toBe('SHOP');
   const inspector = await openDockAndClosePopup(context, testPage, popup);
+  const pagesBeforeSave = context.pages().length;
   expect((await buttonNamesOf(inspector)).filter((name) => name.startsWith('Clear'))).toEqual([]);
 
   await testPage.keyboard.press('p');
   await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
   await dropPin(testPage, inspector, [320, 180], 'Price is wrong', 1);
-  await dropPin(testPage, inspector, [640, 360], 'Logo is cut off', 2);
+  // Above the dock's bar, which crosses the middle of the page at its right half.
+  await dropPin(testPage, inspector, [640, 180], 'Logo is cut off', 2);
   expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Price is wrong', 'Pin 2: Logo is cut off']);
-  expect(await buttonNamesOf(inspector)).toEqual(expect.arrayContaining(['Remove pin 1', 'Remove pin 2', 'Clear 2 pins']));
+  expect(await buttonNamesOf(inspector)).toContain('Clear 2 pins');
+  // A pin's Remove is in its note form, which a click on the pin opens.
+  expect((await buttonNamesOf(inspector)).filter((name) => name.startsWith('Remove pin'))).toEqual([]);
 
+  await clickOverlayButton(inspector, testPage, 'Pin 1: Price is wrong');
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'Note for pin 1' });
   await clickOverlayButton(inspector, testPage, 'Remove pin 1');
 
   await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off']);
-  expect(await buttonNamesOf(inspector)).toEqual(expect.arrayContaining(['Remove pin 1', 'Clear 1 pin']));
-  expect(await buttonNamesOf(inspector)).not.toContain('Remove pin 2');
+  expect(await buttonNamesOf(inspector)).toContain('Clear 1 pin');
+  expect((await buttonNamesOf(inspector)).filter((name) => name.startsWith('Remove pin'))).toEqual([]);
 
   await clickOverlayButton(inspector, testPage, 'Capture');
-  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Report draft made with screenshot 1. Capture more pages, or press Done to open it.']);
+  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Captured. 1 waiting.']);
   expect(await pinNamesOf(inspector)).toEqual([]);
   expect((await buttonNamesOf(inspector)).filter((name) => name.startsWith('Clear'))).toEqual([]);
 
   // C is the dock's key wherever focus is but in the page's own fields.
   await testPage.keyboard.press('c');
-  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Screenshot 2 added to the report draft. Capture more pages, or press Done to open it.']);
+  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Captured. 2 waiting.']);
+  // The captures wait in the extension until Save draft: pinround has no report draft yet.
+  expect(stub.myReportDrafts()).toEqual([]);
 
-  const draftTabOpens = context.waitForEvent('page');
   await clickOverlayButton(inspector, testPage, 'Save draft, 2 in it');
-  const draftTab = await draftTabOpens;
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'What is wrong, in one line' });
+  await testPage.keyboard.type('Basket total is wrong');
+  await clickOverlayButton(inspector, testPage, 'Save draft');
 
-  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Report draft opened in pinround. Check it there and press Send.']);
+  await expect.poll(() => shownStatusesOf(inspector)).toEqual(['Draft saved with 2 captures. Open it in pinround to send it.']);
   const [draft, ...otherDrafts] = stub.myReportDrafts();
   expect(otherDrafts).toEqual([]);
-  await expect(draftTab).toHaveURL(`${PINROUND_TEST_ORIGIN}/report-drafts/${draft.id}`);
+  expect([draft.project, draft.title]).toEqual(['SHOP', 'Basket total is wrong']);
   expect(draft.screenshots.map((screenshot) => screenshot.pins.map((pin) => pin.note))).toEqual([['Logo is cut off'], []]);
   const [keptPin] = draft.screenshots[0].pins;
-  expect([keptPin.x_pct, keptPin.y_pct]).toEqual([expect.closeTo(50, 0), expect.closeTo(50, 0)]);
+  expect([keptPin.x_pct, keptPin.y_pct]).toEqual([expect.closeTo(50, 0), expect.closeTo(25, 0)]);
   expect(stub.storedPictures.length).toBe(2);
   expect(stub.requests.filter((request) => request.method === 'POST' && request.path === '/api/v1/reports').length).toBe(1);
+  expect(context.pages().length).toBe(pagesBeforeSave);
   expect(extensionPagesOf(context)).toEqual([]);
 });
 
-test('a pin dropped at the left or right edge of the page keeps its Remove button fully on screen', async ({ context, testPage }) => {
+test('the note form of a pin dropped at the left or right edge of the page stays fully on screen', async ({ context, testPage }) => {
   await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await openDockAndClosePopup(context, testPage, popup);
@@ -162,20 +170,29 @@ test('a pin dropped at the left or right edge of the page keeps its Remove butto
   if (viewport === null) {
     throw new Error('The test page has no viewport size.');
   }
-
-  await testPage.keyboard.press('p');
-  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
-  await dropPin(testPage, inspector, [0, 300], 'Menu is cut off', 1);
-  // Above the dock, which sits halfway down the right edge.
-  await dropPin(testPage, inspector, [viewport.width - 1, 100], 'Basket is cut off', 2);
-
-  for (const name of ['Remove pin 1', 'Remove pin 2']) {
-    const { backendNodeId } = await inspector.node('button', name);
+  const expectOnScreen = async (role: string, name: string) => {
+    const { backendNodeId } = await inspector.node(role, name);
     const boxes = backendNodeId === undefined ? null : await inspector.boxesOf(backendNodeId);
     expect(boxes, name).not.toBeNull();
     expect(boxes?.border.left, name).toBeGreaterThanOrEqual(0);
     expect(boxes?.border.right, name).toBeLessThanOrEqual(viewport.width);
+  };
+
+  await testPage.keyboard.press('p');
+  await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
+  // Above the dock, which sits halfway down the right edge.
+  const pinSpots: Array<[number, number, number]> = [[1, 0, 300], [2, viewport.width - 1, 100]];
+  for (const [pinNumber, x, y] of pinSpots) {
+    await testPage.mouse.click(x, y);
+    await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: `Note for pin ${pinNumber}` });
+    await expectOnScreen('textbox', `Note for pin ${pinNumber}`);
+    await expectOnScreen('button', 'Save');
+    await expectOnScreen('button', `Remove pin ${pinNumber}`);
+    await testPage.keyboard.type(1 === pinNumber ? 'Menu is cut off' : 'Basket is cut off');
+    await testPage.keyboard.press('Enter');
   }
+
+  await clickOverlayButton(inspector, testPage, 'Pin 1: Menu is cut off');
   await clickOverlayButton(inspector, testPage, 'Remove pin 1');
   await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Basket is cut off']);
 });
@@ -249,7 +266,7 @@ test('the page finds no dock, step card, pin or note through its DOM, and a clic
   });
 
   const pageSees = await testPage.evaluate(() => {
-    const classNames = ['dock', 'dock-handle', 'dock__clear', 'dock__status', 'dock-step', 'dock-step__do', 'surface', 'pin', 'pin-remove', 'pin__note', 'note-editor'];
+    const classNames = ['dock', 'dock__bar', 'dock-handle', 'dock__clear', 'dock__status', 'dock-save', 'dock-step', 'dock-step__do', 'surface', 'pin', 'pin__note', 'note-editor', 'note-field', 'note-editor__remove'];
     const host = document.querySelector('pinround-overlay');
     return {
       bySelector: classNames.filter((className) => document.querySelector(`.${className}`) !== null),

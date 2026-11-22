@@ -137,26 +137,30 @@
         .pin__note[hidden] { display: none; }
         .pin--left .pin__note { left: auto; right: calc(100% + 10px); }
         .pin--left .pin__tab { right: auto; left: -10px; }
+        /* --pin-x is the pin's left in percent. The form starts 14px left of the pin (ends 14px right of it when it opens
+           left) but is held 8px inside the viewport, so a pin at an edge keeps its whole form on screen. */
         .note-editor {
+            --width: min(300px, calc(100% - 16px));
+            --wanted-left: calc(var(--pin-x) - 14px);
             position: absolute;
+            left: clamp(8px, var(--wanted-left), calc(100% - var(--width) - 8px));
             display: grid;
             grid-template-columns: 1fr auto auto;
             align-items: center;
             gap: 6px;
-            width: 300px;
+            width: var(--width);
             padding: 8px;
             border: 1px solid var(--line);
             border-radius: 12px;
             background: var(--panel);
             color: var(--fg);
             box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
-            transform: translate(-14px, 22px);
+            transform: translateY(22px);
             pointer-events: auto;
         }
         .note-editor[hidden] { display: none; }
-        .note-editor--left { transform: translate(calc(-100% + 14px), 22px); }
-        .note-editor--above { transform: translate(-14px, calc(-100% - 22px)); }
-        .note-editor--left.note-editor--above { transform: translate(calc(-100% + 14px), calc(-100% - 22px)); }
+        .note-editor--left { --wanted-left: calc(var(--pin-x) + 14px - var(--width)); }
+        .note-editor--above { transform: translateY(calc(-100% - 22px)); }
         .note-editor input { width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; color: inherit; background: var(--panel); font-size: 0.875rem; }
         .note-editor button { padding: 7px 12px; border: 1px solid var(--primary); border-radius: 8px; background: var(--primary); color: var(--on-primary); font-weight: 500; cursor: pointer; }
         .note-editor .note-editor__remove { border-color: var(--danger); background: transparent; color: var(--danger); }
@@ -217,6 +221,12 @@
         return lastCode >= 0xD800 && lastCode <= 0xDBFF ? cut.slice(0, -1) : cut;
     };
 
+    const isOneLine = (field) => 'TEXTAREA' !== field.tagName;
+    const lineBreakIn = (field) => (isOneLine(field) ? '' : '\n');
+    // A textarea's value holds every line break as \n. Chrome drops the line breaks that end text put into a one-line
+    // input and turns the others into spaces, so pasted lines stay apart.
+    const insertedTextIn = (field, text) => (isOneLine(field) ? text.replace(/[\r\n]+$/, '').replace(/\r\n?|\n/g, ' ') : text.replace(/\r\n?/g, '\n'));
+
     /**
      * What a trusted beforeinput of this kind does to the field, or null for a kind with no model here. intended is the
      * field's whole value after the edit, and null for a deletion with nothing selected, whose length is not known.
@@ -227,8 +237,7 @@
         const isBackward = DELETING_BACKWARD_KINDS.has(inputType);
         if (INSERTING_KINDS.has(inputType)) {
             const isLineBreak = 'insertLineBreak' === inputType || 'insertParagraph' === inputType;
-            // A textarea's value holds every line break as \n.
-            const text = isLineBreak ? '\n' : (data ?? '').replace(/\r\n?/g, '\n');
+            const text = isLineBreak ? lineBreakIn(field) : insertedTextIn(field, data ?? '');
             const inserted = fittingText(text, field.maxLength - before.length - after.length);
 
             return { before, after, isBackward, intended: before + inserted + after, caret: before.length + inserted.length };
@@ -365,7 +374,8 @@
     function openEditor(pin, returnFocusTo) {
         editing = { pin, returnFocusTo };
         setNoteField(pin.note);
-        placeAt(editor, pin);
+        editor.style.setProperty('--pin-x', `${pin.x_pct}%`);
+        editor.style.top = `${pin.y_pct}%`;
         editor.classList.toggle('note-editor--left', opensLeft(pin));
         editor.classList.toggle('note-editor--above', editorOpensAbove(pin));
         editor.hidden = false;
@@ -842,8 +852,9 @@
             return;
         }
         event.preventDefault();
+        // The note is one line, so it scrolls sideways; a mouse wheel only turns up and down.
         if (noteField.matches(':hover')) {
-            noteField.scrollTop += event.deltaY;
+            noteField.scrollLeft += 0 !== event.deltaX ? event.deltaX : event.deltaY;
         }
     }), { passive: false });
     for (const type of OVERLAY_EVENTS) {

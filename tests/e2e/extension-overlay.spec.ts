@@ -247,10 +247,9 @@ test('a capture into my draft round on a ticket sends the pins with the picture 
   expect(posts.map((request) => [request.path, request.answerStatus])).toEqual([['/api/v1/uploads', 201], ['/api/v1/tickets/SHOP-12/draft/screenshots', 200]]);
   expect([posts[0].body?.ticket, posts[0].body?.project, posts[0].body?.mime]).toEqual(['SHOP-12', undefined, 'image/png']);
   const draftRoundBody = posts[1].body ?? {};
-  // P14.T11: the popup starts the title and summary from the page, and a capture sends them with the pins.
-  expect([Object.keys(draftRoundBody).sort(), draftRoundBody.upload_id]).toEqual([['pins', 'summary', 'title', 'upload_id'], 'upload-1']);
+  // The popup starts the title from the page and the summary empty, and a capture sends the title with the pins.
+  expect([Object.keys(draftRoundBody).sort(), draftRoundBody.upload_id]).toEqual([['pins', 'title', 'upload_id'], 'upload-1']);
   expect(draftRoundBody.title).toBe('Acme Foods shop');
-  expect(draftRoundBody.summary).toMatch(/^Page: http:\/\/shop\.acme-foods\.test\/ · Window \d+×\d+ · \S.* \d+(\.\d+)*$/);
   const sentPins = draftRoundBody.pins as StoredPin[];
   expect(sentPins.map((pin) => pin.note)).toEqual(['Logo is cut off', '']);
   expectPinsAt(sentPins, [[30, 60], [80, 20]]);
@@ -327,7 +326,7 @@ test('without a mouse: Escape leaves a note, Delete removes the focused pin and 
   expect(await pinNamesOf(inspector)).toEqual([]);
 });
 
-test('a click on a pin opens its note to change, Backspace removes a pin and the rest renumber, and each note opens away from the nearer edges', async ({ context, testPage }) => {
+test('a click on a pin opens its note to change, Backspace removes a pin and the rest renumber, and each note shows away from the nearer edge', async ({ context, testPage }) => {
   await answerPinroundApi(context);
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await PageInspector.of(context, testPage);
@@ -350,20 +349,18 @@ test('a click on a pin opens its note to change, Backspace removes a pin and the
   await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Pin 1: Logo is cut off' });
   expect(await pinNamesOf(inspector)).toEqual(['Pin 1: Logo is cut off', 'Pin 2: Second', 'Pin 3: Third']);
 
-  // A focused pin shows its note: below and to the right in the top-left quarter, above and to the left in the
-  // bottom-right one, as the note editor opens.
+  // A pin shows its note beside it, on the side facing the middle of the page: right of a pin in the left half, left of
+  // one in the right half.
   const pins = await overlayElementsWithClass(inspector, 'pin');
   const bubbles = await overlayElementsWithClass(inspector, 'pin__note');
   expect([pins.length, bubbles.length]).toEqual([3, 3]);
   const placesOf = async (index: number) => [await inspector.boxesOf(pins[index].backendNodeId), await inspector.boxesOf(bubbles[index].backendNodeId)];
   const [pinOne, bubbleOne] = await placesOf(0);
-  expect(bubbleOne?.border.top).toBeGreaterThanOrEqual(pinOne?.border.bottom ?? Infinity);
-  expect(bubbleOne?.border.left).toBeGreaterThanOrEqual(((pinOne?.border.left ?? 0) + (pinOne?.border.right ?? 0)) / 2 - 1);
+  expect(bubbleOne?.border.left).toBeGreaterThanOrEqual(pinOne?.border.right ?? Infinity);
   await testPage.keyboard.press('Tab');
   await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Pin 2: Second' });
   const [pinTwo, bubbleTwo] = await placesOf(1);
-  expect(bubbleTwo?.border.bottom).toBeLessThanOrEqual(pinTwo?.border.top ?? -Infinity);
-  expect(bubbleTwo?.border.right).toBeLessThanOrEqual(((pinTwo?.border.left ?? 0) + (pinTwo?.border.right ?? 0)) / 2 + 1);
+  expect(bubbleTwo?.border.right).toBeLessThanOrEqual(pinTwo?.border.left ?? -Infinity);
 
   await testPage.keyboard.press('Shift+Tab');
   await testPage.keyboard.press('Backspace');
@@ -390,11 +387,15 @@ test('Tab and Shift+Tab wrap inside the overlay, so Enter never presses the page
   await testPage.keyboard.press('Enter');
   await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'Note for pin 2' });
   await testPage.keyboard.press('Tab');
-  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Save note' });
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Save' });
+  await testPage.keyboard.press('Tab');
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Remove pin 2' });
   await testPage.keyboard.press('Tab');
   await expect.poll(() => inspector.focused()).toEqual(OVERLAY);
   await testPage.keyboard.press('Shift+Tab');
-  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Save note' });
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Remove pin 2' });
+  await testPage.keyboard.press('Shift+Tab');
+  await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Save' });
   await testPage.keyboard.press('Enter');
   await expect.poll(() => inspector.focused()).toEqual({ role: 'button', name: 'Pin 2: Second' });
   await testPage.keyboard.press('Tab');
@@ -429,21 +430,24 @@ test('the page does not scroll under the overlay by wheel or keys, a long note s
 
   expect(await scrollY()).toBe(0);
   await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'Note for pin 1' });
-  await testPage.keyboard.insertText(Array.from({ length: 30 }, (unused, line) => `Line ${line + 1}`).join('\n'));
-  const noteField = (await inspector.shadowElementsOf('pinround-overlay')).find((element) => element.tagName === 'textarea');
-  const noteBoxes = noteField === undefined ? null : await inspector.boxesOf(noteField.backendNodeId);
-  if (noteField === undefined || noteBoxes === null) {
+  await testPage.keyboard.insertText(Array.from({ length: 30 }, (unused, word) => `Word ${word + 1}`).join(' '));
+  const noteField = await overlayElementWithClass(inspector, 'note-field');
+  const noteBoxes = await inspector.boxesOf(noteField.backendNodeId);
+  if (noteBoxes === null) {
     throw new Error('The note field is not shown.');
   }
-  const noteScrollTop = () => inspector.runAsPageOn(noteField.backendNodeId, 'function () { return this.scrollTop; }');
-  await inspector.runAsPageOn(noteField.backendNodeId, 'function () { this.scrollTop = 0; }');
+  // The note is one line, so a long one scrolls sideways, and the wheel turned either way scrolls it.
+  const noteScrollLeft = () => inspector.runAsPageOn(noteField.backendNodeId, 'function () { return this.scrollLeft; }');
+  await inspector.runAsPageOn(noteField.backendNodeId, 'function () { this.scrollLeft = 0; }');
   await testPage.mouse.move((noteBoxes.border.left + noteBoxes.border.right) / 2, (noteBoxes.border.top + noteBoxes.border.bottom) / 2);
   await testPage.mouse.wheel(0, 60);
-  await expect.poll(noteScrollTop).toBe(60);
+  await expect.poll(noteScrollLeft).toBe(60);
+  await testPage.mouse.wheel(40, 0);
+  await expect.poll(noteScrollLeft).toBe(100);
   await afterTwoPaints(testPage);
   expect(await scrollY()).toBe(0);
   await testPage.evaluate(() => document.querySelector('pinround-overlay')?.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true, cancelable: true })));
-  expect(await noteScrollTop()).toBe(60);
+  expect(await noteScrollLeft()).toBe(100);
 
   await testPage.keyboard.press('Escape');
   await testPage.keyboard.press('Escape');
@@ -527,10 +531,11 @@ test('the page\'s own script can neither reach the overlay nor drop, change or r
   const elements = await inspector.shadowElementsOf('pinround-overlay');
   const [surface] = elements.filter((element) => overlayHasClass(element, 'surface'));
   const [firstPin] = elements.filter((element) => overlayHasClass(element, 'pin'));
-  const noteField = elements.find((element) => element.tagName === 'textarea');
-  const saveNote = elements.find((element) => element.tagName === 'button' && element.className === '');
-  if (surface === undefined || firstPin === undefined || noteField === undefined || saveNote === undefined) {
-    throw new Error('The overlay has no surface, pin, note field or Save note button.');
+  const [noteField] = elements.filter((element) => overlayHasClass(element, 'note-field'));
+  const [saveNote] = elements.filter((element) => overlayHasClass(element, 'note-editor__save'));
+  const [removeNote] = elements.filter((element) => overlayHasClass(element, 'note-editor__remove'));
+  if (surface === undefined || firstPin === undefined || noteField === undefined || saveNote === undefined || removeNote === undefined) {
+    throw new Error('The overlay has no surface, pin, note field, Save or Remove button.');
   }
   await inspector.runAsPageOn(noteField.backendNodeId, `function () {
     window.pageScriptRan = true;
@@ -541,6 +546,7 @@ test('the page\'s own script can neither reach the overlay nor drop, change or r
     this.form.requestSubmit();
   }`);
   await inspector.runAsPageOn(saveNote.backendNodeId, 'function () { this.click(); }');
+  await inspector.runAsPageOn(removeNote.backendNodeId, 'function () { this.click(); }');
   await inspector.runAsPageOn(surface.backendNodeId, `function () {
     this.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, clientX: 600, clientY: 400 }));
     this.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }));
@@ -718,17 +724,19 @@ test('the page replaying every note input over the whole note from its capture-p
   await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Price is wrong']);
   expect(await pageWritesOf(testPage)).toEqual({ beforeinputs: 0, wrote: Array.from({ length: 'Price is wrong'.length }, () => true) });
 
+  // Shift+Enter makes no line in the one-line note, and a pasted line break becomes a space.
   await testPage.keyboard.press('Shift+Enter');
-  await testPage.keyboard.type('Total 価格');
-  await testPage.keyboard.insertText('\r\nTax 😀');
+  await testPage.keyboard.type(' Total 価格');
+  await testPage.keyboard.insertText('\r\nTax 😀\r\n');
 
-  const fullNote = 'Price is wrong\nTotal 価格\nTax 😀';
+  const fullNote = 'Price is wrong Total 価格 Tax 😀';
   await expect.poll(async () => (await inspector.node('textbox', 'Note for pin 1')).value).toBe(fullNote);
   const { wrote } = await pageWritesOf(testPage);
-  expect(wrote.length).toBeGreaterThan('Price is wrong'.length + 1 + 'Total 価格'.length);
+  expect(wrote.length).toBeGreaterThan('Price is wrong Total 価格'.length);
   expect(wrote.every((hasWritten) => hasWritten)).toBe(true);
   // The replay empties the note, which is no deletion before the caret, so the note stays as it was without the key.
   await testPage.keyboard.press('Home');
+  await testPage.keyboard.press('ArrowRight');
   await testPage.keyboard.press('Backspace');
   await expect.poll(async () => (await pageWritesOf(testPage)).wrote.length).toBe(wrote.length + 1);
   expect((await inspector.node('textbox', 'Note for pin 1')).value).toBe(fullNote);
@@ -747,29 +755,32 @@ test('the person\'s own inserts, deletions, composition and a cut at the note\'s
   await testPage.mouse.click(400, 300);
   const noteValue = async () => (await inspector.node('textbox', 'Note for pin 1')).value;
 
-  await testPage.keyboard.insertText('Price 価格\r\nis wrong');
-  await expect.poll(noteValue).toBe('Price 価格\nis wrong');
+  // The note is one line: a pasted line break becomes a space, and one at the end of the paste is dropped.
+  await testPage.keyboard.insertText('Price 価格\r\nis wrong\r\n');
+  await expect.poll(noteValue).toBe('Price 価格 is wrong');
   await testPage.keyboard.press('Backspace');
-  await expect.poll(noteValue).toBe('Price 価格\nis wron');
+  await expect.poll(noteValue).toBe('Price 価格 is wron');
   await testPage.keyboard.press('Home');
+  await testPage.keyboard.insertText('Today\nat noon ');
+  await expect.poll(noteValue).toBe('Today at noon Price 価格 is wron');
+  // The caret stays right after the paste, so Delete takes the next character.
   await testPage.keyboard.press('Delete');
-  await expect.poll(noteValue).toBe('Price 価格\ns wron');
+  await expect.poll(noteValue).toBe('Today at noon rice 価格 is wron');
   await testPage.keyboard.press('End');
   await testPage.keyboard.press('Control+Backspace');
-  await expect.poll(noteValue).toBe('Price 価格\ns ');
+  await expect.poll(noteValue).toBe('Today at noon rice 価格 is ');
 
   const session = await context.newCDPSession(testPage);
   await session.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
   await session.send('Input.imeSetComposition', { text: 'にほ', selectionStart: 2, selectionEnd: 2 });
   await session.send('Input.insertText', { text: '日本' });
   await session.detach();
-  await expect.poll(noteValue).toBe('Price 価格\ns 日本');
-  // The accessibility tree shows a line break in a name as a space.
-  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Price 価格 s 日本']);
+  await expect.poll(noteValue).toBe('Today at noon rice 価格 is 日本');
+  await expect.poll(() => pinNamesOf(inspector)).toEqual(['Pin 1: Today at noon rice 価格 is 日本']);
 
   await testPage.keyboard.press('ControlOrMeta+Z');
   await afterTwoPaints(testPage);
-  expect(await noteValue()).toBe('Price 価格\ns 日本');
+  expect(await noteValue()).toBe('Today at noon rice 価格 is 日本');
 
   // The cut falls between the halves of the emoji, so Chrome keeps neither.
   const filler = 'Prix faux, 価格が違う. '.repeat(60).slice(0, 998);

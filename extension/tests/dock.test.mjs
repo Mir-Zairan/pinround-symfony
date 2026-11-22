@@ -709,7 +709,7 @@ test('a click on a pin chooses it with a ring and opens its note form under it, 
     page.click(second);
     assert.deepEqual([second.classList.contains('pin--selected'), second.querySelector('.pin__note').hidden, inRoot('.note-editor').hidden], [true, true, false]);
     assert.deepEqual([inRoot('.note-field').value, inRoot('.note-field').getAttribute('aria-label'), inRoot('.note-field').placeholder], ['Logo is cut off', 'Note for pin 2', 'What is wrong here?']);
-    assert.deepEqual([inRoot('.note-editor').style.left, inRoot('.note-editor').style.top, inRoot('.note-editor').classList.contains('note-editor--above')], ['50%', '50%', false], 'The form sits just below its pin.');
+    assert.deepEqual([inRoot('.note-editor').style.getPropertyValue('--pin-x'), inRoot('.note-editor').style.top, inRoot('.note-editor').classList.contains('note-editor--above')], ['50%', '50%', false], 'The form sits just below its pin; the style keeps it inside the viewport.');
     assert.equal(root.activeElement, inRoot('.note-field'));
     assert.equal(inRoot('.note-editor__remove').getAttribute('aria-label'), 'Remove pin 2');
 
