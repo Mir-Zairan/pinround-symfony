@@ -69,3 +69,25 @@ export async function openThread(page: Page, key: string): Promise<void> {
   // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
   await page.waitForLoadState('networkidle');
 }
+
+/** The headline of the logged-in person's own unshared draft round in the Rounds section. */
+export const DRAFT_ROW_HEADLINE = 'Draft round · only you can see this';
+
+/**
+ * From the ticket page, opens the logged-in person's own unshared draft round with its row's "Open draft" and waits until
+ * its editor is ready.
+ */
+export async function openOwnDraft(page: Page, key: string): Promise<void> {
+  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+  const row = page.locator('article.round-card--private');
+  await expect(row.getByRole('heading', { name: DRAFT_ROW_HEADLINE, level: 3 })).toBeVisible();
+  await row.getByRole('link', { name: 'Open draft' }).click();
+  await expectOnDraftPage(page);
+}
+
+/** Waits until the draft page's editor is ready: its heading is shown and its Stimulus controllers are connected. */
+export async function expectOnDraftPage(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: 'Draft round', level: 1, exact: true })).toBeVisible();
+  // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
+  await page.waitForLoadState('networkidle');
+}

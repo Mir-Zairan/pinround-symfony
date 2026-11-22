@@ -42,7 +42,8 @@
                         {%- endfor -%}
                     </div>
                 {% endif %}
-                <div class="draft-page__actions">
+                {#- With Drive off, Turbo posts a form only inside a data-turbo="true" element: a refusal then stays on this page as a toast. -#}
+                <div class="draft-page__actions" data-turbo="true">
                     <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::SHARE_ROUTE'), {key: this.ticketKey, id: card.roundId}) }}" class="round-card__form">
                         <input type="hidden" name="{{ csrfField }}" value="{{ draftCsrfToken }}">
                         <twig:Button type="submit" size="sm" class="round-card__share">Share with the team now</twig:Button>

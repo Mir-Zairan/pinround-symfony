@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { seedDraftWithPicture } from './draft-picture';
 import { seedChecklistRound } from './review-round-seed';
-import { makeTicketForOmar, openAs } from './ticket';
+import { makeTicketForOmar, openAs, openOwnDraft } from './ticket';
 
 // Rounds on the ticket page (P14.T7): later rounds are one-line rows, Round 0's picture is at most 200 px high with its
 // title beside it and the unused thread composer is one line, so a ticket with five rounds stays short, and on a
@@ -52,10 +52,9 @@ test.beforeAll(async ({ browser }) => {
   seedDraftWithPicture(key);
 
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
-  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-  await page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
+  await openOwnDraft(page, key);
+  await page.getByRole('button', { name: 'Share with the team now' }).click();
   const draft = page.locator('article.round-card--private');
-  await draft.getByRole('button', { name: 'Share with the team now' }).click();
   await page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
   await expect(page.locator('turbo-frame#ticket-rounds article.round-card--row')).toHaveCount(ROWS);
   await expect(draft).toHaveCount(0);

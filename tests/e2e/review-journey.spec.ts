@@ -4,7 +4,7 @@ import { LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './aut
 import { fillTicket, openNewTicketForm, placeTwoPins } from './new-ticket-form';
 import { EARLIER_PIN_NOTES, REVIEW_AREAS, seedReviewRound } from './review-round-seed';
 import { areaTab, roundPanel, saveVerdict } from './round-page';
-import { giveTicketTo, makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
+import { expectOnDraftPage, giveTicketTo, makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // Phase 5's journey with nothing mocked (P05 Definition of done): Mia reports a ticket with an uploaded screenshot and
 // two pins; Omar, given the ticket, starts work, uploads a picture to his draft round, pins it and shares the draft when
@@ -96,10 +96,9 @@ test('Mia reports with pins, Omar shares a pinned draft on hand-off, and Mia rev
 
     await openRounds(page, key);
     await page.getByRole('button', { name: 'Start a draft round' }).click();
-    await expect(page.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
-    await page.waitForLoadState('networkidle');
+    await expectOnDraftPage(page);
     const fileChooser = page.waitForEvent('filechooser');
-    await page.locator('article.round-card--private').getByRole('button', { name: 'Add screenshot' }).click();
+    await page.locator('.draft-round-editor').getByRole('button', { name: 'Add screenshot' }).click();
     await (await fileChooser).setFiles(FIXTURE);
 
     // The editor adds the picture by itself once the worker has made it ready.
@@ -114,6 +113,7 @@ test('Mia reports with pins, Omar shares a pinned draft on hand-off, and Mia rev
     await shot.getByLabel('Note for pin 1').fill(DRAFT_PIN_NOTE);
     await pinSaved;
 
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     const dialog = page.getByRole('dialog', { name: 'Share your draft round?' });
     let answer = moveAnswer(page, key);
     await nextStepVerb(page, 'Send to code review').click();

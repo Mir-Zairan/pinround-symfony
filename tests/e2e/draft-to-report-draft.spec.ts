@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { MIA_STORAGE_STATE } from './auth';
 import { seedDraftWithPicture } from './draft-picture';
-import { makeTicketGivenTo, openAs, TOAST_REGION } from './ticket';
+import { makeTicketGivenTo, openAs, openOwnDraft, TOAST_REGION } from './ticket';
 
 // "Make it a new ticket" (ADR-0044, P13.T2): the owner of a private draft round moves its pictures into a new report
 // draft and lands on its page. Who else may press it, and what stays unchanged when they try, is proven in
@@ -20,10 +20,8 @@ test('Mia makes a new ticket of her draft round and lands on the report draft wi
   const key = await makeTicketGivenTo(browser, `Coupon field clears on reload ${randomUUID().slice(0, 8)}`, 'Mia');
   seedDraftWithPicture(key);
   const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
-  // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
-  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-  const card = page.locator('article.round-card--private');
-  await expect(card.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+  await openOwnDraft(page, key);
+  const card = page.locator('.draft-round-editor');
   await expect(card.locator('section.draft-shot')).toHaveCount(1);
   const shot = card.locator('section.draft-shot');
   const titleSaved = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/editScreenshotText') && 200 === response.status());

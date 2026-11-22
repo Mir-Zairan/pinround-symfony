@@ -1,24 +1,23 @@
 import AxeBuilder from '@axe-core/playwright';
-import { errors, expect, test, type Browser, type BrowserContext, type Locator, type Page, type Request } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { demoPassword, LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE, SARA_EMAIL } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
-import { drawablePng, MEDIA_ID, routeCompletedUpload } from './media-mocks';
+import { drawablePng } from './media-mocks';
 import { recordCspViolations, spotInLayer } from './pin-spots';
-import { composerBody, makeTicketForOmar, openAs, openThread, threadFrame, TOAST_REGION } from './ticket';
+import { DRAFT_ROW_HEADLINE, expectOnDraftPage, makeTicketForOmar, openAs, openOwnDraft, TOAST_REGION } from './ticket';
 
-// The private draft round (P05.T8, ADR-0017) in a real browser. Omar is the assignee and the owner; Lena, Mia and Sara
-// must not see it. What the server refuses for each role is proven in tests/Functional/Review; here it is proven again
-// through the page and the direct URLs.
+// The private draft round (P05.T8, ADR-0017) in a real browser: a PRIVATE row in the ticket's Rounds section whose
+// "Open draft" leads to the draft's own page. Omar is the assignee and the owner; Lena, Mia and Sara must not see it.
+// What the server refuses for each role is proven in tests/Functional/Review; here it is proven again through the page
+// and the direct URLs.
 //
-// A picture upload needs the processing worker and a bucket, so the cases with a picture seed it already ready through the
-// dev-only console command (draft-picture.ts) and run on any stack. The cases of an upload held across a live refresh
-// answer the upload in the browser (media-mocks.ts), so the server refuses the picture it is asked to add.
+// Most cases with a picture seed it already ready through the dev-only console command (draft-picture.ts). The case of
+// "Add screenshot" after a removed upload uploads for real, so it needs the dev stack's processing worker and bucket.
 
 test.use({ viewport: { width: 1280, height: 900 } });
 // Both draft specs read and decide the same people's drafts; playwright.config.ts runs them one test at a time.
 
-const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const SHARED_HEADLINE = /^Round \d+ · self-check by Omar · open · 1 screenshot$/;
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 // COPIED_SHOWN_FOR_MS in copy-text_controller.js.
@@ -27,130 +26,8 @@ const COPIED_SHOWN_FOR_MS = 2000;
 const ANIMATION_FRAME_MS = 16;
 const FROZEN_AT = new Date('2026-03-14T10:00:00Z');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const HUB_PATH = '/.well-known/mercure';
-// As in live-updates.spec.ts: a signal shows within 3 s, and one within RefreshTicketPagesHandler's 2 s window of the
-// last (the ticket's creation counts) is sent one window later.
-const SHOWS_WITHIN_MS = 3000;
-const COALESCED_SHOWS_WITHIN_MS = 2000 + SHOWS_WITHIN_MS;
-// RoundRefused::MEDIA_NOT_UPLOADED_BY_YOU.
-const ADD_REFUSAL = 'Add a screenshot you uploaded yourself.';
-
-/** What the case of a reload fetched during an upload keeps on the page's window between its steps. */
-interface HeldRoundsRender {
-  heldEditor: Element | null;
-  roundsRenderAsked: Promise<void>;
-}
-
-/** Whether request is a fetch of the ticket page, which only a live-updates signal sends. */
-function isPageFetch(request: Request, key: string): boolean {
-  return new URL(request.url()).pathname === `/t/${key}` && request.resourceType() === 'fetch';
-}
-
-/**
- * Waits for the signal of the ticket's creation, which may reach the page only after it opened, and resolves once the
- * page has fetched it, or after SHOWS_WITHIN_MS with none. Started before the page opens, so later signals come from
- * the test's own changes.
- */
-async function settleCreationSignal(page: Page, key: string): Promise<void> {
-  let creationFetch: Request;
-  try {
-    creationFetch = await page.waitForRequest((sent) => isPageFetch(sent, key), { timeout: SHOWS_WITHIN_MS });
-  } catch (error) {
-    if (error instanceof errors.TimeoutError) {
-      return;
-    }
-    throw error;
-  }
-  const response = await creationFetch.response();
-  await response?.finished();
-  await nextTaskOf(page);
-}
-
-/** Resolves once the page has run a task queued after now, so the script's work on an answer already read is done. */
-async function nextTaskOf(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
-}
-
-/** Resolves once the page has painted a frame and run a task after it, so a render Turbo put off to that frame is done. */
-async function nextFrameOf(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0))));
-}
-
-function isRoundsLoad(request: Request, key: string): boolean {
-  return 'GET' === request.method() && new URL(request.url()).pathname === `/t/${key}/rounds`;
-}
-
-/** Every load of the Rounds section's frame from now on. */
-function recordRoundsLoads(page: Page, key: string): Request[] {
-  const loads: Request[] = [];
-  page.on('request', (request) => {
-    if (isRoundsLoad(request, key)) {
-      loads.push(request);
-    }
-  });
-  return loads;
-}
-
-/**
- * Omar's page of a new ticket, its live stream open and a draft round started. The upload calls are answered in the
- * browser, and every status poll waits until releaseStatus() is called, then says ready.
- */
-async function startDraftWithHeldUpload(browser: Browser, title: string): Promise<{ context: BrowserContext; page: Page; key: string; card: Locator; releaseStatus: () => void; picture: Buffer }> {
-  const key = await makeTicketForOmar(browser, title);
-  const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
-  const creationSignalSettled = settleCreationSignal(page, key);
-  const streamOpened = page.waitForResponse((response) => new URL(response.url()).pathname === HUB_PATH);
-  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-  expect((await streamOpened).status()).toBe(200);
-  await creationSignalSettled;
-  await page.getByRole('button', { name: 'Start a draft round' }).click();
-  const card = page.locator('article.round-card--private');
-  await expect(card.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
-  await page.waitForLoadState('networkidle');
-
-  const picture = drawablePng(400, 240);
-  await routeCompletedUpload(page, 'intent-held-by-refresh', picture.length);
-  let releaseStatus = () => {};
-  const statusReleased = new Promise<void>((resolve) => {
-    releaseStatus = resolve;
-  });
-  // Without the hold the refresh drops the editor, which aborts this poll; the answer then has no request to go to.
-  await page.route('**/media/*/status', async (route) => {
-    await statusReleased;
-    await route.fulfill({ status: 200, json: { status: 'ready' } }).catch(() => {});
-  });
-  return { context, page, key, card, releaseStatus, picture };
-}
-
-/** Starts the upload and resolves once its first status poll is sent, so the picture waits to be added. */
-async function uploadUntilFirstPoll(page: Page, card: Locator, picture: Buffer): Promise<void> {
-  const firstPoll = page.waitForRequest((request) => /^\/media\/[^/]+\/status$/.test(new URL(request.url()).pathname));
-  await card.locator('input[type="file"]').setInputFiles({ name: 'checkout.png', mimeType: 'image/png', buffer: picture });
-  await firstPoll;
-  await expect(card.locator('[data-upload-busy]')).toHaveCount(1);
-}
-
-/** Lena comments on the ticket, which sends Omar's page a refresh signal. */
-async function commentAsLena(browser: Browser, key: string): Promise<BrowserContext> {
-  const lena = await openAs(browser, LENA_STORAGE_STATE);
-  await openThread(lena.page, key);
-  await composerBody(lena.page).fill('The banner still covers the coupon box on a narrow window.');
-  await threadFrame(lena.page).locator('form.thread__composer button[type="submit"]').click();
-  await expect(lena.page.locator(TOAST_REGION)).toHaveText('Comment added.');
-  return lena.context;
-}
-
-/** Resolves with the add's answer once releaseStatus() let the picture be ready. */
-async function addAfterRelease(page: Page, releaseStatus: () => void): Promise<void> {
-  const added = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/addScreenshot'));
-  releaseStatus();
-  const addAnswer = await added;
-  expect(addAnswer.request().postData() ?? '').toContain(MEDIA_ID);
-  expect(addAnswer.status()).toBe(200);
-  // The picture is only mocked in the browser, so the server refuses it; that answer proves the add reached it.
-  expect(await addAnswer.text()).toContain(ADD_REFUSAL);
-  return addAnswer;
-}
+// The upload's own wait for a processed picture, with room for the worker.
+const UPLOAD_PROCESSED_WITHIN_MS = 30_000;
 
 async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<{ context: BrowserContext; page: Page; key: string; roundId: string }> {
   const key = await makeTicketForOmar(browser, 'Draft round check on the checkout banner');
@@ -158,13 +35,13 @@ async function startDraftAsOmar(browser: Browser, withPicture = false): Promise<
     seedDraftWithPicture(key);
   }
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
-  // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
-  await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-  if (!withPicture) {
+  if (withPicture) {
+    await openOwnDraft(page, key);
+  } else {
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Start a draft round' }).click();
+    await expectOnDraftPage(page);
   }
-  await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
-  await page.waitForLoadState('networkidle');
   const shareAction = await page.locator('form.round-card__form', { has: page.locator('.round-card__share') }).getAttribute('action');
   const roundId = /\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1];
   expect(roundId, 'the share form of the draft').toBeTruthy();
@@ -194,28 +71,40 @@ function recordRoundRequests(page: Page, key: string, roundId: string): string[]
 }
 
 test.describe('Draft round', () => {
-  test('Omar starts a draft and sees the empty PRIVATE card and the Claude Code box', async ({ browser }) => {
-    const { context, page, key } = await startDraftAsOmar(browser);
-    const card = page.locator('article.round-card--private');
+  test('Omar starts a draft on its own page with the Claude Code box, and the ticket shows it as a PRIVATE row', async ({ browser }) => {
+    const { context, page, key, roundId } = await startDraftAsOmar(browser);
 
-    await expect(card.getByText('PRIVATE', { exact: true })).toBeVisible();
-    await expect(card.getByText('Check your own work before you pass it on.', { exact: false })).toBeVisible();
-    await expect(card.getByText('No screenshots yet.')).toBeVisible();
-    await expect(card.getByRole('button', { name: 'Add screenshot' })).toBeVisible();
-    await expect(card.getByRole('button', { name: 'Delete draft' })).toBeVisible();
-    await expect(card.getByRole('heading', { name: 'For Claude Code', level: 4 })).toBeVisible();
-    await expect(card.getByLabel('Line to give Claude Code')).toHaveValue(`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`);
-    await expect(card.locator('.claude-code-box__tools')).toContainText('get_round_notes, add_screenshot, set_verdict');
+    await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/${roundId}/draft$`));
+    const header = page.locator('.round-page__header');
+    await expect(header.getByText('PRIVATE', { exact: true })).toBeVisible();
+    await expect(header.getByRole('link', { name: `Back to ${key}` })).toBeVisible();
+    await expect(page.getByText('Check your own work before you pass it on.', { exact: false })).toBeVisible();
+    await expect(page.getByText('No screenshots yet.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add screenshot' })).toHaveCount(1);
+    await expect(header.getByRole('button', { name: 'Delete draft' })).toBeVisible();
+    const box = page.locator('section.claude-code-box');
+    await expect(box.getByRole('heading', { name: 'For Claude Code', level: 2 })).toBeVisible();
+    await expect(box.getByLabel('Line to give Claude Code')).toHaveValue(`Read my pinround notes for ${key} and fix what is marked “Not right yet”.`);
+    await expect(box.locator('.claude-code-box__tools')).toContainText('get_round_notes, add_screenshot, set_verdict');
+    await expect(box.locator('code.claude-code-box__command')).toHaveText(/^claude mcp add --transport http pinround https:\/\/[^ ]+\/mcp$/);
+
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    const row = page.locator('article.round-card--private');
+    await expect(row.getByRole('heading', { name: DRAFT_ROW_HEADLINE, level: 3 })).toBeVisible();
+    await expect(row.getByText('PRIVATE', { exact: true })).toBeVisible();
+    await expect(row.locator('.round-card__status')).toHaveText('no screenshots');
+    await expect(row.locator('img, form, .claude-code-box')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Start a draft round' })).toHaveCount(0);
+    await row.getByRole('link', { name: 'Open draft' }).click();
+    await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/${roundId}/draft$`));
     await context.close();
   });
 
   test('sharing a draft with a screenshot makes it read-only', async ({ browser }) => {
     const { context, page } = await startDraftAsOmar(browser, true);
-    const card = page.locator('article.round-card--private');
-    await expect(card.locator('section.draft-shot')).toHaveCount(1);
+    await expect(page.locator('section.draft-shot')).toHaveCount(1);
 
-    await card.getByRole('button', { name: 'Share with the team now' }).click();
+    await page.getByRole('button', { name: 'Share with the team now' }).click();
 
     const shared = page.locator('article.round-card--row').filter({ has: page.getByRole('heading', { name: SHARED_HEADLINE, level: 3 }) });
     await expect(shared).toBeVisible();
@@ -236,10 +125,8 @@ test.describe('Draft round', () => {
     await page.clock.install({ time: FROZEN_AT });
     await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Start a draft round' }).click();
-    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
-    // Stimulus controllers connect after the importmap modules load, and nothing in the page marks that moment.
-    await page.waitForLoadState('networkidle');
-    const box = page.locator('article.round-card--private section.claude-code-box');
+    await expectOnDraftPage(page);
+    const box = page.locator('section.claude-code-box');
     const line = `Read my pinround notes for ${key} and fix what is marked “Not right yet”.`;
     await expect(box.getByLabel('Line to give Claude Code')).toHaveValue(line);
     await expect(box.getByRole('link', { name: 'API tokens' })).toHaveAttribute('href', '/me/tokens');
@@ -283,9 +170,9 @@ test.describe('Draft round', () => {
     });
     await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Start a draft round' }).click();
-    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await expectOnDraftPage(page);
     expect(await page.evaluate(() => typeof navigator.clipboard?.writeText)).toBe('undefined');
-    const box = page.locator('article.round-card--private section.claude-code-box');
+    const box = page.locator('section.claude-code-box');
     // Before copy-text connects the controls are hidden anyway; only after it has run does hidden prove its check.
     await expect(box.locator('[data-controller~="copy-text"][data-copy-text-connected]')).toHaveCount(1);
 
@@ -310,7 +197,7 @@ test.describe('Draft round', () => {
     // The same replay as its owner shows the component answers, so a refusal below is the voter's and not a bad replay.
     const ownerAnswer = await omarContext.request.post(`${liveUrl}/get`, componentRequest());
     expect(ownerAnswer.status()).toBe(200);
-    expect(await ownerAnswer.text()).toContain(DRAFT_HEADLINE);
+    expect(await ownerAnswer.text()).toContain('Share with the team now');
 
     const others: [string, () => Promise<{ context: BrowserContext; page: Page }>][] = [
       ['Lena', () => openAs(browser, LENA_STORAGE_STATE)],
@@ -335,6 +222,10 @@ test.describe('Draft round', () => {
       await expect(page.getByText('PRIVATE', { exact: true })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Start a draft round' }), `${name} may not start a draft`).toHaveCount(0);
 
+      const draftPage = await context.request.get(`/t/${key}/rounds/${roundId}/draft`);
+      expect(draftPage.status(), `${name}: draft page`).toBe(404);
+      expect(await draftPage.text()).not.toContain('Share with the team now');
+
       const frame = await context.request.get(`/t/${key}/rounds`);
       expect(frame.status(), `${name}: rounds frame`).toBe(200);
       const frameHtml = await frame.text();
@@ -343,19 +234,19 @@ test.describe('Draft round', () => {
 
       const editor = await context.request.post(`${liveUrl}/get`, componentRequest());
       expect(editor.status(), `${name}: editor component`).toBe(404);
-      expect(await editor.text()).not.toContain(DRAFT_HEADLINE);
+      expect(await editor.text()).not.toContain('Share with the team now');
 
       for (const action of ['share', 'delete']) {
         const refused = await context.request.post(`/t/${key}/rounds/${roundId}/${action}`, { form: { _csrf_token: 'x' } });
         expect(refused.status(), `${name}: ${action}`).toBe(404);
-        expect(await refused.text()).not.toContain(DRAFT_HEADLINE);
+        expect(await refused.text()).not.toContain('Share with the team now');
       }
       await context.close();
     }
 
     // Nothing the others tried changed the draft: it is still private and Omar's.
     await omar.reload({ waitUntil: 'networkidle' });
-    await expect(omar.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await expect(omar.getByRole('heading', { name: 'Draft round', level: 1, exact: true })).toBeVisible();
     await expect(omar.getByRole('button', { name: 'Share with the team now' })).toBeVisible();
     await omarContext.close();
   });
@@ -485,84 +376,33 @@ test.describe('Draft round', () => {
 
     await expect(page.locator(TOAST_REGION)).toHaveText('This page was open too long. Reload it and try again.');
     await expect.poll(() => events.join(',')).toBe('delete,setPins');
-    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Draft round', level: 1, exact: true })).toBeVisible();
     await page.reload({ waitUntil: 'networkidle' });
     await expect(page.getByLabel('Note for pin 1')).toHaveValue('Kept after a refused delete');
     expect(events, 'one pin save after the refusal, none more').toEqual(['delete', 'setPins']);
     await context.close();
   });
 
-  test('an upload Omar started holds a live refresh of the Rounds section until its picture is added, and a refused add until he moves on', async ({ browser }) => {
-    test.setTimeout(60_000);
-    const title = 'Draft upload outlasts a refresh of the rounds';
-    const { context, page, key, card, releaseStatus, picture } = await startDraftWithHeldUpload(browser, title);
-    const roundsLoads = recordRoundsLoads(page, key);
-    await uploadUntilFirstPoll(page, card, picture);
+  test('uploading and removing a screenshot twice leaves exactly one Add screenshot', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const { context, page } = await startDraftAsOmar(browser);
+    const shots = page.locator('section.draft-shot');
 
-    const omarsRefresh = page.waitForRequest((request) => isPageFetch(request, key), { timeout: COALESCED_SHOWS_WITHIN_MS });
-    const lenaContext = await commentAsLena(browser, key);
-    const refreshAnswer = await (await omarsRefresh).response();
-    await refreshAnswer?.finished();
-    await nextTaskOf(page);
-    expect(roundsLoads, 'the Rounds section is held while the upload waits for its picture').toEqual([]);
-    await expect(card.getByText('No screenshots yet.')).toBeVisible();
+    for (const round of [1, 2]) {
+      const added = page.waitForResponse((response) => response.url().includes('/_components/DraftRoundEditor/addScreenshot') && 200 === response.status(), { timeout: UPLOAD_PROCESSED_WITHIN_MS });
+      await page.locator('.draft-round-editor__upload input[type="file"]').setInputFiles({ name: `checkout-${round}.png`, mimeType: 'image/png', buffer: drawablePng(400, 240) });
+      await added;
+      await expect(shots, `upload ${round}`).toHaveCount(1);
+      await expect(page.getByRole('button', { name: 'Add screenshot' }), `after upload ${round}`).toHaveCount(1);
 
-    await addAfterRelease(page, releaseStatus);
-    const refusal = card.getByRole('alert');
-    await expect(refusal).toHaveText(ADD_REFUSAL);
-    await expect(card.locator('[data-upload-busy]'), 'the refusal keeps the upload busy while it shows').toHaveCount(1);
-    await nextTaskOf(page);
-    expect(roundsLoads, 'the held refresh waits while the refusal shows').toEqual([]);
-    await card.getByRole('button', { name: 'Add screenshot' }).focus();
-    await nextTaskOf(page);
-    expect(roundsLoads, 'moving inside the editor keeps the refusal').toEqual([]);
-    await expect(refusal).toHaveText(ADD_REFUSAL);
-
-    await page.getByRole('heading', { name: title, level: 1 }).click();
-    await expect.poll(() => roundsLoads.length, { message: 'the held Rounds section loads again once Omar moved on' }).toBeGreaterThan(0);
-    await expect(card.getByRole('alert')).toHaveCount(0);
-    await expect(card.locator('[data-upload-busy]')).toHaveCount(0);
-    await lenaContext.close();
-    await context.close();
-  });
-
-  test('a Rounds reload that was being fetched when Omar started an upload renders only once the upload ended', async ({ browser }) => {
-    test.setTimeout(60_000);
-    const title = 'Draft upload started during a reload of the rounds';
-    const { context, page, key, card, releaseStatus, picture } = await startDraftWithHeldUpload(browser, title);
-    let releaseRounds = () => {};
-    const roundsReleased = new Promise<void>((resolve) => {
-      releaseRounds = resolve;
-    });
-    await page.route((url) => url.pathname === `/t/${key}/rounds`, async (route) => {
-      await roundsReleased;
-      await route.fallback().catch(() => {});
-    });
-    const roundsReload = page.waitForRequest((request) => isRoundsLoad(request, key), { timeout: COALESCED_SHOWS_WITHIN_MS });
-    const lenaContext = await commentAsLena(browser, key);
-    await roundsReload;
-
-    await uploadUntilFirstPoll(page, card, picture);
-    await card.evaluate((element) => {
-      const held = window as unknown as HeldRoundsRender;
-      held.heldEditor = element.querySelector('.draft-round-editor__body');
-      held.roundsRenderAsked = new Promise<void>((resolve) => element.closest('turbo-frame')?.addEventListener('turbo:before-frame-render', () => resolve(), { once: true }));
-    });
-    releaseRounds();
-    await page.evaluate(() => (window as unknown as HeldRoundsRender).roundsRenderAsked);
-    await nextFrameOf(page);
-    expect(await page.evaluate(() => (window as unknown as HeldRoundsRender).heldEditor?.isConnected), 'the fetched Rounds section waits while the upload is busy').toBe(true);
-
-    await addAfterRelease(page, releaseStatus);
-    await expect(card.getByRole('alert')).toHaveText(ADD_REFUSAL);
-    await nextFrameOf(page);
-    expect(await page.evaluate(() => (window as unknown as HeldRoundsRender).heldEditor?.isConnected), 'the refusal keeps the fetched section waiting').toBe(true);
-
-    await page.getByRole('heading', { name: title, level: 1 }).click();
-    await expect.poll(() => page.evaluate(() => (window as unknown as HeldRoundsRender).heldEditor?.isConnected), { message: 'the fetched Rounds section renders once Omar moved on' }).toBe(false);
-    await expect(card.getByRole('alert')).toHaveCount(0);
-    await expect(card.getByText('No screenshots yet.')).toBeVisible();
-    await lenaContext.close();
+      const removed = savedBy(page, 'removeScreenshot');
+      await shots.getByRole('button', { name: 'Remove screenshot' }).click();
+      await removed;
+      await expect(shots, `remove ${round}`).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Add screenshot' }), `after remove ${round}`).toHaveCount(1);
+    }
+    await expect(page.locator('.draft-round-editor__upload')).toHaveCount(1);
+    await expect(page.locator('.draft-round-editor__upload input[type="file"]')).toHaveCount(1);
     await context.close();
   });
 });

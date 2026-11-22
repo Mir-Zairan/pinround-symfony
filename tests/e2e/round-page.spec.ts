@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE, MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
-import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
+import { makeTicketForOmar, openAs, openOwnDraft, TOAST_REGION } from './ticket';
 
 // The round page of a shared draft (P14.T8 step 1) in a real browser: one screenshot at a time, the right arrow showing
 // the next, a click on a tab jumping to another. What the page shows for each round kind and query, and who is
@@ -16,7 +16,6 @@ import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
-const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** RoundBar::FRAME_ID: the ticket page's frame that holds the round bar while a shared round is open. */
 const ROUND_BAR_FRAME = 'ticket-round-bar';
@@ -44,8 +43,7 @@ test.describe('The round page of a shared draft', () => {
     const key = await makeTicketForOmar(browser, 'Round page check on the cart screenshots');
     seedDraftWithPicture(key);
     const omar = await openAs(browser, OMAR_STORAGE_STATE);
-    await omar.page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    await expect(omar.page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await openOwnDraft(omar.page, key);
     const shareAction = await omar.page.locator('form.round-card__form', { has: omar.page.locator('.round-card__share') }).getAttribute('action');
     seedTwoMoreScreenshots(/\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1] ?? '');
     await omar.page.reload({ waitUntil: 'networkidle' });
@@ -110,9 +108,8 @@ test.describe('The move-on buttons of an open round', () => {
 
     // Seeded once the ticket is in Testing, so no hand-off above asked to share it.
     seedDraftWithPicture(key);
-    await omar.page.reload({ waitUntil: 'networkidle' });
-    await omar.page.getByRole('heading', { level: 2, name: 'Rounds' }).scrollIntoViewIfNeeded();
-    await omar.page.locator('article.round-card--private').getByRole('button', { name: 'Share with the team now' }).click();
+    await openOwnDraft(omar.page, key);
+    await omar.page.getByRole('button', { name: 'Share with the team now' }).click();
     const sharedRow = omar.page.locator('turbo-frame#ticket-rounds article.round-card--row');
     await expect(sharedRow.getByRole('heading', { name: /^Round 1 · self-check by Omar · open · 1 screenshot$/, level: 3 })).toBeVisible();
     await omar.context.close();

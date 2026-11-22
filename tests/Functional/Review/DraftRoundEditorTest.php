@@ -108,6 +108,7 @@ final class DraftRoundEditorTest extends WebTestCase
         self::assertSame($before['screenshots'][$this->miasDraft], $this->screenshotRowsOf($this->miasDraft));
         self::assertSame($before['screenshots'][$this->otherTicketsDraft], $this->screenshotRowsOf($this->otherTicketsDraft));
         self::assertSame(2, $this->roundRow($this->ticketId, $this->draft)['version'], 'One accepted change adds one.');
+        self::assertSame([$rows[2]['id']], $this->shownSectionIds(), 'The added screenshot is the one shown.');
     }
 
     #[Test]
@@ -131,7 +132,32 @@ final class DraftRoundEditorTest extends WebTestCase
             self::assertResponseStatusCodeSame(200, $name);
             self::assertSame($reason, $this->refusalShown(), $name);
             self::assertSame($before, $this->stored(), $name.': nothing is stored.');
+            self::assertSame([$this->firstShot], $this->shownSectionIds(), $name.': a refused add keeps the tab shown.');
         }
+    }
+
+    #[Test]
+    public function aTabNumberThatIsNoWholeNumberFromOneIsABadRequestAndAnUnknownCompareModeShowsBoth(): void
+    {
+        $this->seedWorld();
+
+        foreach (['0', 'x', '-1', '1.5'] as $number) {
+            $this->act('showScreenshot', ['number' => $number]);
+
+            self::assertResponseStatusCodeSame(400, $number);
+        }
+
+        $this->act('showScreenshot', ['number' => '99']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([$this->secondShot], $this->shownSectionIds(), 'A number past the last shows the last.');
+
+        $this->act('compare', ['mode' => 'sideways']);
+
+        self::assertResponseStatusCodeSame(200);
+        $props = new Crawler((string) $this->client->getResponse()->getContent())->filter('.draft-round-editor')->attr('data-live-props-value');
+        self::assertIsString($props);
+        self::assertStringContainsString('"compareMode":"both"', $props);
     }
 
     #[Test]
@@ -602,6 +628,14 @@ final class DraftRoundEditorTest extends WebTestCase
             'isPrivate' => 0 !== \count($response->filter('.round-page__header .round-card__private')),
             'pictures' => $pictures,
         ];
+    }
+
+    /**
+     * @return list<string> the screenshot sections of the last response that are not hidden: the shown tab's
+     */
+    private function shownSectionIds(): array
+    {
+        return new Crawler((string) $this->client->getResponse()->getContent())->filter('section[data-screenshot-id]:not([hidden])')->each(static fn (Crawler $section): string => (string) $section->attr('data-screenshot-id'));
     }
 
     private function refusalShown(): ?string

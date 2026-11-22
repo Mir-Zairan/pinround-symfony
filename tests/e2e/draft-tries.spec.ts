@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { seedDraftWithPicture } from './draft-picture';
-import { makeTicketForOmar, openAs } from './ticket';
+import { makeTicketForOmar, openAs, openOwnDraft } from './ticket';
 
 // The tries of a screenshot in the owner's draft round (P14.T6 step 2, ADR-0048) in a real browser: the latest try with
 // "Try 2 of 2", the switch to try 1 and back, and a pin of try 1 marked fixed. What each action stores and refuses, and
@@ -15,7 +15,6 @@ import { makeTicketForOmar, openAs } from './ticket';
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
-const DRAFT_HEADLINE = 'Draft round · only you can see this';
 const FIRST_TRY_NOTE = 'The banner covers the total';
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -53,8 +52,7 @@ test.describe('Tries of a screenshot in the draft round', () => {
     const key = await makeTicketForOmar(browser, 'Draft round tries on the checkout banner');
     seedDraftWithPicture(key);
     const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
-    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    await expect(page.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await openOwnDraft(page, key);
     const shareAction = await page.locator('form.round-card__form', { has: page.locator('.round-card__share') }).getAttribute('action');
     const roundId = /\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1] ?? '';
     seedRetakeWithPinOnTheFirstTry(roundId);

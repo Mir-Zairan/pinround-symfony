@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { LENA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { seedDraftWithPicture } from './draft-picture';
-import { makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
+import { expectOnDraftPage, makeTicketForOmar, openAs, TOAST_REGION } from './ticket';
 
 // "Share your draft round?" (P05.T9, ADR-0017): the dialog a move shows to the owner of an undecided draft round with a
 // screenshot. What the server answers for every choice and refusal is proven in
@@ -23,13 +23,15 @@ async function startDraft(browser: Browser, title: string, withPicture: boolean)
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
   if (!withPicture) {
+    // The start opens the new draft's page; the moves below are the ticket page's.
     await page.getByRole('button', { name: 'Start a draft round' }).click();
+    await expectOnDraftPage(page);
+    await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
   }
-  await expect(page.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
+  const draftRow = page.locator('article.round-card--private');
+  await expect(draftRow.getByRole('heading', { name: 'Draft round · only you can see this', level: 3 })).toBeVisible();
   await page.waitForLoadState('networkidle');
-  if (withPicture) {
-    await expect(page.locator('section.draft-shot')).toHaveCount(1);
-  }
+  await expect(draftRow.locator('.round-card__status')).toHaveText(withPicture ? '0 of 1 look right · 1 screenshot' : 'no screenshots');
   return { context, page, key };
 }
 

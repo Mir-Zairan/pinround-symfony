@@ -6,7 +6,7 @@ import { MIA_STORAGE_STATE, OMAR_STORAGE_STATE } from './auth';
 import { runAsDatabaseOwner } from './database';
 import { runPhp } from './draft-picture';
 import { ACCEPT, issueOmarsToken, McpSession, PROTOCOL_VERSION, revokeOnTokensPage, revokeTokensLeftOpen, UUID, type ToolAnswer } from './mcp';
-import { makeTicketForOmar, openAs } from './ticket';
+import { makeTicketForOmar, openAs, openOwnDraft } from './ticket';
 
 // P09.T5's journey with the real processing worker and bucket: Omar's token → create_upload → PUT to the presigned URL
 // → add_screenshot → the picture is in Omar's draft round, and Mia, the tester, does not see it. The tool contracts and
@@ -16,7 +16,6 @@ test.use({ viewport: { width: 1280, height: 900 } });
 
 /** read and rounds:write, as the token page makes it by default. */
 const UPLOAD_SCOPES = ['read', 'rounds:write'] as const;
-const DRAFT_HEADLINE = 'Draft round · only you can see this';
 // P09.T5's acceptance: the screenshot is in the draft within 10 s of the upload.
 const PROCESSING_LIMIT_MS = 10_000;
 // AddScreenshot::STILL_PROCESSING's status and PICTURE_REJECTED.
@@ -68,7 +67,7 @@ async function addScreenshotOnceProcessed(session: McpSession, toolArguments: Re
   return last.answer;
 }
 
-/** On Omar's ticket page: the id of his open draft round, from its share form. */
+/** On Omar's draft page: the id of his open draft round, from its share form. */
 async function draftRoundIdOn(page: Page): Promise<string> {
   const shareAction = await page.locator('form.round-card__form', { has: page.locator('.round-card__share') }).getAttribute('action');
   const roundId = /\/rounds\/([^/]+)\/share$/.exec(shareAction ?? '')?.[1] ?? '';
@@ -92,8 +91,7 @@ test.describe('Screenshots from Claude Code', () => {
     expect(screenshotId).toMatch(UUID);
 
     const { context: omarContext, page: omar } = await openAs(browser, OMAR_STORAGE_STATE);
-    await omar.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    await expect(omar.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await openOwnDraft(omar, key);
     const shot = omar.locator(`section.draft-shot[data-screenshot-id="${screenshotId}"]`);
     await expect(omar.locator('section.draft-shot')).toHaveCount(1);
     await expect(shot.getByLabel('Picture title · optional')).toHaveValue('Checkout page after the fix');
@@ -142,8 +140,7 @@ test.describe('Screenshots from Claude Code', () => {
     expect(refused.isError).toBe(true);
     expect(refused.text).toBe(PICTURE_REJECTED);
     const { context, page: omar } = await openAs(browser, OMAR_STORAGE_STATE);
-    await omar.goto(`/t/${key}`, { waitUntil: 'networkidle' });
-    await expect(omar.getByRole('heading', { name: DRAFT_HEADLINE, level: 3 })).toBeVisible();
+    await openOwnDraft(omar, key);
     await expect(omar.locator('section.draft-shot')).toHaveCount(0);
     await expect(omar.getByText('No screenshots yet.')).toBeVisible();
     const roundId = await draftRoundIdOn(omar);
@@ -171,7 +168,7 @@ test.describe('Screenshots from Claude Code', () => {
     expect(added.isError, added.text).toBe(false);
     expect(added.structured).toMatchObject({ status: 'added' });
     const { context, page: omar } = await openAs(browser, OMAR_STORAGE_STATE);
-    await omar.goto(`/t/${key}`, { waitUntil: 'networkidle' });
+    await openOwnDraft(omar, key);
     const picture = omar.locator(`section.draft-shot[data-screenshot-id="${String(added.structured.screenshot_id)}"] img`).first();
     await picture.scrollIntoViewIfNeeded();
     await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0), { message: 'the processed picture loads' }).toBe(true);
