@@ -16,4 +16,46 @@
         <h2 id="round-panel-own-pins" class="round-panel__title">{{ panel.ownPinsHeading }}</h2>
         {{ include('@Review/_round_pin_rows.html.twig', {rows: panel.ownPins, side: 'after', emptyMessage: 'This screenshot has no pins.'}) }}
     </section>
+
+    {% if panel.verdict is not null %}
+        {% set verdict = panel.verdict %}
+        {% set verdictController = 'App\\Review\\UI\\Controller\\VerdictController' %}
+        {#- A plain form: VerdictController comes back to this section (its id as fragment, which fragment-focus focuses). -#}
+        <section class="round-panel__section round-panel__section--verdict" id="{{ constant(verdictController ~ '::SCREENSHOT_VERDICT_SECTION_ID') }}" tabindex="-1" data-controller="fragment-focus" aria-labelledby="round-screenshot-verdict-title">
+            <h2 id="round-screenshot-verdict-title" class="round-panel__title">{{ verdict.mayGiveVerdict ? 'Your verdict' : 'Verdict' }} on {{ verdict.screenshotName }}</h2>
+            {% if verdict.verdictLabel is null %}
+                <p class="round-panel__empty">No verdict yet.</p>
+            {% else %}
+                <p class="round-panel__verdict"><twig:Tag>{{ verdict.verdictLabel }}</twig:Tag></p>
+                {% if verdict.note is not null %}
+                    <p class="round-panel__note">{{ verdict.note }}</p>
+                {% endif %}
+                {% if verdict.decidedByName is not null %}
+                    <p class="round-panel__author">Saved by {{ verdict.decidedByName }}</p>
+                {% endif %}
+            {% endif %}
+            {% if verdict.mayGiveVerdict %}
+                {% set verdictField = constant(verdictController ~ '::VERDICT_FIELD') %}
+                {#- No required on the chips: a save without one gets the prototype's toast from the server. -#}
+                <form method="post" action="{{ path(constant(verdictController ~ '::SCREENSHOT_VERDICT_ROUTE'), {key: ticketKey, number: roundNumber, screenshotId: verdict.screenshotId}) }}" class="round-panel__verdict-form" data-turbo="false">
+                    <input type="hidden" name="{{ constant(verdictController ~ '::CSRF_FIELD') }}" value="{{ csrf_token(verdictCsrfId) }}">
+                    <fieldset class="round-panel__choices">
+                        <legend class="visually-hidden">Your verdict on {{ verdict.screenshotName }}</legend>
+                        {% for value, choiceLabel in constant('App\\Review\\UI\\RoundPage\\RoundPages::AREA_VERDICT_LABELS') %}
+                            <label class="chip round-panel__choice">
+                                <input type="radio" name="{{ verdictField }}" value="{{ value }}"{% if value == verdict.verdict %} checked{% endif %}>
+                                {{ choiceLabel }}
+                            </label>
+                        {% endfor %}
+                    </fieldset>
+                    <label class="round-panel__label" for="round-screenshot-verdict-note">Note (optional)</label>
+                    <textarea id="round-screenshot-verdict-note" class="text-field round-panel__note-field" name="{{ constant(verdictController ~ '::NOTE_FIELD') }}"{% if verdict.leadName is not null %} placeholder="What should {{ verdict.leadName }} know?"{% endif %} maxlength="{{ constant(verdictController ~ '::NOTE_MAX_LENGTH') }}" rows="3">{{ verdict.note }}</textarea>
+                    {% if verdict.leadName is not null %}
+                        <p class="round-panel__then">Then: {{ verdict.leadName }}, team lead</p>
+                    {% endif %}
+                    <twig:Button type="submit" class="round-panel__save">Save verdict</twig:Button>
+                </form>
+            {% endif %}
+        </section>
+    {% endif %}
 </aside>

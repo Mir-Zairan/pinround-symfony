@@ -81,6 +81,44 @@ test.describe('The round page of a shared draft', () => {
     await expect(tabs.locator('[data-screenshot-pager-target="next"]'), 'no screenshot after the last').toHaveCount(0);
     await context.close();
   });
+
+  // Who may give it, and what a refused post changes, is proven in
+  // tests/Functional/Review/VerdictControllerScreenshotsTest.php.
+  test('Mia gives the shared screenshot Needs fix with a note, and Omar reads it on the same page', async ({ browser }) => {
+    test.setTimeout(120_000);
+    const key = await makeTicketForOmar(browser, 'Round page verdict on the cart screenshot');
+    seedDraftWithPicture(key);
+    const omar = await openAs(browser, OMAR_STORAGE_STATE);
+    await openOwnDraft(omar.page, key);
+    await omar.page.locator('.round-card__share').click();
+    await expect(omar.page.locator('article.round-card--row').getByRole('heading', { name: /^Round 1 · /, level: 3 })).toBeVisible();
+
+    const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+    await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
+    const verdict = page.locator('#round-screenshot-verdict');
+    await expect(verdict.getByRole('heading', { level: 2 })).toHaveText(/^Your verdict on /);
+    await expect(verdict).toContainText('No verdict yet.');
+    await expect(verdict).toContainText('Then: Lena, team lead');
+
+    await verdict.getByText('Needs fix', { exact: true }).click();
+    await verdict.getByLabel('Note (optional)').fill('The total still shows the old price.');
+    await verdict.getByRole('button', { name: 'Save verdict' }).click();
+
+    await expect(page.locator(TOAST_REGION)).toContainText('Verdict saved. Lena can see it.');
+    await expect(page).toHaveURL(new RegExp(`/t/${key}/rounds/1\\?screenshot=1#round-screenshot-verdict$`));
+    await expect(verdict, 'the redirect brings Mia back to the verdict').toBeFocused();
+    await expect(verdict.locator('.round-panel__verdict')).toHaveText('Needs fix');
+    await expect(verdict.getByRole('radio', { name: 'Needs fix' })).toBeChecked();
+    await context.close();
+
+    await omar.page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
+    const omarsView = omar.page.locator('#round-screenshot-verdict');
+    await expect(omarsView.getByRole('heading', { level: 2 })).toHaveText(/^Verdict on /);
+    await expect(omarsView.locator('.round-panel__verdict')).toHaveText('Needs fix');
+    await expect(omarsView.locator('.round-panel__note')).toHaveText('The total still shows the old price.');
+    await expect(omarsView.getByRole('button')).toHaveCount(0);
+    await omar.context.close();
+  });
 });
 
 // The move-on buttons (P14.T8, ADR-0048): the person whose turn it is gives the open round's verdict from its page, a
@@ -119,7 +157,7 @@ test.describe('The move-on buttons of an open round', () => {
     await page.goto(`/t/${key}/rounds/1`, { waitUntil: 'networkidle' });
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Round 1 · shot .+ · Ready for you$/);
     const moveOn = page.locator('section.round-move-on');
-    await expect(moveOn.getByRole('heading', { name: 'Your verdict' })).toBeVisible();
+    await expect(moveOn.getByRole('heading', { name: 'Your verdict', exact: true })).toBeVisible();
 
     await moveOn.getByRole('button', { name: 'Needs changes' }).click();
 

@@ -1411,7 +1411,8 @@ button.round-tab {
   margin: 0;
 }
 
-.round-panel__section:has(#round-panel-verdict) {
+.round-panel__section:has(#round-panel-verdict),
+.round-panel__section--verdict {
   padding: 18px;
   border-radius: var(--radius-card);
   background: var(--s-c);

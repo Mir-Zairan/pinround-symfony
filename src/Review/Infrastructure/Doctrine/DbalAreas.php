@@ -9,6 +9,7 @@ use App\Review\Domain\Area;
 use App\Review\Domain\AreaId;
 use App\Review\Domain\Areas;
 use App\Review\Domain\AreaVerdict;
+use App\Review\Domain\DraftScreenshotVerdict;
 use App\Review\Domain\PinId;
 use App\Review\Domain\PinSource;
 use App\Review\Domain\PinToCheck;
@@ -24,7 +25,7 @@ use App\SharedKernel\Domain\UserId;
 use Doctrine\DBAL\Connection;
 
 /**
- * Areas on rvw_area, rvw_round and rvw_pin through DBAL; no entity maps them (doctrine.yaml schema_filter). Every
+ * Areas on rvw_area, rvw_round, rvw_pin and rvw_screenshot_verdict through DBAL; no entity maps them (doctrine.yaml schema_filter). Every
  * statement names organization_id as well as row-level security, so each one uses an index that starts with it.
  */
 final readonly class DbalAreas implements Areas
@@ -149,6 +150,41 @@ final readonly class DbalAreas implements Areas
         );
 
         return 1 === $updated;
+    }
+
+    public function isShownScreenshotOf(RoundId $roundId, ScreenshotId $screenshotId): bool
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+
+        return false !== $this->connection->fetchOne(
+            'SELECT 1 FROM rvw_screenshot AS screenshot WHERE screenshot.organization_id = ? AND screenshot.id = ? AND screenshot.round_id = ?'
+            .' AND '.DbalRoundQueries::latestTrySql('screenshot'),
+            [$organizationId, $screenshotId->toString(), $roundId->toString()],
+        );
+    }
+
+    public function saveScreenshotVerdict(DraftScreenshotVerdict $verdict): void
+    {
+        $organizationId = $this->requireTransactionAndTenant();
+        // The foreign key refuses a screenshot of another round; the WHERE keeps a verdict of one round from being
+        // written over by another's, which the key makes impossible anyway.
+        $written = $this->connection->executeStatement(
+            'INSERT INTO rvw_screenshot_verdict (organization_id, screenshot_id, round_id, verdict, note, decided_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            .' ON CONFLICT (organization_id, screenshot_id) DO UPDATE SET verdict = EXCLUDED.verdict, note = EXCLUDED.note,'
+            .' decided_by = EXCLUDED.decided_by, decided_at = EXCLUDED.decided_at WHERE rvw_screenshot_verdict.round_id = EXCLUDED.round_id',
+            [
+                $organizationId,
+                $verdict->screenshotId->toString(),
+                $verdict->roundId->toString(),
+                $verdict->verdict->value,
+                $verdict->note,
+                $verdict->decidedBy->toString(),
+                $verdict->decidedAt->format(self::TIMESTAMP),
+            ],
+        );
+        if (1 !== $written) {
+            throw new \LogicException(\sprintf('Screenshot %s is not one of round %s.', $verdict->screenshotId->toString(), $verdict->roundId->toString()));
+        }
     }
 
     private function requireTransactionAndTenant(): string

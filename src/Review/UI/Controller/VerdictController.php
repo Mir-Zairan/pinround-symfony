@@ -34,7 +34,8 @@ use Symfony\UX\Turbo\TurboBundle;
 
 /**
  * The verdicts of the review round page's side panel (P05.T7, review-round.md, Side panel): Fixed, Still wrong and
- * Undo on an earlier pin, and Save verdict on a screen area. None moves the ticket. A saved verdict answers a Turbo
+ * Undo on an earlier pin, and Save verdict on a screen area or on the shown screenshot of a shared draft. None moves
+ * the ticket. A saved verdict answers a Turbo
  * form with a stream that shows each area's state in the strip and the side panel again with the toast, and any other
  * form with a redirect to the area on the round page with the toast flashed. A refusal changes nothing and answers with
  * its toast the same two ways, as a 403 or 422 stream. A form of the full-screen review (FOCUS_SIDE_FIELD) gets a redirect back to it either way, and
@@ -51,6 +52,9 @@ final class VerdictController extends AbstractController
     public const string PIN_VERDICT_ROUTE = 'review_pin_verdict';
     public const string PIN_UNDO_ROUTE = 'review_pin_verdict_undo';
     public const string AREA_VERDICT_ROUTE = 'review_area_verdict';
+    public const string SCREENSHOT_VERDICT_ROUTE = 'review_screenshot_verdict';
+    /** The id of a shared draft's verdict section on the round page, which a saved or refused verdict comes back to. */
+    public const string SCREENSHOT_VERDICT_SECTION_ID = 'round-screenshot-verdict';
 
     public const string CSRF_FIELD = '_csrf_token';
     /** A pin's fixed or still_wrong, an area's pass, needs_fix or question. */
@@ -93,6 +97,7 @@ final class VerdictController extends AbstractController
         private readonly ReviewRoundQueries $reviewRoundQueries,
         private readonly VerdictCommands $verdictCommands,
         private readonly RefusalAnswers $refusalAnswers,
+        private readonly RoundPages $roundPages,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -177,6 +182,90 @@ final class VerdictController extends AbstractController
             RoundPanel::SAVE_BUTTON_ID,
             false,
         );
+    }
+
+    /**
+     * "Save verdict" on the shown screenshot of a shared draft (ADR-0048, note of 2026-11-22): a plain form, answered
+     * saved or refused with a redirect to that screenshot's verdict section on the round page and the toast flashed.
+     * The same order of refusals as the other verdicts; a screenshot the round page does not show is a 404.
+     */
+    #[Route('/t/{key}/rounds/{number}/screenshots/{screenshotId}/verdict', name: self::SCREENSHOT_VERDICT_ROUTE, requirements: ['number' => '\d{1,9}'], methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function screenshotVerdict(string $key, int $number, string $screenshotId, Request $request): Response
+    {
+        if (null === $this->tenantContext->get()) {
+            // Anonymous requests have no tenant, and the firewall sends the AccessDeniedException to the login page.
+            throw $this->createAccessDeniedException();
+        }
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $verdict = $request->request->getString(self::VERDICT_FIELD);
+        $note = $request->request->getString(self::NOTE_FIELD);
+        $now = $this->clock->now();
+        $screenshotNumber = null;
+
+        try {
+            $toast = $this->transactions->run(function () use ($key, $number, $screenshotId, $csrfToken, $verdict, $note, $now, &$screenshotNumber): string {
+                $visible = $this->visibleTicketLookup->visibleTicketOf($key);
+                $round = $this->reviewRoundQueries->roundOf($visible->ticket->id, $number, $visible->actor->userId())
+                    ?? throw new NotFoundHttpException(RoundController::NOT_FOUND);
+                $facts = new RoundAccessFacts($visible->actor->organizationId(), $round->id, $visible->ticket->id, $round->ownerId, false, false);
+                if (!$this->isGranted(RoundPermission::VIEW, $facts)) {
+                    throw new NotFoundHttpException(RoundController::NOT_FOUND);
+                }
+                // Found first, so a refusal goes back to the screenshot the form was on; one the page does not show
+                // is a 404 only after the refusals, as the other verdicts' unknown pins and areas.
+                [, $screenshots] = $this->roundPages->screenshotsOf($visible, $round) ?? [null, []];
+                foreach ($screenshots as $index => $screenshot) {
+                    if ($screenshot->id === strtolower($screenshotId)) {
+                        $screenshotNumber = $index + 1;
+                    }
+                }
+                if (!$this->isGranted(VerdictPermission::SET, $facts)) {
+                    throw new RefusedWithToast(self::ONLY_TESTER_OR_LEAD, Response::HTTP_FORBIDDEN);
+                }
+                if (!$this->isCsrfTokenValid(self::csrfIdOf($key), $csrfToken)) {
+                    throw RefusedWithToast::formExpired();
+                }
+                if (null === $screenshotNumber) {
+                    throw new NotFoundHttpException(VerdictRefused::SCREENSHOT_NOT_FOUND);
+                }
+
+                try {
+                    $this->verdictCommands->saveScreenshotVerdict($round->id, strtolower($screenshotId), $visible->actor->userId(), '' === $verdict ? null : $verdict, $note, $now);
+                } catch (VerdictRefused $refused) {
+                    if ($refused->isNotFound()) {
+                        throw new NotFoundHttpException($refused->getMessage(), $refused);
+                    }
+                    throw new RefusedWithToast($refused->getMessage());
+                }
+
+                return \sprintf(
+                    self::VERDICT_SAVED,
+                    $visible->ticket->turnSnapshot->leadDisplayName
+                        ?? throw new \LogicException('VerdictVoter grants verdicts only on a ticket with a team, and a team has a lead.'),
+                );
+            });
+        } catch (TicketNotFound) {
+            throw $this->createNotFoundException(RoundsController::NOT_FOUND);
+        } catch (RefusedWithToast $refused) {
+            return $this->redirectToScreenshotVerdict($key, $number, $screenshotNumber, $refused->toast());
+        }
+
+        return $this->redirectToScreenshotVerdict($key, $number, $screenshotNumber, $toast);
+    }
+
+    /**
+     * @param int|null $screenshotNumber from 1, the screenshot to show; the first one when the round page does not show
+     *                                   the screenshot the form named
+     */
+    private function redirectToScreenshotVerdict(string $key, int $number, ?int $screenshotNumber, string $toast): Response
+    {
+        $this->addFlash(self::TOAST, $toast);
+        $parameters = ['key' => $key, 'number' => $number, '_fragment' => self::SCREENSHOT_VERDICT_SECTION_ID];
+        if (null !== $screenshotNumber) {
+            $parameters[RoundController::SCREENSHOT_PARAMETER] = $screenshotNumber;
+        }
+
+        return $this->redirectToRoute(RoundController::ROUND_ROUTE, $parameters, Response::HTTP_SEE_OTHER);
     }
 
     /**

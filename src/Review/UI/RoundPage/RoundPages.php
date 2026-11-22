@@ -9,6 +9,7 @@ use App\Media\Api\SignedUrls;
 use App\Review\Api\AreaState;
 use App\Review\Api\AreaView;
 use App\Review\Api\ChecklistQueries;
+use App\Review\Api\DraftScreenshotVerdictQueries;
 use App\Review\Api\ReviewRoundView;
 use App\Review\Api\RoundPinView;
 use App\Review\Api\RoundScreenshotView;
@@ -42,7 +43,9 @@ use App\Ticketing\Api\TicketPageView;
  * Its reads do not grow with the screenshots or pins: one signing call for the shown pictures, for a round without areas
  * other than a review round, RoundsVisibleTo's read of the one round whose screenshots it shows, for a shared draft its
  * read of the hand-off round before it or, with none, of the report, whose pictures are the Befores (and, for a copied
- * picture that round does not hold, pairedBeforeOf's reads of its source), checkRowsOf's reads of the check items, and, on an open hand-off round, RoundReadyFor's reads of who it is ready for.
+ * picture that round does not hold, pairedBeforeOf's reads of its source), checkRowsOf's reads of the check items, for
+ * a shared draft the read of the shown screenshot's verdict, and, on an open hand-off round, RoundReadyFor's reads of
+ * who it is ready for.
  */
 final readonly class RoundPages
 {
@@ -76,6 +79,7 @@ final readonly class RoundPages
         private RoundReadyFor $roundReadyFor,
         private ChecklistQueries $checklistQueries,
         private ChecklistCards $checklistCards,
+        private DraftScreenshotVerdictQueries $draftScreenshotVerdictQueries,
     ) {
     }
 
@@ -153,6 +157,7 @@ final readonly class RoundPages
                 null === $beforeScreenshot ? [] : self::picturePinRowsOf($ticket, $beforeScreenshot, $beforeNumber - 1, $checkRows['before']),
                 \sprintf(self::PINS_FROM_ROUND, $picturesRound->number ?? 0),
                 self::picturePinRowsOf($ticket, $screenshot, $shownIndex, $checkRows['after']),
+                RoundView::DRAFT === $round->kind ? $this->screenshotVerdictOf($ticket, $round, $screenshot, $number, $isVerdictGranted) : null,
             ),
             $verdictGiverName,
             self::NO_SCREENSHOTS,
@@ -194,6 +199,29 @@ final readonly class RoundPages
             'after' => self::checkRowsByPinOf($cards[strtolower($afterRoundId ?? '')] ?? null),
             'before' => self::checkRowsByPinOf($cards[strtolower($beforeRoundId ?? '')] ?? null),
         ];
+    }
+
+    /**
+     * The shared draft's verdict on its shown screenshot, with the form for whoever may give verdicts; one read of the
+     * stored verdict. Runs inside the request transaction whose tenant is the viewer's organization.
+     *
+     * @param int  $number           from 1, the screenshot's place in the strip
+     * @param bool $isVerdictGranted whether VerdictPermission SET is granted to the viewer on the round
+     */
+    private function screenshotVerdictOf(TicketPageView $ticket, ReviewRoundView $round, RoundScreenshotView $screenshot, int $number, bool $isVerdictGranted): ScreenshotVerdictSection
+    {
+        $stored = $this->draftScreenshotVerdictQueries->verdictOf($round->id, $screenshot->id);
+
+        return new ScreenshotVerdictSection(
+            $screenshot->id,
+            $screenshot->title ?? \sprintf('Screenshot %d', $number),
+            $stored?->verdict,
+            null === $stored ? null : (self::AREA_VERDICT_LABELS[$stored->verdict] ?? null),
+            $stored?->note,
+            null === $stored ? null : ($ticket->displayNames[$stored->decidedBy->toString()] ?? null),
+            self::mayGiveVerdictsOn($ticket, $round, $isVerdictGranted),
+            $ticket->turnSnapshot->leadDisplayName,
+        );
     }
 
     /**

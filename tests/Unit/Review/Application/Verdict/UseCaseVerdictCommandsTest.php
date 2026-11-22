@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Review\Application\Verdict;
 use App\Review\Api\Event\AreaVerdictSaved;
 use App\Review\Api\Event\PinVerdictSet;
 use App\Review\Api\Event\PinVerdictUndone;
+use App\Review\Api\Event\ScreenshotVerdictSaved;
 use App\Review\Api\VerdictCommands;
 use App\Review\Api\VerdictRefused;
 use App\Review\Application\Verdict\UseCaseVerdictCommands;
@@ -79,6 +80,11 @@ final class UseCaseVerdictCommandsTest extends TestCase
     private const string SECOND_AFTER = '0197a3c0-0000-7000-8000-000000007763';
     private const string OTHER_AFTER = '0197a3c0-0000-7000-8000-000000007764';
 
+    private const string DRAFT_SHOT = '0197a3c0-0000-7000-8000-000000007771';
+    private const string DRAFT_EARLIER_TRY = '0197a3c0-0000-7000-8000-000000007772';
+    private const string OTHER_DRAFT_SHOT = '0197a3c0-0000-7000-8000-000000007773';
+    private const string OTHER_DRAFT = '0197a3c0-0000-7000-8000-000000007739';
+
     private const string DECIDED_AT = '2027-03-15 16:00:00+00:00';
     private const string NOW = '2027-03-16 09:30:00+00:00';
 
@@ -103,6 +109,10 @@ final class UseCaseVerdictCommandsTest extends TestCase
         $this->areas->addRound(self::ACME_FOODS, self::round(self::DELETED_DRAFT, RoundKind::Draft, isShared: false, state: RoundState::Closed, isDeleted: true));
         $this->areas->addRound(self::ACME_FOODS, self::round(self::SHARED_DRAFT, RoundKind::Draft));
         $this->areas->addRound(self::BETA_BAKERY, self::round(self::BETA_REVIEW, RoundKind::Review));
+        $this->areas->addRound(self::ACME_FOODS, self::round(self::OTHER_DRAFT, RoundKind::Draft));
+        // DRAFT_EARLIER_TRY is a try of the shared draft that a retake replaced, so its page does not show it.
+        $this->areas->addShownScreenshot(self::ACME_FOODS, self::SHARED_DRAFT, self::DRAFT_SHOT);
+        $this->areas->addShownScreenshot(self::ACME_FOODS, self::OTHER_DRAFT, self::OTHER_DRAFT_SHOT);
 
         $this->areas->addArea(self::ACME_FOODS, self::area(self::AREA, self::REVIEW, self::AFTER));
         $this->areas->addArea(self::ACME_FOODS, self::area(self::DECIDED_AREA, self::REVIEW, self::SECOND_AFTER)->decide(new UserId(self::LENA), AreaVerdict::Pass, 'Looks right now', new \DateTimeImmutable(self::DECIDED_AT)));
@@ -228,6 +238,7 @@ final class UseCaseVerdictCommandsTest extends TestCase
         yield 'a pin verdict' => [static fn (VerdictCommands $commands, string $roundId) => $commands->setPinVerdict($roundId, self::HUMAN_PIN, new UserId(self::MIA), VerdictCommands::PIN_FIXED, new \DateTimeImmutable(self::NOW))];
         yield 'an undo' => [static fn (VerdictCommands $commands, string $roundId) => $commands->undoPinVerdict($roundId, self::JUDGED_PIN, new UserId(self::MIA), new \DateTimeImmutable(self::NOW))];
         yield 'an area verdict' => [static fn (VerdictCommands $commands, string $roundId) => $commands->saveAreaVerdict($roundId, self::AREA, new UserId(self::MIA), VerdictCommands::AREA_PASS, 'Fine', new \DateTimeImmutable(self::NOW))];
+        yield 'a screenshot verdict' => [static fn (VerdictCommands $commands, string $roundId) => $commands->saveScreenshotVerdict($roundId, self::DRAFT_SHOT, new UserId(self::MIA), VerdictCommands::AREA_PASS, 'Fine', new \DateTimeImmutable(self::NOW))];
     }
 
     /**
@@ -417,6 +428,72 @@ final class UseCaseVerdictCommandsTest extends TestCase
         $this->assertRefusedAndUnchanged('A note holds at most 1,000 characters.', fn () => $this->commands->saveAreaVerdict(self::REVIEW, self::DECIDED_AREA, new UserId(self::MIA), VerdictCommands::AREA_NEEDS_FIX, str_repeat('é', Area::NOTE_MAX_LENGTH + 1), new \DateTimeImmutable(self::NOW)));
     }
 
+    #[Test]
+    public function aScreenshotOfASharedDraftGetsItsVerdictWithItsTrimmedNoteAfterTheRoundIsLocked(): void
+    {
+        $this->commands->saveScreenshotVerdict(strtoupper(self::SHARED_DRAFT), strtoupper(self::DRAFT_SHOT), new UserId(self::MIA), VerdictCommands::AREA_NEEDS_FIX, "  The total is still off\r\n", new \DateTimeImmutable(self::NOW));
+
+        $stored = $this->areas->storedScreenshotVerdict(self::ACME_FOODS, self::DRAFT_SHOT);
+        self::assertNotNull($stored);
+        self::assertSame(
+            [self::SHARED_DRAFT, AreaVerdict::NeedsFix, 'The total is still off', self::MIA, self::NOW],
+            [$stored->roundId->toString(), $stored->verdict, $stored->note, $stored->decidedBy->toString(), $stored->decidedAt->format('Y-m-d H:i:sP')],
+        );
+        self::assertSame(['lockRound', 'isShownScreenshotOf', 'saveScreenshotVerdict'], $this->areas->calls);
+        self::assertEquals(
+            [new ScreenshotVerdictSaved(self::ACME_FOODS, self::TICKET, self::SHARED_DRAFT, self::DRAFT_SHOT, 'needs_fix', true, self::MIA, new \DateTimeImmutable(self::NOW))],
+            $this->events->published(),
+        );
+        self::assertStringNotContainsString('total', serialize($this->events->published()));
+        self::assertNull($this->areas->storedScreenshotVerdict(self::ACME_FOODS, self::OTHER_DRAFT_SHOT), 'Another draft\'s screenshot keeps none.');
+    }
+
+    #[Test]
+    public function aNewScreenshotVerdictTakesThePlaceOfTheEarlierOneAndABlankNoteIsNone(): void
+    {
+        $this->commands->saveScreenshotVerdict(self::SHARED_DRAFT, self::DRAFT_SHOT, new UserId(self::LENA), VerdictCommands::AREA_PASS, 'Fine', new \DateTimeImmutable(self::DECIDED_AT));
+
+        $this->commands->saveScreenshotVerdict(self::SHARED_DRAFT, self::DRAFT_SHOT, new UserId(self::MIA), VerdictCommands::AREA_QUESTION, " \n ", new \DateTimeImmutable(self::NOW));
+
+        $stored = $this->areas->storedScreenshotVerdict(self::ACME_FOODS, self::DRAFT_SHOT);
+        self::assertNotNull($stored);
+        self::assertSame([AreaVerdict::Question, null, self::MIA, self::NOW], [$stored->verdict, $stored->note, $stored->decidedBy->toString(), $stored->decidedAt->format('Y-m-d H:i:sP')]);
+        self::assertSame([true, false], array_map(static fn (object $event): bool => $event instanceof ScreenshotVerdictSaved && $event->hasNote, $this->events->published()));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function screenshotsTheRoundPageDoesNotShow(): iterable
+    {
+        yield 'a malformed id' => [self::SHARED_DRAFT, 'shot-1'];
+        yield 'an unknown id' => [self::SHARED_DRAFT, self::UNKNOWN_AREA];
+        yield 'an earlier try a retake replaced' => [self::SHARED_DRAFT, self::DRAFT_EARLIER_TRY];
+        yield 'another draft\'s screenshot' => [self::SHARED_DRAFT, self::OTHER_DRAFT_SHOT];
+        yield 'a review round\'s picture, which is an area\'s' => [self::REVIEW, self::AFTER];
+    }
+
+    #[Test]
+    #[DataProvider('screenshotsTheRoundPageDoesNotShow')]
+    public function aScreenshotTheRoundPageDoesNotShowIsNotFoundAndNothingIsSaved(string $roundId, string $screenshotId): void
+    {
+        $this->assertRefusedAndUnchanged(VerdictRefused::SCREENSHOT_NOT_FOUND, fn () => $this->commands->saveScreenshotVerdict($roundId, $screenshotId, new UserId(self::MIA), VerdictCommands::AREA_PASS, null, new \DateTimeImmutable(self::NOW)));
+        self::assertTrue(new VerdictRefused(VerdictRefused::SCREENSHOT_NOT_FOUND)->isNotFound());
+    }
+
+    #[Test]
+    #[DataProvider('missingAreaVerdicts')]
+    public function aScreenshotVerdictWithoutAKnownChipAsksToPickOne(?string $verdict): void
+    {
+        $this->assertRefusedAndUnchanged('Pick Pass, Needs fix or Question first.', fn () => $this->commands->saveScreenshotVerdict(self::SHARED_DRAFT, self::DRAFT_SHOT, new UserId(self::MIA), $verdict, 'A note', new \DateTimeImmutable(self::NOW)));
+    }
+
+    #[Test]
+    public function aScreenshotVerdictNoteOverTheCapIsRefused(): void
+    {
+        $this->assertRefusedAndUnchanged('A note holds at most 1,000 characters.', fn () => $this->commands->saveScreenshotVerdict(self::SHARED_DRAFT, self::DRAFT_SHOT, new UserId(self::MIA), VerdictCommands::AREA_NEEDS_FIX, str_repeat('é', Area::NOTE_MAX_LENGTH + 1), new \DateTimeImmutable(self::NOW)));
+    }
+
     /**
      * @param \Closure(VerdictCommands, string): void $command
      */
@@ -455,6 +532,7 @@ final class UseCaseVerdictCommandsTest extends TestCase
 
         self::assertEquals($before, $this->areas->snapshot());
         self::assertNotContains('saveVerdict', $this->areas->calls);
+        self::assertNotContains('saveScreenshotVerdict', $this->areas->calls);
         self::assertSame([], $this->events->published());
     }
 

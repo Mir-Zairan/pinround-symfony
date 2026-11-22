@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Review\Domain;
 
 /**
- * The screen areas of review rounds and the verdicts on them and on the earlier round's pins. Each method needs an
+ * The screen areas of review rounds and the verdicts on them and on the earlier round's pins, and the verdicts on the
+ * screenshots of shared drafts. Each method needs an
  * open transaction under the round's organization as tenant, and reads or writes that organization's rows only.
  */
 interface Areas
@@ -50,4 +51,19 @@ interface Areas
      * @throws \LogicException when no transaction is open or no tenant is set
      */
     public function savePinVerdict(PinToCheck $read, PinToCheck $changed): bool;
+
+    /**
+     * Whether the screenshot is one of the round's and the latest try of its chain, the one the round page shows.
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set
+     */
+    public function isShownScreenshotOf(RoundId $roundId, ScreenshotId $screenshotId): bool;
+
+    /**
+     * Writes the verdict in place of any earlier one on its screenshot.
+     *
+     * @throws \LogicException when no transaction is open or no tenant is set; a screenshot of another round fails the
+     *                         database's foreign key, so the caller saves only one isShownScreenshotOf found
+     */
+    public function saveScreenshotVerdict(DraftScreenshotVerdict $verdict): void;
 }

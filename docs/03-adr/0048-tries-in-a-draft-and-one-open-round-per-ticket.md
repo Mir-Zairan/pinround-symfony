@@ -15,10 +15,11 @@ it closes when the person whose turn it is moves the ticket on.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — what each option loses.
 - [More information](#more-information) — related ADRs, requirements, revisit triggers.
 - [Note of 2026-11-22](#note-of-2026-11-22-the-checklist-has-no-round-number) — the checklist has no round number; the first shared round is Round 1.
+- [Note of 2026-11-22, verdicts](#note-of-2026-11-22-a-verdict-on-each-screenshot-of-a-shared-draft) — a verdict with a note on each screenshot of a shared draft; it closes and moves nothing.
 
 ## Status
 
-Accepted 2026-11-20; amended 2026-11-21 before merge; dated note 2026-11-22 on round numbers · Deciders: Zairan Mir (lead, product owner).
+Accepted 2026-11-20; amended 2026-11-21 before merge; dated notes 2026-11-22 on round numbers and on screenshot verdicts · Deciders: Zairan Mir (lead, product owner).
 
 The product owner accepted these decisions in a session on 2026-11-20, after testing pinround by hand
 ([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)). An ADR is accepted when it is merged
@@ -256,3 +257,16 @@ on closing, sharing or Befores changes. In the schema the checklist row keeps `k
 `number` NULL (`rvw_round_shared_check`, Version20261122060000), and its one slot per ticket stays
 `rvw_round_ticket_id_checklist_key`; it has no round page of its own, as `/t/{key}/rounds/{number}` needs a number, and
 its items are checked on the ticket page and on Round 0's page. Data was dummy, so no rounds were renumbered.
+
+## Note of 2026-11-22: a verdict on each screenshot of a shared draft
+
+The product owner asked on 2026-11-22 for the review round's "Your verdict on <area>" on each screenshot of a shared
+draft too: Pass, Needs fix or Question, an optional note, "Then: <lead>, team lead" and Save verdict, for whoever
+VerdictPermission SET grants (the ticket's tester and the team's lead), while the round is open; everyone else who may
+see the round reads "Verdict on …" with the note. It extends this ADR without changing it: option 1 stands, so a
+screenshot verdict closes no round and moves no ticket, and the round still closes only when the person whose turn it
+is moves the ticket on. It answers part of option 1's "Bad": the reviewer can now say what she found on each picture,
+apart from the move. A verdict belongs to the shown screenshot, the latest try of its chain; the next one saved takes
+its place. It is stored in `rvw_screenshot_verdict` (Version20261122120000), not in `rvw_area`, as a shared draft has
+no screen areas, and not in `rvw_screenshot.verdict`, which is the owner's own look at a picture. What happened does
+not list these verdicts yet.
