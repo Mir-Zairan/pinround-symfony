@@ -14,5 +14,5 @@
     "service_worker": "src/background/service-worker.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "identity", "scripting", "storage"]
+  "permissions": ["activeTab", "identity", "offscreen", "scripting", "storage"]
 }

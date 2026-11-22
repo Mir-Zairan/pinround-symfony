@@ -252,7 +252,7 @@ export function fakePinround({ scopes = ALL_SCOPES, projects = ['SHOP'], tickets
         return [404, { error: 'No route.' }];
     }
 
-    const response = (status, json, headers = {}) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(headers), json: async () => structuredClone(json) });
+    const response = (status, json, headers = {}) => ({ ok: status >= 200 && status < 300, status, headers: new Headers(headers), json: async () => structuredClone(json), text: async () => JSON.stringify(json) });
 
     async function fetchFn(href, init) {
         const url = new URL(href);

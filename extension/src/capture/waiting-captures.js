@@ -3,6 +3,7 @@
 // uploaded and the first makes the report draft (new-report.js), so no draft exists without its title. Session
 // storage is the extension's own (trusted contexts only), so the page cannot read a waiting picture or its notes.
 import { checkedPins } from '../overlay/pins.js';
+import { base64OfBlob } from '../shared/base64.js';
 import { MAX_SCREENSHOTS, pngOf } from './capture.js';
 import { WAITING_CAPTURES_KEY, addCaptureToNewReport, checkedNewReportCapture, loadNewReport, saveTypedReport, sendPendingCapture } from './new-report.js';
 import { capturePinnedTab, closePinOverlay } from './page-pins.js';
@@ -11,8 +12,6 @@ export const NO_ROOM = 'The extension has no room for another capture. Press Sav
 export const WAITING_FULL = 'A report holds at most 10 captures. Press Save draft, then start a new report for more.';
 export const NOTHING_WAITING = 'There is no capture to save. Press Capture first.';
 const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
-// String.fromCharCode takes its bytes as arguments, and an engine caps how many one call may have.
-const BASE64_CHUNK_BYTES = 0x8000;
 
 export const capturedMessage = (waitingCount) => `Captured. ${waitingCount} waiting.`;
 export const draftSavedMessage = (screenshotCount) => `Draft saved with ${screenshotCount} ${1 === screenshotCount ? 'capture' : 'captures'}. Open it in pinround to send it.`;
@@ -77,13 +76,7 @@ async function dropWaitingCapture(storage, id) {
 }
 
 async function dataUrlOf(file) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = '';
-    for (let start = 0; start < bytes.length; start += BASE64_CHUNK_BYTES) {
-        binary += String.fromCharCode(...bytes.subarray(start, start + BASE64_CHUNK_BYTES));
-    }
-
-    return `${PNG_DATA_URL_PREFIX}${btoa(binary)}`;
+    return `${PNG_DATA_URL_PREFIX}${await base64OfBlob(file)}`;
 }
 
 /**

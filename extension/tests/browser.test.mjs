@@ -15,14 +15,15 @@ afterEach(() => {
 });
 
 test('the fake offers exactly what the adapter offers, so a test cannot use a call the extension does not have', () => {
-    const { storage, tabs, windows, runtime, scripting, identity } = fakeBrowser();
+    const { storage, tabs, windows, runtime, offscreen, scripting, identity } = fakeBrowser();
 
-    assert.deepEqual(shapeOf({ storage, tabs, windows, runtime, scripting, identity }), shapeOf(browser));
+    assert.deepEqual(shapeOf({ storage, tabs, windows, runtime, offscreen, scripting, identity }), shapeOf(browser));
     assert.deepEqual(shapeOf(browser), {
         storage: { local: { get: 'function', set: 'function', remove: 'function' }, session: { get: 'function', set: 'function', remove: 'function' } },
         tabs: { query: 'function', captureVisibleTab: 'function', create: 'function', get: 'function', update: 'function' },
         windows: { getLastFocused: 'function' },
-        runtime: { openOptionsPage: 'function', onMessage: { addListener: 'function' } },
+        runtime: { id: 'function', openOptionsPage: 'function', onMessage: { addListener: 'function' }, sendMessage: 'function', getContexts: 'function' },
+        offscreen: { createDocument: 'function' },
         scripting: { executeScript: 'function' },
         identity: { getRedirectURL: 'function', launchWebAuthFlow: 'function' },
     });
@@ -44,7 +45,8 @@ test('the adapter hands each call to the chrome API with its arguments and answe
             update: answering('tabs.update'),
         },
         windows: { getLastFocused: answering('windows.getLastFocused') },
-        runtime: { openOptionsPage: answering('runtime.openOptionsPage') },
+        runtime: { id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage: answering('runtime.openOptionsPage'), sendMessage: answering('runtime.sendMessage'), getContexts: answering('runtime.getContexts') },
+        offscreen: { createDocument: answering('offscreen.createDocument') },
         scripting: { executeScript: answering('scripting.executeScript') },
         identity: { getRedirectURL: answering('identity.getRedirectURL'), launchWebAuthFlow: answering('identity.launchWebAuthFlow') },
     };
@@ -60,6 +62,10 @@ test('the adapter hands each call to the chrome API with its arguments and answe
     assert.equal(await browser.tabs.update(7, { url: 'https://shop.acme-foods.example/orders' }), 'tabs.update answer');
     assert.equal(await browser.windows.getLastFocused(), 'windows.getLastFocused answer');
     assert.equal(await browser.runtime.openOptionsPage(), 'runtime.openOptionsPage answer');
+    assert.equal(browser.runtime.id(), 'abcdefghijklmnopabcdefghijklmnop');
+    assert.equal(await browser.runtime.sendMessage({ pinroundExtensionPageFetch: {} }), 'runtime.sendMessage answer');
+    assert.equal(await browser.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] }), 'runtime.getContexts answer');
+    assert.equal(await browser.offscreen.createDocument({ url: 'offscreen.html' }), 'offscreen.createDocument answer');
     assert.equal(await browser.scripting.executeScript(injection), 'scripting.executeScript answer');
     assert.equal(await browser.identity.getRedirectURL(), 'identity.getRedirectURL answer');
     assert.equal(await browser.identity.launchWebAuthFlow({ url: 'https://pinround.acme-foods.example/oauth/authorize', interactive: true }), 'identity.launchWebAuthFlow answer');
@@ -75,6 +81,9 @@ test('the adapter hands each call to the chrome API with its arguments and answe
         ['tabs.update', 7, { url: 'https://shop.acme-foods.example/orders' }],
         ['windows.getLastFocused'],
         ['runtime.openOptionsPage'],
+        ['runtime.sendMessage', { pinroundExtensionPageFetch: {} }],
+        ['runtime.getContexts', { contextTypes: ['OFFSCREEN_DOCUMENT'] }],
+        ['offscreen.createDocument', { url: 'offscreen.html' }],
         ['scripting.executeScript', injection],
         ['identity.getRedirectURL', undefined],
         ['identity.launchWebAuthFlow', { url: 'https://pinround.acme-foods.example/oauth/authorize', interactive: true }],

@@ -5,7 +5,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 ## Index
 - [What it does](#what-it-does) — where a capture can go, and what it never does
 - [Install it](#install-it) — load the folder; its id is the same on every computer
-- [Let pinround accept it](#let-pinround-accept-it) — the two origin settings: set in the dev stack, set once elsewhere
+- [Let pinround accept it](#let-pinround-accept-it) — the two origin settings: set in the dev stack, set once elsewhere; the dev stack's certificate warning to accept once
 - [Connect it](#connect-it) — Connect on pinround's consent page, or paste a token instead
 - [Capture a page](#capture-a-page) — a new report, or your draft round on a ticket, as a new screenshot or a retake
 - [Notebooks](#notebooks) — make one, pin a page and capture it there
@@ -15,7 +15,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 - [Allowed hosts for scenarios](#allowed-hosts-for-scenarios) — where scenarios may play, and the question before a run
 - [Safety](#safety) — what the player never does, and who decides
 - [Sign out](#sign-out) — the token stops working everywhere; a Connect can also be ended under **Connected apps** on **API tokens**
-- [Permissions and why](#permissions-and-why) — the four Chrome permissions it asks for
+- [Permissions and why](#permissions-and-why) — the five Chrome permissions it asks for
 - [Manual check](#manual-check) — the capture and notebook checks to run by hand, and the record of the last runs
 
 ## What it does
@@ -29,7 +29,7 @@ How to install, connect and use the Chrome extension that captures the page you 
 The extension is not in the Chrome Web Store yet. Load it from the repository:
 1. Open `chrome://extensions` and turn on **Developer mode** (top right).
 2. Click **Load unpacked** and pick the `extension/` folder.
-3. Go on with [Connect it](#connect-it). On the dev stack (`make demo` or `make up`) there is nothing to set first.
+3. Go on with [Connect it](#connect-it). On the dev stack (`make demo` or `make up`), accept its certificate warning once ([below](#let-pinround-accept-it)); there is nothing else to set.
 
 The `key` in `extension/manifest.json` gives the extension the same **ID** on every computer and from any folder: `ecijiihpbchkekoddiblnidjpeaajkfo`, so its origin is `chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo`. Only the public half of that key is in the repository; an unpacked extension needs no more. Chrome 120 or newer.
 
@@ -39,6 +39,8 @@ A browser sends the extension's origin with every request. pinround and its stor
 - The storage's CORS origins: in the dev stack, `MINIO_CORS_ALLOW_ORIGIN`, whose `compose.yaml` default is `https://localhost,chrome-extension://ecijiihpbchkekoddiblnidjpeaajkfo`. To add another, set the whole comma-separated list, app origin first, in `.env.local`, then run `docker compose up -d --force-recreate minio-init`. In production, add the origin to the bucket's CORS rule for `PUT`. Without it the picture upload fails with "The screenshot could not be stored."
 
 For another ID on the dev stack, `.claude/skills/pinround-setup/pinround-setup.sh extension <id>` sets both.
+
+**The dev stack's certificate.** Its certificate comes from Caddy's own local authority, which your browser does not trust. Before you connect, open https://localhost in the same Chrome profile and accept the warning once (**Advanced**, then **Proceed to localhost**). That covers the storage at https://localhost:9443 too, as it is the same host. Without it, connecting says "Could not reach pinround. Check the address and your connection." To skip the warning altogether, import `~/.config/pinround/caddy-root.crt` (`.claude/skills/pinround-setup/pinround-setup.sh trust-ca` copies it there) under Chrome's **Settings › Privacy and security › Security › Manage certificates**, as a trusted authority for websites.
 
 ## Connect it
 Connect with pinround's own consent page, with no token to make or paste ([ADR-0050](../03-adr/0050-one-click-connect-with-oauth.md)):
@@ -108,7 +110,7 @@ The dock is one small dark bar on the page itself (a light one when your system 
 2. In **Save to**, choose where captures go: **New report**, **My draft round · SHOP-12** or **Notebook · <title>**. The popup and the dock always show the same choice.
 3. Use the bar, left to right. P, C and H work as keys too, but not while you type in a field or hold Ctrl, Alt or Cmd. While the dock waits for the extension, a press on Capture, Save draft or **Save to** does nothing but say "Still working on the last request. Try again when it is done."
    - **Pin** (P) turns pin mode on: the page gets a faint tint, and a click drops a pin and opens its note form just below it. Type what is wrong in **What is wrong here?** and press **Save** or Enter. A pin with a note shows it in a dark label beside it. Click a pin to change its note or **Remove** it; the chosen pin has a ring. Delete on a focused pin removes it too.
-   - **Capture** (C) takes the page with its pins, with a short white flash. For a new report it waits in the extension: "Captured. 2 waiting." Nothing is sent yet. For a draft round or a notebook it is added at once, for example "Added to your draft round on SHOP-12. Only you see it."
+   - **Capture** (C) takes the page with its pins, with a short white flash. For a new report it waits in the extension: "Captured. 2 waiting." Nothing is sent yet. For a draft round or a notebook it is added at once, for example "Added to your draft round on SHOP-12. Only you see it." Chrome takes at most two captures a second; a third is refused with "Chrome takes at most two captures a second, so nothing was captured. Press Capture again."
    - **Clear 3 pins** shows only while pins are on the page, and drops them all.
    - **Play** plays a notebook's scenario (step 4).
    - **Save draft** shows how many captures wait. It works for a new report with a capture waiting; draft rounds and notebooks keep each capture as you take it, so for them it stays off.
@@ -153,6 +155,7 @@ In the options, press **Sign out**. The extension asks pinround to revoke the to
 |---|---|
 | `activeTab` | To take a picture of the tab you are on, and read its title for the capture's title, only after you click the extension's icon. It gives no access to other tabs and none in the background. |
 | `identity` | To open pinround's consent page in a window of its own when you press **Connect to pinround**, and take the one-time code back from it. It reads no Google account and no other site's sign-in. |
+| `offscreen` | To send the dock's requests and pictures from a hidden extension page instead of its background worker. Chrome lets a page reach a pinround whose certificate warning you accepted in a tab (the dev stack's local one), and never the background worker, so without it the dock's **Save draft** fails there with "The screenshot could not be stored." The page has no window, shows nothing and makes only the requests the extension makes anyway. |
 | `scripting` | To run the extension's own pin overlay and scenario player in the tab you are on, only after you click the extension's icon. It never runs a script from the network. |
 | `storage` | To keep the pinround address, your tokens, your allowed hosts and your "Play anyway" answers in this browser profile, and, until the browser closes, where your captures go, the report draft they are adding to, and the dock's captures waiting for **Save draft**. |
 

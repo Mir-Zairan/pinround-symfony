@@ -236,6 +236,10 @@ const isWebUrl = (url) => ['http:', 'https:'].includes(new URL(url).protocol);
 
 export const FAKE_EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
 export const USER_DID_NOT_APPROVE = 'The user did not approve access.';
+export const ONE_OFFSCREEN_DOCUMENT = 'Only a single offscreen document may be created.';
+export const NO_RECEIVER = 'Could not establish connection. Receiving end does not exist.';
+const PORT_CLOSED = 'The message port closed before a response was received.';
+const OFFSCREEN_REASONS = new Set(['TESTING', 'AUDIO_PLAYBACK', 'IFRAME_SCRIPTING', 'DOM_SCRAPING', 'BLOBS', 'DOM_PARSER', 'USER_MEDIA', 'DISPLAY_MEDIA', 'WEB_RTC', 'CLIPBOARD', 'LOCAL_STORAGE', 'WORKERS', 'BATTERY_STATUS', 'MATCH_MEDIA', 'GEOLOCATION']);
 const WEB_AUTH_FLOW_DETAILS = "Error in invocation of identity.launchWebAuthFlow(identity.WebAuthFlowDetails details, optional function callback): Error at parameter 'details': Missing required property 'url'.";
 
 /**
@@ -246,8 +250,10 @@ const WEB_AUTH_FLOW_DETAILS = "Error in invocation of identity.launchWebAuthFlow
  *   'https://shop.acme-foods.example', or ALL_URLS for every web page. The person is in the first tab's window.
  *   webAuthFlow is what the person does in identity.launchWebAuthFlow's window opened on `url`: the address that window
  *   reached, or null when they closed it.
+ *   offscreenListener is the runtime.onMessage listener the extension's offscreen document adds once
+ *   offscreen.createDocument opens it: runtime.sendMessage reaches it, the message copied as JSON as Chrome copies it.
  */
-export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async () => null } = {}) {
+export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async () => null, offscreenListener = null } = {}) {
     const openTabs = tabs.map((tab) => ({ active: false, status: 'complete', windowId: FIRST_WINDOW_ID, ...structuredClone(tab) }));
     let lastFocusedWindowId = openTabs[0]?.windowId ?? FIRST_WINDOW_ID;
     const hostOriginSet = new Set(hostOrigins);
@@ -257,6 +263,9 @@ export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async (
     const injectedFiles = [];
     const webAuthFlows = [];
     const messageListeners = [];
+    /** @type {string[]} the address of the open offscreen document; Chrome keeps one at most */
+    const offscreenDocuments = [];
+    const sentRuntimeMessages = [];
     let nextTabId = Math.max(0, ...openTabs.map((tab) => tab.id)) + 1;
     let documentsLoaded = 0;
     let optionsPageOpenings = 0;
@@ -396,6 +405,7 @@ export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async (
             },
         },
         runtime: {
+            id: () => FAKE_EXTENSION_ID,
             async openOptionsPage() {
                 optionsPageOpenings += 1;
             },
@@ -403,6 +413,43 @@ export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async (
                 addListener(listener) {
                     messageListeners.push(listener);
                 },
+            },
+            async getContexts({ contextTypes } = {}) {
+                if (!(contextTypes ?? []).includes('OFFSCREEN_DOCUMENT')) {
+                    throw new Error('The fake browser models getContexts for OFFSCREEN_DOCUMENT only.');
+                }
+
+                return offscreenDocuments.map((documentUrl) => ({ contextType: 'OFFSCREEN_DOCUMENT', documentUrl }));
+            },
+            /** Sent from the service worker: it reaches the offscreen document, the one other context modelled. */
+            sendMessage(message) {
+                const copied = JSON.parse(JSON.stringify(message));
+                sentRuntimeMessages.push(copied);
+
+                return answerLater(() => new Promise((resolve, reject) => {
+                    if (0 === offscreenDocuments.length || null === offscreenListener) {
+                        reject(new Error(NO_RECEIVER));
+
+                        return;
+                    }
+                    const keepsChannelOpen = offscreenListener(copied, { id: FAKE_EXTENSION_ID, url: offscreenDocuments[0] }, (answer) => resolve(JSON.parse(JSON.stringify(answer ?? null))));
+                    if (true !== keepsChannelOpen) {
+                        reject(new Error(PORT_CLOSED));
+                    }
+                }));
+            },
+        },
+        offscreen: {
+            createDocument({ url, reasons, justification }) {
+                return answerLater(() => {
+                    if ('string' !== typeof url || !Array.isArray(reasons) || 0 === reasons.length || !reasons.every((reason) => OFFSCREEN_REASONS.has(reason)) || 'string' !== typeof justification) {
+                        throw new TypeError('Error in invocation of offscreen.createDocument(offscreen.CreateParameters parameters, optional function callback): No matching signature.');
+                    }
+                    if (offscreenDocuments.length > 0) {
+                        throw new Error(ONE_OFFSCREEN_DOCUMENT);
+                    }
+                    offscreenDocuments.push(`chrome-extension://${FAKE_EXTENSION_ID}/${url}`);
+                });
             },
         },
         scripting: {
@@ -493,6 +540,10 @@ export function fakeBrowser({ tabs = [], hostOrigins = [], webAuthFlow = async (
         webAuthFlows,
         /** The listeners added with runtime.onMessage.addListener, in order; a test calls them as Chrome would. */
         messageListeners,
+        /** The address of each offscreen document opened and still open. */
+        offscreenDocuments,
+        /** Each runtime.sendMessage message, as JSON copied it, in order. */
+        sentRuntimeMessages,
         get optionsPageOpenings() {
             return optionsPageOpenings;
         },

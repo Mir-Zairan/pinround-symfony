@@ -12,6 +12,7 @@ import { pageTitleOf } from '../capture/page-context.js';
 import { capturedMessage, draftSavedMessage, keepWaitingCapture, loadWaitingCaptures, saveWaitingCaptures } from '../capture/waiting-captures.js';
 import { SYSTEM_CLOCK } from '../player/step-runner.js';
 import { openStartPage, scenarioToPlay, taggedCaptureTexts } from './dock-scenario.js';
+import { extensionPageFetchOf } from './extension-page-fetch.js';
 
 const runRules = globalThis.pinroundDockRun;
 
@@ -48,12 +49,13 @@ export function isDockRequest(message) {
  * @param {{id?: number, url?: string, title?: string, width?: number, height?: number}} tab the tab whose dock asked,
  *   as Chrome names the sender
  * @param {{browser: object, apiOf?: (settings: {origin: string, token: string}) => import('../shared/api.js').PinroundApi,
- *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} deps the clock, in ms, times the wait for the
- *   start page to load; the system's by default
+ *   clock?: {now: () => number, wait: (ms: number) => Promise<void>}}} deps apiOf by default sends every request from
+ *   the extension's offscreen document (extension-page-fetch.js); the clock, in ms, times the wait for the start page
+ *   to load; the system's by default
  * @returns {Promise<DockAnswer>} never rejects: a refusal is an answer with isError. A scenario request answers
  *   {scenario} (dock-scenario.js) instead of a state
  */
-export async function answerDockRequest(request, tab, { browser, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local), clock = SYSTEM_CLOCK }) {
+export async function answerDockRequest(request, tab, { browser, apiOf = (settings) => pinroundApiOf(settings, browser.storage.local, extensionPageFetchOf(browser)), clock = SYSTEM_CLOCK }) {
     if (!DOCK_ACTIONS.includes(request.pinroundDock) || !Number.isInteger(tab?.id) || !isReadableValue(request)) {
         return { message: DOCK_TEXTS.unknownRequest, isError: true };
     }

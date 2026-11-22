@@ -6,8 +6,9 @@ import { NEW_REPORT_KEY, NOT_SENT, WAITING_CAPTURES_KEY, loadNewReport } from '.
 import { NOTHING_WAITING, NO_ROOM, WAITING_FULL, capturedMessage, draftSavedMessage, loadWaitingCaptures } from '../src/capture/waiting-captures.js';
 import { PinroundApi } from '../src/shared/api.js';
 import { saveSettings } from '../src/shared/settings.js';
-import { fakeBrowser } from './fake-browser.mjs';
-import { PINROUND_ORIGIN, TOKEN, fakePinround } from './fake-pinround.mjs';
+import { EXTENSION_PAGE_FETCH, answerExtensionPageFetch } from '../src/background/extension-page-fetch.js';
+import { FAKE_EXTENSION_ID, fakeBrowser } from './fake-browser.mjs';
+import { PINROUND_ORIGIN, STORAGE_ORIGIN, TOKEN, fakePinround } from './fake-pinround.mjs';
 
 const SHOP_ORIGIN = 'https://shop.acme-foods.example';
 const SHOP_TAB = { id: 7, url: `${SHOP_ORIGIN}/cart`, title: 'Acme Foods shop', active: true };
@@ -38,8 +39,8 @@ const SAVE = (reportTitle, project = '') => ({ pinroundDock: 'save-draft', value
 const PAGE_PIN = { x_pct: 10, y_pct: 20, note: 'Total' };
 
 /** The extension on the shop tab, its icon clicked, paired unless told otherwise, with this target and new report kept. */
-async function dockBrowser({ isPaired = true, target = null, newReport = null } = {}) {
-    const browser = fakeBrowser({ tabs: [SHOP_TAB] });
+async function dockBrowser({ isPaired = true, target = null, newReport = null, offscreenListener = null } = {}) {
+    const browser = fakeBrowser({ tabs: [SHOP_TAB], offscreenListener });
     browser.clickIcon(SHOP_TAB.id);
     if (isPaired) {
         await saveSettings(PINROUND_ORIGIN, TOKEN, browser.storage.local);
@@ -450,6 +451,30 @@ test('the service worker answers a dock message from a tab through the listener 
     } finally {
         delete globalThis.chrome;
     }
+});
+
+test('with no apiOf given, the dock\'s calls and each picture\'s PUT go from the offscreen document, where an accepted certificate holds', async () => {
+    const pinround = fakePinround({ tickets: TICKETS, notebooks: NOTEBOOKS });
+    const offscreenListener = (message, sender, sendResponse) => {
+        const answer = answerExtensionPageFetch(message, sender, { extensionId: FAKE_EXTENSION_ID, fetchFn: pinround.fetchFn });
+        if (null === answer) {
+            return false;
+        }
+        answer.then(sendResponse);
+
+        return true;
+    };
+    const browser = await dockBrowser({ target: NEW_REPORT_TARGET, newReport: TYPED_NEW_REPORT, offscreenListener });
+    await putPinOnPage(browser);
+
+    assert.equal((await answerDockRequest({ pinroundDock: 'capture' }, SHOP_TAB, { browser })).message, capturedMessage(1));
+    assert.equal((await answerDockRequest(SAVE('Total is wrong'), SHOP_TAB, { browser })).message, draftSavedMessage(1));
+
+    assert.deepEqual(pinround.myDrafts().map((draft) => [draft.title, draft.screenshots.length]), [['Total is wrong', 1]]);
+    const sentFromPage = browser.sentRuntimeMessages.map((message) => message[EXTENSION_PAGE_FETCH]).map(({ method, url }) => `${method} ${new URL(url).origin}`);
+    assert.ok(sentFromPage.includes(`PUT ${STORAGE_ORIGIN}`), sentFromPage.join(', '));
+    assert.ok(sentFromPage.includes(`POST ${PINROUND_ORIGIN}`), sentFromPage.join(', '));
+    assert.equal(browser.offscreenDocuments.length, 1);
 });
 
 test('a waiting capture this version cannot read is left out, never sent', async () => {

@@ -10,6 +10,9 @@ export const OVERLAY_FILES = ['src/overlay/pin-rules.js', 'src/overlay/dock.js',
 export const CANNOT_PIN_PAGE = 'This page cannot be pinned. Open a web page and try again.';
 export const CANNOT_DOCK_PAGE = 'The dock cannot open on this page. Open a web page and try again.';
 export const PAGE_NOT_ON_SCREEN = 'The page is no longer on screen, so nothing was captured. Go back to it and capture again.';
+export const CAPTURED_TOO_FAST = 'Chrome takes at most two captures a second, so nothing was captured. Press Capture again.';
+// Chrome's refusal names its own cap: captureVisibleTab may run twice a second.
+const CAPTURE_QUOTA_NAME = 'MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND';
 
 /** @returns {Promise<number>} the id of the tab the popup was opened on */
 export async function activeTabId(browser) {
@@ -110,7 +113,7 @@ async function shownTabPng(browser, tabId, windowId) {
         throw new Error(PAGE_NOT_ON_SCREEN);
     }
     if (undefined !== refusal) {
-        throw refusal;
+        throw String(refusal?.message).includes(CAPTURE_QUOTA_NAME) ? new Error(CAPTURED_TOO_FAST) : refusal;
     }
 
     return pngOf(dataUrl);

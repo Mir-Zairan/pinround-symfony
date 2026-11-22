@@ -1,5 +1,6 @@
 // Capture of the visible tab and its upload: the picture goes straight to storage through a presigned PUT, never in
 // a request body (ADR-0011).
+import { bytesOfBase64 } from '../shared/base64.js';
 import { isId } from './capture-target.js';
 import { unwrappedText } from './untrusted-text.js';
 
@@ -19,9 +20,7 @@ export function pngOf(dataUrl) {
     if (!dataUrl.startsWith(prefix)) {
         throw new Error('The capture is not a PNG.');
     }
-    const bytes = Uint8Array.from(atob(dataUrl.slice(prefix.length)), (character) => character.charCodeAt(0));
-
-    return new Blob([bytes], { type: 'image/png' });
+    return new Blob([bytesOfBase64(dataUrl.slice(prefix.length))], { type: 'image/png' });
 }
 
 /** @returns {Promise<string>} the SHA-256 of the file in lowercase hex */

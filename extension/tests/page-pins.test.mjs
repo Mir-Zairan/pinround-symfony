@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CANNOT_DOCK_PAGE, CANNOT_PIN_PAGE, OVERLAY_FILES, PAGE_NOT_ON_SCREEN, activeTabId, capturePinnedTab, closePinOverlay, openPageDock, openPinOverlay } from '../src/capture/page-pins.js';
+import { CANNOT_DOCK_PAGE, CANNOT_PIN_PAGE, CAPTURED_TOO_FAST,OVERLAY_FILES, PAGE_NOT_ON_SCREEN, activeTabId, capturePinnedTab, closePinOverlay, openPageDock, openPinOverlay } from '../src/capture/page-pins.js';
 import { ACTIVE_TAB_NOT_IN_EFFECT, ALL_URLS, FIRST_WINDOW_ID, NEEDS_ACTIVE_TAB, fakeBrowser } from './fake-browser.mjs';
 
 const SHOP_PAGE = { id: 7, url: 'https://shop.acme-foods.example/cart', title: 'Acme Foods shop', active: true };
@@ -157,6 +157,18 @@ test('a refusal that is not about reach stops the capture', async () => {
 
     await assert.rejects(capturePinnedTab(browser, 99), { message: 'No tab with id: 99.' });
     assert.equal(captures, 0);
+});
+
+test('Chrome\'s refusal of a third capture in one second is said in plain words, and the pins come back on the page', async () => {
+    const browser = shopBrowser();
+    await seedOverlay(browser, [{ x_pct: 25, y_pct: 40, note: 'Total' }]);
+    browser.tabs.captureVisibleTab = async () => {
+        throw new Error('This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota.');
+    };
+
+    await assert.rejects(capturePinnedTab(browser, SHOP_PAGE.id), { message: CAPTURED_TOO_FAST });
+    assert.deepEqual(await overlayCallsOf(browser), ['hideForCapture', 'show']);
+    assert.equal(CAPTURED_TOO_FAST, 'Chrome takes at most two captures a second, so nothing was captured. Press Capture again.');
 });
 
 test('a tab that is not on screen is refused before the overlay hides, and nothing is captured', async () => {

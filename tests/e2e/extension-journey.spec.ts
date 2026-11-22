@@ -6,10 +6,14 @@ import { runAsDatabaseOwner } from './database';
 import {
   CAPTURE_HOST_PERMISSIONS,
   EXTENSION_ID,
+  PageInspector,
   TEST_PAGE_ORIGIN,
+  acceptCertificateOf,
   chooseNewReport,
+  clickOverlayButton,
   expect,
   openPopupFor,
+  resizeWindowOf,
   test,
   type ExtensionPageGlobals,
   type StubScenario,
@@ -32,6 +36,7 @@ const FIRST_REPORT_CAPTURE_SAVED = 'Report draft made with screenshot 1. Capture
 const REPORTS_WRITE_MISSING = 'Your pinround token cannot make reports. Make a token that may prepare report drafts on the API tokens page, then pair the extension again.';
 const SHOP_HOST_QUESTION = 'This scenario clicks and types on shop.acme-foods.test. It can change data there.';
 const RAN_TO_ITS_END = 'The scenario ran to its end.';
+const CAPTURED_TOO_FAST = 'Chrome takes at most two captures a second, so nothing was captured. Press Capture again.';
 
 test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS });
 
@@ -192,6 +197,62 @@ test('"A new report" with a real token without reports:write shows the plain mes
   const remembered = await inSession(popup, 'pinroundNewReport');
   expect([remembered?.draftId ?? null, remembered?.pendingCapture ?? null]).toEqual([null, null]);
   await expect(testPage.locator('pinround-overlay')).toHaveCount(1);
+});
+
+/** The texts of the statuses and alerts the overlay shows, empty ones left out. */
+async function overlayMessagesOf(inspector: PageInspector): Promise<string[]> {
+  return (await inspector.accessibleNodes()).filter((node) => (node.role === 'status' || node.role === 'alert') && node.text !== '').map((node) => node.text);
+}
+
+test.describe('with the local certificate accepted in a tab, as README says, and not ignored by the browser', () => {
+  test.use({ certificateAcceptedInTab: true, viewportFollowsWindow: true });
+
+  test('three dock captures on a 1920x1080 window, two of them pinned, are saved as one report draft through the storage\'s own port', async ({ context, testPage, baseURL }) => {
+    test.setTimeout(120_000);
+    const appOrigin = String(baseURL);
+    const reportTitle = `Pay button is hidden ${randomUUID().slice(0, 8)}`;
+    await acceptCertificateOf(context, appOrigin);
+    await resizeWindowOf(context, testPage, { width: 1920, height: 1080 });
+    const options = await pairOnOptionsPage(context, appOrigin, issueTokenFor(OMAR_EMAIL, ['read', 'reports:write']));
+    await options.close();
+    const popup = await openPopupFor(context, testPage);
+    await popup.getByLabel(TARGET_PICKER).selectOption({ label: 'A new report' });
+    await popup.getByLabel('Project key').fill('SHOP');
+    await popup.getByLabel('Project key').press('Tab');
+    await expect.poll(async () => (await inSession(popup, 'pinroundNewReport'))?.project).toBe('SHOP');
+    await popup.getByRole('button', { name: 'Open the dock on this page' }).click();
+    await expect(popup.getByRole('status')).toHaveText('The dock is on the page. Pin, capture and save your draft from there.');
+    await popup.close();
+    await testPage.bringToFront();
+    const inspector = await PageInspector.of(context, testPage);
+
+    for (const [shot, pinSpot] of [[1, [400, 200]], [2, null], [3, [900, 600]]] as Array<[number, [number, number] | null]>) {
+      if (pinSpot !== null) {
+        await testPage.keyboard.press('p');
+        await testPage.mouse.click(...pinSpot);
+        await testPage.keyboard.type(`Note ${shot}`);
+        await testPage.keyboard.press('Enter');
+      }
+      const captured = `Captured. ${shot} waiting.`;
+      await clickOverlayButton(inspector, testPage, 'Capture');
+      // Chrome takes two captures a second; a person told so presses Capture again.
+      await expect.poll(() => overlayMessagesOf(inspector)).toEqual([expect.stringMatching(new RegExp(`^(${captured}|${CAPTURED_TOO_FAST})$`))]);
+      if ((await overlayMessagesOf(inspector))[0] === CAPTURED_TOO_FAST) {
+        await clickOverlayButton(inspector, testPage, 'Capture');
+      }
+      await expect.poll(() => overlayMessagesOf(inspector)).toEqual([captured]);
+    }
+    await clickOverlayButton(inspector, testPage, 'Save draft, 3 in it');
+    await expect.poll(() => inspector.focused()).toEqual({ role: 'textbox', name: 'What is wrong, in one line' });
+    await testPage.keyboard.type(reportTitle);
+    madeReportDrafts.push({ ownerEmail: OMAR_EMAIL, title: reportTitle });
+    await clickOverlayButton(inspector, testPage, 'Save draft');
+
+    await expect.poll(() => overlayMessagesOf(inspector), { timeout: 30_000 }).toEqual(['Draft saved with 3 captures. Open it in pinround to send it.']);
+    expect(runAsDatabaseOwner(`
+      SELECT jsonb_array_length(d.screenshots) FROM rvw_report_draft d JOIN idn_user u ON u.id = d.owner_id
+      WHERE u.email = '${OMAR_EMAIL}' AND d.title = '${reportTitle}'`)).toEqual(['3']);
+  });
 });
 
 const pressCheckStock: StubScenarioStep = { type: 'click', say: 'Press Check stock.', target: { role: 'button', name: 'Check stock' } };

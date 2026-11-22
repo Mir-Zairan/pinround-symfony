@@ -48,6 +48,7 @@ interface ExtensionFixtures {
   extensionHostPermissions: string[];
   viewportFollowsWindow: boolean;
   screenDeviceScaleFactor: number;
+  certificateAcceptedInTab: boolean;
   extensionDirectory: string;
   context: BrowserContext;
   testPage: Page;
@@ -60,6 +61,8 @@ interface ExtensionFixtures {
  * `viewportFollowsWindow` drops Playwright's fixed viewport, for a spec that resizes the window (resizeWindowOf).
  * `screenDeviceScaleFactor` is the screen's devicePixelRatio, which captureVisibleTab's picture follows; Playwright's
  * fixed viewport emulates a ratio of 1 over it, so a spec that sets it also sets `viewportFollowsWindow`.
+ * `certificateAcceptedInTab` stops Playwright ignoring certificate errors, so the dev stack's local certificate holds
+ * only once acceptCertificateOf has accepted its warning in a tab, as README tells a person to.
  */
 export const test = base.extend<ExtensionFixtures>({
   extensionHostPermissions: [[`${TEST_PAGE_ORIGIN}/*`], { option: true }],
@@ -70,13 +73,15 @@ export const test = base.extend<ExtensionFixtures>({
     await use(directory);
     await rm(directory, { recursive: true, force: true });
   },
-  context: async ({ extensionDirectory, viewportFollowsWindow, screenDeviceScaleFactor }, use) => {
+  certificateAcceptedInTab: [false, { option: true }],
+  context: async ({ extensionDirectory, viewportFollowsWindow, screenDeviceScaleFactor, certificateAcceptedInTab }, use) => {
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
       args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`, `--force-device-scale-factor=${screenDeviceScaleFactor}`],
       ...(viewportFollowsWindow ? { viewport: null } : {}),
       // The journey spec pairs with the dev app at https://localhost, whose certificate comes from Caddy's local CA.
-      ignoreHTTPSErrors: true,
+      // Playwright's ignoring covers pages only, never the service worker; acceptCertificateOf does what a person does.
+      ignoreHTTPSErrors: !certificateAcceptedInTab,
     });
     await context.route(`${TEST_PAGE_ORIGIN}/**`, (route) =>
       new URL(route.request().url()).pathname === '/' ? route.fulfill({ path: TEST_PAGE_FILE, contentType: 'text/html' }) : route.fulfill({ status: 404 }),
@@ -157,6 +162,91 @@ export async function resizeWindowOf(context: BrowserContext, tab: Page, size: {
   await session.send('Browser.setWindowBounds', { windowId, bounds: { ...size, windowState: 'normal' } });
   await session.detach();
   await expect.poll(() => tab.evaluate(() => [window.innerWidth, window.innerHeight])).not.toEqual(viewportBefore);
+}
+
+/**
+ * Accepts the warning about `origin`'s certificate on Chrome's warning page, as a person presses Advanced and then
+ * Proceed. Chrome then lets the tabs and extension pages of this profile reach every port of that host; for
+ * `test.use({ certificateAcceptedInTab: true })`.
+ */
+export async function acceptCertificateOf(context: BrowserContext, origin: string): Promise<void> {
+  const tab = await context.newPage();
+  await expect(tab.goto(`${origin}/login`)).rejects.toThrow(/ERR_CERT_AUTHORITY_INVALID/);
+  await tab.locator('#details-button').click();
+  await tab.locator('#proceed-link').click();
+  await expect(tab).toHaveURL(`${origin}/login`);
+  await tab.close();
+}
+
+/** The part of Playwright's Route the stub's answers use; answerOffscreenDocument hands them one of its own. */
+interface StubRoute {
+  request(): { url(): string; method(): string; headers(): Record<string, string>; postData(): string | null; postDataBuffer(): Buffer | null };
+  fulfill(response: { status: number; body?: string; json?: unknown; headers?: Record<string, string> }): Promise<void>;
+  abort(errorCode: 'connectionreset'): Promise<void>;
+}
+
+/** A paused request as DevTools' Fetch domain sends it. */
+interface PausedRequest {
+  requestId: string;
+  request: { url: string; method: string; headers: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }> };
+}
+
+/**
+ * Answers the extension's offscreen document (offscreen.html), which sends the service worker's requests, with the
+ * answers given: Playwright neither lists that document nor routes its requests. The document is opened here, before
+ * the test, so its first request is already held; the extension finds it open and uses it. Each answer gets the
+ * requests whose address starts with its prefix.
+ */
+async function answerOffscreenDocument(context: BrowserContext, answers: Array<[string, (route: StubRoute) => unknown]>): Promise<void> {
+  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+  await worker.evaluate(async () => {
+    const { chrome } = globalThis as unknown as { chrome: { offscreen: { createDocument(parameters: object): Promise<void> } } };
+    await chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['BLOBS'], justification: 'The specs answer its requests.' });
+  });
+  const [anyPage] = context.pages();
+  const session = await context.newCDPSession(anyPage);
+  const { targetInfos } = await session.send('Target.getTargets');
+  const offscreen = targetInfos.find((target) => target.url === `chrome-extension://${EXTENSION_ID}/offscreen.html`);
+  if (offscreen === undefined) {
+    throw new Error('The offscreen document did not open.');
+  }
+  const { sessionId } = await session.send('Target.attachToTarget', { targetId: offscreen.targetId, flatten: false });
+  let nextMessageId = 1;
+  const sendToDocument = async (method: string, params: object): Promise<void> => {
+    await session.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id: nextMessageId++, method, params }) });
+  };
+  session.on('Target.receivedMessageFromTarget', (event) => {
+    const message = JSON.parse(event.message) as { method?: string; params?: PausedRequest };
+    if (event.sessionId !== sessionId || message.method !== 'Fetch.requestPaused' || message.params === undefined) {
+      return;
+    }
+    const { requestId, request } = message.params;
+    const body = request.postDataEntries !== undefined
+      ? Buffer.concat(request.postDataEntries.map((entry) => Buffer.from(entry.bytes ?? '', 'base64')))
+      : (request.postData === undefined ? null : Buffer.from(request.postData));
+    const answer = answers.find(([prefix]) => request.url.startsWith(prefix))?.[1];
+    if (answer === undefined) {
+      void sendToDocument('Fetch.failRequest', { requestId, errorReason: 'NameNotResolved' });
+      return;
+    }
+    void answer({
+      request: () => ({
+        url: () => request.url,
+        method: () => request.method,
+        headers: () => Object.fromEntries(Object.entries(request.headers).map(([name, value]) => [name.toLowerCase(), value])),
+        postData: () => body?.toString('utf8') ?? null,
+        postDataBuffer: () => body,
+      }),
+      fulfill: ({ status, body: text = '', json, headers = {} }) => sendToDocument('Fetch.fulfillRequest', {
+        requestId,
+        responseCode: status,
+        responseHeaders: Object.entries({ 'Content-Type': json === undefined ? 'text/plain' : 'application/json', ...headers }).map(([name, value]) => ({ name, value })),
+        body: Buffer.from(json === undefined ? text : JSON.stringify(json)).toString('base64'),
+      }),
+      abort: () => sendToDocument('Fetch.failRequest', { requestId, errorReason: 'ConnectionReset' }),
+    });
+  });
+  await sendToDocument('Fetch.enable', { patterns: answers.map(([prefix]) => ({ urlPattern: `${prefix}*` })) });
 }
 
 /** A pinround the specs answer with context.route; no app runs behind it. */
@@ -261,6 +351,11 @@ export interface PinroundStubSeed {
   /** `owner` defaults to the paired person; another owner's notebook is never listed and answers 404. */
   notebooks?: Array<Omit<StubNotebook, 'owner' | 'version' | 'screenshots' | 'scenarios'> & Partial<Pick<StubNotebook, 'owner' | 'version' | 'screenshots' | 'scenarios'>>>;
   reportDrafts?: StubReportDraft[];
+  /**
+   * Also answers the offscreen document, which sends the dock's requests (answerOffscreenDocument); it is opened before
+   * the test then. For a spec that uses the dock only, so the others see no offscreen document.
+   */
+  answersDock?: boolean;
 }
 
 export interface PinroundStub {
@@ -308,7 +403,7 @@ const sha256Hex = (bytes: Buffer | string) => createHash('sha256').update(bytes)
  * the same method, path and body bytes and is refused (422) for another request. Ids are made in order, so a spec
  * knows the next one.
  */
-export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_TOKEN_SCOPES, projects = ['SHOP'], tickets = [], notebooks = [], reportDrafts = [] }: PinroundStubSeed = {}): Promise<PinroundStub> {
+export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_TOKEN_SCOPES, projects = ['SHOP'], tickets = [], notebooks = [], reportDrafts = [], answersDock = false }: PinroundStubSeed = {}): Promise<PinroundStub> {
   const storedFiles = new Map<string, Buffer>();
   const usedUploads = new Set<string>();
   const idempotencyKeys = new Map<string, { requestHash: string; answer: StubAnswer }>();
@@ -516,7 +611,7 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
     return [404, { error: 'No route.' }];
   };
 
-  await context.route(`${PINROUND_TEST_ORIGIN}/api/**`, (route) => {
+  const answerApi = (route: StubRoute) => {
     const request = route.request();
     const url = new URL(request.url());
     const bodyText = request.postData() ?? '';
@@ -547,8 +642,8 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
     }
     recorded.answerStatus = answer[0];
     return route.fulfill({ status: answer[0], json: answer[1], headers });
-  });
-  await context.route(`${STUB_STORAGE_ORIGIN}/**`, (route) => {
+  };
+  const answerStorage = (route: StubRoute) => {
     const request = route.request();
     const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
     const upload = [...stub.uploads.entries()].find(([, candidate]) => candidate.putUrl === request.url());
@@ -558,7 +653,12 @@ export async function answerPinroundApi(context: BrowserContext, { scopes = ALL_
     storedFiles.set(upload[0], bytes);
     stub.storedPictures.push(bytes);
     return route.fulfill({ status: 200, body: '' });
-  });
+  };
+  await context.route(`${PINROUND_TEST_ORIGIN}/api/**`, answerApi);
+  await context.route(`${STUB_STORAGE_ORIGIN}/**`, answerStorage);
+  if (answersDock) {
+    await answerOffscreenDocument(context, [[`${PINROUND_TEST_ORIGIN}/api/`, answerApi], [`${STUB_STORAGE_ORIGIN}/`, answerStorage]]);
+  }
   return stub;
 }
 
@@ -713,4 +813,20 @@ export class PageInspector {
     }
     return result.value;
   }
+}
+
+/** The names of the buttons a screen reader finds on the page, the overlay's closed root included. */
+export async function buttonNamesOf(inspector: PageInspector): Promise<string[]> {
+  return (await inspector.accessibleNodes()).filter((node) => node.role === 'button').map((node) => node.name);
+}
+
+/** A person's mouse click on the middle of the overlay's one button with this exact name. */
+export async function clickOverlayButton(inspector: PageInspector, page: Page, name: string): Promise<void> {
+  await expect.poll(async () => (await buttonNamesOf(inspector)).filter((shown) => shown === name).length, `one button "${name}"`).toBe(1);
+  const { backendNodeId } = await inspector.node('button', name);
+  const boxes = backendNodeId === undefined ? null : await inspector.boxesOf(backendNodeId);
+  if (boxes === null) {
+    throw new Error(`The button "${name}" is not shown.`);
+  }
+  await page.mouse.click((boxes.border.left + boxes.border.right) / 2, (boxes.border.top + boxes.border.bottom) / 2);
 }

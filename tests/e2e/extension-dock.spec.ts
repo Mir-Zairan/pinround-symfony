@@ -5,6 +5,8 @@ import {
   TEST_PAGE_ORIGIN,
   TEST_PAGE_URL,
   answerPinroundApi,
+  buttonNamesOf,
+  clickOverlayButton,
   expect,
   pairedPopupFor,
   test,
@@ -35,10 +37,6 @@ const BASKET_SCENARIO: StubScenario = {
 // Every spec here captures, or opens the dock on the test page as a capture would.
 test.use({ extensionHostPermissions: CAPTURE_HOST_PERMISSIONS });
 
-async function buttonNamesOf(inspector: PageInspector): Promise<string[]> {
-  return (await inspector.accessibleNodes()).filter((node) => node.role === 'button').map((node) => node.name);
-}
-
 async function pinNamesOf(inspector: PageInspector): Promise<string[]> {
   return (await buttonNamesOf(inspector)).filter((name) => /^Pin \d+(:|$)/.test(name));
 }
@@ -52,17 +50,6 @@ async function shownStatusesOf(inspector: PageInspector): Promise<string[]> {
 async function stepCardTextOf(inspector: PageInspector): Promise<string | null> {
   const cards = (await inspector.accessibleNodes()).filter((node) => node.role === 'region' && node.name === 'Scenario step');
   return cards.length === 1 ? cards[0].text : null;
-}
-
-/** A person's mouse click on the middle of the overlay's one button with this exact name. */
-async function clickOverlayButton(inspector: PageInspector, page: Page, name: string): Promise<void> {
-  await expect.poll(async () => (await buttonNamesOf(inspector)).filter((shown) => shown === name).length, `one button "${name}"`).toBe(1);
-  const { backendNodeId } = await inspector.node('button', name);
-  const boxes = backendNodeId === undefined ? null : await inspector.boxesOf(backendNodeId);
-  if (boxes === null) {
-    throw new Error(`The button "${name}" is not shown.`);
-  }
-  await page.mouse.click((boxes.border.left + boxes.border.right) / 2, (boxes.border.top + boxes.border.bottom) / 2);
 }
 
 /** A person's click on the pinning surface, the note typed into the editor it opens, then Enter to keep it. */
@@ -88,7 +75,7 @@ const extensionPagesOf = (context: BrowserContext) => context.pages().filter((pa
 
 /** The paired popup with the notebook holding BASKET_SCENARIO chosen, and the test page's host allowed to play. */
 async function popupWithBasketNotebook(context: BrowserContext, testPage: Page): Promise<{ stub: PinroundStub; popup: Page }> {
-  const stub = await answerPinroundApi(context, { notebooks: [{ notebook_id: NOTEBOOK_ID, title: 'Basket checks', last_used_at: '2026-03-02T09:00:00+00:00', scenarios: [BASKET_SCENARIO] }] });
+  const stub = await answerPinroundApi(context, { answersDock: true, notebooks: [{ notebook_id: NOTEBOOK_ID, title: 'Basket checks', last_used_at: '2026-03-02T09:00:00+00:00', scenarios: [BASKET_SCENARIO] }] });
   const popup = await pairedPopupFor(context, testPage);
   await popup.evaluate(async (hosts) => {
     const { chrome } = globalThis as unknown as ExtensionPageGlobals;
@@ -101,7 +88,7 @@ async function popupWithBasketNotebook(context: BrowserContext, testPage: Page):
 }
 
 test('a tester pins, removes a pin, captures twice and saves one report draft with the title typed in the dock, without opening the popup again', async ({ context, testPage }) => {
-  const stub = await answerPinroundApi(context);
+  const stub = await answerPinroundApi(context, { answersDock: true });
   const popup = await pairedPopupFor(context, testPage);
   await popup.getByLabel('Put the screenshot in').selectOption({ label: 'A new report' });
   await popup.getByLabel('Project key').fill('SHOP');
@@ -163,7 +150,7 @@ test('a tester pins, removes a pin, captures twice and saves one report draft wi
 });
 
 test('the note form of a pin dropped at the left or right edge of the page stays fully on screen', async ({ context, testPage }) => {
-  await answerPinroundApi(context);
+  await answerPinroundApi(context, { answersDock: true });
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await openDockAndClosePopup(context, testPage, popup);
   const viewport = testPage.viewportSize();
@@ -198,7 +185,7 @@ test('the note form of a pin dropped at the left or right edge of the page stays
 });
 
 test('on a 360px wide phone the dock wraps inside the screen, and its buttons keep their names where their words are hidden', async ({ context, testPage }) => {
-  await answerPinroundApi(context);
+  await answerPinroundApi(context, { answersDock: true });
   await testPage.setViewportSize({ width: 360, height: 640 });
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await openDockAndClosePopup(context, testPage, popup);
@@ -214,7 +201,7 @@ test('on a 360px wide phone the dock wraps inside the screen, and its buttons ke
 });
 
 test('with Letter keys off, P on the page does nothing while P in the dock still pins, and turned on again P on the page pins', async ({ context, testPage }) => {
-  await answerPinroundApi(context);
+  await answerPinroundApi(context, { answersDock: true });
   const popup = await pairedPopupFor(context, testPage);
   const inspector = await openDockAndClosePopup(context, testPage, popup);
   const overlaysShown = async () => (await inspector.accessibleNodes()).filter((node) => node.role === OVERLAY.role && node.name === OVERLAY.name).length;

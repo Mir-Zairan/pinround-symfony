@@ -21,9 +21,13 @@ export const browser = {
     },
     windows: { getLastFocused: () => chrome.windows.getLastFocused() },
     runtime: {
+        id: () => chrome.runtime.id,
         openOptionsPage: () => chrome.runtime.openOptionsPage(),
         onMessage: { addListener: (listener) => chrome.runtime.onMessage.addListener(listener) },
+        sendMessage: (message) => chrome.runtime.sendMessage(message),
+        getContexts: (filter) => chrome.runtime.getContexts(filter),
     },
+    offscreen: { createDocument: (parameters) => chrome.offscreen.createDocument(parameters) },
     scripting: { executeScript: (injection) => chrome.scripting.executeScript(injection) },
     identity: {
         getRedirectURL: (path) => chrome.identity.getRedirectURL(path),

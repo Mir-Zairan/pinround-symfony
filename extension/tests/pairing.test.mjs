@@ -117,7 +117,7 @@ test('the manifest asks for exactly the permissions the guide lists, and for no 
     const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
     const guide = readFileSync(new URL('../../docs/guides/browser-extension.md', import.meta.url), 'utf8');
 
-    assert.deepEqual(manifest.permissions, ['activeTab', 'identity', 'scripting', 'storage']);
+    assert.deepEqual(manifest.permissions, ['activeTab', 'identity', 'offscreen', 'scripting', 'storage']);
     assert.equal(manifest.host_permissions, undefined);
     assert.equal(manifest.optional_host_permissions, undefined);
     assert.equal(manifest.content_scripts, undefined);
