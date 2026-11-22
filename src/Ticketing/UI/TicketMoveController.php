@@ -32,6 +32,7 @@ use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\RoleTicketVisibilities;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\StepQueries;
+use App\Workflow\Api\TransitionPolicy;
 use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -62,6 +63,7 @@ final class TicketMoveController extends AbstractController
     public const string MOVE_ROUTE = 'ticket_move';
     public const string MOVE_TO_ROUTE = 'ticket_move_to';
     public const string ASSIGN_ROUTE = 'ticket_assign';
+    public const string UNDO_ROUTE = 'ticket_undo_move';
 
     /**
      * The form fields the actions read. The waiting-on fields are move-to's, and empty for none; the assignee is
@@ -126,7 +128,8 @@ final class TicketMoveController extends AbstractController
         $now = $this->clock->now();
 
         try {
-            $toast = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $draftChoice, $now): string {
+            /** @var array{string, bool} $made */
+            $made = $this->transactions->run(function () use ($key, $verb, $csrfToken, $expectedVersion, $draftChoice, $now): array {
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 try {
@@ -135,14 +138,14 @@ final class TicketMoveController extends AbstractController
                     throw $this->refusalOutOfTheMove($refused, $ticket);
                 }
                 if (null !== $moveResult->draftOutcome) {
-                    return PingsClearedToast::withClearedPings(MoveToasts::movedToWithDraft($this->stepNameAfterMoveOf($ticket), $moveResult), $moveResult->clearedPingCount);
+                    return [PingsClearedToast::withClearedPings(MoveToasts::movedToWithDraft($this->stepNameAfterMoveOf($ticket), $moveResult), $moveResult->clearedPingCount), false];
                 }
 
-                return PingsClearedToast::withClearedPings(MoveToasts::ofVerb(
+                return [PingsClearedToast::withClearedPings(MoveToasts::ofVerb(
                     $verb,
                     MoveToasts::namesPerson($verb) ? $this->turnFirstNameOf($ticket) : null,
                     MoveToasts::namesStep($verb) ? $this->stepNameAfterMoveOf($ticket) : null,
-                ), $moveResult->clearedPingCount);
+                ), $moveResult->clearedPingCount), true];
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -155,8 +158,9 @@ final class TicketMoveController extends AbstractController
         } catch (DraftDecisionNeeded $needed) {
             return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_ROUTE, ['key' => $key, 'verb' => $verb]), fn (TicketPageView $ticket, ActorContext $actor): ?string => $this->verbTargetStepNameOf($verb, $ticket, $actor));
         }
+        [$toast, $offersUndo] = $made;
 
-        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
+        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK, $offersUndo ? $this->undoActionOf($key, $expectedVersion) : null);
     }
 
     /**
@@ -175,7 +179,8 @@ final class TicketMoveController extends AbstractController
         $now = $this->clock->now();
 
         try {
-            $toast = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $draftChoice, $now): string {
+            /** @var array{string, bool} $made */
+            $made = $this->transactions->run(function () use ($key, $stepId, $csrfToken, $expectedVersion, $waitingOnUserId, $waitingOnLabel, $draftChoice, $now): array {
                 [$actor, $ticket] = $this->movableTicketOf($key);
                 $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
                 if (self::isWaitingOnMalformed($waitingOnUserId, $waitingOnLabel)) {
@@ -201,10 +206,10 @@ final class TicketMoveController extends AbstractController
 
                 $stepName = $this->listedStepNameOf($stepId);
 
-                return PingsClearedToast::withClearedPings(
+                return [PingsClearedToast::withClearedPings(
                     null === $moveResult->draftOutcome ? MoveToasts::movedTo($stepName) : MoveToasts::movedToWithDraft($stepName, $moveResult),
                     $moveResult->clearedPingCount,
-                );
+                ), null === $moveResult->draftOutcome];
             });
         } catch (TicketNotFound) {
             throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
@@ -217,8 +222,66 @@ final class TicketMoveController extends AbstractController
         } catch (DraftDecisionNeeded $needed) {
             return $this->answerWithDraftQuestion($request, $key, $needed->draft, $this->generateUrl(self::MOVE_TO_ROUTE, ['key' => $key, 'stepId' => $stepId]), fn (): string => $this->listedStepNameOf($stepId));
         }
+        [$toast, $offersUndo] = $made;
+
+        return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK, $offersUndo ? $this->undoActionOf($key, $expectedVersion) : null);
+    }
+
+    /**
+     * Undo in a move's toast (gap list 1.10, beyond the prototype): takes the ticket's last move back, for the person who
+     * made it, within Workflow's TransitionPolicy::UNDO_SECONDS by the server's clock, while that move is its last
+     * change; the form posts the version the move left. A refusal is a toast, and changes nothing.
+     */
+    #[Route('/t/{key}/undo-move', name: self::UNDO_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function undoMove(string $key, Request $request): Response
+    {
+        $this->requestTenant();
+        $csrfToken = $request->request->getString(self::CSRF_FIELD);
+        $expectedVersion = self::versionOf($request);
+        $now = $this->clock->now();
+
+        try {
+            $toast = $this->transactions->run(function () use ($key, $csrfToken, $expectedVersion, $now): string {
+                [$actor, $ticket] = $this->movableTicketOf($key);
+                $this->refuseAnUnusableForm($key, $csrfToken, $expectedVersion);
+                try {
+                    $moveResult = $this->ticketCommands->undoMove($actor->organizationId(), $actor->userId(), $key, $expectedVersion, $now);
+                } catch (MoveRefused $refused) {
+                    throw new MoveRefusedWithToast($this->refusalToastOf($refused, $ticket));
+                }
+
+                return PingsClearedToast::withClearedPings(MoveToasts::undone($this->stepNameAfterMoveOf($ticket)), $moveResult->clearedPingCount);
+            });
+        } catch (TicketNotFound) {
+            throw $this->createNotFoundException(TicketShowController::NOT_FOUND);
+        } catch (TicketChangedMeanwhile) {
+            return $this->answerWithToast($request, $key, MoveToasts::UNDO_CHANGED_SINCE, Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (MoveRefusedWithToast $refused) {
+            return $this->answerWithToast($request, $key, $refused->toast(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         return $this->answerWithToast($request, $key, $toast, Response::HTTP_OK);
+    }
+
+    /**
+     * The toast's Undo for a move made from $versionBefore: one save raises the version by one, so the form posts the
+     * version the move left, and any save since refuses the Undo.
+     *
+     * @return array{label: string, url: string, csrfId: string, fields: array<string, string>, shownForMs: int}|null
+     */
+    private function undoActionOf(string $key, ?int $versionBefore): ?array
+    {
+        if (null === $versionBefore) {
+            return null;
+        }
+
+        return [
+            'label' => MoveToasts::UNDO,
+            'url' => $this->generateUrl(self::UNDO_ROUTE, ['key' => $key]),
+            'csrfId' => self::csrfIdOf($key),
+            'fields' => [self::VERSION_FIELD => (string) ($versionBefore + 1)],
+            'shownForMs' => TransitionPolicy::UNDO_SECONDS * 1000,
+        ];
     }
 
     /**
@@ -533,9 +596,10 @@ final class TicketMoveController extends AbstractController
      * rollback, with the same 404 and 403 as the move. Any other form gets a redirect to the ticket page with the toast
      * flashed, whatever the move's outcome.
      *
-     * @param int $streamStatus 200 for a move made, 422 for one refused
+     * @param int                                                                                                    $streamStatus 200 for a move made, 422 for one refused
+     * @param array{label: string, url: string, csrfId: string, fields: array<string, string>, shownForMs: int}|null $toastAction  the toast's Undo; only a Turbo Stream shows it
      */
-    private function answerWithToast(Request $request, string $key, string $toast, int $streamStatus): Response
+    private function answerWithToast(Request $request, string $key, string $toast, int $streamStatus, ?array $toastAction = null): Response
     {
         if (TurboBundle::STREAM_FORMAT !== $request->getPreferredFormat()) {
             $this->addFlash(self::TOAST, $toast);
@@ -545,12 +609,12 @@ final class TicketMoveController extends AbstractController
 
         // Rendered inside the re-read's transaction, as the ticket page renders inside the request's: People's ping
         // sheets read the ping limit under the tenant, and outside a transaction they would open one of their own.
-        return $this->transactions->run(function () use ($key, $toast, $streamStatus): Response {
+        return $this->transactions->run(function () use ($key, $toast, $streamStatus, $toastAction): Response {
             [$actor, $ticket] = $this->movableTicketOf($key);
 
             return $this->render(
                 '@Ticketing/move.stream.html.twig',
-                [...$this->ticketPageParts->of($ticket, $actor), 'toast' => $toast],
+                [...$this->ticketPageParts->of($ticket, $actor), 'toast' => $toast, 'toastAction' => $toastAction],
                 new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),
             );
         });

@@ -10,9 +10,11 @@ use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\TicketTurnSnapshot;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\Event\TicketEvent;
+use App\Ticketing\Application\LastTicketChange;
 use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketEvents;
 use App\Ticketing\Application\TicketHistory;
+use App\Ticketing\Domain\MovedFrom;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
@@ -36,6 +38,9 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
 
     /** @var list<string> */
     private array $ticketsChangedMeanwhile = [];
+
+    /** @var array<string, LastTicketChange> by ticket id */
+    private array $lastChanges = [];
 
     public function __construct(private readonly string $nextTicketId)
     {
@@ -99,8 +104,17 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         return $ticket;
     }
 
+    /**
+     * As DbalTicketHistory, the latest row this double recorded for the ticket, whatever its type.
+     */
+    public function lastChangeOf(TicketId $ticketId, \DateTimeImmutable $ticketCreatedAt): ?LastTicketChange
+    {
+        return $this->lastChanges[$ticketId->toString()] ?? null;
+    }
+
     public function recordCreated(OrganizationId $organizationId, TicketId $ticketId, UserId $reporter, string $stepId, \DateTimeImmutable $at): void
     {
+        $this->lastChanges[$ticketId->toString()] = new LastTicketChange($reporter, null, $at, null);
         $this->writes[] = \sprintf('created %s by %s in %s at %s', $ticketId->toString(), $reporter->toString(), $stepId, $at->format('Y-m-d H:i'));
     }
 
@@ -113,7 +127,9 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         ?string $verb,
         ?string $overrideNote,
         \DateTimeImmutable $at,
+        ?MovedFrom $movedFrom = null,
     ): void {
+        $this->lastChanges[$ticketId->toString()] = new LastTicketChange($actor, $toStepId, $at, $movedFrom);
         $this->writes[] = \sprintf(
             'moved %s by %s from %s to %s with verb %s and note %s at %s',
             $ticketId->toString(),
@@ -135,6 +151,7 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
         UserId $assignee,
         \DateTimeImmutable $at,
     ): void {
+        $this->lastChanges[$ticketId->toString()] = new LastTicketChange($actor, $toStepId, $at, null);
         $this->writes[] = \sprintf(
             'given %s by %s from %s to %s to %s at %s',
             $ticketId->toString(),
@@ -148,6 +165,7 @@ final class RecordedTicketWrites implements Tickets, TicketHistory, TurnProjecto
 
     public function recordReviewChange(OrganizationId $organizationId, TicketId $ticketId, UserId $actor, ReviewChange $change, \DateTimeImmutable $at): void
     {
+        $this->lastChanges[$ticketId->toString()] = new LastTicketChange($actor, null, $at, null);
         $this->writes[] = \sprintf(
             '%s %s by %s to %s on pin %s in area %s at %s',
             $change->kind,

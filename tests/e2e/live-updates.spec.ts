@@ -306,7 +306,7 @@ test.describe('two people on one ticket', () => {
     await expect(lenasStatus).toContainText('To do');
 
     await omar.page.locator('#ticket-next-step .next-step-box__verbs').getByRole('button', { name: 'Start work' }).click();
-    await expect(omar.page.locator(TOAST_REGION)).toHaveText('Started. Status is In progress.');
+    await expect(omar.page.locator(`${TOAST_REGION} .toast__text`)).toHaveText('Started. Status is In progress.');
 
     await expect(lenasStatus).toContainText('In progress', { timeout: SHOWS_WITHIN_MS });
     await expectSameLoad(lena.page);

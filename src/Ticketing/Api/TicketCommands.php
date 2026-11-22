@@ -132,6 +132,26 @@ interface TicketCommands
     public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int;
 
     /**
+     * Undo of the ticket's last move (a verb move or "Move to another step…", not a give): puts back its step, who it
+     * waits on, its reviewer, tester and closed state, so the turn is the one before the move. Workflow's
+     * TransitionPolicy::checkUndo decides: only the person who moved, within UNDO_SECONDS of $at, while that move is the
+     * ticket's last change. Writes a "moved" row with the verb "undo" (which no Undo takes back), the turn row and
+     * TicketMoved. A round the move closed stays closed, and a draft it shared stays shared.
+     *
+     * @param int $expectedVersion the version the move left the ticket at
+     *
+     * @return MoveResult the pings it cleared; never a draft outcome
+     *
+     * @throws TicketNotFound         as move does
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion (someone saved it after the move),
+     *                                or another request saved it first; nothing is saved
+     * @throws MoveRefused            when the ticket has no team or the policy refuses the Undo, with its note (not the
+     *                                mover, too late, changed since); nothing is saved
+     * @throws \LogicException        when no transaction is open
+     */
+    public function undoMove(OrganizationId $organizationId, UserId $actor, string $key, int $expectedVersion, \DateTimeImmutable $at): MoveResult;
+
+    /**
      * The lead's "Move to another step…": moves the ticket to a step of its team without a verb, and writes the same rows
      * and event as move, with no verb. In Needs input the ticket waits on the person or label given, else its reporter.
      * It shares or keeps private the actor's undecided draft round as move does. It is lead-only, so it closes no round.

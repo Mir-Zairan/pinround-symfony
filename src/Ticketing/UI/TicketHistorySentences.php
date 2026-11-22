@@ -88,6 +88,9 @@ final readonly class TicketHistorySentences
             return $actor.' gave it to '.(null === $entry->givenToId ? PersonNames::UNKNOWN_PERSON : $this->firstNameOf($entry->givenToId));
         }
         $toStep = $this->stepNameOf($entry->toStepId);
+        if ($entry->isUndo() && null !== $entry->fromStepId) {
+            return $actor.' undid the move to '.$this->stepNameOf($entry->fromStepId).', back to '.$toStep;
+        }
         if (null === $entry->fromStepId || 0 === strcasecmp($entry->fromStepId, $entry->toStepId)) {
             return $actor.' moved it to '.$toStep;
         }

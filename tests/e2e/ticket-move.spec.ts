@@ -77,7 +77,7 @@ test.describe('four people move one SHOP ticket', () => {
 
     await clickVerb(page, 'Start work', 200);
 
-    await expect(page.locator(TOAST_REGION)).toHaveText('Started. Status is In progress.');
+    await expect(page.locator(`${TOAST_REGION} .toast__text`)).toHaveText('Started. Status is In progress.');
     await expect(statusPill(page)).toHaveText('In progress');
     await expect(nextStepBox(page).getByRole('heading', { name: 'Your next step' })).toBeFocused();
     await expect(verbButtons(page).first()).toHaveText('Send to code review');
@@ -85,7 +85,7 @@ test.describe('four people move one SHOP ticket', () => {
 
     await clickVerb(page, 'Send to code review', 200);
 
-    await expect(page.locator(TOAST_REGION)).toHaveText('Sent to code review. Lena’s turn now.');
+    await expect(page.locator(`${TOAST_REGION} .toast__text`)).toHaveText('Sent to code review. Lena’s turn now.');
     await expect(statusPill(page)).toHaveText('Code review');
     await expect(nextStepBox(page).locator('.next-step-box__sentence')).toHaveText('Nothing for you now. Lena’s turn.');
     await expect(verbButtons(page)).toHaveCount(0);
@@ -100,7 +100,7 @@ test.describe('four people move one SHOP ticket', () => {
 
     await clickVerb(page, 'Approve code', 200);
 
-    await expect(page.locator(TOAST_REGION)).toHaveText('Code approved. Mia’s turn to test.');
+    await expect(page.locator(`${TOAST_REGION} .toast__text`)).toHaveText('Code approved. Mia’s turn to test.');
     await expect(statusPill(page)).toHaveText('Testing');
     expect(await seriousViolations(page)).toEqual([]);
 
@@ -135,7 +135,7 @@ test.describe('four people move one SHOP ticket', () => {
     expect((await answer).status()).toBe(200);
 
     await expect(dialog).toBeHidden();
-    await expect(page.locator(TOAST_REGION)).toHaveText('Moved to Needs input.');
+    await expect(page.locator(`${TOAST_REGION} .toast__text`)).toHaveText('Moved to Needs input.');
     await expect(statusPill(page)).toHaveText('Needs input');
     await expect(page.locator('#ticket-state .ticket__now')).toContainText('Omar');
     await expect(nextStepBox(page).locator('.next-step-box__sentence')).toHaveText('Nothing for you now. Omar’s turn.');

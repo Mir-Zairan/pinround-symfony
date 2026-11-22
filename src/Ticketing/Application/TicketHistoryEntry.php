@@ -40,4 +40,9 @@ final readonly class TicketHistoryEntry
     {
         return MoveTicket::GIVE_IT_TO === $this->verb;
     }
+
+    public function isUndo(): bool
+    {
+        return MoveTicket::UNDO === $this->verb;
+    }
 }

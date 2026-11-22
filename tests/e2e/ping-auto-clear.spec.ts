@@ -51,7 +51,7 @@ test('Omar starting work on a ticket clears Lena’s ping from his bell and the 
   await page.locator('#ticket-next-step .next-step-box__verbs').getByRole('button', { name: 'Start work' }).click();
   expect((await answer).status()).toBe(200);
 
-  await expect(page.locator(TOAST_REGION)).toHaveText('Started. Status is In progress. 1 ping on this ticket cleared.');
+  await expect(page.locator(`${TOAST_REGION} .toast__text`)).toHaveText('Started. Status is In progress. 1 ping on this ticket cleared.');
   await openPopoverOn(page, '/');
   await expect(lenasCardOn(page, key)).toHaveCount(0);
 });

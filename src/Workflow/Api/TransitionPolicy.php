@@ -12,6 +12,9 @@ namespace App\Workflow\Api;
  */
 interface TransitionPolicy
 {
+    /** How long after a move the person who made it may take it back with Undo. */
+    public const int UNDO_SECONDS = 30;
+
     /**
      * Nobody without the team role lead or member in the ticket's team gets a verb, and nobody gets one while a question
      * is open. The note explains a move a rule blocks for this person, also one they could not use anyway, as the ticket
@@ -60,4 +63,16 @@ interface TransitionPolicy
      * @param list<StepView> $steps StepQueries::moveTargetsFor the ticket's team, the list moveChoices took
      */
     public function checkMoveTo(TicketState $ticket, ActorInTeam $actor, RuleSetView $rules, StepView $target, array $steps): Decision;
+
+    /**
+     * Undo after a mistaken move (gap list 1.10): the person who made the move may take it back, to the step it left,
+     * for UNDO_SECONDS after it, while it is the ticket's last change. Refused, with a note, for anyone else, after
+     * UNDO_SECONDS, or once the ticket changed since; without a note for a step that is not in $steps any more; and as
+     * every move is for a person with no team role or while a question is open. No other rule is checked: the Undo puts
+     * the ticket back where a move the policy allowed found it.
+     *
+     * @param StepView       $target the step the move left
+     * @param list<StepView> $steps  StepQueries::moveTargetsFor the ticket's team
+     */
+    public function checkUndo(TicketState $ticket, ActorInTeam $actor, TeamFacts $team, MoveToUndo $move, StepView $target, array $steps, \DateTimeImmutable $now): Decision;
 }

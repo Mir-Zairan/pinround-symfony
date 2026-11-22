@@ -43,6 +43,7 @@ use App\Workflow\Api\Availability;
 use App\Workflow\Api\Decision;
 use App\Workflow\Api\MoveChoices;
 use App\Workflow\Api\MoveTarget;
+use App\Workflow\Api\MoveToUndo;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepQueries;
@@ -53,6 +54,7 @@ use App\Workflow\Api\TransitionPolicy;
 use App\Workflow\Api\TurnInputs;
 use App\Workflow\Api\TurnPeopleChoice;
 use App\Workflow\Api\TurnRules;
+use App\Workflow\Application\Transition\CatalogueTransitionPolicy;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -464,6 +466,124 @@ final class MoveTicketTest extends KernelTestCase
         self::assertSame($expectedTemplate, $refusal->ruleNoteTemplate);
         self::assertSame($expectedPeople, array_map(static fn (UserId $userId): string => $userId->toString(), $refusal->ruleNotePeople));
         self::assertSame($stateBefore, $this->storedState());
+    }
+
+    /**
+     * Omar sends his ticket to code review by mistake: the move stores Lena as reviewer and gives her the turn. His Undo
+     * 20 seconds later puts the step, the reviewer and the turn back as they were, and What happened keeps both rows.
+     */
+    #[Test]
+    public function theMoverUndoesHisMoveAndTheStepPeopleAndTurnAreAsBefore(): void
+    {
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP]);
+        $ticketId = $this->ticketId();
+        $this->transactions()->committedAs(self::ACME_FOODS, fn (): ?string => $this->turnProjector()->refresh($ticketId));
+        [, $versionBefore] = $this->stepAndVersion();
+        $peopleBefore = $this->storedPeople();
+        $turnBefore = $this->turnRows();
+        $this->move(self::OMAR, 'send_to_code_review', $versionBefore);
+        self::assertSame(self::CODE_REVIEW_STEP, $this->stepAndVersion()[0]);
+        self::assertNotSame($peopleBefore, $this->storedPeople(), 'The move stored a reviewer.');
+        self::assertNotSame($turnBefore, $this->turnRows(), 'The move gave someone else the turn.');
+
+        $this->undoMove(self::OMAR, $versionBefore + 1, '2027-03-16 09:30:20+00:00');
+
+        self::assertSame([self::IN_PROGRESS_STEP, $versionBefore + 2], $this->stepAndVersion());
+        self::assertSame($peopleBefore, $this->storedPeople());
+        self::assertSame($turnBefore, $this->turnRows());
+        self::assertSame(
+            [[self::CODE_REVIEW_STEP, self::IN_PROGRESS_STEP, 'undo', self::OMAR, '2027-03-16 09:30:20']],
+            array_map(static fn (array $row): array => [$row['from_step'], $row['to_step'], $row['verb'], $row['actor_id'], $row['at']], \array_slice($this->movedRows(), -1)),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, string, ?string, array<string, string>}>
+     */
+    public static function refusedUndos(): iterable
+    {
+        // Who undoes Omar's move made at MOVED_AT, when, and the rule note template and people it is refused with.
+        yield 'after 30 seconds' => [self::OMAR, '2027-03-16 09:30:31+00:00', CatalogueTransitionPolicy::UNDO_TOO_LATE_NOTE, ['lead' => self::LENA]];
+        yield 'the lead, after 30 seconds' => [self::LENA, '2027-03-16 09:30:31+00:00', CatalogueTransitionPolicy::UNDO_NOT_YOURS_NOTE, ['mover' => self::OMAR]];
+        yield 'someone who did not move it' => [self::LENA, '2027-03-16 09:30:05+00:00', CatalogueTransitionPolicy::UNDO_NOT_YOURS_NOTE, ['mover' => self::OMAR]];
+        yield 'a viewer' => [self::RAJ, '2027-03-16 09:30:05+00:00', self::NO_TEAM_ROLE_NOTE, []];
+        yield 'a clock before the move' => [self::OMAR, '2027-03-16 09:29:59+00:00', CatalogueTransitionPolicy::UNDO_TOO_LATE_NOTE, ['lead' => self::LENA]];
+    }
+
+    /**
+     * @param array<string, string> $expectedPeople
+     */
+    #[Test]
+    #[DataProvider('refusedUndos')]
+    public function aRefusedUndoSaysWhyAndChangesNothing(string $actor, string $at, ?string $expectedTemplate, array $expectedPeople): void
+    {
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP]);
+        [, $versionBefore] = $this->stepAndVersion();
+        $this->move(self::OMAR, 'send_to_code_review', $versionBefore);
+        $stateAfterTheMove = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->undoMove($actor, $versionBefore + 1, $at));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertSame($expectedTemplate, $refusal->ruleNoteTemplate);
+        self::assertSame($expectedPeople, array_map(static fn (UserId $userId): string => $userId->toString(), $refusal->ruleNotePeople));
+        self::assertSame($stateAfterTheMove, $this->storedState());
+    }
+
+    /**
+     * Once Omar's Undo is the ticket's last change, nothing is left to undo: an Undo is never undone.
+     */
+    #[Test]
+    public function anUndoIsNotUndoneAndChangesNothing(): void
+    {
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP]);
+        [, $versionBefore] = $this->stepAndVersion();
+        $this->move(self::OMAR, 'send_to_code_review', $versionBefore);
+        $this->undoMove(self::OMAR, $versionBefore + 1, '2027-03-16 09:30:10+00:00');
+        $stateAfterTheUndo = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->undoMove(self::OMAR, $versionBefore + 2, '2027-03-16 09:30:15+00:00'));
+
+        self::assertInstanceOf(MoveRefused::class, $refusal);
+        self::assertSame(CatalogueTransitionPolicy::UNDO_CHANGED_SINCE_NOTE, $refusal->ruleNoteTemplate);
+        self::assertSame($stateAfterTheUndo, $this->storedState());
+    }
+
+    /**
+     * Lena put the ticket on hold after Omar's move: his Undo, with the version his move left, is refused as changed.
+     */
+    #[Test]
+    public function anUndoAfterSomeoneElseMovedTheTicketIsRefusedAndChangesNothing(): void
+    {
+        $this->setColumns(['step_id' => self::IN_PROGRESS_STEP]);
+        [, $versionBefore] = $this->stepAndVersion();
+        $this->move(self::OMAR, 'send_to_code_review', $versionBefore);
+        $this->move(self::LENA, 'put_on_hold', $versionBefore + 1);
+        $stateAfterLenasMove = $this->storedState();
+
+        $refusal = $this->refusalOf(fn () => $this->undoMove(self::OMAR, $versionBefore + 1, '2027-03-16 09:30:10+00:00'));
+
+        self::assertInstanceOf(TicketChangedMeanwhile::class, $refusal);
+        self::assertSame($stateAfterLenasMove, $this->storedState());
+        self::assertSame(self::ON_HOLD_STEP, $stateAfterLenasMove['step_id']);
+    }
+
+    /**
+     * Undo puts back who the ticket waited on and its closed state, not only its step: Lena's input_given out of Needs
+     * input is undone into Needs input waiting on Mia.
+     */
+    #[Test]
+    public function undoingAMoveOutOfNeedsInputWaitsOnTheSamePersonAgain(): void
+    {
+        $this->setColumns(['step_id' => self::NEEDS_INPUT_STEP, 'previous_step_id' => self::CODE_REVIEW_STEP, 'waiting_on_user_id' => self::MIA]);
+        [, $versionBefore] = $this->stepAndVersion();
+        $waitingOnBefore = $this->waitingOn();
+        $this->move(self::LENA, 'input_given', $versionBefore);
+
+        $this->undoMove(self::LENA, $versionBefore + 1, '2027-03-16 09:30:30+00:00');
+
+        self::assertSame([self::NEEDS_INPUT_STEP, $versionBefore + 2], $this->stepAndVersion());
+        self::assertSame($waitingOnBefore, $this->waitingOn());
     }
 
     #[Test]
@@ -1214,6 +1334,17 @@ final class MoveTicketTest extends KernelTestCase
         ));
     }
 
+    private function undoMove(string $actor, int $expectedVersion, string $at): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->ticketCommands()->undoMove(
+            new OrganizationId(self::ACME_FOODS),
+            new UserId($actor),
+            self::KEY,
+            $expectedVersion,
+            new \DateTimeImmutable($at),
+        ));
+    }
+
     private function giveTo(string $actor, string $assignee, int $expectedVersion): void
     {
         $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->ticketCommands()->giveTo(
@@ -1668,6 +1799,11 @@ final class MoveTicketTest extends KernelTestCase
             {
                 return $this->catalogue->checkMoveTo($ticket, $actor, $rules, $target, $steps);
             }
+
+            public function checkUndo(TicketState $ticket, ActorInTeam $actor, TeamFacts $team, MoveToUndo $move, StepView $target, array $steps, \DateTimeImmutable $now): Decision
+            {
+                return $this->catalogue->checkUndo($ticket, $actor, $team, $move, $target, $steps, $now);
+            }
         };
     }
 
@@ -1690,7 +1826,7 @@ final class MoveTicketTest extends KernelTestCase
             $container->get(RuleQueries::class),
             $container->get(StepQueries::class),
             $transitionPolicy ?? $container->get(TransitionPolicy::class),
-            new DbalTicketHistory($this->connection()),
+            new DbalTicketHistory($this->connection(), self::getContainer()->get(TenantContext::class)),
             $this->turnProjector(),
             new MessengerTicketEvents($container->get('event.bus'), $this->connection()),
             $container->get(TurnPeopleChoice::class),

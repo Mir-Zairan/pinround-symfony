@@ -1,3 +1,18 @@
 {#- The page's one toast, showing message: it arrives empty and the toast controller writes the text in a moment later,
-    because screen readers do not announce text that is already in the region when it is swapped in. -#}
-<twig:Toast data-controller="toast" data-toast-message-value="{{ message }}" data-turbo-temporary></twig:Toast>
+    because screen readers do not announce text that is already in the region when it is swapped in. With action
+    ({label, url, csrfId, fields, shownForMs}), a POST button follows the text, as Undo after a move, and the toast stays
+    for shownForMs so the button can be used. -#}
+{%- if action|default(null) %}
+    <twig:Toast class="toast--with-action" data-controller="toast" data-toast-message-value="{{ message }}" data-toast-shown-for-ms-value="{{ action.shownForMs }}" data-turbo-temporary>
+        <span class="toast__text" data-toast-target="text"></span>
+        <form class="toast__action" method="post" action="{{ action.url }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(action.csrfId) }}">
+            {%- for name, value in action.fields %}
+                <input type="hidden" name="{{ name }}" value="{{ value }}">
+            {%- endfor %}
+            <button type="submit" class="toast__action-button">{{ action.label }}</button>
+        </form>
+    </twig:Toast>
+{%- else %}
+    <twig:Toast data-controller="toast" data-toast-message-value="{{ message }}" data-turbo-temporary></twig:Toast>
+{%- endif %}

@@ -4,4 +4,4 @@
 <turbo-stream action="replace" target="{{ constant('App\\Ticketing\\UI\\TicketPageParts::ROUNDS_ID') }}"><template>{{ include('@Ticketing/_rounds.html.twig') }}</template></turbo-stream>
 <turbo-stream action="replace" target="{{ constant('App\\Ticketing\\UI\\TicketPageParts::PEOPLE_ID') }}"><template>{{ include('@Ticketing/_people.html.twig') }}</template></turbo-stream>
 <turbo-stream action="replace" target="{{ constant('App\\Ticketing\\UI\\TicketPageParts::ACTIVITY_ID') }}"><template>{{ include('@Ticketing/_activity.html.twig') }}</template></turbo-stream>
-{{ include('@Web/_toast_stream.html.twig', {message: toast}) }}
+{{ include('@Web/_toast_stream.html.twig', {message: toast, action: toastAction|default(null)}) }}

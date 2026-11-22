@@ -121,7 +121,7 @@ final class DbalTicketHistoryTest extends KernelTestCase
 
     private function recordMoveOf(string $organizationId, string $ticketId, string $fromStepId, string $toStepId, ?string $verb, ?string $overrideNote, string $movedAt): void
     {
-        new DbalTicketHistory($this->entityManager()->getConnection())->recordMoved(
+        new DbalTicketHistory($this->entityManager()->getConnection(), self::getContainer()->get(TenantContext::class))->recordMoved(
             new OrganizationId($organizationId),
             new TicketId($ticketId),
             new UserId(self::LENA),

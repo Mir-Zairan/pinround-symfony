@@ -283,7 +283,7 @@ final class CreateTicketTest extends KernelTestCase
         $tenantContext = self::getContainer()->get(TenantContext::class);
         $tenantContext->set(new OrganizationId(self::ACME_FOODS));
         try {
-            new DbalTicketHistory($this->connection())
+            new DbalTicketHistory($this->connection(), self::getContainer()->get(TenantContext::class))
                 ->recordCreated(new OrganizationId(self::ACME_FOODS), new TicketId(self::TICKET), new UserId(self::MIA), self::TO_DO_STEP, new \DateTimeImmutable('2027-03-15 10:00:00 UTC'));
             self::fail('A ticket event was recorded with no transaction open.');
         } catch (\LogicException $refused) {
@@ -329,7 +329,7 @@ final class CreateTicketTest extends KernelTestCase
             self::getContainer()->get(StepQueries::class),
             new DbalNextTicketNumber($this->connection()),
             $this->ticketsWithTheFixedId(),
-            new DbalTicketHistory($this->connection()),
+            new DbalTicketHistory($this->connection(), self::getContainer()->get(TenantContext::class)),
             $turnProjector,
             new MessengerTicketEvents(self::getContainer()->get('event.bus'), $this->connection()),
             new \App\Ticketing\Domain\Intake\CheckReasons(),

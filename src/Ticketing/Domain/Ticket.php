@@ -365,6 +365,30 @@ final class Ticket implements TenantOwned
     }
 
     /**
+     * The fields a move is about to change, for the move's history row, so an Undo can put them back.
+     */
+    public function movedFrom(): MovedFrom
+    {
+        return new MovedFrom($this->stepId, $this->previousStepId, $this->waitingOnUserId, $this->waitingOnLabel, $this->reviewerId, $this->testerId, $this->closedAt);
+    }
+
+    /**
+     * Undo: puts back the fields a move changed, as they were before it, so the step and whose turn it is are the
+     * ones before the move. The caller has checked the move is the ticket's last change and the policy allows the Undo.
+     */
+    public function undoMove(MovedFrom $before, \DateTimeImmutable $undoneAt): void
+    {
+        $this->stepId = $before->stepId;
+        $this->previousStepId = $before->previousStepId;
+        $this->waitingOnUserId = $before->waitingOnUserId;
+        $this->waitingOnLabel = $before->waitingOnLabel;
+        $this->reviewerId = $before->reviewerId;
+        $this->testerId = $before->testerId;
+        $this->closedAt = $before->closedAt;
+        $this->updatedAt = $undoneAt;
+    }
+
+    /**
      * Makes the person the ticket's assignee; the caller has checked they may take it. A new assignee clears the stored
      * reviewer, as NoSelfReview reads a stored reviewer equal to the assignee as the no-one-else fallback, and clears the
      * stored tester when it is the new assignee. The same assignee given again keeps both.

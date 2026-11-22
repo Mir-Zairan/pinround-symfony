@@ -46,6 +46,12 @@ final class MoveToasts
     /** The move forms' data-failed-toast: assets/app.js shows it after an answer with no Turbo Stream reloads the page. */
     public const string MOVE_FAILED = 'Could not move the ticket. Try again.';
 
+    /** The button of a move's toast that takes the move back (TicketMoveController::undoMove). */
+    public const string UNDO = 'Undo';
+    public const string UNDONE = 'Undone. It is back in {step}.';
+    /** Workflow's note for the same refusal, for an Undo whose posted version is not the ticket's any more. */
+    public const string UNDO_CHANGED_SINCE = 'The ticket changed after this move, so it can’t be undone.';
+
     /** For a turn whose person Identity does not know any more, so the toast never fails on a missing name. */
     public const string SOMEONE = 'someone';
 
@@ -85,6 +91,11 @@ final class MoveToasts
     public static function movedTo(string $stepName): string
     {
         return strtr(self::MOVED_TO, [self::STEP => $stepName]);
+    }
+
+    public static function undone(string $stepName): string
+    {
+        return strtr(self::UNDONE, [self::STEP => $stepName]);
     }
 
     /**

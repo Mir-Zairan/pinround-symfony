@@ -43,6 +43,8 @@ final class TicketHistorySentencesTest extends TestCase
         yield 'a self-give by someone gone' => [self::entry(self::GONE, self::TO_DO, self::TO_DO, 'give_it_to', self::GONE), 'An unknown person took it'];
         yield 'a move from a deleted step' => [self::entry(self::LENA, self::DELETED_STEP, self::TO_DO, null), 'Lena moved it from a step that is gone to To do'];
         yield 'a move to a deleted step' => [self::entry(self::LENA, self::TO_DO, self::DELETED_STEP, null), 'Lena moved it from To do to a step that is gone'];
+        yield 'an undo' => [self::entry(self::OMAR, self::CODE_REVIEW, self::IN_PROGRESS, 'undo'), 'Omar undid the move to Code review, back to In progress'];
+        yield 'an undo by someone gone' => [self::entry(self::GONE, self::CODE_REVIEW, self::IN_PROGRESS, 'undo'), 'An unknown person undid the move to Code review, back to In progress'];
         yield 'a step id in upper case' => [self::entry(self::OMAR, strtoupper(self::TO_DO), self::IN_PROGRESS, 'start_work'), 'Omar moved it from To do to In progress'];
     }
 

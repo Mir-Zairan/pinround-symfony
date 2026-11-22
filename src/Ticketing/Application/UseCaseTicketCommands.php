@@ -52,6 +52,11 @@ final readonly class UseCaseTicketCommands implements TicketCommands
         return $this->moveTicket->giveTo($organizationId, $actor, $key, $assignee, $expectedVersion, $at);
     }
 
+    public function undoMove(OrganizationId $organizationId, UserId $actor, string $key, int $expectedVersion, \DateTimeImmutable $at): MoveResult
+    {
+        return $this->moveTicket->undoMove($organizationId, $actor, $key, $expectedVersion, $at);
+    }
+
     public function moveTo(
         OrganizationId $organizationId,
         UserId $actor,

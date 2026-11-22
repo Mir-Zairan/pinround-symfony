@@ -1,3 +1,4 @@
-{#- A Turbo Stream that shows message as the page's one toast: it replaces what base.html.twig's toast region holds,
-    and the region keeps its role="status" so the new toast is announced. -#}
+{#- A Turbo Stream that shows message as the page's one toast, with an optional action (see _toast.html.twig): it
+    replaces what base.html.twig's toast region holds, and the region keeps its role="status" so the new toast is
+    announced. -#}
 <turbo-stream action="update" target="toast-region"><template>{{ include('@Web/_toast.html.twig') }}</template></turbo-stream>

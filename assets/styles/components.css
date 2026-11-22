@@ -408,8 +408,36 @@ a.seg {
 }
 
 /* The toast controller writes the text a moment after the page shows; no empty pill until then. */
-.toast:empty {
+.toast:empty,
+.toast--with-action:has(.toast__text:empty) {
   display: none;
+}
+
+/* A toast with one action, such as Undo after a move: the text, then the action on the same line. */
+.toast--with-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+}
+
+.toast__action {
+  margin: 0;
+}
+
+.toast__action-button {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--inverse-on-surface);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.toast__action-button:focus-visible {
+  outline: 2px solid var(--inverse-on-surface);
 }
 
 /* LiveUpdates' "Updates paused" banner, above the page it follows; its top margin is main's top padding (.page). No

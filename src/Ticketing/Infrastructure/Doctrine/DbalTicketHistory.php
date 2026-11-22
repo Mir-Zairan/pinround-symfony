@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Ticketing\Infrastructure\Doctrine;
 
+use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
+use App\Ticketing\Application\LastTicketChange;
 use App\Ticketing\Application\MoveTicket\MoveTicket;
 use App\Ticketing\Application\ReviewChange;
 use App\Ticketing\Application\TicketHistory;
+use App\Ticketing\Domain\MovedFrom;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Uid\Uuid;
 
@@ -21,8 +24,10 @@ final readonly class DbalTicketHistory implements TicketHistory
 {
     public const string CREATED = 'created';
     public const string MOVED = 'moved';
+    /** As insertEvent writes at, microseconds kept. */
+    private const string AT_FORMAT = 'Y-m-d\TH:i:s.uP';
 
-    public function __construct(private Connection $connection)
+    public function __construct(private Connection $connection, private TenantContext $tenantContext)
     {
     }
 
@@ -40,9 +45,72 @@ final readonly class DbalTicketHistory implements TicketHistory
         ?string $verb,
         ?string $overrideNote,
         \DateTimeImmutable $at,
+        ?MovedFrom $movedFrom = null,
     ): void {
         $payload = array_filter(['verb' => $verb, 'override_note' => $overrideNote], static fn (?string $value): bool => null !== $value);
+        if (null !== $movedFrom) {
+            $payload[self::MOVED_FROM_PAYLOAD_KEY] = [
+                'step_id' => $movedFrom->stepId,
+                'previous_step_id' => $movedFrom->previousStepId,
+                'waiting_on_user_id' => $movedFrom->waitingOnUserId,
+                'waiting_on_label' => $movedFrom->waitingOnLabel,
+                'reviewer_id' => $movedFrom->reviewerId,
+                'tester_id' => $movedFrom->testerId,
+                'closed_at' => $movedFrom->closedAt?->format(self::AT_FORMAT),
+            ];
+        }
         $this->insertEvent($organizationId, $ticketId, $actor, self::MOVED, $fromStepId, $toStepId, $payload, $at);
+    }
+
+    public function lastChangeOf(TicketId $ticketId, \DateTimeImmutable $ticketCreatedAt): ?LastTicketChange
+    {
+        if (!$this->connection->isTransactionActive()) {
+            throw new \LogicException('A ticket\'s history is read in a transaction under the organization as tenant; none is open.');
+        }
+        $row = $this->connection->fetchAssociative(
+            'SELECT actor_id, type, to_step, payload -> \''.self::MOVED_FROM_PAYLOAD_KEY.'\' AS moved_from, at FROM tkt_ticket_event'
+            .' WHERE organization_id = CAST(:organization AS uuid) AND ticket_id = CAST(:ticket AS uuid) AND at >= CAST(:ticket_created_at AS timestamptz)'
+            .' ORDER BY at DESC, id DESC LIMIT 1',
+            DbalTicketHistoryEntries::parametersOf($this->tenantContext->require()->toString(), $ticketId, $ticketCreatedAt),
+        );
+        if (false === $row) {
+            return null;
+        }
+        if (!\is_string($row['actor_id']) || !\is_string($row['at'])) {
+            throw new \UnexpectedValueException('A ticket event row lacks its actor or time.');
+        }
+        $isMove = self::MOVED === $row['type'] && \is_string($row['to_step']);
+
+        return new LastTicketChange(
+            new UserId($row['actor_id']),
+            $isMove ? $row['to_step'] : null,
+            new \DateTimeImmutable($row['at']),
+            $isMove && \is_string($row['moved_from']) ? self::movedFromOf($row['moved_from']) : null,
+        );
+    }
+
+    /**
+     * A payload any later code may have written: one that is not the shape recordMoved writes reads as none, so the move
+     * is not undone rather than undone wrong.
+     */
+    private static function movedFromOf(string $json): ?MovedFrom
+    {
+        $fields = json_decode($json, true);
+        if (!\is_array($fields) || !\is_string($fields['step_id'] ?? null)) {
+            return null;
+        }
+        $textOrNull = static fn (string $key): ?string => \is_string($fields[$key] ?? null) ? $fields[$key] : null;
+        $closedAt = $textOrNull('closed_at');
+
+        return new MovedFrom(
+            $fields['step_id'],
+            $textOrNull('previous_step_id'),
+            $textOrNull('waiting_on_user_id'),
+            $textOrNull('waiting_on_label'),
+            $textOrNull('reviewer_id'),
+            $textOrNull('tester_id'),
+            null === $closedAt ? null : new \DateTimeImmutable($closedAt),
+        );
     }
 
     public function recordGiven(
@@ -65,7 +133,7 @@ final readonly class DbalTicketHistory implements TicketHistory
     }
 
     /**
-     * @param array<string, string|int|null> $payload
+     * @param array<string, string|int|array<string, string|null>|null> $payload
      */
     private function insertEvent(
         OrganizationId $organizationId,

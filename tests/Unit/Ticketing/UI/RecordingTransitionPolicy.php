@@ -8,6 +8,7 @@ use App\Workflow\Api\ActorInTeam;
 use App\Workflow\Api\Availability;
 use App\Workflow\Api\Decision;
 use App\Workflow\Api\MoveChoices;
+use App\Workflow\Api\MoveToUndo;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepView;
 use App\Workflow\Api\TeamFacts;
@@ -52,5 +53,12 @@ final class RecordingTransitionPolicy implements TransitionPolicy
         $this->askedActors[] = $actor;
 
         return $this->policy->checkMoveTo($ticket, $actor, $rules, $target, $steps);
+    }
+
+    public function checkUndo(TicketState $ticket, ActorInTeam $actor, TeamFacts $team, MoveToUndo $move, StepView $target, array $steps, \DateTimeImmutable $now): Decision
+    {
+        $this->askedActors[] = $actor;
+
+        return $this->policy->checkUndo($ticket, $actor, $team, $move, $target, $steps, $now);
     }
 }

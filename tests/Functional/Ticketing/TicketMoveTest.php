@@ -87,13 +87,16 @@ final class TicketMoveTest extends WebTestCase
     /** @var array<string, string> step id by core code, and 'pairing' for Shop's own step */
     private array $steps = [];
 
+    /** The request's clock, which an Undo test moves on. */
+    private MockClock $clock;
+
     protected function setUp(): void
     {
         $this->client = self::createClient([], ['HTTPS' => 'on']);
         $this->client->disableReboot();
-        $clock = new MockClock(new \DateTimeImmutable(self::NOW));
-        self::getContainer()->set('clock', $clock);
-        new AddTicketEventPartitions($this->migrator(), $clock)();
+        $this->clock = new MockClock(new \DateTimeImmutable(self::NOW));
+        self::getContainer()->set('clock', $this->clock);
+        new AddTicketEventPartitions($this->migrator(), $this->clock)();
         $this->people = $this->createAcmeFoodsPeople();
         $this->committedAs($this->acmeFoods, fn (Connection $migrator): int|string => $migrator->executeStatement(
             "UPDATE org_team_member SET job = 'developer' WHERE team_id = ? AND user_id = ?",
@@ -776,6 +779,87 @@ final class TicketMoveTest extends WebTestCase
     }
 
     /**
+     * Omar sends his ticket to code review by mistake (gap list 1.10). The toast offers Undo for 30 seconds; his Undo
+     * 10 seconds later puts the ticket back in In progress, his turn again, and What happened says so.
+     */
+    #[Test]
+    public function theMoveToastOffersUndoAndTheMoverTakesTheMoveBack(): void
+    {
+        $this->addTicket(['step' => 'progress']);
+        $stateBefore = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', '/t/'.self::KEY.'/move/send_to_code_review', $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+        $undoForm = $this->undoFormOf($this->streamsOfTheAnswer(200));
+
+        $this->clock()->modify('+10 seconds');
+        $this->client->request('POST', (string) $undoForm->attr('action'), $this->undoFieldsOf($undoForm), [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(200);
+        self::assertSame('Undone. It is back in In progress.', $this->toastOf($streams));
+        self::assertCount(0, $streams[self::TOAST_REGION_ID]->filter('form'), 'An Undo offers no Undo.');
+        self::assertSame('In progress', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertStringContainsString('Omar undid the move to Code review, back to In progress', $streams[TicketPageParts::ACTIVITY_ID]->text());
+        self::assertSame(
+            [...$stateBefore, 'version' => self::VERSION + 2, 'events' => $stateBefore['events'] + 2, 'outbox' => $stateBefore['outbox'] + 2],
+            $this->stateOfTicket(),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, int, string}> who presses Undo on Omar's move, how many seconds after it,
+     *                                                      and the toast
+     */
+    public static function undosRefused(): iterable
+    {
+        yield 'after 30 seconds' => ['Omar', 31, 'Undo works for 30 seconds after a move. Ask Lena to move it back.'];
+        yield 'someone who did not make the move' => ['Lena', 5, 'Only Omar can undo this move.'];
+    }
+
+    #[Test]
+    #[DataProvider('undosRefused')]
+    public function aRefusedUndoSaysWhyInAToastAndNothingChanges(string $person, int $secondsLater, string $expectedToast): void
+    {
+        $this->addTicket(['step' => 'progress']);
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', '/t/'.self::KEY.'/move/send_to_code_review', $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+        $undoForm = $this->undoFormOf($this->streamsOfTheAnswer(200));
+        $stateAfterTheMove = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people[$person]);
+
+        $this->clock()->modify(\sprintf('+%d seconds', $secondsLater));
+        $this->client->request('POST', (string) $undoForm->attr('action'), [...$this->undoFieldsOf($undoForm), TicketMoveController::CSRF_FIELD => $this->csrfTokenFor($this->client, TicketMoveController::csrfIdOf(self::KEY))], [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(422);
+        self::assertSame($expectedToast, $this->toastOf($streams));
+        self::assertSame('Code review', $streams[TicketPageParts::STATE_ID]->filter('.pill')->text());
+        self::assertSame($stateAfterTheMove, $this->stateOfTicket());
+    }
+
+    /**
+     * Lena put the ticket on hold after Omar's move: his Undo carries the version his move left and is refused.
+     */
+    #[Test]
+    public function anUndoAfterSomeoneActedSinceIsRefusedAndNothingChanges(): void
+    {
+        $this->addTicket(['step' => 'progress']);
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', '/t/'.self::KEY.'/move/send_to_code_review', $this->moveFields(), [], self::TURBO_FORM_HEADERS);
+        $undoForm = $this->undoFormOf($this->streamsOfTheAnswer(200));
+        $this->logIn($this->client, $this->people['Lena']);
+        $this->client->request('POST', '/t/'.self::KEY.'/move/put_on_hold', $this->moveFields([TicketMoveController::VERSION_FIELD => (string) (self::VERSION + 1)]), [], self::TURBO_FORM_HEADERS);
+        $this->streamsOfTheAnswer(200);
+        $stateAfterLenasMove = $this->stateOfTicket();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('POST', (string) $undoForm->attr('action'), [...$this->undoFieldsOf($undoForm), TicketMoveController::CSRF_FIELD => $this->csrfTokenFor($this->client, TicketMoveController::csrfIdOf(self::KEY))], [], self::TURBO_FORM_HEADERS);
+
+        $streams = $this->streamsOfTheAnswer(422);
+        self::assertSame(MoveToasts::UNDO_CHANGED_SINCE, $this->toastOf($streams));
+        self::assertSame($stateAfterLenasMove, $this->stateOfTicket());
+        self::assertSame($this->steps['hold'], $stateAfterLenasMove['step_id']);
+    }
+
+    /**
      * A stale page posts the version it read; the answer shows the step and version the ticket is at now, so the next
      * click is made from them.
      */
@@ -1270,9 +1354,47 @@ final class TicketMoveTest extends WebTestCase
     {
         $toast = $streams[self::TOAST_REGION_ID]->filter('.toast[data-controller="toast"]');
         self::assertCount(1, $toast);
-        self::assertSame('', $toast->text());
+        $text = $toast->filter('.toast__text');
+        self::assertSame('', (0 === $text->count() ? $toast : $text)->text());
 
         return (string) $toast->attr('data-toast-message-value');
+    }
+
+    /**
+     * The toast's Undo: a POST form to the Undo route with the version the move left, shown for 30 seconds.
+     *
+     * @param array<string, Crawler> $streams
+     */
+    private function undoFormOf(array $streams): Crawler
+    {
+        $toast = $streams[self::TOAST_REGION_ID]->filter('.toast[data-controller="toast"]');
+        self::assertSame('30000', $toast->attr('data-toast-shown-for-ms-value'));
+        $form = $toast->filter('form.toast__action');
+        self::assertCount(1, $form);
+        self::assertSame('/t/'.self::KEY.'/undo-move', $form->attr('action'));
+        self::assertSame(MoveToasts::UNDO, $form->filter('button')->text());
+        self::assertSame((string) (self::VERSION + 1), $form->filter('input[name="'.TicketMoveController::VERSION_FIELD.'"]')->attr('value'));
+
+        return $form;
+    }
+
+    /**
+     * @return array<string, string> the hidden fields of the Undo form
+     */
+    private function undoFieldsOf(Crawler $undoForm): array
+    {
+        $fields = [];
+        foreach ($undoForm->filter('input[type=hidden]') as $input) {
+            self::assertInstanceOf(\DOMElement::class, $input);
+            $fields[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
+
+        return $fields;
+    }
+
+    private function clock(): MockClock
+    {
+        return $this->clock;
     }
 
     /**
@@ -1324,6 +1446,11 @@ final class TicketMoveTest extends WebTestCase
             }
 
             public function giveTo(OrganizationId $organizationId, UserId $actor, string $key, UserId $assignee, int $expectedVersion, \DateTimeImmutable $at): int
+            {
+                throw new \LogicException('Only moveTo is replaced.');
+            }
+
+            public function undoMove(OrganizationId $organizationId, UserId $actor, string $key, int $expectedVersion, \DateTimeImmutable $at): MoveResult
             {
                 throw new \LogicException('Only moveTo is replaced.');
             }

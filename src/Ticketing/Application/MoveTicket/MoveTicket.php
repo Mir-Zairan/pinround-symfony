@@ -30,12 +30,14 @@ use App\Ticketing\Application\TicketHistory;
 use App\Ticketing\Application\TicketTurnSnapshots;
 use App\Ticketing\Domain\InvalidTicketKey;
 use App\Ticketing\Domain\InvalidWaitingOn;
+use App\Ticketing\Domain\MovedFrom;
 use App\Ticketing\Domain\Ticket;
 use App\Ticketing\Domain\TicketKey;
 use App\Ticketing\Domain\Tickets;
 use App\Ticketing\Domain\TicketVersionConflict;
 use App\Ticketing\Domain\WaitingOn;
 use App\Workflow\Api\Decision;
+use App\Workflow\Api\MoveToUndo;
 use App\Workflow\Api\RuleQueries;
 use App\Workflow\Api\StepQueries;
 use App\Workflow\Api\StepView;
@@ -56,6 +58,8 @@ final readonly class MoveTicket
     public const string ASSIGNEE_NOT_IN_TEAM_NOTE = 'Give it to someone in the ticket’s team.';
     /** The refusal of giving the ticket to the person who already has it, with {assignee} for them. */
     public const string ALREADY_GIVEN_NOTE = '{assignee} already has this ticket.';
+    /** The verb of an Undo's "moved" row and TicketMoved; not one of Workflow's verbs, as no button but Undo makes it. */
+    public const string UNDO = 'undo';
 
     private const string NEEDS_INPUT = 'input';
     private const string REVIEW = 'review';
@@ -151,6 +155,56 @@ final readonly class MoveTicket
         ));
 
         return $clearedPingCount;
+    }
+
+    /**
+     * Undo after a mistaken move (gap list 1.10): puts back what the ticket's last move changed (its step, who it waits
+     * on, its reviewer and tester, closed_at), so whose turn it is is the one before the move, once Workflow's policy
+     * allows it (TransitionPolicy::checkUndo: the mover, within UNDO_SECONDS of $at, while the move is the last change).
+     * Recorded as a move with the verb UNDO, which no Undo takes back, and published as TicketMoved. A round the move
+     * closed stays closed and a draft it shared stays shared.
+     *
+     * @param int $expectedVersion the version the move left the ticket at, so any save since refuses the Undo
+     *
+     * @return MoveResult the pings the Undo cleared
+     *
+     * @throws TicketNotFound         when the key is malformed or the organization has no ticket with it
+     * @throws TicketChangedMeanwhile when the ticket's version is not $expectedVersion, or another request saved it first
+     * @throws MoveRefused            when the ticket has no team or no history, or the policy refuses the Undo (with its
+     *                                note); nothing is saved
+     */
+    public function undoMove(OrganizationId $organizationId, UserId $actor, string $key, int $expectedVersion, \DateTimeImmutable $at): MoveResult
+    {
+        $ticket = $this->loadedTicket($organizationId, $key, $expectedVersion);
+        $teamId = $ticket->team() ?? throw new MoveRefused(null);
+        $lastChange = $this->ticketHistory->lastChangeOf($ticket->id(), $ticket->createdAt()) ?? throw new MoveRefused(null);
+        $movedFrom = $lastChange->movedFrom;
+        $team = $this->teamOf($teamId);
+        $before = $this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people);
+        $waitingTurns = $this->waitingTurnsOf($before);
+        // A last change that is no undoable move (a give, an Undo, a review change) is asked about as the actor's own
+        // move changed since, so the refusal says the ticket changed rather than naming its writer as the mover.
+        $move = null === $movedFrom
+            ? new MoveToUndo($actor, $ticket->stepId(), $lastChange->at, false)
+            : new MoveToUndo($lastChange->actorId, $lastChange->toStepId ?? '', $lastChange->at, true);
+        $target = $team->stepOfId($movedFrom->stepId ?? $ticket->stepId());
+        $decision = $this->transitionPolicy->checkUndo(
+            TurnInputs::ticketStateOf($before),
+            $team->actorInTeam($actor),
+            self::teamFactsOf($before, $waitingTurns),
+            $move,
+            $target,
+            $this->stepQueries->moveTargetsFor($teamId),
+            $at,
+        );
+        self::refuseUnlessAllowed($decision);
+        if (null === $movedFrom) {
+            throw new \LogicException('The policy allows an Undo only of a move that is the last change.');
+        }
+        $fromStepId = $ticket->stepId();
+        $ticket->undoMove($movedFrom, $at);
+
+        return new MoveResult($this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), self::UNDO, null, $at, $waitingTurns));
     }
 
     /**
@@ -372,6 +426,7 @@ final readonly class MoveTicket
         } else {
             $draftId = $this->shareDraftQuestion->undecidedDraftIdOf($ticket->id(), $actor);
         }
+        $movedFrom = $ticket->movedFrom();
         $ticket->move(
             $target->id(),
             $target->groupCode(),
@@ -382,7 +437,7 @@ final readonly class MoveTicket
             self::TEST === $target->coreCode() ? $this->turnPeopleChoice->testerToStore($teamFacts) : null,
         );
 
-        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns);
+        $clearedPingCount = $this->saveAndRecord($ticket, $team, $before, $actor, $fromStepId, $target->id(), $verb, null, $at, $waitingTurns, $movedFrom);
         $this->shareDraftQuestion->closeRoundsOnMove($ticket->id(), $moveFacts, $at);
         if (null === $draftId) {
             return new MoveResult($clearedPingCount);
@@ -413,6 +468,8 @@ final readonly class MoveTicket
      *
      * @param UserId|null                       $givenTo      the person a give_it_to names, recorded in the history row
      * @param array<string, array<string, int>> $waitingTurns the team's waiting reviews and tests already read for $before
+     * @param MovedFrom|null                    $movedFrom    what a move Undo may take back changed, as it was before;
+     *                                                        null for a give and an Undo
      *
      * @return int how many of the actor's pings on the ticket it cleared
      *
@@ -429,6 +486,7 @@ final readonly class MoveTicket
         ?UserId $givenTo,
         \DateTimeImmutable $at,
         array $waitingTurns,
+        ?MovedFrom $movedFrom = null,
     ): int {
         try {
             $this->tickets->save($ticket);
@@ -438,7 +496,7 @@ final readonly class MoveTicket
         $clearedPingCount = $this->pingClearing->clearForActor($ticket->organizationId(), $before->ticketId, $actor, $at);
         $overrideNote = $this->turnProjector->refreshFrom($this->ticketTurnSnapshots->ofTeamTicket($ticket, $team->steps, $team->people), $waitingTurns);
         if (null === $givenTo) {
-            $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at);
+            $this->ticketHistory->recordMoved($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $verb, $overrideNote, $at, $movedFrom);
         } else {
             $this->ticketHistory->recordGiven($ticket->organizationId(), $ticket->id(), $actor, $fromStepId, $toStepId, $givenTo, $at);
         }

@@ -588,6 +588,11 @@ final class ReportControllerTest extends WebTestCase
                 throw new \LogicException('Report a problem gives no ticket.');
             }
 
+            public function undoMove(OrganizationId $organizationId, UserId $actor, string $key, int $expectedVersion, \DateTimeImmutable $at): MoveResult
+            {
+                throw new \LogicException('Report a problem undoes no move.');
+            }
+
             public function moveTo(OrganizationId $organizationId, UserId $actor, string $key, string $stepId, int $expectedVersion, ?UserId $waitingOnUserId, ?string $waitingOnLabel, \DateTimeImmutable $at, ?DraftChoice $draftChoice = DraftChoice::Keep): MoveResult
             {
                 throw new \LogicException('Report a problem moves no ticket.');

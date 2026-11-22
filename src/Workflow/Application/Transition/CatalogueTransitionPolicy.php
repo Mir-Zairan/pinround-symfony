@@ -12,6 +12,7 @@ use App\Workflow\Api\MoveChoice;
 use App\Workflow\Api\MoveChoiceGroup;
 use App\Workflow\Api\MoveChoices;
 use App\Workflow\Api\MoveTarget;
+use App\Workflow\Api\MoveToUndo;
 use App\Workflow\Api\RuleNote;
 use App\Workflow\Api\RuleSetView;
 use App\Workflow\Api\StepView;
@@ -53,6 +54,10 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
 {
     private const string NO_TEAM_ROLE_NOTE = 'Managers can read and comment. Only the team moves tickets.';
     private const string GIVE_IT_TO_SOMEONE_ELSE_LABEL = 'Give it to someone else…';
+    public const string UNDO_NOT_YOURS_NOTE = 'Only {mover} can undo this move.';
+    public const string UNDO_CHANGED_SINCE_NOTE = 'The ticket changed after this move, so it can’t be undone.';
+    public const string UNDO_TOO_LATE_NOTE = 'Undo works for 30 seconds after a move. Ask {lead} to move it back.';
+    public const string UNDO_TOO_LATE_FOR_THE_LEAD_NOTE = 'Undo works for 30 seconds after a move. Use Move to another step… instead.';
 
     /** @var list<Guard> */
     private array $guards;
@@ -192,6 +197,34 @@ final readonly class CatalogueTransitionPolicy implements TransitionPolicy
         }
 
         return Decision::allowed(MoveTarget::step($target->id()), true);
+    }
+
+    /**
+     * @param list<StepView> $steps
+     */
+    public function checkUndo(TicketState $ticket, ActorInTeam $actor, TeamFacts $team, MoveToUndo $move, StepView $target, array $steps, \DateTimeImmutable $now): Decision
+    {
+        $noteForEveryMove = $this->noteForEveryMove($ticket, $actor);
+        if (null !== $noteForEveryMove) {
+            return Decision::refused($noteForEveryMove);
+        }
+        if (!$move->movedBy->equals($actor->userId)) {
+            return Decision::refused(new RuleNote(self::UNDO_NOT_YOURS_NOTE, ['mover' => $move->movedBy]));
+        }
+        if (!$move->isLastChange || $move->toStepId !== $ticket->stepId) {
+            return Decision::refused(new RuleNote(self::UNDO_CHANGED_SINCE_NOTE));
+        }
+        $secondsSinceMove = $now->getTimestamp() - $move->movedAt->getTimestamp();
+        if ($secondsSinceMove < 0 || $secondsSinceMove > self::UNDO_SECONDS) {
+            return Decision::refused($this->moveRights->leadsTheTeam($actor)
+                ? new RuleNote(self::UNDO_TOO_LATE_FOR_THE_LEAD_NOTE)
+                : new RuleNote(self::UNDO_TOO_LATE_NOTE, ['lead' => $team->leadId]));
+        }
+        if ($target->id() === $ticket->stepId || !array_any($steps, static fn (StepView $step): bool => $step->id() === $target->id())) {
+            return Decision::refused(null);
+        }
+
+        return Decision::allowed(MoveTarget::step($target->id()));
     }
 
     private function noteForEveryMove(TicketState $ticket, ActorInTeam $actor): ?RuleNote
