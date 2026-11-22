@@ -42,6 +42,20 @@ function expectsTurboStream(form) {
   }
   return frameTarget === null && !form.closest('turbo-frame');
 }
+// The fetch that followed the redirect already took the flashed toast out of the session, so the real load of the same
+// page would show none: the toast the fetched page holds is left for that load instead (as "Make it a new ticket" on
+// the draft page does). DOMParser runs none of the page's scripts.
+async function carryToastThenLoad(fetchResponse) {
+  try {
+    const html = (await fetchResponse.responseHTML) ?? '';
+    const toast = new DOMParser().parseFromString(html, 'text/html').querySelector('#toast-region [data-toast-message-value]');
+    if (toast instanceof HTMLElement && toast.dataset.toastMessageValue) {
+      queuePendingToast(toast.dataset.toastMessageValue);
+    }
+  } finally {
+    window.location.assign(fetchResponse.response.url);
+  }
+}
 // Any answer to such a form but a stream (a plain 403/404/500, the login page after the session expired) would be
 // swapped in as a Turbo visit whose scripts the CSP blocks, so load a real page instead: the redirect's target, or this
 // page again, as the answered URL may be POST-only. Before that reload, a form with data-failed-toast leaves its text
@@ -57,7 +71,7 @@ document.addEventListener('turbo:before-fetch-response', (event) => {
   }
   event.preventDefault();
   if (fetchResponse.redirected) {
-    window.location.assign(fetchResponse.response.url);
+    carryToastThenLoad(fetchResponse);
   } else {
     const failedToast = form.dataset.failedToast;
     if (failedToast) {
