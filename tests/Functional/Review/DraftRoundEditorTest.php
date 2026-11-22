@@ -513,7 +513,7 @@ final class DraftRoundEditorTest extends WebTestCase
         $this->seedWorld();
         $report = $this->addRound($this->ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $reportShot = $this->addScreenshot($report, $this->addMedia('ready', 'Mia'), 0, 'Report shot', null);
-        $this->addCheckItem($this->addRound($this->ticketId, 1, 'checklist', 'Omar', self::SHARED_AT), $this->addPin($reportShot, 1, '50.00', '50.00', 'Report note', 'Mia'), 'open');
+        $this->addCheckItem($this->addRound($this->ticketId, null, 'checklist', 'Omar', self::SHARED_AT), $this->addPin($reportShot, 1, '50.00', '50.00', 'Report note', 'Mia'), 'open');
         $this->addRound($this->ticketId, 2, 'review', 'Lena', self::SHARED_AT);
         $debugData = self::getContainer()->get('doctrine.debug_data_holder');
         $debugData->reset();

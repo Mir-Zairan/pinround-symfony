@@ -42,8 +42,9 @@ use Symfony\Component\Uid\Uuid;
  * For the full-screen review's layout checks, LONG_NOTE_OPTION gives the first pin a long note and PENDING_AFTER_OPTION
  * leaves one area's "after" picture pending. For the checklist card's checks, CHECKLIST_OPTION first gives the ticket the
  * reporter's Round 0 with one ready picture and REPORT_PIN_NOTES, and the checklist the app makes from it, which has no
- * number (ADR-0048, note of 2026-11-22), so the draft is round 1 and the review round 2 either way. CLOSED_OPTION then closes the shared and review rounds, as a move on by the
- * person whose turn it is would, so the assignee may share another round (ADR-0048).
+ * number (ADR-0048, note of 2026-11-22), so the draft is round 1 and the review round 2 either way. CLOSED_OPTION then
+ * closes the shared and review rounds, as a move on by the person whose turn it is would, so the assignee may share
+ * another round (ADR-0048).
  */
 // Never registered in prod, so no console call there can fake processed pictures or a round.
 #[AsCommand(name: 'app:e2e:seed-review-round', description: 'Give a ticket with no rounds a round 1 with pins and a review round 2 with two screen areas (dev and test only)')]

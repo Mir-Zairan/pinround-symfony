@@ -289,18 +289,22 @@ final class FocusPageScreenshotsTest extends WebTestCase
     }
 
     #[Test]
-    public function aChecklistRoundShowsTheReportsScreenshotsAndAnEmptyDraftSaysItHasNone(): void
+    public function theChecklistHasNoFullScreenOfItsOwnRoundZeroShowsItsPinsAndAnEmptyDraftSaysItHasNone(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $reportShots = $this->seedRoundOfScreenshots($ticketId, 0, 'report', 'Mia', 'Report shot ', [1, 0]);
-        $this->addCheckItem($this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShots[0], 9, '30.00', '30.00', 'A checked note', 'Mia'), 'open');
+        $this->addCheckItem($this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShots[0], 9, '30.00', '30.00', 'A checked note', 'Mia'), 'open');
         $this->addRound($ticketId, 2, 'draft', 'Omar', self::SHARED_TODAY);
         $this->logIn($this->client, $this->people['Lena']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus');
+        // The checklist has no number (ADR-0048, note of 2026-11-22), so no round number opens it.
+        $this->client->request('GET', '/t/SHOP-1/rounds/1/focus');
+        self::assertResponseStatusCodeSame(404);
+
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/0/focus');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('SHOP-1 · Round 1 · Report shot 0 · screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
+        self::assertSame('SHOP-1 · Round 0 · Report shot 0 · screenshot 1 of 2', $page->filter('h1.focus-review__line')->text());
         self::assertSame('Report shot 0', $page->filter('.focus-review__picture img.screenshot__image')->attr('alt'));
         self::assertSame(['Note 1', 'A checked note'], $page->filter('.focus-bar__note')->each(static fn (Crawler $note): string => $note->text()));
 

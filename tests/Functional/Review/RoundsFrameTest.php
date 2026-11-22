@@ -306,7 +306,7 @@ final class RoundsFrameTest extends WebTestCase
         $ticketId = $this->addTicket('SHOP-1');
         $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Cart', null);
-        $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $checklist = $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_AT);
         $review = $this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_AT);
         $this->addCheckItem($checklist, $this->addPin($reportShot, 2, '20.00', '20.00', '', 'Mia'), 'fixed');
         $openItem = $this->addCheckItem($checklist, $this->addPin($reportShot, 1, '10.00', '10.00', 'Total is <b>wrong</b>', 'Mia'), 'open');
@@ -318,7 +318,7 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame(
-            ['Round 0 · Report · by Mia · 3 pins', 'Round 1 · Checklist from the report', 'Round 2 · review by Lena · open · 1 screenshot'],
+            ['Round 0 · Report · by Mia · 3 pins', 'Checklist from the report', 'Round 2 · review by Lena · open · 1 screenshot'],
             $page->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
         self::assertSame(['Open round'], $page->filter(self::ROUNDS.' a.round-card__open')->each(static fn (Crawler $link): string => $link->text()));
@@ -364,7 +364,7 @@ final class RoundsFrameTest extends WebTestCase
         $this->addScreenshot($selfCheck, $this->addMedia('ready'), 0, 'Self-check shot one', null);
         $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Cart', null);
-        $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $checklist = $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_AT);
         $this->addCheckItem($checklist, $this->addPin($reportShot, 1, '10.00', '10.00', 'Total is wrong', 'Mia'), 'open');
         $this->logIn($this->client, $this->people['Lena']);
 
@@ -442,7 +442,7 @@ final class RoundsFrameTest extends WebTestCase
     {
         $ticketId = $this->addTicket('SHOP-1');
         $reportShot = $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
-        $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $checklist = $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_AT);
         $this->addCheckItem($checklist, $this->addPin($reportShot, 1, '10.00', '10.00', 'A note', 'Mia'), 'open');
         $this->logIn($this->client, $this->people['Raj']);
 
@@ -462,7 +462,7 @@ final class RoundsFrameTest extends WebTestCase
     public function aChecklistRoundWithNoItemsIsAnErrorNotAnEmptyCard(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
-        $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_AT);
         $this->logIn($this->client, $this->people['Omar']);
 
         $this->client->catchExceptions(false);
@@ -1002,7 +1002,7 @@ final class RoundsFrameTest extends WebTestCase
         $this->queryCountOf(self::ROUNDS_PAGE);
         $noChecklistQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
-        $checklist = $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_AT);
+        $checklist = $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_AT);
         $this->addCheckItem($checklist, $pinIds[0], 'open');
         $oneItemQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
         self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row'));

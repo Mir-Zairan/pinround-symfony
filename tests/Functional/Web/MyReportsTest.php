@@ -632,7 +632,7 @@ final class MyReportsTest extends WebTestCase
         $organizationId = $this->acmeFoods->toString();
         $lenaId = $this->people['Lena']->id()->toString();
         $this->committedAs($this->acmeFoods, static function (Connection $migrator) use ($organizationId, $ticketId, $lenaId, $itemStates, $closedFindings): int {
-            $addRound = static function (string $kind, int $number, string $state) use ($migrator, $organizationId, $ticketId, $lenaId): string {
+            $addRound = static function (string $kind, ?int $number, string $state) use ($migrator, $organizationId, $ticketId, $lenaId): string {
                 $roundId = Uuid::v7()->toRfc4122();
                 $migrator->insert('rvw_round', [
                     'organization_id' => $organizationId, 'id' => $roundId, 'ticket_id' => $ticketId, 'owner_id' => $lenaId, 'kind' => $kind,
@@ -648,7 +648,7 @@ final class MyReportsTest extends WebTestCase
             ]);
             $pinNumber = 1;
             foreach (array_filter([1 => $itemStates, 2 => $closedFindings]) as $number => $states) {
-                $roundId = 1 === $number ? $addRound('checklist', 1, 'open') : $addRound('draft', 2, 'closed');
+                $roundId = 1 === $number ? $addRound('checklist', null, 'open') : $addRound('draft', 1, 'closed');
                 foreach ($states as $state) {
                     $pinId = Uuid::v7()->toRfc4122();
                     $migrator->insert('rvw_pin', [

@@ -160,15 +160,19 @@ final class RoundPageScreenshotsTest extends WebTestCase
     }
 
     #[Test]
-    public function theReportAndAChecklistRoundShowTheReportsScreenshots(): void
+    public function theReportShowsItsScreenshotsAndTheChecklistHasNoRoundPageOfItsOwn(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $reportShots = $this->seedRoundOfScreenshots($ticketId, 0, 'report', 'Mia', 'Report shot ', [1, 0]);
-        $this->addCheckItem($this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShots[0], 9, '30.00', '30.00', 'A checked note', 'Mia'), 'open');
+        $this->addCheckItem($this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShots[0], 9, '30.00', '30.00', 'A checked note', 'Mia'), 'open');
         $this->seedSharedDraft($ticketId, 2, 'Later draft shot ', [1]);
         $this->logIn($this->client, $this->people['Lena']);
 
-        foreach (['/t/SHOP-1/rounds/0', '/t/SHOP-1/rounds/1'] as $roundPage) {
+        // The checklist has no number (ADR-0048, note of 2026-11-22), so Round 1 is no page while the draft is round 2.
+        $this->client->request('GET', '/t/SHOP-1/rounds/1');
+        self::assertResponseStatusCodeSame(404);
+
+        foreach (['/t/SHOP-1/rounds/0'] as $roundPage) {
             $page = $this->client->request('GET', $roundPage);
 
             self::assertResponseStatusCodeSame(200);
@@ -186,18 +190,16 @@ final class RoundPageScreenshotsTest extends WebTestCase
     }
 
     #[Test]
-    public function aChecklistRoundOfATicketWithoutAReportSaysItHasNoScreenshots(): void
+    public function theChecklistOfATicketWithoutAReportHasNoRoundNumberToOpen(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
-        $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER);
+        $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_EARLIER);
         $this->seedSharedDraft($ticketId, 2, 'Later draft shot ', [1]);
         $this->logIn($this->client, $this->people['Mia']);
 
-        $page = $this->client->request('GET', self::DRAFT_PAGE);
+        $this->client->request('GET', self::DRAFT_PAGE);
 
-        self::assertResponseStatusCodeSame(200);
-        self::assertSame(RoundPages::NO_SCREENSHOTS, $page->filter('.empty-state')->text());
-        self::assertStringNotContainsString('Later draft shot', (string) $this->client->getResponse()->getContent());
+        self::assertResponseStatusCodeSame(404);
     }
 
     #[Test]

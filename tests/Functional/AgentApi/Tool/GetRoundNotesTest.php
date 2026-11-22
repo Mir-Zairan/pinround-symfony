@@ -139,7 +139,6 @@ final class GetRoundNotesTest extends WebTestCase
         ], $this->responseValueAt('result', 'structuredContent', 'shared_round'));
         self::assertSame([
             'round_id' => $this->checklistRound,
-            'number' => 2,
             'checked_ok_count' => 0,
             'total' => 1,
             'items' => [['item_id' => $this->checkItem, 'pin_number' => 1, 'note' => '<untrusted_text>Total &lt;b&gt;wrong&lt;/b&gt;</untrusted_text>', 'state' => 'fixed']],
@@ -320,7 +319,7 @@ final class GetRoundNotesTest extends WebTestCase
         $this->addPin($this->sharedShot, 2, '30.00', '30.00', 'AI suggestion', 'Omar', 'ai', 'suggested');
         $this->addPin($this->sharedShot, 1, '80.00', '80.00', 'Shared note', 'Omar');
 
-        $this->checklistRound = $this->addRound($this->ticketId, 2, 'checklist', 'Mia', '2026-11-05 10:00:00+00');
+        $this->checklistRound = $this->addRound($this->ticketId, null, 'checklist', 'Mia', '2026-11-05 10:00:00+00');
         $this->checkItem = $this->addCheckItem($this->checklistRound, $this->reportPin, 'fixed');
 
         $this->omarsDraft = $this->addRound($this->ticketId, null, 'draft', 'Omar', null);

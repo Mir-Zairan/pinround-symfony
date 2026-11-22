@@ -90,7 +90,7 @@ final class FindingsRoundChecklistTest extends WebTestCase
             [$miaId, $organizationId, $ticketId],
         ));
         $reportShot = $this->addScreenshot($this->addRound($this->ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
-        $this->checklistId = $this->addRound($this->ticketId, 1, 'checklist', 'Mia', self::SHARED_AT);
+        $this->checklistId = $this->addRound($this->ticketId, null, 'checklist', 'Mia', self::SHARED_AT);
         $this->checklistItemId = $this->addCheckItem($this->checklistId, $this->addPin($reportShot, 1, '10.00', '10.00', 'Total is wrong', 'Mia'), 'fixed');
         $this->miasDraftId = $this->addRound($this->ticketId, null, 'draft', 'Mia', null);
         $draftShot = $this->addScreenshot($this->miasDraftId, $this->addMedia('ready'), 0, 'Small screen', null, 'not_right');
@@ -114,13 +114,13 @@ final class FindingsRoundChecklistTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
         $page = $this->roundsFrame();
         self::assertSame(
-            ['Round 0 · Report · by Mia · 1 pin', 'Round 1 · Checklist from the report', 'Round 2 · findings by Mia · open · 1 screenshot', 'Checklist'],
+            ['Round 0 · Report · by Mia · 1 pin', 'Checklist from the report', 'Round 1 · findings by Mia · open · 1 screenshot', 'Checklist'],
             $page->filter('turbo-frame#ticket-rounds .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
         $card = $page->filter('article#round-'.$this->miasDraftId);
         self::assertSame('round-'.$this->miasDraftId.'-heading', $card->attr('aria-labelledby'));
-        self::assertSame('Round 2 · findings by Mia · open · 1 screenshot', $card->filter('h3#round-'.$this->miasDraftId.'-heading')->text());
-        self::assertSame(['/t/SHOP-1/rounds/2'], $card->filter('a.round-card__open')->each(static fn (Crawler $link): string => (string) $link->attr('href')));
+        self::assertSame('Round 1 · findings by Mia · open · 1 screenshot', $card->filter('h3#round-'.$this->miasDraftId.'-heading')->text());
+        self::assertSame(['/t/SHOP-1/rounds/1'], $card->filter('a.round-card__open')->each(static fn (Crawler $link): string => (string) $link->attr('href')));
         self::assertCount(0, $card->filter('figure.screenshot'), 'The findings round is a row: its picture is on its own page, its items stay here.');
         $checklist = $card->filter('div#checklist-'.$this->miasDraftId.'.checklist');
         self::assertCount(1, $checklist);
@@ -424,7 +424,7 @@ final class FindingsRoundChecklistTest extends WebTestCase
             '/t/SHOP-1/rounds/'.$this->miasDraftId.'/share',
             [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))],
         );
-        self::assertSame('Shared with the team as round 2.', $this->toastAfterTheRedirect());
+        self::assertSame('Shared with the team as round 1.', $this->toastAfterTheRedirect());
     }
 
     /**

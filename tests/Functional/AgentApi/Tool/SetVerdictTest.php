@@ -80,7 +80,7 @@ final class SetVerdictTest extends WebTestCase
 
         $this->ticketId = $this->addTicket('SHOP-1');
         $reportShot = $this->addScreenshot($this->addRound($this->ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
-        $checklist = $this->addRound($this->ticketId, 1, 'checklist', 'Mia', self::SHARED_AT);
+        $checklist = $this->addRound($this->ticketId, null, 'checklist', 'Mia', self::SHARED_AT);
         $this->checkItem = $this->addCheckItem($checklist, $this->addPin($reportShot, 1, '10.00', '10.00', 'The total', 'Mia'), 'open');
         $this->omarsSharedDraft = $this->addRound($this->ticketId, 2, 'draft', 'Omar', self::SHARED_AT);
         $this->omarsSharedShot = $this->addScreenshot($this->omarsSharedDraft, $this->addMedia('ready', 'Omar'), 0, null, null);

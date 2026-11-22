@@ -177,7 +177,7 @@ final class ReviewChangesInWhatHappenedTest extends WebTestCase
         $reportShot = $this->addScreenshot($report, $this->addMedia('ready'), 0, 'Product list', null);
         $this->pins[1] = $this->addPin($reportShot, 1, '10.00', '10.00', 'Price cut off', 'Mia');
         $this->pins[2] = $this->addPin($reportShot, 2, '20.00', '30.00', 'Total is wrong', 'Mia');
-        $checklist = $this->addRound($this->ticketId, 1, 'checklist', 'Mia', self::SHARED_EARLIER);
+        $checklist = $this->addRound($this->ticketId, null, 'checklist', 'Mia', self::SHARED_EARLIER);
         $this->checkItem = Uuid::v7()->toRfc4122();
         $parameters = [$this->acmeFoods->toString(), $this->checkItem, $checklist, $this->pins[1]];
         $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(

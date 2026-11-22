@@ -79,7 +79,7 @@ final class ChecklistControllerTest extends WebTestCase
         ));
         $this->ticketId = $this->addTicket('SHOP-1');
         $reportShot = $this->addScreenshot($this->addRound($this->ticketId, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
-        $this->checklistId = $this->addRound($this->ticketId, 1, 'checklist', 'Mia', self::SHARED_AT);
+        $this->checklistId = $this->addRound($this->ticketId, null, 'checklist', 'Mia', self::SHARED_AT);
         foreach (self::STATES_AS_SEEDED as $number => $state) {
             $this->items[$number] = $this->addCheckItem($this->checklistId, $this->addPin($reportShot, $number, '10.00', '10.00', 'Note '.$number, 'Mia'), $state);
         }
@@ -135,15 +135,16 @@ final class ChecklistControllerTest extends WebTestCase
     }
 
     /**
-     * The round page lists the checklist round's pictures, the report's, with each pin's check state and the tester's
-     * buttons; a plain form from it comes back to it, a refused one too, and one from the full-screen review to its pin.
+     * Round 0's page lists the report's pictures with each pin's check state and the tester's buttons, as the checklist
+     * has no round page of its own (ADR-0048, note of 2026-11-22); a plain form from it comes back to it, a refused one
+     * too, and one from the full-screen review to its pin.
      */
     #[Test]
     public function theRoundPageShowsEachPinsCheckAndItsFormsComeBackToIt(): void
     {
         $this->logIn($this->client, $this->people['Mia']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1');
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/0');
 
         self::assertResponseStatusCodeSame(200);
         $rows = $page->filter('.round-pin[data-pin-list="after"]');
@@ -154,16 +155,16 @@ final class ChecklistControllerTest extends WebTestCase
         );
         $okForm = $rows->eq(4)->filter('form')->first();
         self::assertSame($this->itemUrl(5, 'ok'), $okForm->attr('action'));
-        self::assertSame(['1', '1'], [
+        self::assertSame(['0', '1'], [
             $okForm->filter('input[name="'.ChecklistController::RETURN_ROUND_FIELD.'"]')->attr('value'),
             $okForm->filter('input[name="'.ChecklistController::RETURN_SCREENSHOT_FIELD.'"]')->attr('value'),
         ]);
-        $back = [ChecklistController::RETURN_ROUND_FIELD => '1', ChecklistController::RETURN_SCREENSHOT_FIELD => '1'];
+        $back = [ChecklistController::RETURN_ROUND_FIELD => '0', ChecklistController::RETURN_SCREENSHOT_FIELD => '1'];
 
         $this->client->request('POST', $this->itemUrl(5, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()] + $back);
 
         self::assertResponseStatusCodeSame(303);
-        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1#round-check-'.$this->items[5], $this->client->getResponse()->headers->get('Location'), 'Back to the changed pin\'s row.');
+        self::assertSame('/t/SHOP-1/rounds/0?screenshot=1#round-check-'.$this->items[5], $this->client->getResponse()->headers->get('Location'), 'Back to the changed pin\'s row.');
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Pin 5 checked OK.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
@@ -176,7 +177,7 @@ final class ChecklistControllerTest extends WebTestCase
         $this->client->request('POST', $this->itemUrl(2, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()] + $back);
 
         self::assertResponseStatusCodeSame(303);
-        self::assertSame('/t/SHOP-1/rounds/1?screenshot=1#round-check-'.$this->items[2], $this->client->getResponse()->headers->get('Location'), 'A refusal comes back to the round page too.');
+        self::assertSame('/t/SHOP-1/rounds/0?screenshot=1#round-check-'.$this->items[2], $this->client->getResponse()->headers->get('Location'), 'A refusal comes back to the round page too.');
         self::assertSame(array_replace(self::STATES_AS_SEEDED, [5 => 'ok']), $this->storedStates());
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
@@ -189,7 +190,7 @@ final class ChecklistControllerTest extends WebTestCase
         ] + $back);
 
         self::assertResponseStatusCodeSame(303);
-        self::assertSame('/t/SHOP-1/rounds/1/focus?screenshot=1&side=after&pin=1', $this->client->getResponse()->headers->get('Location'));
+        self::assertSame('/t/SHOP-1/rounds/0/focus?screenshot=1&side=after&pin=1', $this->client->getResponse()->headers->get('Location'));
         self::assertSame(array_replace(self::STATES_AS_SEEDED, [1 => 'fixed', 5 => 'ok']), $this->storedStates());
 
         $this->client->request('POST', $this->itemUrl(4, 'fixed'), [ChecklistController::CSRF_FIELD => $this->checklistToken(), ChecklistController::RETURN_ROUND_FIELD => '1/../../x']);
@@ -203,7 +204,7 @@ final class ChecklistControllerTest extends WebTestCase
     {
         $this->logIn($this->client, $this->people['Mia']);
 
-        $page = $this->client->request('GET', '/t/SHOP-1/rounds/1/focus?screenshot=1&pin=2');
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/0/focus?screenshot=1&pin=2');
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $page->filter('.focus-review__picture.screenshot--markers'), 'Markers, whose notes are in the bar only.');
@@ -213,7 +214,7 @@ final class ChecklistControllerTest extends WebTestCase
         self::assertNull($secondBar->attr('hidden'));
         self::assertSame(['OK', 'Not fixed'], $secondBar->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
         self::assertSame($this->itemUrl(2, 'ok'), $secondBar->filter('form')->first()->attr('action'));
-        self::assertSame(['1', '1', 'after', '2'], [
+        self::assertSame(['0', '1', 'after', '2'], [
             $secondBar->filter('input[name="'.ChecklistController::RETURN_ROUND_FIELD.'"]')->first()->attr('value'),
             $secondBar->filter('input[name="'.ChecklistController::RETURN_SCREENSHOT_FIELD.'"]')->first()->attr('value'),
             $secondBar->filter('input[name="'.ChecklistController::RETURN_SIDE_FIELD.'"]')->first()->attr('value'),
@@ -351,7 +352,7 @@ final class ChecklistControllerTest extends WebTestCase
     {
         $otherTicket = $this->addTicket('SHOP-2', number: 2);
         $otherShot = $this->addScreenshot($this->addRound($otherTicket, 0, 'report', 'Mia', self::SHARED_AT), $this->addMedia('ready'), 0, 'Cart', null);
-        $otherItem = $this->addCheckItem($this->addRound($otherTicket, 1, 'checklist', 'Mia', self::SHARED_AT), $this->addPin($otherShot, 1, '10.00', '10.00', 'Elsewhere', 'Mia'), 'open');
+        $otherItem = $this->addCheckItem($this->addRound($otherTicket, null, 'checklist', 'Mia', self::SHARED_AT), $this->addPin($otherShot, 1, '10.00', '10.00', 'Elsewhere', 'Mia'), 'open');
         $this->logIn($this->client, $this->people['Omar']);
         $token = $this->checklistToken();
         $notItemsOfTheTicket = [

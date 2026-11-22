@@ -175,13 +175,14 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
         $exitCode = $tester->execute(['organization' => 'acme-foods', 'ticket' => 'SHOP-1', '--checklist' => true]);
 
         self::assertSame(Command::SUCCESS, $exitCode, $tester->getDisplay());
-        self::assertStringContainsString('Round 3 on SHOP-1 has 2 screen areas with ready pictures.', $tester->getDisplay());
-        self::assertStringContainsString('Checklist round 1 on SHOP-1 has 2 open items.', $tester->getDisplay());
+        self::assertStringContainsString('Round 2 on SHOP-1 has 2 screen areas with ready pictures.', $tester->getDisplay());
+        self::assertStringContainsString('The checklist from the report on SHOP-1 has 2 open items.', $tester->getDisplay());
         $rounds = $this->roundRowsOf($ticketId);
-        usort($rounds, static fn (array $one, array $other): int => $one['number'] <=> $other['number']);
+        // The checklist has no number; it comes right after Round 0.
+        usort($rounds, static fn (array $one, array $other): int => [$one['number'] ?? 0, 'checklist' === $one['kind']] <=> [$other['number'] ?? 0, 'checklist' === $other['kind']]);
         $omar = $this->people['Omar']->id()->toString();
         self::assertSame(
-            [['report', 0, $this->people['Mia']->id()->toString()], ['checklist', 1, $this->people['Mia']->id()->toString()], ['draft', 2, $omar], ['review', 3, $omar]],
+            [['report', 0, $this->people['Mia']->id()->toString()], ['checklist', null, $this->people['Mia']->id()->toString()], ['draft', 1, $omar], ['review', 2, $omar]],
             array_map(static fn (array $round): array => [$round['kind'], $round['number'], $round['owner_id']], $rounds),
             'Mia reported SHOP-1, so she owns Round 0 and the checklist made from it.',
         );
@@ -204,11 +205,12 @@ final class SeedReviewRoundCommandTest extends KernelTestCase
         $exitCode = $tester->execute(['organization' => 'acme-foods', 'ticket' => 'SHOP-1', '--checklist' => true, '--closed' => true]);
 
         self::assertSame(Command::SUCCESS, $exitCode, $tester->getDisplay());
-        self::assertStringContainsString('Rounds 2 and 3 on SHOP-1 are closed.', $tester->getDisplay());
+        self::assertStringContainsString('Rounds 1 and 2 on SHOP-1 are closed.', $tester->getDisplay());
         $rounds = $this->roundRowsOf($ticketId);
-        usort($rounds, static fn (array $one, array $other): int => $one['number'] <=> $other['number']);
+        // The checklist has no number; it comes right after Round 0.
+        usort($rounds, static fn (array $one, array $other): int => [$one['number'] ?? 0, 'checklist' === $one['kind']] <=> [$other['number'] ?? 0, 'checklist' === $other['kind']]);
         self::assertSame(
-            [['report', 0, 'open'], ['checklist', 1, 'open'], ['draft', 2, 'closed'], ['review', 3, 'closed']],
+            [['report', 0, 'open'], ['checklist', null, 'open'], ['draft', 1, 'closed'], ['review', 2, 'closed']],
             array_map(static fn (array $round): array => [$round['kind'], $round['number'], $round['state']], $rounds),
         );
         self::assertSame(['rounds' => 4, 'media' => 5, 'screenshots' => 5, 'pins' => 4, 'areas' => 2, 'items' => 2], $this->rowCounts());

@@ -212,8 +212,8 @@ final class RoundPageTest extends WebTestCase
     }
 
     /**
-     * Only an open hand-off round waits for someone: the report, a checklist round and a closed round name nobody,
-     * although it is Mia's turn.
+     * Only an open hand-off round waits for someone: the report and a closed round name nobody, although it is Mia's
+     * turn. The checklist has no number, so it has no page (ADR-0048, note of 2026-11-22).
      */
     #[Test]
     public function aRoundThatWaitsForNoVerdictSaysNothingOfWhoIsNext(): void
@@ -221,20 +221,23 @@ final class RoundPageTest extends WebTestCase
         $ticketId = $this->addTicket('SHOP-1');
         $this->addTurnRowOf($ticketId, 'Mia');
         $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_EARLIER);
-        $this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER);
+        $this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_EARLIER);
         $this->closeRound($this->addRound($ticketId, 2, 'review', 'Omar', self::SHARED_EARLIER));
         $this->addRound($ticketId, 3, 'review', 'Omar', self::SHARED_TODAY);
         $this->logIn($this->client, $this->people['Lena']);
 
+        $this->client->request('GET', '/t/SHOP-1/rounds/1');
+        self::assertResponseStatusCodeSame(404);
+
         $headers = [];
-        foreach ([0, 1, 2, 3] as $number) {
+        foreach ([0, 2, 3] as $number) {
             $page = $this->client->request('GET', '/t/SHOP-1/rounds/'.$number);
             self::assertResponseStatusCodeSame(200);
             $headers[] = $page->filter('h1.round-page__title')->text();
         }
 
         self::assertSame(
-            ['Round 0 · shot yesterday, 10:00', 'Round 1 · shot yesterday, 10:00', 'Round 2 · shot yesterday, 10:00', 'Round 3 · shot today, 10:12 · Ready for Mia'],
+            ['Round 0 · shot yesterday, 10:00', 'Round 2 · shot yesterday, 10:00', 'Round 3 · shot today, 10:12 · Ready for Mia'],
             $headers,
         );
     }
@@ -409,7 +412,7 @@ final class RoundPageTest extends WebTestCase
     {
         $ticketId = $this->addTicket('SHOP-1');
         $reportShot = $this->addScreenshot($this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_EARLIER), $this->addMedia('ready'), 0, 'Report shot', null);
-        $this->addCheckItem($this->addRound($ticketId, 1, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShot, 1, '10.00', '10.00', 'A note', 'Mia'), 'open');
+        $this->addCheckItem($this->addRound($ticketId, null, 'checklist', 'Omar', self::SHARED_EARLIER), $this->addPin($reportShot, 1, '10.00', '10.00', 'A note', 'Mia'), 'open');
         $this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_EARLIER);
         $this->addRound($ticketId, null, 'draft', 'Lena', null);
         $this->logIn($this->client, $this->people['Mia']);

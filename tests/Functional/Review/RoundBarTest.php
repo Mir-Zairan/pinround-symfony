@@ -83,7 +83,7 @@ final class RoundBarTest extends WebTestCase
     {
         $ticketId = $this->addTicket('SHOP-1');
         $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
-        $this->addRound($ticketId, 1, 'checklist', 'Mia', self::SHARED_AT);
+        $this->addRound($ticketId, null, 'checklist', 'Mia', self::SHARED_AT);
         $this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_AT);
         $this->addTurnRowOf($ticketId, 'Mia');
         $this->logIn($this->client, $this->people['Omar']);
@@ -170,7 +170,7 @@ final class RoundBarTest extends WebTestCase
         $this->addTurnRowOf($ticketId, 'Mia');
         if ($hasClosedRounds) {
             $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
-            $this->addRound($ticketId, 1, 'checklist', 'Mia', self::SHARED_AT);
+            $this->addRound($ticketId, null, 'checklist', 'Mia', self::SHARED_AT);
             $this->closeRound($this->addRound($ticketId, 2, 'review', 'Lena', self::SHARED_AT));
             $this->closeRound($this->addRound($ticketId, 3, 'draft', 'Mia', self::SHARED_AT));
         }
