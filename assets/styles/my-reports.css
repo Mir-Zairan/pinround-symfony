@@ -38,6 +38,23 @@
   color: var(--on-surface-var);
 }
 
+.my-reports__elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  font-size: 14px;
+}
+
+.my-reports__elsewhere-link {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.report-drafts-link__count {
+  color: var(--on-surface-var);
+  font-weight: 400;
+}
+
 .my-reports__group {
   display: flex;
   flex-direction: column;

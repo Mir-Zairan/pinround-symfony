@@ -68,7 +68,7 @@ final class MyReportsTest extends WebTestCase
         foreach ($this->createdOrganizationIds as $organizationId) {
             $this->committedAs(new OrganizationId($organizationId), static function (Connection $migrator) use ($organizationId): int {
                 // rvw_round has no key to tkt_ticket, so it goes by itself, with its pictures, pins and check items.
-                foreach (['rvw_round', 'ins_ticket_turn', 'tkt_ticket', 'wf_step'] as $table) {
+                foreach (['rvw_report_draft', 'rvw_round', 'ins_ticket_turn', 'tkt_ticket', 'wf_step'] as $table) {
                     $migrator->executeStatement(\sprintf('DELETE FROM %s WHERE organization_id = ?', $table), [$organizationId]);
                 }
 
@@ -343,6 +343,50 @@ final class MyReportsTest extends WebTestCase
         self::assertSame(['Report a problem → /report'], $page->filter('.my-reports__header a.my-reports__report')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')));
     }
 
+    /**
+     * Drafts an agent or the extension saved, and notebooks, are found from My reports, also before the first report:
+     * the count is Mia's own drafts only, not Omar's.
+     */
+    #[Test]
+    public function myReportsLinksTheReportDraftsWithTheirCountAndTheNotebooks(): void
+    {
+        $this->addReportDraft('Mia', 'Cart total is doubled');
+        $this->addReportDraft('Omar', 'Coupon is not applied');
+        $this->addReportDraft('Mia', 'Basket badge is wrong');
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(
+            ['Report drafts 2 → /report-drafts', 'Notebooks → /notebooks'],
+            $page->filter('.my-reports__header nav.my-reports__elsewhere[aria-label="Drafts and notebooks"] a.my-reports__elsewhere-link')->each(static fn (Crawler $link): string => $link->text().' → '.$link->attr('href')),
+        );
+        self::assertCount(1, $page->filter('main .empty-state'), 'Mia has reported nothing yet.');
+
+        $this->logIn($this->client, $this->people['Raj']);
+        $page = $this->client->request('GET', self::MY_REPORTS);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Report drafts 0', $page->filter('a.report-drafts-link')->text(), 'Raj has none.');
+    }
+
+    /**
+     * The list shows 20 drafts a page, so the count says "20+" past the first page rather than read every draft.
+     */
+    #[Test]
+    public function theReportDraftsCountSaysTwentyPlusPastTheListsFirstPage(): void
+    {
+        for ($number = 1; $number <= 21; ++$number) {
+            $this->addReportDraft('Mia', 'Draft '.$number);
+        }
+        $this->logIn($this->client, $this->people['Mia']);
+
+        $page = $this->client->request('GET', self::MY_REPORTS);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('20+', $page->filter('a.report-drafts-link .report-drafts-link__count')->text());
+    }
+
     #[Test]
     public function aPersonWhoReportedNothingSeesHowTheListFills(): void
     {
@@ -579,6 +623,16 @@ final class MyReportsTest extends WebTestCase
     private static function keysOf(Crawler $part): array
     {
         return self::textsOf($part, '.my-reports__key');
+    }
+
+    private function addReportDraft(string $owner, string $title): void
+    {
+        $parameters = [$this->acmeFoods->toString(), Uuid::v7()->toRfc4122(), $this->people[$owner]->id()->toString(), $title];
+        $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+            "INSERT INTO rvw_report_draft (organization_id, id, owner_id, project_key, title, detail, screenshots, version, created_at, updated_at)
+             VALUES (?, ?, ?, 'SHOP', ?, '', '[]'::jsonb, 1, '2026-11-05 07:00:00+00', '2026-11-05 08:00:00+00')",
+            $parameters,
+        ));
     }
 
     /**

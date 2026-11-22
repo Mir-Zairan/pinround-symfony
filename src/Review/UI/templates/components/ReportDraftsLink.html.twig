@@ -1,0 +1,3 @@
+{% if countText is not null %}
+    <a{{ attributes.defaults({class: 'report-drafts-link'}) }} href="{{ path(this.route) }}">Report drafts <span class="report-drafts-link__count">{{ countText }}</span></a>
+{% endif %}

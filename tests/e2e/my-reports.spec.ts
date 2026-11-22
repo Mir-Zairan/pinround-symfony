@@ -97,6 +97,19 @@ test('Add more info opens the ticket on its comment box, focused, with the toast
   expect(new URL(page.url()).search, 'the parameter leaves the address, so a reload does not repeat it').toBe('');
 });
 
+test('My reports leads to the report drafts, with their count, and to the notebooks', async ({ page }) => {
+  await openMyReports(page);
+  const elsewhere = page.getByRole('navigation', { name: 'Drafts and notebooks' });
+
+  await expect(elsewhere.getByRole('link', { name: /^Report drafts \d+\+?$/ })).toBeVisible();
+  await elsewhere.getByRole('link', { name: /^Report drafts/ }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Report drafts');
+
+  await openMyReports(page);
+  await elsewhere.getByRole('link', { name: 'Notebooks', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('My notebooks');
+});
+
 test('no card shows more than two buttons, and Answer names its ticket', async ({ page }) => {
   await openMyReports(page);
 

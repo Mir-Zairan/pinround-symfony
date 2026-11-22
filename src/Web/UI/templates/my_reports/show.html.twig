@@ -73,6 +73,12 @@
                         {%- endif -%}
                     </p>
                 {% endif %}
+                {#- Review's drafts and notebooks, saved by an agent or the browser extension: ReportDraftsLink by name, as
+                    Web may not use Review. -#}
+                <nav class="my-reports__elsewhere" aria-label="Drafts and notebooks">
+                    {{ component('ReportDraftsLink', {class: 'my-reports__elsewhere-link'}) }}
+                    <a class="my-reports__elsewhere-link" href="{{ path('review_notebooks') }}">Notebooks</a>
+                </nav>
             </div>
             {#- The empty state has its own Report a problem button. -#}
             {% if hasReports %}
