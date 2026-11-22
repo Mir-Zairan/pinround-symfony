@@ -29,11 +29,10 @@ const SAVE_FAILED = 'Could not save the checklist change. Try again.';
 test.describe.configure({ mode: 'serial' });
 
 let key = '';
-let checklistNumber = 0;
 
 test.beforeAll(async ({ browser }) => {
   key = await makeTicketForOmar(browser, 'Checklist check on the coupon field');
-  checklistNumber = seedChecklistRound(key);
+  seedChecklistRound(key);
 });
 
 async function openTicket(browser: Browser, storageState: string): Promise<{ page: Page; close: () => Promise<void> }> {
@@ -46,7 +45,7 @@ async function openTicket(browser: Browser, storageState: string): Promise<{ pag
 }
 
 function checklistHeading(page: Page): Locator {
-  return page.getByRole('heading', { level: 3, name: `Round ${checklistNumber} · Checklist from the report` });
+  return page.getByRole('heading', { level: 3, name: 'Checklist from the report', exact: true });
 }
 
 function card(page: Page): Locator {

@@ -65,7 +65,7 @@ stateDiagram-v2
 
 ## All decisions
 
-All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 and ADR-0043 on 2026-11-18) (deciders: Zairan Mir, lead, with the team), ADR-0044 to ADR-0047 on 2026-11-19, and ADR-0048 on 2026-11-20 (amended 2026-11-21 before merge), and ADR-0049 and ADR-0050 on 2026-11-21.
+All ADRs below are **Accepted** on **2026-11-06** (ADR-0033 and ADR-0034 on 2026-11-07, ADR-0035 on 2026-11-08, ADR-0036 and ADR-0037 on 2026-11-10, ADR-0038 on 2026-11-11, ADR-0039 on 2026-11-14, ADR-0040 and ADR-0041 on 2026-11-15, ADR-0042 and ADR-0043 on 2026-11-18) (deciders: Zairan Mir, lead, with the team), ADR-0044 to ADR-0047 on 2026-11-19, and ADR-0048 on 2026-11-20 (amended 2026-11-21 before merge; dated note 2026-11-22: the checklist has no round number), and ADR-0049 and ADR-0050 on 2026-11-21.
 
 | ADR | Title | Decision in one line |
 |---|---|---|

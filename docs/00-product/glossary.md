@@ -40,7 +40,7 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Checker** — The person who does the check: the lead of the ticket's team. If the ticket has no team, the *triager*.
 
-**Checklist (Round 1)** — The list made from the pins of the report. The developer marks each item "Fixed"; the tester marks it "OK" or "Not fixed".
+**Checklist** — The list made from the pins of the report, shown as "Checklist from the report". It has no round number. The developer marks each item "Fixed"; the tester marks it "OK" or "Not fixed".
 
 **Comment** — A message on a ticket. It does not change the status and sends no notification. Compare *Question*.
 
@@ -120,7 +120,7 @@ Every product word in pinround, with its plain meaning. Code, UI copy and docs u
 
 **Risky** — A check reason. The report mentions security, data loss, leaks, passwords, crashes or outages (by word list or AI). Security words also make the ticket *team-only*.
 
-**Round** — One pass of showing and checking work on screenshots. Round 0 is the report. Round 1 is the checklist from its pins. Later rounds are review rounds. A draft round is private until shared.
+**Round** — One pass of showing and checking work on screenshots. Round 0 is the report. The checklist from its pins has no number. The first round shared after the report is Round 1, then 2, 3 and so on. A draft round is private until shared.
 
 **Round 0 (report)** — The screenshot and pins from the person who reported the problem.
 

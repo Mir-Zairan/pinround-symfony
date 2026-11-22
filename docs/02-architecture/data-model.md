@@ -116,7 +116,7 @@ erDiagram
   rvw_round ||--o{ rvw_screenshot : has
   rvw_screenshot ||--o{ rvw_pin : has
   rvw_screenshot ||--o{ rvw_screenshot : "retakes (retake_of, first try)"
-  rvw_round ||--o{ rvw_check_item : "checklist (round 1)"
+  rvw_round ||--o{ rvw_check_item : "checklist (no number)"
   rvw_pin ||--o| rvw_check_item : "made from"
   rvw_round ||--o{ rvw_area : "review round areas"
   rvw_screenshot ||--o| rvw_area : "after (this round)"

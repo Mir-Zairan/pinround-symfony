@@ -11,8 +11,8 @@ import { makeTicketForOmar, openAs, openOwnDraft } from './ticket';
 // tests/Functional/Ticketing/TicketPageTest.php; here the browser lays the page out.
 //
 // The rounds are seeded through the dev-only console commands (review-round-seed.ts, draft-picture.ts): Round 0, the
-// Round 1 checklist, Omar's shared round 2 and the review round 3, both closed, then a draft of Omar's he shares as
-// round 4: under ADR-0048 a share waits while another shared round is open.
+// checklist from the report (no number), Omar's shared round 1 and the review round 2, both closed, then a draft of
+// Omar's he shares as round 3: under ADR-0048 a share waits while another shared round is open.
 
 const MAX_PAGE_HEIGHT_PX = 1400;
 /** review.css's --round-thumbnail-width. */
@@ -32,7 +32,6 @@ const ROW_HEADLINE = /^Round \d+ · (review|self-check|findings) by Omar · (ope
 test.describe.configure({ mode: 'serial' });
 
 let key = '';
-let checklistNumber = 0;
 
 async function openTicketWithRoundsLoaded(page: Page): Promise<void> {
   await page.goto(`/t/${key}`, { waitUntil: 'networkidle' });
@@ -48,7 +47,7 @@ async function openTicketWithRoundsLoaded(page: Page): Promise<void> {
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(90_000);
   key = await makeTicketForOmar(browser, 'Rounds on the ticket page stay short');
-  checklistNumber = seedChecklistRound(key, { closed: true });
+  seedChecklistRound(key, { closed: true });
   seedDraftWithPicture(key);
 
   const { context, page } = await openAs(browser, OMAR_STORAGE_STATE);
@@ -68,7 +67,7 @@ test('a SHOP ticket with five rounds is under 1,400 px tall at 1440x900, with th
 
   const frame = page.locator('turbo-frame#ticket-rounds');
   await expect(frame.getByRole('heading', { level: 3, name: /^Round 0 · Report · by .+ · 2 pins$/ })).toHaveCount(1);
-  await expect(frame.getByRole('heading', { level: 3, name: `Round ${checklistNumber} · Checklist from the report`, exact: true })).toHaveCount(1);
+  await expect(frame.getByRole('heading', { level: 3, name: 'Checklist from the report', exact: true })).toHaveCount(1);
   const rows = frame.locator('article.round-card--row');
   await expect(rows).toHaveCount(ROWS);
   for (const headline of await rows.locator('h3').allTextContents()) {

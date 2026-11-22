@@ -471,8 +471,8 @@ A pin is a see-through ring, not a filled dot, so the element under it stays rea
 **FR-RND-03 — Round 0 (report)** · Must · Prototype: `Main › Ticket` (Rounds › Round 0 · Report)
 Shows the reporter's screenshot with pins and "by Mia · 2 pins".
 
-**FR-RND-04 — Round 1 checklist** · Must · Prototype: `Main › Ticket` (Round 1 · Checklist from the report)
-One item per Round 0 pin. Assignee: "Mark fixed" (open or not fixed → "Fixed · to check"). Tester: "OK" or "Not fixed". Summary "1 of 2 checked OK".
+**FR-RND-04 — Checklist from the report** · Must · Prototype: `Main › Ticket` (Round 1 · Checklist from the report)
+One item per Round 0 pin. The checklist has no round number: the card reads "Checklist from the report", and the first round shared after the report is Round 1, then 2, 3… (product owner, 2026-11-22; the prototype's "Round 1 · Checklist" is overruled, [ADR-0048](../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md#more-information)). Assignee: "Mark fixed" (open or not fixed → "Fixed · to check"). Tester: "OK" or "Not fixed". Summary "1 of 2 checked OK".
 
 **FR-RND-05 — Review round** · Must · Prototype: `Review` board
 A review round has before and after screenshots per section of the screen (e.g. "Per Product"), the pins from the earlier round, view switch Side by side / Before / After, a section list with state (Passed, "3 pins", Not reviewed).

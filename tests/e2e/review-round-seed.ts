@@ -50,9 +50,14 @@ export type ChecklistRoundSeedOptions = {
 
 /**
  * As seedReviewRound, after first giving the ticket its reporter's Round 0 with the pins REPORT_PIN_NOTES and the
- * checklist round made from it, both items open. Returns the checklist round's number.
+ * checklist made from it, both items open. The checklist has no round number (ADR-0048, note of 2026-11-22), so the
+ * assignee's shared round is still round 1. Returns that shared round's number.
  */
 export function seedChecklistRound(ticketKey: string, options: ChecklistRoundSeedOptions = {}): number {
   const flags = ['--checklist', ...(options.closed ? ['--closed'] : [])];
-  return numberSaid(runConsole('app:e2e:seed-review-round', 'acme-foods', ticketKey, ...flags), /Checklist round (\d+) on /, 'checklist round');
+  const said = runConsole('app:e2e:seed-review-round', 'acme-foods', ticketKey, ...flags);
+  if (!said.includes(`The checklist from the report on ${ticketKey} has `)) {
+    throw new Error(`app:e2e:seed-review-round did not make the checklist: ${said}`);
+  }
+  return numberSaid(said, /Round (\d+) on /, 'review round') - 1;
 }

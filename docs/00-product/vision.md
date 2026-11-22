@@ -64,7 +64,7 @@ Mia clicks "Report a problem", captures the shop page and drops two pins: "1. To
 
 Lena's Home says "7 things wait on you, Lena". Number 2 is "Check the new ticket from Mia". She sees it is not a duplicate and presses "Looks fine", then "Give it to…" and picks Omar, who has the least waiting work.
 
-Omar opens SHOP-88. The two pins are his checklist. He fixes the code with Claude Code. He starts a private **draft round**, adds after-screenshots and marks one "Not right yet". He tells Claude Code "read my pinround notes for SHOP-88". Claude Code reads the note, fixes the last bit and adds a new screenshot. Omar presses "Send to code review" and chooses "Share as round 2".
+Omar opens SHOP-88. The two pins are his checklist. He fixes the code with Claude Code. He starts a private **draft round**, adds after-screenshots and marks one "Not right yet". He tells Claude Code "read my pinround notes for SHOP-88". Claude Code reads the note, fixes the last bit and adds a new screenshot. Omar presses "Send to code review" and chooses "Share as round 1".
 
 Mia gets the round. She looks only at the two pinned spots, before and after. She marks both "Fixed" and presses "Pass it". Raj opens his Home and sees the shop team bar: most work in Doing and Checking, little waiting. He does not need to ask anyone.
 

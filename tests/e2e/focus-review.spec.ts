@@ -140,7 +140,7 @@ test('Mia walks the pins with the keyboard only: Full screen, the arrows, Enter 
 // pictures, the first with EARLIER_PIN_NOTES.
 test('Full screen opens from a shared draft, from Round 0 and from Round 0 on the ticket page; Escape goes back to each, focus on its link', async ({ browser }) => {
   const reportKey = await makeTicketForOmar(browser, 'Full-screen check of the report and draft pictures');
-  const draftNumber = seedChecklistRound(reportKey) + 1;
+  const draftNumber = seedChecklistRound(reportKey);
   const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
   await drawThePictures(context);
   const fullScreenLink = page.getByRole('link', { name: 'Full screen', exact: true });

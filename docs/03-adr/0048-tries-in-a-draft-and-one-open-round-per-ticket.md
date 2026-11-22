@@ -14,10 +14,11 @@ it closes when the person whose turn it is moves the ticket on.
 - [Confirmation](#confirmation) — the tests of P14.T5 and P14.T6.
 - [Pros and cons of the options](#pros-and-cons-of-the-options) — what each option loses.
 - [More information](#more-information) — related ADRs, requirements, revisit triggers.
+- [Note of 2026-11-22](#note-of-2026-11-22-the-checklist-has-no-round-number) — the checklist has no round number; the first shared round is Round 1.
 
 ## Status
 
-Accepted 2026-11-20; amended 2026-11-21 before merge · Deciders: Zairan Mir (lead, product owner).
+Accepted 2026-11-20; amended 2026-11-21 before merge; dated note 2026-11-22 on round numbers · Deciders: Zairan Mir (lead, product owner).
 
 The product owner accepted these decisions in a session on 2026-11-20, after testing pinround by hand
 ([phase 14](../05-plan/phase-14-tester-feedback.md#decisions-already-made)). An ADR is accepted when it is merged
@@ -244,3 +245,14 @@ ticket that is not a findings round. An open findings round closes on the assign
 - Revisit when: more than 10% of shares in 30 days are refused because a round is open, or a shared round stays open
   more than 7 days after the ticket left the step it was shared into. Either means a lead's move should close it, or a
   Close round button is needed after all.
+
+## Note of 2026-11-22: the checklist has no round number
+
+The product owner decided on 2026-11-22 that the checklist made from the report's pins is not a numbered round. Round 0
+is the report; the checklist follows it as "Checklist from the report", with no number; the first round shared after
+the report is Round 1, then 2, 3 and so on. The decisions above stand as written: their example numbers ("Round 2 is
+ready…") counted the checklist as Round 1, so read them one lower. The checklist was never a hand-off round, so no rule
+on closing, sharing or Befores changes. In the schema the checklist row keeps `kind = 'checklist'` and `shared_at`, has
+`number` NULL (`rvw_round_shared_check`, Version20261122060000), and its one slot per ticket stays
+`rvw_round_ticket_id_checklist_key`; it has no round page of its own, as `/t/{key}/rounds/{number}` needs a number, and
+its items are checked on the ticket page and on Round 0's page. Data was dummy, so no rounds were renumbered.

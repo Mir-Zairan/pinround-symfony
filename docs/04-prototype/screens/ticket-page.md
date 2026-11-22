@@ -12,7 +12,7 @@ One ticket. The page shows what the ticket asks, whose turn it is, what happens 
 - [New ticket check box](#new-ticket-check-box): shown while a new ticket needs a look.
 - [The ask](#the-ask): summary, original text, history, AI summary, Explain it to me.
 - [Questions and comments](#questions-and-comments): comments, questions, replies, resolve, composer.
-- [Rounds](#rounds): Round 0 report, Round 1 checklist, review round link, draft round.
+- [Rounds](#rounds): Round 0 report, the checklist from the report (no number), review round link, draft round.
 - [Your next step box](#your-next-step-box): verb buttons, team rules, move to another step.
 - [People, What happened, Details](#people-what-happened-details): the right column.
 - [Every move](#every-move): what each action changes (pings, log, toast).
@@ -225,7 +225,9 @@ Section title `Rounds`, in this order:
 1. **Round 0 · Report** (when the ticket came from a report with a screenshot):
    - Card header `Round 0 · Report`, then `by <first> · N pins · screenshot is simulated`.
    - The screenshot with numbered pins at their saved % positions.
-2. **Round 1 · Checklist from the report**:
+2. **Checklist from the report** (the prototype shows `Round 1 · Checklist from the report`; product decision
+   2026-11-22: the checklist has no round number, so the product's header is `Checklist from the report` and the
+   first shared round is Round 1, see [ADR-0048's note](../../03-adr/0048-tries-in-a-draft-and-one-open-round-per-ticket.md#note-of-2026-11-22-the-checklist-has-no-round-number)):
    - Header plus `k of n checked OK`.
    - The text `Every pin from the report must be fixed by the developer and checked by the tester.`
    - One row per pin: number, note, state chip, and actions.
@@ -239,7 +241,7 @@ Section title `Rounds`, in this order:
 
    - Assignee on Open or Not fixed: `Mark fixed`. Toast `Pin N marked fixed. <tester> checks it.`
    - Tester on Fixed: `OK` (toast `Pin N checked OK.`) and `Not fixed` (toast `Pin N sent back.`).
-3. **A review round** (example in the prototype): a bordered row `Round 2 · Ready for Mia` with the muted line `Example round with made-up screenshots` and the button `Open round`. It opens the [Review round board](review-round.md).
+3. **A review round** (example in the prototype): a bordered row `Round 2 · Ready for Mia` (Round 1 in the product, as the checklist has no number) with the muted line `Example round with made-up screenshots` and the button `Open round`. It opens the [Review round board](review-round.md).
 4. **Draft round** (see below).
 5. **No rounds**: a dashed box: `No rounds yet. The developer starts round 1 from Claude Code: it shoots the screens and puts them here.`
 
@@ -247,7 +249,9 @@ Section title `Rounds`, in this order:
 - Shown to the assignee while the ticket is not Done. Once shared, everyone sees it.
 - The card has a 1.5 px dashed border.
 - Title: `Draft round · only you can see this` with a `PRIVATE` tag. Once shared: `Round N · self-check by <owner>`.
-  - N = 3 when an example review round exists, 2 when the ticket has a report, else 1.
+  - In the prototype N = 3 when an example review round exists, 2 when the ticket has a report, else 1. In the product
+    (decision 2026-11-22) the checklist takes no number, so N is one above the highest shared round: 1 for the first
+    round shared after the report.
 - Status: `k of n look right`.
 - Sub text:
   - Private: `Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.`
