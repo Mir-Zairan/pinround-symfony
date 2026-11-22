@@ -52,8 +52,23 @@ final class PingController extends AbstractController
     public const string CSRF_FIELD = '_csrf_token';
     public const string MESSAGE_FIELD = 'message';
 
-    /** The id of a person's Ping button on the ticket page, which a stream answer replaces. */
+    public const string SHEET_ROUTE = 'notification_ping_sheet';
+
+    /**
+     * With the ticket's key and the person's id, the id of their Ping button, which a stream answer replaces; keyed by
+     * ticket too, as My reports can hold sheets for one person on several cards.
+     */
     public const string PING_TARGET_PREFIX = 'ping-';
+
+    /**
+     * With the ticket's key, the Turbo frame of a My reports card that the sheet route fills; Web's
+     * my_reports/show.html.twig builds the same id, as Web may not use Notification's UI.
+     */
+    public const string SHEET_FRAME_PREFIX = 'ping-sheet-';
+
+    /** The ticket page's People heading, where a request for the sheet outside its frame lands. */
+    private const string PEOPLE_FRAGMENT = 'ticket-people-heading';
+    private const string TURBO_FRAME_HEADER = 'Turbo-Frame';
 
     public const string RECIPIENT_NOT_FOUND = 'No person you may ping has that id.';
     public const string FORM_EXPIRED = 'The page was open too long. Try again.';
@@ -94,6 +109,52 @@ final class PingController extends AbstractController
     public static function csrfIdOf(string $key): string
     {
         return self::CSRF_ID_PREFIX.$key;
+    }
+
+    public static function targetIdOf(string $key, string $userId): string
+    {
+        return self::PING_TARGET_PREFIX.$key.'-'.$userId;
+    }
+
+    public static function sheetFrameIdOf(string $key): string
+    {
+        return self::SHEET_FRAME_PREFIX.$key;
+    }
+
+    /**
+     * One person's ping sheet, opened as it loads, in the Turbo frame of a My reports card that offers "Ping <name>",
+     * so the ping is sent from that page through ping() and its toast shows there. The same 404s as ping() for a ticket
+     * the person may not see or ping from and for someone who is no member; the viewer's own id gets an empty frame, as
+     * nobody pings themselves. A request that is not that frame's (no script, or another frame) goes to the ticket's
+     * People, where the sheet is on the page.
+     */
+    #[Route('/t/{key}/ping/{userId}/sheet', name: self::SHEET_ROUTE, requirements: ['userId' => self::USER_ID_REQUIREMENT], methods: ['GET'])]
+    public function sheet(string $key, string $userId, Request $request): Response
+    {
+        if (null === $this->tenantContext->get()) {
+            throw $this->createAccessDeniedException();
+        }
+        try {
+            [$actor, $ticket] = $this->pingableTicketOf($key);
+        } catch (TicketNotFound) {
+            throw $this->createNotFoundException(self::TICKET_NOT_FOUND);
+        }
+        $toUserId = new UserId(strtolower($userId));
+        $firstName = $this->recipientFirstNameOf($actor, $toUserId);
+        $frameId = self::sheetFrameIdOf($ticket->key);
+        if ($frameId !== $request->headers->get(self::TURBO_FRAME_HEADER)) {
+            return $this->redirectToRoute(self::TICKET_ROUTE, ['key' => $ticket->key, '_fragment' => self::PEOPLE_FRAGMENT], Response::HTTP_SEE_OTHER);
+        }
+
+        return $this->render('@Notification/ping_sheet_frame.html.twig', [
+            'frameId' => $frameId,
+            'ticketId' => $ticket->id->toString(),
+            'ticketKey' => $ticket->key,
+            'ticketTitle' => $ticket->title,
+            'toUserId' => $toUserId->toString(),
+            'toFirstName' => $firstName,
+            'isViewer' => $toUserId->equals($actor->userId()),
+        ]);
     }
 
     #[Route('/t/{key}/ping/{userId}', name: self::ROUTE, requirements: ['userId' => self::USER_ID_REQUIREMENT], methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
@@ -203,7 +264,7 @@ final class PingController extends AbstractController
             '@Notification/ping.stream.html.twig',
             [
                 'toast' => $toast,
-                'pingTargetId' => self::PING_TARGET_PREFIX.$toUserId->toString(),
+                'pingTargetId' => self::targetIdOf($key, $toUserId->toString()),
                 'againIn' => null === $againAt ? null : PingedState::againInOf($againAt, $now),
             ],
             new Response(null, $streamStatus, ['Content-Type' => TurboBundle::STREAM_MEDIA_TYPE]),

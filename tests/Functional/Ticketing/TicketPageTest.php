@@ -1192,7 +1192,7 @@ final class TicketPageTest extends WebTestCase
         self::assertStringContainsString('Raj', (string) $this->turnLineOf($this->client->getCrawler(), 'now'));
         self::assertSame(['1 h ago · Sara moved it to To do', '5 Nov · Created by Lena'], self::activityLinesOf($this->client->getCrawler()));
         self::assertCount(1, $this->client->getCrawler()->filter('.ticket__position'));
-        self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
+        self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$keys['X'].'-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
 
         return $pageQueryCount;
     }
@@ -1250,7 +1250,7 @@ final class TicketPageTest extends WebTestCase
             ['Lena · Reporter', 'Omar · Assignee', 'Someone else'],
             $this->client->getCrawler()->filter('dialog#needs-input-'.$this->stepsByCore['input'].' .waiting-on__choice')->each(static fn (Crawler $choice): string => $choice->text()),
         );
-        self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
+        self::assertSame('Ping Omar', trim($this->client->getCrawler()->filter('#ping-'.$key.'-'.$this->people['Omar']->id()->toString().' .dialog__title')->text()));
         self::assertSame(7, $pageQueryCount);
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Web;
 
 use App\Identity\Domain\User;
+use App\Notification\UI\Controller\PingController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TeamId;
 use App\Tests\Functional\Identity\LogsInUsers;
@@ -308,9 +309,21 @@ final class MyReportsTest extends WebTestCase
         self::assertSame(['Answer on SHOP-1 → /t/SHOP-1'], $answers->each(static fn (Crawler $answer): string => $answer->text().' → '.$answer->attr('href')));
         self::assertSame(' on SHOP-1', $answers->filter('.visually-hidden')->text(normalizeWhitespace: false));
         self::assertCount(1, $page->filter('.my-reports__group--needs_you a.my-reports__answer'));
+        $omarId = $this->people['Omar']->id()->toString();
+        $lenaId = $this->people['Lena']->id()->toString();
         self::assertSame(
-            ['Ping Omar about SHOP-3 → /t/SHOP-3#ticket-people-heading · btn btn-tonal btn-sm my-reports__ping', 'Ping Lena about SHOP-2 → /t/SHOP-2#ticket-people-heading · btn btn-text btn-sm my-reports__ping'],
-            $page->filter('a.my-reports__ping')->each(static fn (Crawler $ping): string => $ping->text().' → '.$ping->attr('href').' · '.$ping->attr('class')),
+            [
+                'Ping Omar about SHOP-3 → GET /t/SHOP-3/ping/'.$omarId.'/sheet into '.PingController::sheetFrameIdOf('SHOP-3').' · btn btn-tonal btn-sm my-reports__ping',
+                'Ping Lena about SHOP-2 → GET /t/SHOP-2/ping/'.$lenaId.'/sheet into '.PingController::sheetFrameIdOf('SHOP-2').' · btn btn-text btn-sm my-reports__ping',
+            ],
+            $page->filter('form.my-reports__ping-form[data-turbo="true"]')->each(static fn (Crawler $form): string => $form->filter('button[type="submit"][aria-haspopup="dialog"]')->text()
+                .' → '.strtoupper((string) $form->attr('method')).' '.$form->attr('action').' into '.$form->attr('data-turbo-frame')
+                .' · '.$form->filter('button')->attr('class')),
+        );
+        self::assertSame(
+            [PingController::sheetFrameIdOf('SHOP-3'), PingController::sheetFrameIdOf('SHOP-2')],
+            $page->filter('.my-reports__actions > turbo-frame.my-reports__ping-frame')->each(static fn (Crawler $frame): ?string => $frame->attr('id')),
+            'Each card has the empty frame its form loads the sheet into.',
         );
         self::assertSame(
             ['SHOP-1', 'SHOP-3', 'SHOP-5', 'SHOP-2', 'SHOP-4'],

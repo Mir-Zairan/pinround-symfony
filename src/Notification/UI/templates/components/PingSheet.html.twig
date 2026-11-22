@@ -18,9 +18,12 @@
         {# The dialog's close event does not bubble, so the sheet listens for it in the capture phase. #}
         <div id="{{ pingTargetId }}" class="ping-sheet" data-turbo="true" {{ stimulus_controller('ping-sheet') }}
             data-action="close->ping-sheet#clearRefusal:capture">
-            <twig:Dialog id="{{ pingTargetId }}-dialog" title="Ping {{ toFirstName }}">
+            <twig:Dialog id="{{ pingTargetId }}-dialog" title="Ping {{ toFirstName }}" :openOnConnect="isOpenedOnLoad">
                 <twig:block name="trigger">
-                    <twig:Button variant="outline" size="sm" aria-haspopup="dialog" aria-label="Ping {{ toFirstName }}" data-action="dialog#open">Ping</twig:Button>
+                    {#- Opened on load, the sheet's trigger is the My reports card's own button. -#}
+                    {% if not isOpenedOnLoad %}
+                        <twig:Button variant="outline" size="sm" aria-haspopup="dialog" aria-label="Ping {{ toFirstName }}" data-action="dialog#open">Ping</twig:Button>
+                    {% endif %}
                 </twig:block>
                 <twig:block name="content">
                     <form method="post" id="{{ pingFormId }}" class="ping-sheet__form" action="{{ pingAction }}" data-turbo="true" data-failed-toast="{{ pingFailedToast }}"

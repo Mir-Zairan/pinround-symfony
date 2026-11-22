@@ -176,6 +176,15 @@
   margin-left: auto;
 }
 
+.my-reports__ping-form {
+  display: contents;
+}
+
+/* Once the person is pinged (or was, within the limit), "Pinged · again in N h" in the frame takes the button's place. */
+.my-reports__actions:has(.ping-sheet__pinged) .my-reports__ping-form {
+  display: none;
+}
+
 /* The menu's items are links to the ticket page, styled as the menu's buttons. */
 .my-reports__menu .menu__item {
   display: flex;

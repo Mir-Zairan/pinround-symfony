@@ -56,6 +56,32 @@ test('My reports opens from the menu and shows each report as a card with its pr
   await expect(card.locator('.my-reports__now')).not.toBeEmpty();
 });
 
+test('Ping on a card opens the ping sheet on My reports, sends from there and leaves the card pinged', async ({ browser, page }) => {
+  const key = await makeTicketForOmar(browser, `Coupon field clears on reload ${randomUUID().slice(0, 8)}`);
+  await openMyReports(page);
+  const card = page.locator('.my-reports__card').filter({ has: page.locator(`a.my-reports__link[href="/t/${key}"]`) });
+  const ping = card.getByRole('button', { name: `Ping Omar about ${key}` });
+
+  await ping.click();
+
+  const sheet = page.getByRole('dialog', { name: 'Ping Omar' });
+  await expect(sheet).toBeVisible();
+  await expect(page).toHaveURL(/\/my-reports$/);
+  await expect(sheet.getByLabel('Message')).toHaveValue(`Hi Omar, could you look at ${key}?`);
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sheet).toBeHidden();
+  await expect(ping, 'focus is back on the card\'s Ping').toBeFocused();
+
+  await ping.click();
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole('button', { name: 'Send ping' }).click();
+
+  await expect(page.locator('#toast-region')).toContainText('Pinged Omar. One notification sent.');
+  await expect(page).toHaveURL(/\/my-reports$/);
+  await expect(card.locator('.ping-sheet__pinged')).toHaveText(/^Pinged · again in \d+ h$/);
+  await expect(ping, 'the pinged state takes the button\'s place').toBeHidden();
+});
+
 test('no card shows more than two buttons, and Answer names its ticket', async ({ page }) => {
   await openMyReports(page);
 

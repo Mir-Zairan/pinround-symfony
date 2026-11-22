@@ -1,0 +1,13 @@
+{#- PingController::sheet: one person's ping sheet in a My reports card's frame, opened as it loads; the card's own
+    "Ping <name>" button is its trigger. -#}
+<turbo-frame id="{{ frameId }}">
+    {{ component('PingSheet', {
+        ticketId: ticketId,
+        ticketKey: ticketKey,
+        ticketTitle: ticketTitle,
+        toUserId: toUserId,
+        toFirstName: toFirstName,
+        isViewer: isViewer,
+        isOpenedOnLoad: true,
+    }) }}
+</turbo-frame>

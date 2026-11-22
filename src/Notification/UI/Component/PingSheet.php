@@ -15,7 +15,8 @@ use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
 use Symfony\UX\TwigComponent\Attribute\PostMount;
 
 /**
- * One person's Ping button on the ticket page's People and the sheet it opens (dialogs-and-popovers.md, Ping sheet).
+ * One person's Ping button on the ticket page's People and the sheet it opens (dialogs-and-popovers.md, Ping sheet);
+ * also the sheet alone, opened as it loads, in a My reports card's frame (PingController::sheet).
  * The page shows it only to someone granted PingPermission::SEND; PingController checks that again on POST. When the
  * viewer pinged the person about the ticket within the limit, it shows "Pinged · again in N h" instead, which is also
  * what PingController's stream answer puts in its place.
@@ -51,6 +52,12 @@ final class PingSheet
 
     /** Whether the row is the viewer's own, who may not ping themselves. */
     public bool $isViewer = false;
+
+    /**
+     * Whether the sheet opens as it loads, with no Ping button of its own: a My reports card's button loaded it
+     * (PingController::sheet) and is its trigger.
+     */
+    public bool $isOpenedOnLoad = false;
 
     /** Whether there is a Ping button or a pinged state to show; false for the viewer's own row or with no actor. */
     public bool $isShown = false;
@@ -106,7 +113,7 @@ final class PingSheet
      */
     public function targetId(): string
     {
-        return PingController::PING_TARGET_PREFIX.$this->toUserId;
+        return PingController::targetIdOf($this->ticketKey, $this->toUserId);
     }
 
     public function route(): string

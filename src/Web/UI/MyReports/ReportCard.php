@@ -24,6 +24,8 @@ final readonly class ReportCard
      *                                     ("Ping Omar") on a Stuck or Moving report; null on a Needs you or done
      *                                     report, or when it is the viewer's turn, a label's, nobody's, or the person
      *                                     left
+     * @param string|null $pingUserId      that person's user id, for the ping sheet the card opens; null exactly when
+     *                                     $pingFirstName is
      */
     public function __construct(
         public string $key,
@@ -38,6 +40,7 @@ final readonly class ReportCard
         public bool $isAnswerOffered,
         public ?string $pinProgressText,
         public ?string $pingFirstName,
+        public ?string $pingUserId,
     ) {
     }
 }

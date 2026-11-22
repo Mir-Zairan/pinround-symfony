@@ -52,6 +52,8 @@ final class PingTest extends WebTestCase
     /** What Turbo sends with a form it posts. */
     private const array TURBO_FORM_HEADERS = ['HTTP_ACCEPT' => 'text/vnd.turbo-stream.html, text/html, application/xhtml+xml'];
     private const string TOAST_REGION_ID = 'toast-region';
+    /** What Turbo sends when a My reports card loads SHOP-1's sheet into its frame. */
+    private const array SHEET_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => 'ping-sheet-SHOP-1'];
 
     private KernelBrowser $client;
 
@@ -100,7 +102,7 @@ final class PingTest extends WebTestCase
         $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
 
         $streams = $this->streamsOfTheAnswer(200, 'Lena', true);
-        self::assertSame('Pinged · again in 4 h', trim($streams['ping-'.$this->idOf('Lena')]->filter('#ping-'.$this->idOf('Lena'))->text()));
+        self::assertSame('Pinged · again in 4 h', trim($streams['ping-'.self::KEY.'-'.$this->idOf('Lena')]->filter('#ping-'.self::KEY.'-'.$this->idOf('Lena'))->text()));
         self::assertSame(1, $this->stateValkey()->exists($this->slotKeyOf('Omar', 'Lena')));
         self::assertSame('Pinged Lena. One notification sent.', $this->toastOf($streams));
         self::assertSame([['from_id' => $this->idOf('Omar'), 'to_id' => $this->idOf('Lena'), 'body' => self::MESSAGE, 'created_at' => '2026-11-06 12:00:00+00']], $this->storedPings());
@@ -119,7 +121,7 @@ final class PingTest extends WebTestCase
         $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(['message' => 'Any news?']), [], self::TURBO_FORM_HEADERS);
 
         $streams = $this->streamsOfTheAnswer(422, 'Lena', true);
-        self::assertSame('Pinged · again in 3 h', trim($streams['ping-'.$this->idOf('Lena')]->text()));
+        self::assertSame('Pinged · again in 3 h', trim($streams['ping-'.self::KEY.'-'.$this->idOf('Lena')]->text()));
         self::assertSame('You pinged Lena about this ticket recently. You can ping them again in 3 h.', $this->toastOf($streams));
         self::assertCount(1, $this->storedPings());
         self::assertSame(self::MESSAGE, $this->storedPings()[0]['body']);
@@ -225,7 +227,7 @@ final class PingTest extends WebTestCase
 
         $streams = $this->streamsOfTheAnswer(422, $recipient, false);
         self::assertSame($expectedToast, $this->toastOf($streams));
-        self::assertSame($expectedToast, trim($streams['ping-'.$this->idOf($recipient).'-refusal']->text()));
+        self::assertSame($expectedToast, trim($streams['ping-'.self::KEY.'-'.$this->idOf($recipient).'-refusal']->text()));
         self::assertSame([], $this->storedPings());
         self::assertSame(0, $this->publishedPingEvents());
     }
@@ -369,7 +371,7 @@ final class PingTest extends WebTestCase
         $page = $this->client->request('GET', self::TICKET_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        $sheet = $page->filter('#ping-'.$this->idOf('Lena'));
+        $sheet = $page->filter('#ping-'.self::KEY.'-'.$this->idOf('Lena'));
         self::assertCount(1, $sheet);
         self::assertSame('Ping', trim($sheet->filter('button[aria-haspopup="dialog"]')->text()));
         self::assertSame('Ping Lena', trim($sheet->filter('.dialog__title')->text()));
@@ -381,12 +383,12 @@ final class PingTest extends WebTestCase
         self::assertSame('true', $form->attr('data-turbo'));
         self::assertSame(PingSheet::PING_FAILED, $form->attr('data-failed-toast'));
         self::assertSame(['Cancel', 'Send ping'], $sheet->filter('.dialog__actions button')->each(static fn (Crawler $button): string => trim($button->text())));
-        self::assertCount(0, $page->filter('#ping-'.$this->idOf('Omar')));
+        self::assertCount(0, $page->filter('#ping-'.self::KEY.'-'.$this->idOf('Omar')));
         self::assertGreaterThan(1, $page->filter('.ticket-people__row')->count());
         // Ping keeps its own grid column, apart from the name and role, so a long role line cannot push it down.
         $lenasRow = $page->filter('.ticket-people__row')->reduce(static fn (Crawler $row): bool => 'Lena' === $row->filter('.ticket-people__who > .ticket-people__name')->text());
         self::assertCount(1, $lenasRow);
-        self::assertCount(1, $lenasRow->filter('.ticket-people__row > .ticket-people__actions > #ping-'.$this->idOf('Lena')));
+        self::assertCount(1, $lenasRow->filter('.ticket-people__row > .ticket-people__actions > #ping-'.self::KEY.'-'.$this->idOf('Lena')));
         self::assertCount(0, $lenasRow->filter('.ticket-people__who .ping-sheet'));
     }
 
@@ -398,7 +400,7 @@ final class PingTest extends WebTestCase
         $page = $this->client->request('GET', self::TICKET_PAGE);
         self::assertResponseStatusCodeSame(200);
 
-        $this->client->submit($page->filter('#ping-'.$this->idOf('Lena').' form.ping-sheet__form')->form(), [], ['HTTP_ACCEPT' => self::TURBO_FORM_HEADERS['HTTP_ACCEPT']]);
+        $this->client->submit($page->filter('#ping-'.self::KEY.'-'.$this->idOf('Lena').' form.ping-sheet__form')->form(), [], ['HTTP_ACCEPT' => self::TURBO_FORM_HEADERS['HTTP_ACCEPT']]);
 
         $this->streamsOfTheAnswer(200, 'Lena', true);
         self::assertSame([self::DRAFT], array_column($this->storedPings(), 'body'));
@@ -430,9 +432,117 @@ final class PingTest extends WebTestCase
         $page = $this->client->request('GET', self::TICKET_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        $lenasAction = $page->filter('#ping-'.$this->idOf('Lena'));
+        $lenasAction = $page->filter('#ping-'.self::KEY.'-'.$this->idOf('Lena'));
         self::assertSame('Pinged · again in 3 h', trim($lenasAction->text()));
         self::assertCount(0, $lenasAction->filter('button, form'));
+    }
+
+    /**
+     * GET /t/{key}/ping/{userId}/sheet, which a My reports card loads into its frame: the ticket page's sheet, opened as
+     * it connects, with no Ping button of its own, posting to the same ping route. It has no Now line to quote.
+     */
+    #[Test]
+    public function theSheetRouteGivesTheCardsFrameTheOpenedSheetAndStoresNothing(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $page = $this->client->request('GET', $this->sheetPathTo('Omar'), [], [], self::SHEET_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $frame = $page->filter('turbo-frame#ping-sheet-SHOP-1');
+        self::assertCount(1, $frame);
+        $sheet = $frame->filter('#ping-'.self::KEY.'-'.$this->idOf('Omar').'.ping-sheet');
+        self::assertCount(1, $sheet);
+        self::assertCount(1, $sheet->filter('[data-controller="dialog"][data-dialog-open-on-connect-value="true"] > dialog'), 'The sheet opens as it connects.');
+        self::assertCount(0, $sheet->filter('[aria-haspopup="dialog"]'), 'The card\'s own Ping button is the trigger.');
+        self::assertSame('Ping Omar', trim($sheet->filter('.dialog__title')->text()));
+        self::assertSame($this->pathTo('Omar'), $sheet->filter('form.ping-sheet__form')->attr('action'));
+        self::assertSame('Hi Omar, could you look at SHOP-1?', $sheet->filter('textarea.ping-sheet__message')->text());
+        self::assertSame([], $this->storedPings());
+    }
+
+    /**
+     * Without script, or for another frame, the request is the ticket page's People, where the sheet is on the page.
+     *
+     * @return iterable<string, array{array<string, string>}>
+     */
+    public static function requestsOutsideTheSheetsFrame(): iterable
+    {
+        yield 'no frame' => [[]];
+        yield 'another ticket\'s frame' => [['HTTP_TURBO_FRAME' => 'ping-sheet-SHOP-2']];
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    #[Test]
+    #[DataProvider('requestsOutsideTheSheetsFrame')]
+    public function theSheetRouteOutsideItsFrameGoesToTheTicketsPeople(array $headers): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $this->client->request('GET', $this->sheetPathTo('Omar'), [], [], $headers);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertResponseRedirects('/t/SHOP-1#ticket-people-heading');
+    }
+
+    /**
+     * @param array{reporter?: string, visibility?: string} $ticket
+     * @param 'member'|'viewer'|null                        $miaTeamRole
+     */
+    #[Test]
+    #[DataProvider('peopleWhoMayNotPing')]
+    public function theSheetRouteIsNotFoundForSomeoneWhoMayNotPing(string $sender, array $ticket, ?string $miaTeamRole): void
+    {
+        $this->seedShop($ticket, $miaTeamRole);
+        if ('Ben' === $sender) {
+            $this->addBenOfBetaBakery();
+        }
+        $this->logIn($this->client, $this->people[$sender]);
+
+        $this->client->request('GET', $this->sheetPathTo('Lena'), [], [], self::SHEET_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(404);
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('No ticket you may see has that key.', $content);
+        self::assertStringNotContainsString('<turbo-frame', $content);
+    }
+
+    #[Test]
+    public function theSheetRouteForNoMemberIsNotFoundAndForTheViewerIsAnEmptyFrame(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $this->client->request('GET', '/t/'.self::KEY.'/ping/'.self::NOBODY_ID.'/sheet', [], [], self::SHEET_FRAME_HEADERS);
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(PingController::RECIPIENT_NOT_FOUND, (string) $this->client->getResponse()->getContent());
+
+        $page = $this->client->request('GET', $this->sheetPathTo('Omar'), [], [], self::SHEET_FRAME_HEADERS);
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $page->filter('turbo-frame#ping-sheet-SHOP-1'));
+        self::assertCount(0, $page->filter('.ping-sheet, .ping-sheet__pinged'), 'Nobody pings themselves.');
+    }
+
+    #[Test]
+    public function theSheetRouteAfterAPingShowsThePingedStateInTheFrame(): void
+    {
+        $this->seedShop();
+        $this->logIn($this->client, $this->people['Omar']);
+        $this->client->request('POST', $this->pathTo('Lena'), $this->pingFields(), [], self::TURBO_FORM_HEADERS);
+        self::assertResponseStatusCodeSame(200);
+        $this->clock->modify('+90 minutes');
+
+        $page = $this->client->request('GET', $this->sheetPathTo('Lena'), [], [], self::SHEET_FRAME_HEADERS);
+
+        self::assertResponseStatusCodeSame(200);
+        $pinged = $page->filter('turbo-frame#ping-sheet-SHOP-1 > #ping-'.self::KEY.'-'.$this->idOf('Lena'));
+        self::assertSame('Pinged · again in 3 h', trim($pinged->text()));
+        self::assertCount(0, $page->filter('dialog, form'));
+        self::assertCount(1, $this->storedPings());
     }
 
     #[Test]
@@ -447,7 +557,7 @@ final class PingTest extends WebTestCase
         $page = $this->client->request('GET', self::TICKET_PAGE);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Ping Lena', trim($page->filter('#ping-'.$this->idOf('Lena').' .dialog__title')->text()));
+        self::assertSame('Ping Lena', trim($page->filter('#ping-'.self::KEY.'-'.$this->idOf('Lena').' .dialog__title')->text()));
     }
 
     #[Test]
@@ -587,6 +697,11 @@ final class PingTest extends WebTestCase
         return '/t/'.self::KEY.'/ping/'.$this->idOf($person);
     }
 
+    private function sheetPathTo(string $person): string
+    {
+        return $this->pathTo($person).'/sheet';
+    }
+
     /**
      * @param array<string, string> $overrides
      *
@@ -612,12 +727,12 @@ final class PingTest extends WebTestCase
         self::assertResponseStatusCodeSame($expectedStatus);
         self::assertSame('text/vnd.turbo-stream.html; charset=UTF-8', $this->client->getResponse()->headers->get('Content-Type'));
         preg_match_all(
-            '#<turbo-stream action="([a-z]+)" target="([a-z0-9-]+)"><template>(.*?)</template></turbo-stream>#s',
+            '#<turbo-stream action="([a-z]+)" target="([A-Za-z0-9-]+)"><template>(.*?)</template></turbo-stream>#s',
             (string) $this->client->getResponse()->getContent(),
             $matches,
             \PREG_SET_ORDER,
         );
-        $buttonTarget = $isPinged ? ['replace', 'ping-'.$this->idOf($recipient)] : ['update', 'ping-'.$this->idOf($recipient).'-refusal'];
+        $buttonTarget = $isPinged ? ['replace', 'ping-'.self::KEY.'-'.$this->idOf($recipient)] : ['update', 'ping-'.self::KEY.'-'.$this->idOf($recipient).'-refusal'];
         self::assertSame([$buttonTarget, ['update', self::TOAST_REGION_ID]], array_map(static fn (array $match): array => [$match[1], $match[2]], $matches));
         $streams = [];
         foreach ($matches as [, , $target, $content]) {

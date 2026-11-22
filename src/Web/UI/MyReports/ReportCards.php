@@ -122,8 +122,9 @@ final readonly class ReportCards
         // The quoted question is the asker's, so the avatar beside it is too (my-reports.md, Card).
         $avatarName = null === $questionLine ? $turnPersonName : $askerName;
         // A Needs you report offers Answer instead (my-reports.md, Card), and nobody pings themselves.
-        $isPingOffered = (ReportGroup::Stuck === $group || ReportGroup::Moving === $group)
-            && null !== $report->turnUserId && !$report->turnUserId->equals($viewerId);
+        $pingUserId = (ReportGroup::Stuck === $group || ReportGroup::Moving === $group)
+            && null !== $turnPersonName && !$report->turnUserId->equals($viewerId)
+            ? $report->turnUserId : null;
 
         return new ReportCard(
             $report->key,
@@ -137,7 +138,8 @@ final readonly class ReportCards
             ReportCardText::nowTextOf($report, $group, $isDone ? null : $this->turnPersonNowTextOf($report, $step, $viewerId, $namesByUserId), $questionLine),
             ReportGroup::NeedsYou === $group,
             null === $pinProgress ? null : ReportCardText::pinProgressTextOf($pinProgress),
-            $isPingOffered && null !== $turnPersonName ? NowNextContext::firstNameFrom($turnPersonName) : null,
+            null === $pingUserId ? null : NowNextContext::firstNameFrom($turnPersonName),
+            $pingUserId?->toString(),
         );
     }
 

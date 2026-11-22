@@ -4,11 +4,12 @@
 
 {% block stylesheets %}
     <link rel="stylesheet" href="{{ asset('styles/my-reports.css') }}">
+    <link rel="stylesheet" href="{{ asset('styles/ping-sheet.css') }}">
 {% endblock %}
 
 {#- The cards of ReportCards (my-reports.md, Card). At most two buttons a card: Answer or "Ping <name>", and the "⋯"
-    menu. Ping opens the ticket at its People, whose Ping button sends it under the ticket's own rules; the menu holds
-    only what the ticket page already does. -#}
+    menu. Ping loads the ticket page's ping sheet into the card's frame and opens it there (PingController::sheet; without
+    script it goes to the ticket's People); the menu holds only what the ticket page already does. -#}
 {% macro cards(cards, stageLabels) %}
     {# No hover prefetch: each link would cost a ticket page's queries. #}
     <ul class="my-reports__rows" data-turbo-prefetch="false">
@@ -31,8 +32,13 @@
                     <div class="my-reports__actions">
                         {% if card.isAnswerOffered %}
                             <twig:Button size="sm" href="{{ card.url }}" class="my-reports__answer">Answer<span class="visually-hidden"> on {{ card.key }}</span></twig:Button>
-                        {% elseif card.pingFirstName is not null %}
-                            <twig:Button variant="{{ card.isStuck ? 'tonal' : 'text' }}" size="sm" href="{{ card.url }}#ticket-people-heading" class="my-reports__ping">Ping {{ card.pingFirstName }}<span class="visually-hidden"> about {{ card.key }}</span></twig:Button>
+                        {% elseif card.pingUserId is not null %}
+                            {#- PingController::sheetFrameIdOf's id; the frame gets the opened sheet, or "Pinged · again in N h". -#}
+                            {%- set pingFrameId = 'ping-sheet-' ~ card.key -%}
+                            <form method="get" action="{{ path('notification_ping_sheet', {key: card.key, userId: card.pingUserId}) }}" class="my-reports__ping-form" data-turbo="true" data-turbo-frame="{{ pingFrameId }}">
+                                <twig:Button type="submit" variant="{{ card.isStuck ? 'tonal' : 'text' }}" size="sm" class="my-reports__ping" aria-haspopup="dialog">Ping {{ card.pingFirstName }}<span class="visually-hidden"> about {{ card.key }}</span></twig:Button>
+                            </form>
+                            <turbo-frame id="{{ pingFrameId }}" class="my-reports__ping-frame"></turbo-frame>
                         {% endif %}
                         <div class="menu my-reports__menu" {{ stimulus_controller('menu') }} data-action="focusout->menu#closeOnFocusLeave">
                             <button type="button" class="icon-btn my-reports__menu-trigger" aria-label="More for {{ card.key }}" aria-haspopup="menu" aria-expanded="false" aria-controls="{{ menuId }}"

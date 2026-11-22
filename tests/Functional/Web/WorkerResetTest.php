@@ -409,7 +409,7 @@ final class WorkerResetTest extends WebTestCase
 
         $page = $this->client->request('GET', '/t/SHOP-1');
         self::assertResponseStatusCodeSame(200);
-        self::assertSame('Pinged · again in 3 h', trim($page->filter('#ping-'.$lenaId)->text()));
+        self::assertSame('Pinged · again in 3 h', trim($page->filter('#ping-SHOP-1-'.$lenaId)->text()));
 
         // Valkey ends the slot by its own clock, not the frozen one, so the test ends it by hand.
         self::assertSame(1, $this->stateValkey()->del($slotKey));
@@ -417,7 +417,7 @@ final class WorkerResetTest extends WebTestCase
         $page = $this->client->request('GET', '/t/SHOP-1');
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(['Ping Lena'], $page->filter('#ping-'.$lenaId.' .dialog__title')->each(static fn (Crawler $title): string => trim($title->text())));
+        self::assertSame(['Ping Lena'], $page->filter('#ping-SHOP-1-'.$lenaId.' .dialog__title')->each(static fn (Crawler $title): string => trim($title->text())));
     }
 
     /**

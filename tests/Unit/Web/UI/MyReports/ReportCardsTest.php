@@ -102,7 +102,8 @@ final class ReportCardsTest extends TestCase
     }
 
     /**
-     * Omar's stuck build offers "Ping Omar"; Mia's own build, Stuck or Moving, offers no ping, as nobody pings themselves.
+     * Omar's stuck build offers "Ping Omar" with his id for the sheet; Mia's own build, Stuck or Moving, offers no ping,
+     * as nobody pings themselves, and neither does the build of Lena, who left.
      */
     #[Test]
     public function aStuckOrMovingReportOffersToPingTheTurnPersonUnlessItIsTheViewer(): void
@@ -111,13 +112,14 @@ final class ReportCardsTest extends TestCase
             self::report(1, self::DOING_STEP, '2026-10-01 09:00:00', turn: [self::OMAR, 'build']),
             self::report(2, self::DOING_STEP, '2026-10-01 09:00:00', turn: [self::MIA, 'build']),
             self::report(3, self::DOING_STEP, '2026-11-05 09:00:00', turn: [self::MIA, 'build']),
+            self::report(4, self::DOING_STEP, '2026-10-01 09:00:00', turn: [self::LENA, 'build']),
         ];
 
         $cards = $this->cards()->cardsOf(new OrganizationId(self::ACME_FOODS), new UserId(self::MIA), $reports, new \DateTimeImmutable(self::NOW));
 
         self::assertSame(
-            [[true, 'Omar'], [true, null], [false, null]],
-            array_values(array_map(static fn (ReportCard $card): array => [$card->isStuck, $card->pingFirstName], $cards)),
+            [[true, 'Omar', self::OMAR], [true, null, null], [false, null, null], [true, null, null]],
+            array_values(array_map(static fn (ReportCard $card): array => [$card->isStuck, $card->pingFirstName, $card->pingUserId], $cards)),
         );
     }
 
