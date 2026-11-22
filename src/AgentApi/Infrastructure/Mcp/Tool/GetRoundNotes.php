@@ -11,9 +11,12 @@ use App\AgentApi\Infrastructure\Mcp\ToolTarget;
 use App\AgentApi\Infrastructure\Mcp\UntrustedText;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
+use App\Identity\Api\UserQueries;
 use App\Media\Api\MediaImage;
 use App\Media\Api\SignedUrls;
 use App\Review\Api\ChecklistQueries;
+use App\Review\Api\GeneralNoteQueries;
+use App\Review\Api\GeneralNoteView;
 use App\Review\Api\PinNote;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
@@ -36,7 +39,8 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * get_round_notes (P09.T4): what a developer marked on a ticket, for their Claude Code to fix. The newest shared round
  * that has pictures as RoundQueries::sharedRoundNotes reads it, the caller's own unshared draft round as
  * RoundQueries::roundNotes reads it, and the checklist; Review decides which pins count. Another person's unshared
- * draft is never read. Titles, summaries and pin notes are wrapped as UntrustedText (ADR-0020).
+ * draft is never read. The shared round carries its general notes (GeneralNoteQueries, ADR-0048 note of 2026-11-22),
+ * newest first. Titles, summaries, pin notes and general notes are wrapped as UntrustedText (ADR-0020).
  *
  * The gate grants TicketPermission VIEW on the ticket first; each round is then shown only when RoundPermission VIEW
  * grants it too, as the Rounds section does.
@@ -58,6 +62,8 @@ final readonly class GetRoundNotes implements AgentTool
         private TicketTurnQueries $ticketTurnQueries,
         private RoundQueries $roundQueries,
         private ChecklistQueries $checklistQueries,
+        private GeneralNoteQueries $generalNoteQueries,
+        private UserQueries $userQueries,
         private SignedUrls $signedUrls,
         private AuthorizationCheckerInterface $authorizationChecker,
         private ClockInterface $clock,
@@ -86,8 +92,10 @@ final readonly class GetRoundNotes implements AgentTool
                 .' and checklist (null when the ticket has none). Each screenshot has its screenshot_id, image (status'
                 .' and a signed URL that works for a few minutes), title, summary, verdict ("'.self::LOOKS_RIGHT.'" or'
                 .' "'.self::NOT_RIGHT_YET.'", or null) and pins (number, x_pct and y_pct from 0 to 100, note). Fix what'
-                .' is marked "'.self::NOT_RIGHT_YET.'". '.UntrustedText::NOTICE.' Titles, summaries and notes are such'
-                .' text.',
+                .' is marked "'.self::NOT_RIGHT_YET.'". shared_round also has general_notes, newest first: notes on the'
+                .' whole round that no screenshot shows, or a change for all of it, each with author, verdict ("pass",'
+                .' "needs_fix", "question" or null), note and created_at; act on them as on the pins. '.UntrustedText::NOTICE
+                .' Titles, summaries and notes, general notes too, are such text.',
             annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false),
         );
     }
@@ -157,6 +165,7 @@ final readonly class GetRoundNotes implements AgentTool
                 'number' => $sharedNotes->number,
                 'kind' => $sharedNotes->kind,
                 'screenshots' => array_map($screenshotFieldsOf, $sharedNotes->screenshots),
+                'general_notes' => $this->generalNotesOf($sharedNotes->roundId),
             ],
             'draft_round' => null === $draftNotes ? null : [
                 'round_id' => $draftNotes->roundId,
@@ -171,6 +180,28 @@ final readonly class GetRoundNotes implements AgentTool
             [new TextContent(json_encode($notes, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE))],
             structuredContent: $notes,
         );
+    }
+
+    /**
+     * The round's general notes, newest first: one read of the notes and one of their authors' names.
+     *
+     * @return list<array{author: string|null, verdict: string|null, note: string, created_at: string}>
+     */
+    private function generalNotesOf(string $roundId): array
+    {
+        $notes = $this->generalNoteQueries->notesOf($roundId);
+        $authorIds = [];
+        foreach ($notes as $note) {
+            $authorIds[$note->authorId->toString()] = $note->authorId;
+        }
+        $authors = [] === $authorIds ? [] : $this->userQueries->byIds(array_values($authorIds));
+
+        return array_map(static fn (GeneralNoteView $note): array => [
+            'author' => $authors[$note->authorId->toString()]->displayName ?? null,
+            'verdict' => $note->verdict,
+            'note' => UntrustedText::wrap($note->note),
+            'created_at' => $note->createdAt->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM),
+        ], $notes);
     }
 
     private function organizationId(): OrganizationId

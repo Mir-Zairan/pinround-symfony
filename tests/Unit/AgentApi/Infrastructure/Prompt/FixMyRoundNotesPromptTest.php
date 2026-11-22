@@ -12,8 +12,10 @@ use App\AgentApi\Infrastructure\Prompt\FixMyRoundNotesPrompt;
 use App\Identity\Api\ApiTokenAccess;
 use App\Identity\Api\CurrentApiToken;
 use App\Identity\Api\CurrentUser;
+use App\Identity\Api\UserQueries;
 use App\Media\Api\SignedUrls;
 use App\Review\Api\ChecklistQueries;
+use App\Review\Api\GeneralNoteQueries;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundQueries;
 use App\Review\Domain\Screenshot;
@@ -224,6 +226,8 @@ final class FixMyRoundNotesPromptTest extends TestCase
             self::createStub(TicketTurnQueries::class),
             self::createStub(RoundQueries::class),
             self::createStub(ChecklistQueries::class),
+            self::createStub(GeneralNoteQueries::class),
+            self::createStub(UserQueries::class),
             self::createStub(SignedUrls::class),
             self::createStub(AuthorizationCheckerInterface::class),
             new MockClock('2026-03-02 10:00:00 UTC'),
