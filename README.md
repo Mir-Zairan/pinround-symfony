@@ -10,6 +10,7 @@ AI builds in minutes what used to take days. The person who has to check it firs
 - [Run it in 5 minutes](#run-it-in-5-minutes): one command, then log in
 - [Built with](#built-with): Symfony AI, MCP, Symfony 8.1, PostgreSQL, the extension
 - [Try the loop](#try-the-loop): the shop, the extension and Claude Code, then report, fix and hand over one bug
+- [Turn on pinround's AI](#turn-on-pinrounds-ai): Summarize with AI and Check with AI, with Hugging Face, Anthropic or Ollama
 - [What pinround does today](#what-pinround-does-today): the features built so far
 - [Coming next](#coming-next): the next phases
 - [Good to know](#good-to-know): sample data, start and stop, guides
@@ -42,7 +43,11 @@ make demo
 
 It pulls ready-made images, starts pinround and loads the demo people and their tickets: about 4 minutes (4 min 15 s measured from `git clone` on an empty Docker). Then open https://localhost, accept the browser's warning about the local certificate once, and log in as `mia@acme-foods.example` (tester), `omar@acme-foods.example` (developer) or `lena@acme-foods.example` (lead). The password: `grep DEMO_PASSWORD .env.dev.local`. Stop with `make down`. [More](docs/guides/demo.md).
 
-**What to open first:** log in as Mia and open **Tickets** › "Cart total disappears after a discount code". It is her turn, and its Round 1 shows Omar's fix Before and After with pins (the checklist from the report has no round number). Two more show the rest of the loop: "Search finds nothing for Bread with a capital B" (done) and "Orders filter leaves out the last order" (Mia found more, so it is back with Omar).
+**What to open first:** log in as Mia and open **Tickets** › "Cart total disappears after a discount code". Omar fixed it and Lena approved his code, so it now waits for Mia to test it. Its Round 1 shows Omar's fix Before and After, with pins. The checklist made from Mia's report has no round number.
+
+Two more tickets show the two other ways a ticket can go:
+- **"Search finds nothing for Bread with a capital B"** went all the way: Mia reported it, Omar fixed it, Lena approved the code, Mia tested it and every check passed. It is **Done**.
+- **"Orders filter leaves out the last order"** went back: Mia tested Omar's fix and found one more order still missing. She marked it **Needs changes** and added a round with that screenshot, so it is Omar's turn again.
 
 ## Built with
 - **Symfony AI** (`symfony/ai-platform`): **Summarize with AI** and **Check with AI**, through Hugging Face (the default), Anthropic, or Ollama on the person's laptop.
@@ -82,12 +87,40 @@ All demo people (`@acme-foods.example`): Mia (tester), Omar (developer), Lena (l
 
 Put the bugs back with `git restore demo-shop/src`.
 
+## Turn on pinround's AI
+pinround has its own AI for two buttons: **Check with AI** on **New ticket** (it checks a report before you send it) and **Summarize with AI** on a ticket. They do nothing until you choose one of the ways below. The AI only suggests; a person decides. Claude Code works without this.
+
+The steps use the setup script. Set it once: `S=.claude/skills/pinround-setup/pinround-setup.sh`. At any time, `bash $S ai-status` shows what is set and what is missing.
+
+**Cloud: Hugging Face** (the default provider, so there is no admin step). Ticket text goes to Hugging Face.
+1. Make a token at https://huggingface.co/settings/tokens: type **Fine-grained**, tick **Make calls to Inference Providers**.
+2. Run `bash $S ai-key huggingface` in your own terminal and paste the token. It is not shown. The script tests it with one tiny request, saves it in `.env.dev.local` and restarts the app.
+
+**Cloud: Anthropic.** Ticket text goes to Anthropic.
+1. Make a key at https://console.anthropic.com/settings/keys.
+2. Run `bash $S ai-key anthropic` and paste the key.
+3. Log in as Sara (admin), open **Admin › AI** and under **Cloud AI › Provider** choose **Anthropic (Claude)**.
+
+Instead of the script, Sara can also paste a key for Acme Foods in **Admin › AI › Cloud AI › API key**.
+
+**On your laptop: Ollama** (free; ticket text stays on your laptop).
+1. Install Ollama from https://ollama.com and start it.
+2. Let pinround's page talk to it: set `OLLAMA_ORIGINS=https://localhost` for Ollama and restart it. On Linux: `sudo systemctl edit ollama`, add `[Service]` and `Environment="OLLAMA_ORIGINS=https://localhost"`, then `sudo systemctl restart ollama`.
+3. Get a model: `ollama pull qwen3:4b` (about 2.5 GB).
+4. Run `bash $S ai-status`: the three laptop lines must say `ok`.
+5. As Sara, open **Admin › AI** › **Where the AI runs** and choose **Each person's laptop (Ollama)**, or **Laptop first, cloud when it is off**.
+6. In the header, open **Local AI** and press **Check again**. If the browser asks whether the page may talk to apps on this computer, say yes.
+
+On the laptop only **Summarize with AI** runs for now. Its answer is a proposal; a person makes it the ticket's summary. A team can also run one Ollama server for everyone: set `AI_OLLAMA_URL` ([config](docs/operations/config.md#ai)) and choose **Ollama server** under **Cloud AI › Provider**.
+
+**Try it:** as Mia, open **New ticket**, write a short report and press **Check with AI** (cloud only). On any ticket, press **Summarize with AI**.
+
 ## What pinround does today
 - **Screenshots with pins:** from the web form, the extension (with a floating dock on the page) or Claude Code; up to 5 tries per screenshot; Before and After; full-screen review.
 - **Rounds:** a private draft round to check your own work, shared rounds with a verdict per screenshot, one open round per ticket.
 - **Whose turn:** every ticket says "Now: …, Next: …" in plain words. **Tickets** with search and filters, a **Whose turn?** view and **My reports**.
 - **Claude Code (MCP):** 18 tools and 3 prompts to read tickets and round notes, add screenshots and tries, set verdicts, file report drafts and keep notebooks. Connect by signing in or with a token.
-- **pinround's own AI** (Symfony AI; Hugging Face, Anthropic or Ollama on your laptop): **Summarize with AI** on a ticket, **Check with AI** on **New ticket**.
+- **pinround's own AI** (Symfony AI; Hugging Face, Anthropic or Ollama on your laptop): **Summarize with AI** on a ticket, **Check with AI** on **New ticket** ([turn it on](#turn-on-pinrounds-ai)).
 - **Teamwork:** comments, questions that pause a ticket, pings with a bell, live page updates, duplicate suggestions on report.
 - **Extension notebooks and scenarios:** pin pages of your app, ask Claude Code about them, and play back the test steps it writes.
 - **Safe by default:** each organization is isolated in the database, two-step login, permission checks on every action, a phone layout.
@@ -101,7 +134,7 @@ Put the bugs back with `git restore demo-shop/src`.
 
 ## Good to know
 - **Sample data:** setup adds about 40 sample `SHOP` tickets in every step, so each page has something to show. Your own report gets the next number.
-- **Three tickets that show the loop:** setup also adds three `SHOP` bugs of the demo shop with real screenshots: "Search finds nothing for Bread with a capital B" (done), "Cart total disappears after a discount code" (waiting for Mia in Testing) and "Orders filter leaves out the last order" (back with Omar after Mia found a new order missing). Open their rounds to see Before and After with pins and verdicts.
+- **Three tickets that show the loop:** setup also adds three `SHOP` bugs of the demo shop with real screenshots, pins and verdicts. [What to open first](#run-it-in-5-minutes) says what each one shows.
 - **Home is mostly empty** until P07 is built. Your tickets are under **Tickets**.
 - **Start or stop later:** `make up` / `make down`. A port is taken? Set another in `.env.local`, for example `HTTPS_PORT=8443`.
 - **Beyond the demo:** `make up` builds and starts the same stack for development ([step by step](docs/guides/demo.md#set-up-step-by-step)). A deployment for a team is not ready yet: that is the launch phase (P12); the settings are in [config.md](docs/operations/config.md).
