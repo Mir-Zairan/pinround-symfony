@@ -136,6 +136,19 @@ export async function connect(typedOrigin, browserApi, { fetchFn = defaultFetch,
     const endpoints = await endpointsOf(origin, fetchFn);
     const redirectUri = browserApi.identity.getRedirectURL();
     const clientId = await clientIdOf(origin, redirectUri, endpoints, browserApi.storage.local, fetchFn);
+    try {
+        return await signedInWith(clientId, origin, redirectUri, endpoints, browserApi, fetchFn, randomBytes);
+    } catch (refused) {
+        // A kept client may be one a reset pinround no longer knows (a new make demo): its consent page then shows an
+        // error and no code comes back. Forget it, so the next Connect registers again; Deny keeps it.
+        if (!(refused instanceof ConnectRefused) || DENIED !== refused.message) {
+            await browserApi.storage.local.remove(CLIENT_KEY);
+        }
+        throw refused;
+    }
+}
+
+async function signedInWith(clientId, origin, redirectUri, endpoints, browserApi, fetchFn, randomBytes) {
     const codeVerifier = base64UrlOf(randomBytes(VERIFIER_BYTES));
     const state = base64UrlOf(randomBytes(STATE_BYTES));
     const consentUrl = new URL(endpoints.authorization_endpoint);

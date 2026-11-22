@@ -197,6 +197,27 @@ test('Deny and a closed window keep no token', async () => {
     assert.equal(await loadSettings(closed.storage.local), null);
 });
 
+test('a Connect that gets no code forgets the kept client, so the next one registers again; Deny keeps it', async () => {
+    const server = fakeOAuthServer();
+    let inWindow = async (url) => server.allow(url);
+    const browserApi = fakeBrowser({ webAuthFlow: (url) => inWindow(url) });
+    assert.equal(await connectToPinround(ORIGIN, browserApi, { fetchFn: server.fetchFn }), CONNECTED);
+    assert.equal((await browserApi.storage.local.get(CLIENT_KEY))[CLIENT_KEY].clientId, 'client-1');
+
+    // A reset pinround no longer knows client-1: its consent page shows an error and the window is closed.
+    inWindow = async () => null;
+    await assert.rejects(connectToPinround(ORIGIN, browserApi, { fetchFn: server.fetchFn }), new ConnectRefused(NOT_CONNECTED));
+    assert.deepEqual(await browserApi.storage.local.get(CLIENT_KEY), {});
+
+    inWindow = async (url) => server.allow(url);
+    assert.equal(await connectToPinround(ORIGIN, browserApi, { fetchFn: server.fetchFn }), CONNECTED);
+    assert.equal(server.registrations.length, 2, 'the next Connect registered a new client');
+
+    inWindow = async (url) => `${REDIRECT_URI}?error=access_denied&state=${new URL(url).searchParams.get('state')}`;
+    await assert.rejects(connectToPinround(ORIGIN, browserApi, { fetchFn: server.fetchFn }), new ConnectRefused(DENIED));
+    assert.equal((await browserApi.storage.local.get(CLIENT_KEY))[CLIENT_KEY].clientId, 'client-2', 'Deny keeps the client');
+});
+
 test('an endpoint on another origin is refused before anything is registered', async () => {
     const server = fakeOAuthServer({ discovery: { token_endpoint: 'https://collector.example/oauth/token' } });
     const browserApi = fakeBrowser({ webAuthFlow: async (url) => server.allow(url) });
