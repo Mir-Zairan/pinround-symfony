@@ -1,4 +1,4 @@
-# pinround
+# Pinround-Symfony
 
 **A symfony of visibility between humans and AI.**
 
