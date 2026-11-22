@@ -35,9 +35,9 @@ use App\Ticketing\Api\TicketPageView;
  * Builds the round page of any round kind for one viewer (FR-RND-05, the prototype's Review board): the header, a tab
  * per screenshot, and one screenshot shown large with its pins and a side panel. A review round's screenshots are its
  * screen areas, each with the earlier round's picture of the place; the report's and a shared draft's are the latest
- * try of each chain, numbered as RoundCards numbers them; a checklist round shows the report's, whose pins it checks.
- * The panel lists the pins of both pictures; a pin that is a check item (the report's, a findings round's) carries its
- * state and the checklist buttons the viewer may use.
+ * try of each chain, numbered as RoundCards numbers them. The checklist from the report has no number and so no page
+ * (ADR-0048, note of 2026-11-22). The panel lists the pins of both pictures; a pin that is a check item (the report's,
+ * through the checklist, or a findings round's) carries its state and the checklist buttons the viewer may use.
  *
  * Its reads do not grow with the screenshots or pins: one signing call for the shown pictures, for a round without areas
  * other than a review round, RoundsVisibleTo's read of the one round whose screenshots it shows, for a shared draft its
@@ -68,11 +68,7 @@ final readonly class RoundPages
 
     /** ReviewRoundView's and RoundView's kinds. */
     private const string REPORT = 'report';
-    private const string CHECKLIST = 'checklist';
     private const string REVIEW = 'review';
-
-    /** The report is always Round 0. */
-    private const int REPORT_NUMBER = 0;
 
     public function __construct(
         private SignedUrls $signedUrls,
@@ -166,7 +162,7 @@ final readonly class RoundPages
 
     /**
      * The check items on the pins of the pictures a round without areas shows, the After's and the Before's apart: the
-     * checklist round's on the report's pictures, a findings round's on its own; a self-check round's pins are none.
+     * checklist's on the report's pictures, a findings round's on its own; a self-check round's pins are none.
      * Reads ChecklistQueries once when the report's pictures are shown, to find the checklist round, and ChecklistCards'
      * queries when either side may have items. Runs inside the request transaction whose tenant is the viewer's
      * organization.
@@ -184,7 +180,7 @@ final readonly class RoundPages
         }
         $afterRoundId = match ($round->kind) {
             self::REPORT => $checklistRoundId,
-            self::CHECKLIST, RoundView::DRAFT => $round->id,
+            RoundView::DRAFT => $round->id,
             default => null,
         };
         $beforeRoundId = match ($previousRound?->kind) {
@@ -268,8 +264,8 @@ final readonly class RoundPages
      * order the page numbers them from 1, and the round they belong to. One read of that round alone, through
      * RoundsVisibleTo. Runs inside the request transaction whose tenant is the viewer's organization.
      *
-     * @return array{RoundView, list<RoundScreenshotView>}|null null when there is no round to show the pictures of: a
-     *                                                          checklist round of a ticket without a report
+     * @return array{RoundView, list<RoundScreenshotView>}|null null when the round cannot be read again: it was
+     *                                                          deleted meanwhile
      */
     public function screenshotsOf(VisibleTicket $visible, ReviewRoundView $round): ?array
     {
@@ -318,18 +314,12 @@ final readonly class RoundPages
     }
 
     /**
-     * The round whose screenshots the page shows: the report (Round 0) for a checklist round, the round itself
-     * otherwise, read alone, so a shared draft older than the rounds the ticket page lists is found too. Null when the
-     * ticket has no report.
+     * The round with its screenshots, read alone, so a shared draft older than the rounds the ticket page lists is found
+     * too.
      */
     private function picturesRoundOf(VisibleTicket $visible, ReviewRoundView $round): ?RoundView
     {
-        if (self::CHECKLIST !== $round->kind) {
-            return $this->roundsVisibleTo->sharedRoundOf($visible->ticket->id, $visible->visibility, $round->number);
-        }
-        $report = $this->roundsVisibleTo->sharedRoundOf($visible->ticket->id, $visible->visibility, self::REPORT_NUMBER);
-
-        return self::REPORT === $report?->kind ? $report : null;
+        return $this->roundsVisibleTo->sharedRoundOf($visible->ticket->id, $visible->visibility, $round->number);
     }
 
     /**
@@ -387,8 +377,8 @@ final readonly class RoundPages
      *
      * @param int            $number        from 1, its place in the strip
      * @param RoundView|null $previousRound the hand-off round shared before a shared draft, or the report when there is
-     *                                      none, with its latest tries; null for Round 0, a checklist round and a draft
-     *                                      of a ticket with neither
+     *                                      none, with its latest tries; null for Round 0 and a draft of a ticket with
+     *                                      neither
      */
     private function shownScreenshotOf(TicketPageView $ticket, RoundView $picturesRound, RoundScreenshotView $screenshot, int $number, ?RoundView $previousRound, \DateTimeImmutable $now): ShownScreenshot
     {
@@ -618,7 +608,7 @@ final readonly class RoundPages
 
     /**
      * "shot <when>", then, on an open hand-off round, the round bar's "Ready for" line, which names nobody on a closed
-     * round, the report or a checklist round.
+     * round or the report.
      *
      * @param UserId|null $readyForId as RoundReadyFor::userIdOf gives it on an open hand-off round; null on any other
      */

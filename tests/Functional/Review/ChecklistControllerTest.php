@@ -226,13 +226,14 @@ final class ChecklistControllerTest extends WebTestCase
 
         $this->client->request('POST', $this->itemUrl(2, 'ok'), [
             ChecklistController::CSRF_FIELD => $this->checklistToken(),
-            ChecklistController::RETURN_ROUND_FIELD => '1',
+            ChecklistController::RETURN_ROUND_FIELD => '0',
             ChecklistController::RETURN_SCREENSHOT_FIELD => '1',
             ChecklistController::RETURN_SIDE_FIELD => 'after',
             ChecklistController::RETURN_PIN_FIELD => '2',
         ]);
 
         self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1/rounds/0/focus?screenshot=1&side=after&pin=2', $this->client->getResponse()->headers->get('Location'));
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
         $secondBar = $page->filter('.focus-bar__stop')->eq(1);
