@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Ticketing\UI;
 
+use App\Identity\Api\CurrentTimeZone;
 use App\Identity\Api\UserQueries;
 use App\Identity\Api\UserView;
 use App\Insight\Api\HomeQueries;
@@ -60,6 +61,7 @@ final class WhoseTurnController extends AbstractController
         private readonly RailTeamChoice $railTeamChoice,
         private readonly ProjectRail $projectRail,
         private readonly ClockInterface $clock,
+        private readonly CurrentTimeZone $currentTimeZone,
     ) {
     }
 
@@ -124,9 +126,11 @@ final class WhoseTurnController extends AbstractController
         $keptQuery = [...$viewQuery, ...$railQuery];
         $pageQuery = null === $cursor ? $keptQuery : [...$keptQuery, WhoseTurnCursorParameter::AFTER_QUERY => WhoseTurnCursorParameter::valueOf($cursor)];
 
+        $now = $this->clock->now();
+        $viewerTimeZone = $this->currentTimeZone->zone();
         $cards = [];
         foreach ($groups as $group) {
-            $cards[] = $this->cardOf($group, $actor->userId(), $names, $teamPeopleIds, $openedGroup, $pageQuery, $page->isTicketCountCapped);
+            $cards[] = $this->cardOf($group, $actor->userId(), $names, $teamPeopleIds, $openedGroup, $pageQuery, $page->isTicketCountCapped, $now, $viewerTimeZone);
         }
 
         // A filter change reloads only the cards' frame, so it gets that frame alone: no layout, toolbar or rail.
@@ -170,10 +174,9 @@ final class WhoseTurnController extends AbstractController
      *
      * @return array<string, mixed>
      */
-    private function cardOf(TurnGroup $group, UserId $viewerId, array $names, ?array $teamPeopleIds, ?string $openedGroup, array $pageQuery, bool $isTicketCountCapped): array
+    private function cardOf(TurnGroup $group, UserId $viewerId, array $names, ?array $teamPeopleIds, ?string $openedGroup, array $pageQuery, bool $isTicketCountCapped, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): array
     {
         $cardId = self::cardIdOf($group);
-        $now = $this->clock->now();
         $oldestWaitDays = WhoseTurnText::waitDaysOf($group->oldestWaitingSince, $now);
         $isViewer = null !== $group->turnUserId && $group->turnUserId->equals($viewerId);
         if (null === $group->turnUserId) {
@@ -196,7 +199,7 @@ final class WhoseTurnController extends AbstractController
                 'key' => $ticket->key,
                 'title' => $ticket->title,
                 'verb' => TurnKindVerbs::of($ticket->kind),
-                'wait' => WhoseTurnText::waitOf($waitDays),
+                'wait' => WhoseTurnText::waitOf($ticket->waitingSince, $now, $viewerTimeZone),
                 'isWaitTooLong' => WhoseTurnText::isTooLong($waitDays),
             ];
         }
@@ -206,10 +209,10 @@ final class WhoseTurnController extends AbstractController
             'name' => $isViewer ? WhoseTurnText::YOU : $name,
             'avatarName' => $name,
             'tone' => $isViewer ? 'you' : ($isOutsideTheTeam ? 'outside' : 'team'),
-            'sentence' => WhoseTurnText::sentenceOf($group->ticketCount, $waitsOn, $oldestWaitDays, $isOutsideTheTeam, $isTicketCountCapped),
+            'sentence' => WhoseTurnText::sentenceOf($group->ticketCount, $waitsOn, $group->oldestWaitingSince, $now, $viewerTimeZone, $isOutsideTheTeam, $isTicketCountCapped),
             'meterValue' => min($oldestWaitDays, WhoseTurnText::METER_FULL_DAYS),
             'meterLevel' => WhoseTurnText::meterLevelOf($oldestWaitDays),
-            'meterTitle' => 'Oldest wait: '.WhoseTurnText::waitOf($oldestWaitDays),
+            'meterTitle' => 'Oldest wait: '.WhoseTurnText::waitOf($group->oldestWaitingSince, $now, $viewerTimeZone),
             'rows' => $rows,
             'moreText' => $hiddenCount > 0 && !$isOpened ? 'Show '.number_format($hiddenCount).' more' : null,
             'moreUrl' => $this->generateUrl(self::ROUTE, [...$pageQuery, self::OPEN_QUERY => $group->groupKey(), '_fragment' => $cardId]),

@@ -34,27 +34,36 @@ final class WhoseTurnText
     }
 
     /**
-     * "today", "1 day" or "12 days".
+     * "today", "since yesterday", "1 day" or "12 days". A wait under a day is "today" only when it began on the viewer's
+     * calendar day, as Home says it, so a turn that came at 22:00 yesterday is not "today" at 09:00.
      */
-    public static function waitOf(int $waitDays): string
+    public static function waitOf(\DateTimeImmutable $since, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): string
     {
-        return match ($waitDays) {
-            0 => 'today',
-            1 => '1 day',
-            default => $waitDays.' days',
+        $waitDays = self::waitDaysOf($since, $now);
+
+        return match (true) {
+            $waitDays > 1 => $waitDays.' days',
+            1 === $waitDays => '1 day',
+            self::beganBeforeTheDayOf($since, $now, $viewerTimeZone) => 'since yesterday',
+            default => 'today',
         };
     }
 
     /**
-     * "6 tickets wait on Mia · the oldest for 12 days", "1 ticket waits on you · since today", with
-     * OUTSIDE_THE_TEAM added for someone outside the team, and "6+ tickets wait on …" when the search was capped.
+     * "6 tickets wait on Mia · the oldest for 12 days", "1 ticket waits on you · since today" (or "since yesterday", on
+     * the viewer's calendar as waitOf), with OUTSIDE_THE_TEAM added for someone outside the team, and "6+ tickets
+     * wait on …" when the search was capped.
      *
      * @param string $waitsOn             the person's first name, "you", or the label
      * @param bool   $isTicketCountCapped true when the search found more tickets than it counts, so the card may hold more
      */
-    public static function sentenceOf(int $ticketCount, string $waitsOn, int $oldestWaitDays, bool $isOutsideTheTeam, bool $isTicketCountCapped): string
+    public static function sentenceOf(int $ticketCount, string $waitsOn, \DateTimeImmutable $oldestWaitingSince, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone, bool $isOutsideTheTeam, bool $isTicketCountCapped): string
     {
-        $wait = 0 === $oldestWaitDays ? 'since today' : 'for '.self::waitOf($oldestWaitDays);
+        $wait = match (true) {
+            self::waitDaysOf($oldestWaitingSince, $now) > 0 => 'for '.self::waitOf($oldestWaitingSince, $now, $viewerTimeZone),
+            self::beganBeforeTheDayOf($oldestWaitingSince, $now, $viewerTimeZone) => 'since yesterday',
+            default => 'since today',
+        };
         $isOneTicket = 1 === $ticketCount && !$isTicketCountCapped;
 
         return \sprintf(
@@ -94,5 +103,10 @@ final class WhoseTurnText
             TicketListText::countOf($ticketCount, $isTicketCountCapped),
             1 === $ticketCount && !$isTicketCountCapped ? 'ticket' : 'tickets',
         );
+    }
+
+    private static function beganBeforeTheDayOf(\DateTimeImmutable $since, \DateTimeImmutable $now, \DateTimeZone $viewerTimeZone): bool
+    {
+        return $since->setTimezone($viewerTimeZone)->format('Y-m-d') < $now->setTimezone($viewerTimeZone)->format('Y-m-d');
     }
 }

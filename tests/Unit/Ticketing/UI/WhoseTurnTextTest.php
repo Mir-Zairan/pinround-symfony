@@ -12,6 +12,7 @@ use PHPUnit\Framework\TestCase;
 final class WhoseTurnTextTest extends TestCase
 {
     private const string NOW = '2026-11-06 12:00:00 UTC';
+    private const string KOLKATA_NOW = '2026-11-06 09:00:00+05:30';
 
     /**
      * @return iterable<string, array{string, int}>
@@ -32,30 +33,62 @@ final class WhoseTurnTextTest extends TestCase
         self::assertSame($waitDays, WhoseTurnText::waitDaysOf(new \DateTimeImmutable($since), new \DateTimeImmutable(self::NOW)));
     }
 
-    #[Test]
-    public function aWaitReadsTodayOneDayOrDays(): void
+    /**
+     * NOW is 09:00 on 6 Nov in Kolkata (UTC+05:30); a wait under a day says "today" only when it began on that date there.
+     *
+     * @return iterable<string, array{string, string}>
+     */
+    public static function waitWords(): iterable
     {
-        self::assertSame(['today', '1 day', '2 days', '41 days'], array_map(WhoseTurnText::waitOf(...), [0, 1, 2, 41]));
+        yield 'came at 00:30 today' => ['2026-11-06 00:30:00+05:30', 'today'];
+        yield 'came at 22:00 yesterday, eleven hours ago' => ['2026-11-05 22:00:00+05:30', 'since yesterday'];
+        yield 'came after now' => ['2026-11-06 10:00:00+05:30', 'today'];
+        yield 'one day' => ['2026-11-05 08:00:00+05:30', '1 day'];
+        yield 'two days' => ['2026-11-04 08:00:00+05:30', '2 days'];
+        yield 'forty-one days' => ['2026-09-26 08:00:00+05:30', '41 days'];
+    }
+
+    #[Test]
+    #[DataProvider('waitWords')]
+    public function aWaitReadsTodayOnTheViewersCalendarDayElseSinceYesterdayOrDays(string $since, string $wait): void
+    {
+        self::assertSame($wait, WhoseTurnText::waitOf(new \DateTimeImmutable($since), new \DateTimeImmutable(self::KOLKATA_NOW), new \DateTimeZone('Asia/Kolkata')));
     }
 
     /**
-     * @return iterable<string, array{int, string, int, bool, string}>
+     * The same instant, 22:00 yesterday in Kolkata, is 16:30 on 5 Nov in UTC, also yesterday, but 01:30 on 6 Nov in
+     * Tokyo: the day is the viewer's, not the server's.
+     */
+    #[Test]
+    public function todayIsTheViewersCalendarDayNotTheServers(): void
+    {
+        $since = new \DateTimeImmutable('2026-11-05 22:00:00+05:30');
+        $now = new \DateTimeImmutable(self::KOLKATA_NOW);
+
+        self::assertSame('since yesterday', WhoseTurnText::waitOf($since, $now, new \DateTimeZone('UTC')));
+        self::assertSame('today', WhoseTurnText::waitOf($since, $now, new \DateTimeZone('Asia/Tokyo')));
+    }
+
+    /**
+     * @return iterable<string, array{int, string, string, bool, string}>
      */
     public static function sentences(): iterable
     {
-        yield 'many tickets' => [6, 'Mia', 12, false, '6 tickets wait on Mia · the oldest for 12 days'];
-        yield 'outside the team' => [3, 'Customer', 1, true, '3 tickets wait on Customer · the oldest for 1 day · outside the team'];
-        yield 'one ticket' => [1, 'you', 2, false, '1 ticket waits on you · for 2 days'];
-        yield 'one ticket of today' => [1, 'Omar', 0, false, '1 ticket waits on Omar · since today'];
-        yield 'many of today' => [2, 'Omar', 0, false, '2 tickets wait on Omar · the oldest since today'];
-        yield 'thousands' => [1200, 'Omar', 70, false, '1,200 tickets wait on Omar · the oldest for 70 days'];
+        yield 'many tickets' => [6, 'Mia', '2026-10-25 08:00:00+05:30', false, '6 tickets wait on Mia · the oldest for 12 days'];
+        yield 'outside the team' => [3, 'Customer', '2026-11-05 08:00:00+05:30', true, '3 tickets wait on Customer · the oldest for 1 day · outside the team'];
+        yield 'one ticket' => [1, 'you', '2026-11-04 08:00:00+05:30', false, '1 ticket waits on you · for 2 days'];
+        yield 'one ticket of today' => [1, 'Omar', '2026-11-06 00:30:00+05:30', false, '1 ticket waits on Omar · since today'];
+        yield 'many of today' => [2, 'Omar', '2026-11-06 00:30:00+05:30', false, '2 tickets wait on Omar · the oldest since today'];
+        yield 'one ticket of 22:00 yesterday' => [1, 'Omar', '2026-11-05 22:00:00+05:30', false, '1 ticket waits on Omar · since yesterday'];
+        yield 'many of 22:00 yesterday' => [2, 'Omar', '2026-11-05 22:00:00+05:30', false, '2 tickets wait on Omar · the oldest since yesterday'];
+        yield 'thousands' => [1200, 'Omar', '2026-08-28 08:00:00+05:30', false, '1,200 tickets wait on Omar · the oldest for 70 days'];
     }
 
     #[Test]
     #[DataProvider('sentences')]
-    public function theSentenceSaysHowManyWaitOnWhomAndForHowLong(int $ticketCount, string $waitsOn, int $oldestWaitDays, bool $isOutsideTheTeam, string $sentence): void
+    public function theSentenceSaysHowManyWaitOnWhomAndForHowLong(int $ticketCount, string $waitsOn, string $oldestWaitingSince, bool $isOutsideTheTeam, string $sentence): void
     {
-        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, $waitsOn, $oldestWaitDays, $isOutsideTheTeam, false));
+        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, $waitsOn, new \DateTimeImmutable($oldestWaitingSince), new \DateTimeImmutable(self::KOLKATA_NOW), new \DateTimeZone('Asia/Kolkata'), $isOutsideTheTeam, false));
     }
 
     #[Test]
@@ -96,7 +129,7 @@ final class WhoseTurnTextTest extends TestCase
     #[DataProvider('cappedSentences')]
     public function aCappedSearchSaysTheCardMayHoldMore(int $ticketCount, string $sentence): void
     {
-        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, 'Mia', 12, false, true));
+        self::assertSame($sentence, WhoseTurnText::sentenceOf($ticketCount, 'Mia', new \DateTimeImmutable('2026-10-25 08:00:00+05:30'), new \DateTimeImmutable(self::KOLKATA_NOW), new \DateTimeZone('Asia/Kolkata'), false, true));
     }
 
     #[Test]
