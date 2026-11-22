@@ -18,6 +18,7 @@ final readonly class ChecklistRow
      * @param string $stateClass      the chip's colour class, for example "check-state--fixed"
      * @param bool   $mayMarkFixed    whether the row shows "Mark fixed"
      * @param bool   $mayCheck        whether the row shows "OK" and "Not fixed"
+     * @param bool   $mayUndoCheck    whether the row shows "Undo" beside a check, OK or not fixed
      * @param int    $picturePosition the place of its pin's chain of tries among that round's chains, from 0, which
      *                                with $pinNumber finds the pin on the round page (RoundPages::checkKeyOf)
      */
@@ -30,8 +31,17 @@ final readonly class ChecklistRow
         public string $stateClass,
         public bool $mayMarkFixed,
         public bool $mayCheck,
+        public bool $mayUndoCheck,
         public int $picturePosition,
     ) {
+    }
+
+    /**
+     * Whether the row shows any button, so its form needs a token.
+     */
+    public function hasControls(): bool
+    {
+        return $this->mayMarkFixed || $this->mayCheck || $this->mayUndoCheck;
     }
 
     public function markFixedId(): string
@@ -50,7 +60,9 @@ final readonly class ChecklistRow
     }
 
     /**
-     * @return string|null the id of the row's first button; null for a row with none
+     * "Undo" is left out: after a check the focus moves on to the next pin to check, not back to the one just checked.
+     *
+     * @return string|null the id of the row's first button that moves the item forward; null for a row with none
      */
     public function firstControlId(): ?string
     {

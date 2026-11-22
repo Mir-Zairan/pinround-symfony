@@ -9,7 +9,8 @@ use App\SharedKernel\Domain\UserId;
 
 /**
  * One line of a ticket's checklist round: a pin of its Round 0 to check (P05.T6). It starts open; marking it fixed
- * asks for a check, which confirms it OK or sends it back as not fixed. OK is the end. A refused move changes nothing.
+ * asks for a check, which confirms it OK or sends it back as not fixed. OK is the end, unless the check is undone, which
+ * puts the item back to marked fixed. A refused move changes nothing.
  */
 final class CheckItem
 {
@@ -88,6 +89,25 @@ final class CheckItem
         }
 
         $this->moveTo(CheckItemState::NotFixed, $actorId, $checkedAt);
+    }
+
+    /**
+     * Takes back a check, OK or not fixed, so the item is marked fixed and waits for its check again.
+     *
+     * @return CheckItemState the state the check had put the item in, Ok or NotFixed
+     *
+     * @throws \DomainException when the item is not checked OK or sent back as not fixed; the item stays as it was
+     */
+    public function undoCheck(UserId $actorId, \DateTimeImmutable $undoneAt): CheckItemState
+    {
+        $undoneState = $this->state;
+        if (CheckItemState::Ok !== $undoneState && CheckItemState::NotFixed !== $undoneState) {
+            throw new \DomainException('Only a check confirmed OK or sent back as not fixed can be undone.');
+        }
+
+        $this->moveTo(CheckItemState::Fixed, $actorId, $undoneAt);
+
+        return $undoneState;
     }
 
     public function id(): CheckItemId

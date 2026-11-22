@@ -210,8 +210,8 @@ final class FindingsRoundChecklistTest extends WebTestCase
 
         self::assertSame('Pin 2 sent back.', $this->toastOfTheStream(200));
         $streamed = $this->streamedFindings();
-        self::assertSame([['1', self::CUT_OFF_NOTE, 'Checked OK', []], ['2', self::DOUBLE_WARNING_NOTE, 'Not fixed', []]], $this->rowsOf($streamed));
-        self::assertSame(['checklist-'.$this->miasDraftId.'-heading'], $this->autofocusedIdsOf($streamed), 'With no button left, focus goes to the checklist heading.');
+        self::assertSame([['1', self::CUT_OFF_NOTE, 'Checked OK', ['Undo']], ['2', self::DOUBLE_WARNING_NOTE, 'Not fixed', ['Undo']]], $this->rowsOf($streamed));
+        self::assertSame(['checklist-'.$this->miasDraftId.'-heading'], $this->autofocusedIdsOf($streamed), 'With only Undo left, focus goes to the checklist heading.');
         self::assertSame('-1', $streamed->filter('h4')->attr('tabindex'));
         self::assertSame([1 => 'ok', 2 => 'not_fixed'], $this->storedStates());
         self::assertSame('fixed', $this->checklistItemState());
@@ -352,7 +352,7 @@ final class FindingsRoundChecklistTest extends WebTestCase
         self::assertSame('/t/SHOP-1/rounds/2?screenshot=1#round-check-'.$retakeItem, $this->client->getResponse()->headers->get('Location'));
         $page = $this->client->followRedirect();
         self::assertResponseStatusCodeSame(200);
-        self::assertSame([[self::CUT_OFF_NOTE, 'Checked OK', []]], self::pinRowsOf($page->filter('.round-pin[data-pin-list="after"]')));
+        self::assertSame([[self::CUT_OFF_NOTE, 'Checked OK', ['Undo']]], self::pinRowsOf($page->filter('.round-pin[data-pin-list="after"]')));
         self::assertSame([$retakeItem => 'ok', $checkoutItem => 'open'], $this->statesOf([$retakeItem, $checkoutItem]));
     }
 

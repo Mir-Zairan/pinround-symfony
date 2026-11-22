@@ -98,6 +98,10 @@ final class TicketHistorySentencesTest extends TestCase
         yield 'a pin verdict with no words' => [new ReviewChange(ReviewChange::PIN_VERDICT_SET, 'maybe', 2, 'Totals'), 'Omar changed the verdict on pin 2 in area Totals'];
         yield 'a pin verdict undone' => [new ReviewChange(ReviewChange::PIN_VERDICT_UNDONE, 'fixed', 2, 'Per product'), 'Omar undid the verdict on pin 2 in area Per product'];
         yield 'a pin verdict undone on a pin with no labels' => [new ReviewChange(ReviewChange::PIN_VERDICT_UNDONE, 'still_wrong', null, null), 'Omar undid the verdict on a pin in an area'];
+        yield 'a checklist OK undone' => [new ReviewChange(ReviewChange::CHECK_UNDONE, 'ok', 2, null), 'Omar undid Checked OK on pin 2 of the checklist'];
+        yield 'a checklist Not fixed undone' => [new ReviewChange(ReviewChange::CHECK_UNDONE, 'not_fixed', 12, null), 'Omar undid Not fixed on pin 12 of the checklist'];
+        yield 'a checklist check undone on a pin with no number' => [new ReviewChange(ReviewChange::CHECK_UNDONE, 'ok', null, null), 'Omar undid Checked OK on a pin of the checklist'];
+        yield 'a checklist check undone in a state with no words' => [new ReviewChange(ReviewChange::CHECK_UNDONE, 'open', 2, null), 'Omar undid the check on pin 2 of the checklist'];
         yield 'an area verdict Pass' => [new ReviewChange(ReviewChange::AREA_VERDICT_SAVED, 'pass', null, 'Totals'), 'Omar gave area Totals: Pass'];
         yield 'an area verdict Needs fix' => [new ReviewChange(ReviewChange::AREA_VERDICT_SAVED, 'needs_fix', null, 'Totals'), 'Omar gave area Totals: Needs fix'];
         yield 'an area verdict Question' => [new ReviewChange(ReviewChange::AREA_VERDICT_SAVED, 'question', null, 'Totals'), 'Omar gave area Totals: Question'];

@@ -62,4 +62,15 @@ interface ChecklistCommands
      * @throws \LogicException  when no transaction is open or no tenant is set
      */
     public function markNotFixed(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange;
+
+    /**
+     * Takes back a check, OK or not fixed, so the item is marked fixed and waits for its check again; publishes
+     * ChecklistCheckUndone and clears pings as markFixed. The caller must have been granted CHECK on the item, as for
+     * markOk.
+     *
+     * @throws ChecklistRefused NOT_FOUND (answer 404); otherwise the reason to show, such as an item not checked;
+     *                          nothing is saved, published or cleared
+     * @throws \LogicException  when no transaction is open or no tenant is set
+     */
+    public function undoCheck(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange;
 }

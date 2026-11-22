@@ -111,6 +111,9 @@ final readonly class TicketHistorySentences
             ReviewChange::CHECK_ITEM_CHANGED => isset(self::CHECK_ITEM_STATES[$change->outcome])
                 ? \sprintf('set %s on the checklist to %s', $pin, self::CHECK_ITEM_STATES[$change->outcome])
                 : \sprintf('changed %s on the checklist', $pin),
+            ReviewChange::CHECK_UNDONE => isset(self::CHECK_ITEM_STATES[$change->outcome])
+                ? \sprintf('undid %s on %s of the checklist', self::CHECK_ITEM_STATES[$change->outcome], $pin)
+                : \sprintf('undid the check on %s of the checklist', $pin),
             ReviewChange::PIN_VERDICT_SET => isset(self::PIN_VERDICTS[$change->outcome])
                 ? \sprintf('set %s in %s to %s', $pin, $area, self::PIN_VERDICTS[$change->outcome])
                 : \sprintf('changed the verdict on %s in %s', $pin, $area),

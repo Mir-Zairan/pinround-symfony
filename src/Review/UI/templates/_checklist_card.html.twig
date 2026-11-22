@@ -26,7 +26,7 @@
                     <p class="checklist__note" id="{{ noteId }}">{{ row.note }}</p>
                 </div>
                 <twig:Tag class="check-state {{ row.stateClass }}">{{ row.stateLabel }}</twig:Tag>
-                {% if row.mayMarkFixed or row.mayCheck %}
+                {% if row.hasControls %}
                     <div class="checklist__actions">
                         {% if row.mayMarkFixed %}
                             <form method="post" action="{{ path(constant(checklistController ~ '::MARK_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
@@ -42,6 +42,12 @@
                             <form method="post" action="{{ path(constant(checklistController ~ '::MARK_NOT_FIXED_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
                                 <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
                                 <twig:Button type="submit" variant="outline" size="sm" aria-describedby="{{ pinId }} {{ noteId }}">Not fixed</twig:Button>
+                            </form>
+                        {% endif %}
+                        {% if row.mayUndoCheck %}
+                            <form method="post" action="{{ path(constant(checklistController ~ '::UNDO_CHECK_ROUTE'), {key: ticketKey, itemId: row.itemId}) }}" class="checklist__form" data-turbo-frame="_top" data-failed-toast="{{ saveFailedToast }}">
+                                <input type="hidden" name="{{ csrfField }}" value="{{ csrfToken }}">
+                                <twig:Button type="submit" variant="text" size="sm" aria-describedby="{{ pinId }} {{ noteId }}">Undo</twig:Button>
                             </form>
                         {% endif %}
                     </div>

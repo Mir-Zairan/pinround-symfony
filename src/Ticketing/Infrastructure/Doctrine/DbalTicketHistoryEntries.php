@@ -24,7 +24,7 @@ final readonly class DbalTicketHistoryEntries implements TicketHistoryEntries
         .' FROM tkt_ticket_event'
         .' WHERE organization_id = CAST(:organization AS uuid) AND ticket_id = CAST(:ticket AS uuid)'
         .' AND at >= CAST(:ticket_created_at AS timestamptz)'
-        ." AND type IN ('".DbalTicketHistory::MOVED."', '".ReviewChange::CHECK_ITEM_CHANGED."', '".ReviewChange::PIN_VERDICT_SET."', '".ReviewChange::PIN_VERDICT_UNDONE."', '".ReviewChange::AREA_VERDICT_SAVED."')"
+        ." AND type IN ('".DbalTicketHistory::MOVED."', '".ReviewChange::CHECK_ITEM_CHANGED."', '".ReviewChange::PIN_VERDICT_SET."', '".ReviewChange::PIN_VERDICT_UNDONE."', '".ReviewChange::AREA_VERDICT_SAVED."', '".ReviewChange::CHECK_UNDONE."')"
         .' ORDER BY at DESC, id DESC'
         .' LIMIT '.self::LATEST_COUNT;
 

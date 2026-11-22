@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Review\Application\Checklist;
 use App\Review\Api\CheckItemChange;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\ChecklistRefused;
+use App\Review\Api\Event\ChecklistCheckUndone;
 use App\Review\Api\Event\ChecklistItemChanged;
 use App\Review\Application\Checklist\UseCaseChecklistCommands;
 use App\Review\Domain\CheckItem;
@@ -247,6 +248,40 @@ final class UseCaseChecklistCommandsTest extends TestCase
         self::assertSame(['not_fixed', 'fixed'], array_map(static fn (object $event): string => $event instanceof ChecklistItemChanged ? $event->state : '', $this->events->published()));
     }
 
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function checksToUndo(): iterable
+    {
+        yield 'an OK' => ['markOk', 'ok'];
+        yield 'a not fixed' => ['markNotFixed', 'not_fixed'];
+    }
+
+    #[Test]
+    #[DataProvider('checksToUndo')]
+    public function miaUndoesHerCheckAndThePinIsBackToCheck(string $check, string $undoneState): void
+    {
+        $item = $this->secondItemOfAcmeChecklist();
+        $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markFixed(new UserId(self::OMAR), new \DateTimeImmutable(self::CREATED_AT)));
+        if ('markOk' === $check) {
+            $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markOk(new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT)));
+        } else {
+            $this->moveStoredItem($item, static fn (CheckItem $read) => $read->markNotFixed(new UserId(self::MIA), new \DateTimeImmutable(self::CREATED_AT)));
+        }
+
+        $change = $this->commands->undoCheck($item->id()->toString(), new UserId(self::MIA), new \DateTimeImmutable(self::NOW));
+
+        self::assertEquals(new CheckItemChange(2, ChecklistCommands::STATE_FIXED, 2), $change);
+        $stored = $this->storedItem($item);
+        self::assertSame([CheckItemState::Fixed, self::MIA, self::NOW], [$stored->state(), $stored->changedBy()?->toString(), $stored->changedAt()?->format('Y-m-d H:i:sP')]);
+        self::assertSame([$item->id()->toString()], $this->checklists->lockedItemIds);
+        self::assertEquals(
+            [new ChecklistCheckUndone(self::ACME_FOODS, self::TICKET, $item->roundId()->toString(), $item->id()->toString(), $undoneState, self::MIA, new \DateTimeImmutable(self::NOW))],
+            $this->events->published(),
+        );
+        self::assertEquals([[self::ACME_FOODS, self::TICKET, self::MIA, new \DateTimeImmutable(self::NOW)]], $this->pingClearing->calls());
+    }
+
     #[Test]
     public function anIdInUpperCaseNamesTheSameItem(): void
     {
@@ -271,6 +306,8 @@ final class UseCaseChecklistCommandsTest extends TestCase
         yield 'confirming an OK item OK again' => ['markOk', CheckItemState::Ok, 'Only a check marked fixed can be confirmed OK.'];
         yield 'sending back an open item' => ['markNotFixed', null, 'Only a check marked fixed can be sent back as not fixed.'];
         yield 'sending back an OK item' => ['markNotFixed', CheckItemState::Ok, 'Only a check marked fixed can be sent back as not fixed.'];
+        yield 'undoing the check of an open item' => ['undoCheck', null, 'Only a check confirmed OK or sent back as not fixed can be undone.'];
+        yield 'undoing the check of an item marked fixed' => ['undoCheck', CheckItemState::Fixed, 'Only a check confirmed OK or sent back as not fixed can be undone.'];
     }
 
     #[Test]
@@ -317,7 +354,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
     #[DataProvider('itemsTheTenantHasNot')]
     public function anItemTheTenantHasNotIsNotFoundForEveryCommand(string $itemId): void
     {
-        foreach (['markFixed', 'markOk', 'markNotFixed'] as $command) {
+        foreach (['markFixed', 'markOk', 'markNotFixed', 'undoCheck'] as $command) {
             $refusal = $this->refusalOf($command, $itemId);
 
             self::assertSame(ChecklistRefused::NOT_FOUND, $refusal->getMessage(), $command);
@@ -507,6 +544,7 @@ final class UseCaseChecklistCommandsTest extends TestCase
                 'markFixed' => $this->commands->markFixed($itemId, new UserId(self::OMAR), new \DateTimeImmutable(self::NOW)),
                 'markOk' => $this->commands->markOk($itemId, new UserId(self::MIA), new \DateTimeImmutable(self::NOW)),
                 'markNotFixed' => $this->commands->markNotFixed($itemId, new UserId(self::MIA), new \DateTimeImmutable(self::NOW)),
+                'undoCheck' => $this->commands->undoCheck($itemId, new UserId(self::MIA), new \DateTimeImmutable(self::NOW)),
                 default => throw new \LogicException('No such command.'),
             };
         } catch (ChecklistRefused $refusal) {

@@ -46,4 +46,9 @@ final class RecordingChecklistMarks implements ChecklistCommands
     {
         throw new \LogicException('set_verdict never sends an item back.');
     }
+
+    public function undoCheck(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
+    {
+        throw new \LogicException('set_verdict never undoes a check.');
+    }
 }

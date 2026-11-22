@@ -6,7 +6,7 @@
 {% if rows is empty %}
     <p class="round-panel__empty">{{ emptyMessage }}</p>
 {% else %}
-    {% set hasControls = rows|filter(row => row.check is not null and (row.check.mayMarkFixed or row.check.mayCheck)) is not empty %}
+    {% set hasControls = rows|filter(row => row.check is not null and row.check.hasControls) is not empty %}
     {% set csrfToken = hasControls ? csrf_token(checklistCsrfId) : null %}
     <ol class="round-panel__pins">
         {% for row in rows %}

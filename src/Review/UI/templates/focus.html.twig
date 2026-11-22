@@ -62,7 +62,7 @@
                 {% set focusPinField = constant(verdictController ~ '::FOCUS_PIN_FIELD') %}
                 {% set csrfToken = page.mayGiveVerdicts ? csrf_token(verdictCsrfId) : null %}
                 {% set checklistController = 'App\\Review\\UI\\Controller\\ChecklistController' %}
-                {% set hasCheckControls = page.stops|filter(stop => stop.check is not null and (stop.check.mayMarkFixed or stop.check.mayCheck)) is not empty %}
+                {% set hasCheckControls = page.stops|filter(stop => stop.check is not null and stop.check.hasControls) is not empty %}
                 {% set checklistToken = hasCheckControls ? csrf_token(checklistCsrfId) : null %}
                 <div class="focus-bar" aria-live="polite">
                     {% for stop in page.stops %}
@@ -77,8 +77,8 @@
                                 <div class="focus-bar__text">
                                     <h2 class="focus-bar__label" id="focus-pin-{{ stop.position }}-label">{{ stop.label }}</h2>
                                     {#- tabindex: a long note scrolls inside the bar (review.css), and a keyboard scrolls only what it can focus. -#}
-                                    {#- A check item with no button left, as after OK, gives the focus to its note, which keeps the person in the bar. -#}
-                                    {% set isNoteFocused = isCurrent and not page.mayGiveVerdicts and stop.check is not null and not stop.check.mayMarkFixed and not stop.check.mayCheck %}
+                                    {#- A check item with no button, as for someone who only reads, gives the focus to its note, which keeps the person in the bar. -#}
+                                    {% set isNoteFocused = isCurrent and not page.mayGiveVerdicts and stop.check is not null and not stop.check.hasControls %}
                                     <p class="focus-bar__note" tabindex="0"{% if isNoteFocused %} autofocus{% endif %}>{% if stop.note|trim is same as('') %}(no note){% else %}{{ stop.note }}{% endif %}</p>
                                 </div>
                                 {% if page.mayGiveVerdicts %}

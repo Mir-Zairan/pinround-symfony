@@ -63,14 +63,14 @@ final readonly class ChecklistCard
         $this->headline = $isFindings ? self::FINDINGS_HEADLINE : self::HEADLINE;
         $this->description = $isFindings ? self::FINDINGS_DESCRIPTION : self::DESCRIPTION;
         $this->status = \sprintf('%d of %d checked OK', $checkedOkCount, \count($rows));
-        $this->hasControls = [] !== array_filter($rows, static fn (ChecklistRow $row): bool => null !== $row->firstControlId());
+        $this->hasControls = [] !== array_filter($rows, static fn (ChecklistRow $row): bool => $row->hasControls());
     }
 
     /**
      * The checklist round's card, or the "Checklist" part of a findings round's card.
      *
      * @param bool $mayMarkFixed ChecklistPermission MARK_FIXED, granted on the ticket's items alike
-     * @param bool $mayCheck     ChecklistPermission CHECK, granted on the ticket's items alike
+     * @param bool $mayCheck     ChecklistPermission CHECK, granted on the ticket's items alike; it also undoes a check
      *
      * @throws \LogicException for an item state ChecklistCommands does not name, or an item without its picture
      */
@@ -106,6 +106,7 @@ final readonly class ChecklistCard
                 $class,
                 $mayMarkFixed && \in_array($item->state, [ChecklistCommands::STATE_OPEN, ChecklistCommands::STATE_NOT_FIXED], true),
                 $mayCheck && ChecklistCommands::STATE_FIXED === $item->state,
+                $mayCheck && \in_array($item->state, [ChecklistCommands::STATE_OK, ChecklistCommands::STATE_NOT_FIXED], true),
                 $picture->position,
             );
         }, $roundChecklist->checklist->items);

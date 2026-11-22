@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Ticketing\Infrastructure\Messenger;
 
 use App\Review\Api\Event\AreaVerdictSaved;
+use App\Review\Api\Event\ChecklistCheckUndone;
 use App\Review\Api\Event\ChecklistItemChanged;
 use App\Review\Api\Event\PinVerdictSet;
 use App\Review\Api\Event\PinVerdictUndone;
@@ -22,13 +23,13 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
  * Writes one tkt_ticket_event row per checklist or verdict change of a ticket's rounds (P05.T7), once per message
  * however often it is delivered. It runs in worker-notify on event.bus, in the bus's transaction under the event's
  * organization, keeps the event's time, and reads the pin number and area name as they are when it runs. It handles
- * these four events by name, not ReviewEvent: a Review event it has no line for must pass by, as a throw here would
+ * these five events by name, not ReviewEvent: a Review event it has no line for must pass by, as a throw here would
  * roll back the other handlers of that delivery.
  */
 final readonly class RecordReviewChangesHandler
 {
     /**
-     * The OnceOnlyHandling name of all four methods, as a message is only ever one of the events; kept when the class
+     * The OnceOnlyHandling name of all five methods, as a message is only ever one of the events; kept when the class
      * is renamed, or redelivered events would be recorded again.
      */
     public const string HANDLER_NAME = 'ticketing.record_review_change';
@@ -46,6 +47,17 @@ final readonly class RecordReviewChangesHandler
         $this->record($event, fn (): ReviewChange => new ReviewChange(
             ReviewChange::CHECK_ITEM_CHANGED,
             $event->state,
+            $this->reviewChangeLabels->checkItemPinNumberOf($event->itemId),
+            null,
+        ));
+    }
+
+    #[AsMessageHandler(bus: 'event.bus')]
+    public function onChecklistCheckUndone(ChecklistCheckUndone $event): void
+    {
+        $this->record($event, fn (): ReviewChange => new ReviewChange(
+            ReviewChange::CHECK_UNDONE,
+            $event->undoneState,
             $this->reviewChangeLabels->checkItemPinNumberOf($event->itemId),
             null,
         ));

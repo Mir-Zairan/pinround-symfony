@@ -150,7 +150,7 @@ final class ChecklistControllerTest extends WebTestCase
         $rows = $page->filter('.round-pin[data-pin-list="after"]');
         self::assertSame(['Open', 'Fixed · to check', 'Checked OK', 'Not fixed', 'Fixed · to check'], $rows->filter('.check-state')->each(static fn (Crawler $chip): string => $chip->text()));
         self::assertSame(
-            [[], ['OK', 'Not fixed'], [], [], ['OK', 'Not fixed']],
+            [[], ['OK', 'Not fixed'], ['Undo'], ['Undo'], ['OK', 'Not fixed']],
             $rows->each(static fn (Crawler $row): array => $row->filter('button')->each(static fn (Crawler $button): string => $button->text())),
         );
         $okForm = $rows->eq(4)->filter('form')->first();
@@ -238,9 +238,15 @@ final class ChecklistControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $secondBar = $page->filter('.focus-bar__stop')->eq(1);
         self::assertSame('Checked OK', $secondBar->filter('.check-state')->text());
-        self::assertCount(0, $secondBar->filter('form'));
-        self::assertSame(['focus-bar__note'], $page->filter('.focus-bar [autofocus]')->each(static fn (Crawler $control): string => (string) $control->attr('class')), 'With no button left, the shown bar\'s note takes the focus.');
-        self::assertCount(1, $secondBar->filter('.focus-bar__note[autofocus]'));
+        self::assertSame(['Undo'], $secondBar->filter('form button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame($this->itemUrl(2, 'undo-check'), $secondBar->filter('form')->attr('action'));
+        self::assertSame(['Undo'], $page->filter('.focus-bar [autofocus]')->each(static fn (Crawler $control): string => $control->text()), 'The check\'s Undo takes the focus, so a slip is one key away.');
+
+        $this->logIn($this->client, $this->people['Lena']);
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/0/focus?screenshot=1&pin=2');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $page->filter('.focus-bar form'), 'The lead checks nothing.');
+        self::assertSame(['focus-bar__note'], $page->filter('.focus-bar [autofocus]')->each(static fn (Crawler $control): string => (string) $control->attr('class')), 'With no button, the shown bar\'s note takes the focus.');
     }
 
     #[Test]
@@ -249,7 +255,7 @@ final class ChecklistControllerTest extends WebTestCase
         $this->logIn($this->client, $this->people['Mia']);
         $page = $this->client->request('GET', '/t/SHOP-1/rounds', [], [], ['HTTP_TURBO_FRAME' => 'ticket-rounds']);
         self::assertSame(
-            [['OK', 'Not fixed'], ['OK', 'Not fixed']],
+            [['OK', 'Not fixed'], ['Undo'], ['Undo'], ['OK', 'Not fixed']],
             $page->filter('.checklist__row')->reduce(static fn (Crawler $row): bool => $row->filter('button')->count() > 0)
                 ->each(static fn (Crawler $row): array => $row->filter('button')->each(static fn (Crawler $button): string => $button->text())),
         );
@@ -269,6 +275,46 @@ final class ChecklistControllerTest extends WebTestCase
         self::assertSame(['Open', 'Not fixed', 'Checked OK', 'Not fixed', 'Checked OK'], $this->chipsOf($card));
         self::assertSame(['round-'.$this->checklistId.'-heading'], $this->autofocusedIdsOf($card));
         self::assertSame(array_replace(self::STATES_AS_SEEDED, [2 => 'not_fixed', 5 => 'ok']), $this->storedStates());
+    }
+
+    /**
+     * The tester pressed OK and Not fixed by mistake: Undo on the round page puts pin 3 back to check, with its OK and
+     * Not fixed again, and Undo on the ticket's card does the same for pin 4.
+     */
+    #[Test]
+    public function theTesterUndoesAChecksSlipAndThePinIsBackToCheck(): void
+    {
+        $this->logIn($this->client, $this->people['Mia']);
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/0');
+        self::assertResponseStatusCodeSame(200);
+        $undoForm = $page->filter('#round-check-'.$this->items[3].' form');
+        self::assertSame([$this->itemUrl(3, 'undo-check')], $undoForm->each(static fn (Crawler $form): string => (string) $form->attr('action')));
+        self::assertSame('Undo', $undoForm->filter('button')->text());
+
+        $this->client->request('POST', $this->itemUrl(3, 'undo-check'), [
+            ChecklistController::CSRF_FIELD => $this->checklistToken(),
+            ChecklistController::RETURN_ROUND_FIELD => '0',
+            ChecklistController::RETURN_SCREENSHOT_FIELD => '1',
+        ]);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/t/SHOP-1/rounds/0?screenshot=1#round-check-'.$this->items[3], $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('Check on pin 3 undone.', $page->filter('.toast-region [data-toast-message-value]')->attr('data-toast-message-value'));
+        $row = $page->filter('#round-check-'.$this->items[3]);
+        self::assertSame('Fixed · to check', $row->filter('.check-state')->text());
+        self::assertSame(['OK', 'Not fixed'], $row->filter('button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame(array_replace(self::STATES_AS_SEEDED, [3 => 'fixed']), $this->storedStates());
+
+        $this->postAsTurbo($this->itemUrl(4, 'undo-check'));
+
+        self::assertSame('Check on pin 4 undone.', $this->toastOfTheStream(200));
+        $card = $this->streamedCard();
+        self::assertSame(['Open', 'Fixed · to check', 'Fixed · to check', 'Fixed · to check', 'Fixed · to check'], $this->chipsOf($card));
+        self::assertSame('0 of 5 checked OK', $card->filter('.round-card__status')->text());
+        self::assertSame(['checklist-ok-'.$this->items[4]], $this->autofocusedIdsOf($card), 'The undone pin\'s OK takes the focus.');
+        self::assertSame(array_replace(self::STATES_AS_SEEDED, [3 => 'fixed', 4 => 'fixed']), $this->storedStates());
     }
 
     /**
@@ -297,6 +343,8 @@ final class ChecklistControllerTest extends WebTestCase
         self::assertSame(ChecklistController::ONLY_THE_TESTER, $this->toastOfTheStream(403));
         $this->postAsTurbo($this->itemUrl(2, 'not-fixed'));
         self::assertSame(ChecklistController::ONLY_THE_TESTER, $this->toastOfTheStream(403));
+        $this->postAsTurbo($this->itemUrl(3, 'undo-check'));
+        self::assertSame(ChecklistController::ONLY_THE_TESTER_UNDOES, $this->toastOfTheStream(403));
         $this->client->request('POST', $this->itemUrl(2, 'ok'), [ChecklistController::CSRF_FIELD => $this->checklistToken()]);
         self::assertSame(ChecklistController::ONLY_THE_TESTER, $this->toastAfterTheRedirect());
 
@@ -309,6 +357,8 @@ final class ChecklistControllerTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
         $this->postAsTurbo($this->itemUrl(2, 'ok'));
         self::assertSame(ChecklistController::ONLY_THE_TESTER, $this->toastOfTheStream(403));
+        $this->postAsTurbo($this->itemUrl(4, 'undo-check'));
+        self::assertSame(ChecklistController::ONLY_THE_TESTER_UNDOES, $this->toastOfTheStream(403));
 
         $this->logIn($this->client, $this->people['Mia']);
         $this->postAsTurbo($this->itemUrl(1, 'fixed'));
@@ -331,6 +381,10 @@ final class ChecklistControllerTest extends WebTestCase
         self::assertSame('Only a check marked fixed can be confirmed OK.', $this->toastOfTheStream(422));
         $this->postAsTurbo($this->itemUrl(4, 'not-fixed'));
         self::assertSame('Only a check marked fixed can be sent back as not fixed.', $this->toastOfTheStream(422));
+        $this->postAsTurbo($this->itemUrl(1, 'undo-check'));
+        self::assertSame('Only a check confirmed OK or sent back as not fixed can be undone.', $this->toastOfTheStream(422));
+        $this->postAsTurbo($this->itemUrl(2, 'undo-check'));
+        self::assertSame('Only a check confirmed OK or sent back as not fixed can be undone.', $this->toastOfTheStream(422));
 
         self::assertSame(self::STATES_AS_SEEDED, $this->storedStates());
     }
@@ -343,6 +397,9 @@ final class ChecklistControllerTest extends WebTestCase
         $this->client->request('POST', $this->itemUrl(1, 'fixed'), [], [], self::TURBO_FORM_HEADERS);
         self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
         $this->client->request('POST', $this->itemUrl(1, 'fixed'), [ChecklistController::CSRF_FIELD => $this->csrfTokenFor($this->client, ChecklistController::csrfIdOf('SHOP-2'))], [], self::TURBO_FORM_HEADERS);
+        self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
+        $this->logIn($this->client, $this->people['Mia']);
+        $this->client->request('POST', $this->itemUrl(3, 'undo-check'), [], [], self::TURBO_FORM_HEADERS);
         self::assertSame(RefusedWithToast::FORM_EXPIRED, $this->toastOfTheStream(422));
 
         self::assertSame(self::STATES_AS_SEEDED, $this->storedStates());
@@ -360,6 +417,7 @@ final class ChecklistControllerTest extends WebTestCase
             'a malformed id' => '/t/SHOP-1/checklist/not-a-uuid/fixed',
             'an unknown id' => '/t/SHOP-1/checklist/'.Uuid::v7()->toRfc4122().'/fixed',
             "another ticket's item" => '/t/SHOP-1/checklist/'.$otherItem.'/fixed',
+            "another ticket's item to undo" => '/t/SHOP-1/checklist/'.$otherItem.'/undo-check',
             'a ticket that does not exist' => '/t/SHOP-77/checklist/'.$this->items[1].'/fixed',
         ];
 
@@ -393,7 +451,7 @@ final class ChecklistControllerTest extends WebTestCase
     #[Test]
     public function anAnonymousVisitorIsSentToLogInAndChangesNothing(): void
     {
-        foreach ([$this->itemUrl(1, 'fixed'), $this->itemUrl(2, 'ok'), $this->itemUrl(5, 'not-fixed')] as $url) {
+        foreach ([$this->itemUrl(1, 'fixed'), $this->itemUrl(2, 'ok'), $this->itemUrl(5, 'not-fixed'), $this->itemUrl(3, 'undo-check')] as $url) {
             $this->client->request('POST', $url, [ChecklistController::CSRF_FIELD => 'any']);
 
             self::assertResponseRedirects('/login', 302, $url);
@@ -402,7 +460,7 @@ final class ChecklistControllerTest extends WebTestCase
     }
 
     /**
-     * @param 'fixed'|'ok'|'not-fixed' $action
+     * @param 'fixed'|'ok'|'not-fixed'|'undo-check' $action
      */
     private function itemUrl(int $pinNumber, string $action): string
     {

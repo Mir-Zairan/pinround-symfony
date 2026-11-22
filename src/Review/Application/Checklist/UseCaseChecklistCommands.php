@@ -8,7 +8,9 @@ use App\Review\Api\CheckItemChange;
 use App\Review\Api\ChecklistCommands;
 use App\Review\Api\ChecklistQueries;
 use App\Review\Api\ChecklistRefused;
+use App\Review\Api\Event\ChecklistCheckUndone;
 use App\Review\Api\Event\ChecklistItemChanged;
+use App\Review\Api\Event\ReviewEvent;
 use App\Review\Application\ReviewEvents;
 use App\Review\Domain\CheckItem;
 use App\Review\Domain\CheckItemId;
@@ -20,6 +22,7 @@ use App\Review\Domain\Rounds;
 use App\Review\Domain\RoundSlotTaken;
 use App\SharedKernel\Application\PingClearing;
 use App\SharedKernel\Application\TenantContext;
+use App\SharedKernel\Domain\OrganizationId;
 use App\SharedKernel\Domain\TicketId;
 use App\SharedKernel\Domain\UserId;
 use App\Ticketing\Api\TicketTurnQueries;
@@ -96,21 +99,51 @@ final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
 
     public function markFixed(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
     {
-        return $this->change($itemId, $actor, $at, static fn (CheckItem $item) => $item->markFixed($actor, $at));
+        return $this->change($itemId, $actor, $at, static function (CheckItem $item, OrganizationId $organizationId) use ($actor, $at): ReviewEvent {
+            $item->markFixed($actor, $at);
+
+            return self::itemChangedOf($item, $organizationId, $actor, $at);
+        });
     }
 
     public function markOk(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
     {
-        return $this->change($itemId, $actor, $at, static fn (CheckItem $item) => $item->markOk($actor, $at));
+        return $this->change($itemId, $actor, $at, static function (CheckItem $item, OrganizationId $organizationId) use ($actor, $at): ReviewEvent {
+            $item->markOk($actor, $at);
+
+            return self::itemChangedOf($item, $organizationId, $actor, $at);
+        });
     }
 
     public function markNotFixed(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
     {
-        return $this->change($itemId, $actor, $at, static fn (CheckItem $item) => $item->markNotFixed($actor, $at));
+        return $this->change($itemId, $actor, $at, static function (CheckItem $item, OrganizationId $organizationId) use ($actor, $at): ReviewEvent {
+            $item->markNotFixed($actor, $at);
+
+            return self::itemChangedOf($item, $organizationId, $actor, $at);
+        });
+    }
+
+    public function undoCheck(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
+    {
+        return $this->change($itemId, $actor, $at, static function (CheckItem $item, OrganizationId $organizationId) use ($actor, $at): ReviewEvent {
+            $undoneState = $item->undoCheck($actor, $at);
+
+            return new ChecklistCheckUndone(
+                $organizationId->toString(),
+                $item->ticketId()->toString(),
+                $item->roundId()->toString(),
+                $item->id()->toString(),
+                $undoneState->value,
+                $actor->toString(),
+                $at,
+            );
+        });
     }
 
     /**
-     * @param \Closure(CheckItem): void $move
+     * @param \Closure(CheckItem, OrganizationId): ReviewEvent $move makes the move on the locked item, throwing the
+     *                                                               domain's refusal, and gives the event to publish
      *
      * @throws ChecklistRefused NOT_FOUND when the id is malformed or the tenant has no such item; otherwise the domain's
      *                          reason; nothing is saved, published or cleared
@@ -127,13 +160,24 @@ final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
         $facts = $this->checklistQueries->accessFactsOf($id->toString())
             ?? throw new \LogicException(\sprintf('Check item %s is locked but has no access facts.', $id->toString()));
         try {
-            $move($item);
+            $event = $move($item, $organizationId);
         } catch (\DomainException $refused) {
             throw new ChecklistRefused($refused->getMessage(), 0, $refused);
         }
         $this->checklists->saveItem($item);
 
-        $this->reviewEvents->publish(new ChecklistItemChanged(
+        $this->reviewEvents->publish($event);
+
+        return new CheckItemChange(
+            $facts->pinNumber,
+            $item->state()->value,
+            $this->pingClearing->clearForActor($organizationId, $item->ticketId(), $actor, $at),
+        );
+    }
+
+    private static function itemChangedOf(CheckItem $item, OrganizationId $organizationId, UserId $actor, \DateTimeImmutable $at): ChecklistItemChanged
+    {
+        return new ChecklistItemChanged(
             $organizationId->toString(),
             $item->ticketId()->toString(),
             $item->roundId()->toString(),
@@ -141,12 +185,6 @@ final readonly class UseCaseChecklistCommands implements RoundChecklistCommands
             $item->state()->value,
             $actor->toString(),
             $at,
-        ));
-
-        return new CheckItemChange(
-            $facts->pinNumber,
-            $item->state()->value,
-            $this->pingClearing->clearForActor($organizationId, $item->ticketId(), $actor, $at),
         );
     }
 }

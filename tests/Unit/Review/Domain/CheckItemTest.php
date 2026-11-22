@@ -46,6 +46,8 @@ final class CheckItemTest extends TestCase
         yield 'an item sent back marked fixed again' => [CheckItemState::NotFixed, 'markFixed', CheckItemState::Fixed];
         yield 'a fixed item confirmed OK' => [CheckItemState::Fixed, 'markOk', CheckItemState::Ok];
         yield 'a fixed item sent back as not fixed' => [CheckItemState::Fixed, 'markNotFixed', CheckItemState::NotFixed];
+        yield 'an OK check undone' => [CheckItemState::Ok, 'undoCheck', CheckItemState::Fixed];
+        yield 'a not fixed check undone' => [CheckItemState::NotFixed, 'undoCheck', CheckItemState::Fixed];
     }
 
     #[Test]
@@ -75,6 +77,8 @@ final class CheckItemTest extends TestCase
         yield 'an open item sent back' => [CheckItemState::Open, 'markNotFixed', 'Only a check marked fixed can be sent back as not fixed.'];
         yield 'an OK item sent back' => [CheckItemState::Ok, 'markNotFixed', 'Only a check marked fixed can be sent back as not fixed.'];
         yield 'an item sent back sent back again' => [CheckItemState::NotFixed, 'markNotFixed', 'Only a check marked fixed can be sent back as not fixed.'];
+        yield 'an open item undone' => [CheckItemState::Open, 'undoCheck', 'Only a check confirmed OK or sent back as not fixed can be undone.'];
+        yield 'a fixed item undone' => [CheckItemState::Fixed, 'undoCheck', 'Only a check confirmed OK or sent back as not fixed can be undone.'];
     }
 
     #[Test]
@@ -96,6 +100,24 @@ final class CheckItemTest extends TestCase
             [$from, $expectedChangedBy, $expectedChangedAt],
             [$item->state(), $item->changedBy()?->toString(), $item->changedAt()?->format('Y-m-d H:i:sP')],
         );
+    }
+
+    /**
+     * @return iterable<string, array{CheckItemState}>
+     */
+    public static function checkedStates(): iterable
+    {
+        yield 'OK' => [CheckItemState::Ok];
+        yield 'not fixed' => [CheckItemState::NotFixed];
+    }
+
+    #[Test]
+    #[DataProvider('checkedStates')]
+    public function undoingACheckAnswersTheStateItTookBack(CheckItemState $checked): void
+    {
+        $item = self::itemIn($checked);
+
+        self::assertSame($checked, $item->undoCheck(new UserId(self::MIA), new \DateTimeImmutable(self::NOW)));
     }
 
     #[Test]
@@ -183,6 +205,7 @@ final class CheckItemTest extends TestCase
             'markFixed' => $item->markFixed($actorId, $at),
             'markOk' => $item->markOk($actorId, $at),
             'markNotFixed' => $item->markNotFixed($actorId, $at),
+            'undoCheck' => $item->undoCheck($actorId, $at),
             default => throw new \LogicException(\sprintf('No move %s.', $move)),
         };
     }

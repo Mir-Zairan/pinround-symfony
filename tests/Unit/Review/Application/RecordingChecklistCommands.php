@@ -56,4 +56,9 @@ final class RecordingChecklistCommands implements RoundChecklistCommands
     {
         throw new \LogicException('Not used.');
     }
+
+    public function undoCheck(string $itemId, UserId $actor, \DateTimeImmutable $at): CheckItemChange
+    {
+        throw new \LogicException('Not used.');
+    }
 }

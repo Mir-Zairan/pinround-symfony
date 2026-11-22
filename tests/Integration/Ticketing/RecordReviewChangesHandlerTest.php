@@ -123,6 +123,27 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
     }
 
     #[Test]
+    public function anUndoneCheckWritesItsRowWithTheStateItTookBack(): void
+    {
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->checklistCommands()->markFixed(self::PRICE_ITEM, new UserId(self::OMAR), new \DateTimeImmutable(self::MARKED_AT)));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->checklistCommands()->markNotFixed(self::PRICE_ITEM, new UserId(self::MIA), new \DateTimeImmutable(self::SET_AT)));
+        $this->transactions()->committedAs(self::ACME_FOODS, fn () => $this->checklistCommands()->undoCheck(self::PRICE_ITEM, new UserId(self::MIA), new \DateTimeImmutable(self::UNDONE_AT)));
+
+        self::runTheWorkerUntilIdle('outbox');
+        self::runTheWorkerUntilIdle('async_notify');
+
+        self::assertSame(
+            [
+                [ReviewChange::CHECK_ITEM_CHANGED, self::OMAR, null, null, ['area_name' => null, 'outcome' => 'fixed', 'pin_number' => 5], '2027-03-16 09:00:00'],
+                [ReviewChange::CHECK_ITEM_CHANGED, self::MIA, null, null, ['area_name' => null, 'outcome' => 'not_fixed', 'pin_number' => 5], '2027-03-16 09:10:00'],
+                [ReviewChange::CHECK_UNDONE, self::MIA, null, null, ['area_name' => null, 'outcome' => 'not_fixed', 'pin_number' => 5], '2027-03-16 09:20:00'],
+            ],
+            $this->historyRowsAs(self::ACME_FOODS),
+        );
+        self::assertSame([], $this->historyRowsAs(self::BETA_BAKERY), 'Another organization sees none of the rows.');
+    }
+
+    #[Test]
     public function aRedeliveredEventWritesNoSecondRow(): void
     {
         $this->makeTheFourChanges();
@@ -252,7 +273,7 @@ final class RecordReviewChangesHandlerTest extends KernelTestCase
     {
         $rows = $this->transactions()->rolledBackAs($organizationId, fn (): array => $this->connection()->fetchAllNumeric(
             "SELECT type, actor_id, from_step, to_step, payload::text, to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
-             FROM tkt_ticket_event WHERE ticket_id = ? AND type IN (?, ?, ?, ?) ORDER BY at",
+             FROM tkt_ticket_event WHERE ticket_id = ? AND type IN (?, ?, ?, ?, ?) ORDER BY at",
             [self::TICKET, ...ReviewChange::KINDS],
         ));
 

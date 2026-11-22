@@ -34,9 +34,9 @@ use Symfony\UX\Turbo\TurboBundle;
 /**
  * The buttons of the checklist cards in the ticket's Rounds section, the checklist round's (P05.T6, ticket-page.md,
  * Rounds) and a findings round's (FR-RND-17): "Mark fixed" for the ticket's assignee, "OK" and "Not fixed" for its
- * tester. A change answers a Turbo form with a stream that replaces the changed item's card, with focus on the button
- * that took the clicked one's place, and the toast; any other form with a redirect to the ticket's Rounds section with
- * the toast flashed, or, for a form of the round page or its full-screen review (RETURN_ROUND_FIELD), with a redirect
+ * tester, and "Undo" beside the tester's check, which puts the item back to check. A change answers a Turbo form with
+ * a stream that replaces the changed item's card, with focus on the button that took the clicked one's place, and the
+ * toast; any other form with a redirect to the ticket's Rounds section with the toast flashed, or, for a form of the round page or its full-screen review (RETURN_ROUND_FIELD), with a redirect
  * back to that page. A refusal changes nothing and answers with its toast the same two ways, as a 403 or 422 stream.
  *
  * Without the request transaction, as VerdictController: each action runs in a transaction of its own, so a refused
@@ -50,6 +50,7 @@ final class ChecklistController extends AbstractController
     public const string MARK_FIXED_ROUTE = 'review_checklist_mark_fixed';
     public const string MARK_OK_ROUTE = 'review_checklist_mark_ok';
     public const string MARK_NOT_FIXED_ROUTE = 'review_checklist_mark_not_fixed';
+    public const string UNDO_CHECK_ROUTE = 'review_checklist_undo_check';
 
     public const string CSRF_FIELD = '_csrf_token';
 
@@ -73,8 +74,11 @@ final class ChecklistController extends AbstractController
     public const string CHECKED_OK = 'Pin %d checked OK.';
     /** With the pin's number. */
     public const string SENT_BACK = 'Pin %d sent back.';
+    /** With the pin's number. */
+    public const string CHECK_UNDONE = 'Check on pin %d undone.';
     public const string ONLY_THE_ASSIGNEE = "Only the ticket's assignee can mark a pin fixed.";
     public const string ONLY_THE_TESTER = "Only the ticket's tester can check a fixed pin.";
+    public const string ONLY_THE_TESTER_UNDOES = "Only the ticket's tester can undo a check.";
     /** The toast app.js leaves when a checklist form gets no stream back. */
     public const string SAVE_FAILED = 'Could not save the checklist change. Try again.';
 
@@ -147,6 +151,22 @@ final class ChecklistController extends AbstractController
             self::ONLY_THE_TESTER,
             fn (string $id, UserId $actor): CheckItemChange => $this->checklistCommands->markNotFixed($id, $actor, $now),
             static fn (CheckItemChange $change): string => \sprintf(self::SENT_BACK, $change->pinNumber),
+        );
+    }
+
+    #[Route('/t/{key}/checklist/{itemId}/undo-check', name: self::UNDO_CHECK_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
+    public function undoCheck(string $key, string $itemId, Request $request): Response
+    {
+        $now = $this->clock->now();
+
+        return $this->respondToChange(
+            $request,
+            $key,
+            $itemId,
+            ChecklistPermission::CHECK,
+            self::ONLY_THE_TESTER_UNDOES,
+            fn (string $id, UserId $actor): CheckItemChange => $this->checklistCommands->undoCheck($id, $actor, $now),
+            static fn (CheckItemChange $change): string => \sprintf(self::CHECK_UNDONE, $change->pinNumber),
         );
     }
 

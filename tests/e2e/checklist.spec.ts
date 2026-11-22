@@ -114,7 +114,7 @@ test('Mia checks pin 1 OK and sends pin 2 back: the summary counts it, the chips
   await expect(card(page)).toContainText('1 of 2 checked OK');
   await expectChip(row(page, 1), 'Checked OK', CHIP_COLOURS.ok);
   await expect(button(row(page, 2), 'OK'), 'focus goes to the next OK').toBeFocused();
-  await expect(row(page, 1).getByRole('button')).toHaveCount(0);
+  await expect(row(page, 1).getByRole('button'), 'only Undo is left on the checked pin').toHaveText(['Undo']);
 
   await button(row(page, 2), 'Not fixed').click();
   await expect(page.locator(TOAST_REGION)).toContainText('Pin 2 sent back.');
@@ -123,6 +123,26 @@ test('Mia checks pin 1 OK and sends pin 2 back: the summary counts it, the chips
   await expectButtons(page, { markFixed: 0, ok: 0, notFixed: 0 });
   await expect(card(page)).toContainText('1 of 2 checked OK');
   await close();
+});
+
+test('on the round page Mia undoes her Not fixed on pin 2 by its Undo, and sends it back again', async ({ browser }) => {
+  const { context, page } = await openAs(browser, MIA_STORAGE_STATE);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto(`/t/${key}/rounds/0`, { waitUntil: 'networkidle' });
+  const pinRow = page.locator('.round-panel li.round-pin').filter({ hasText: REPORT_PIN_NOTES[1] });
+  await expect(pinRow.locator('.check-state')).toHaveText('Not fixed');
+
+  await pinRow.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.locator(TOAST_REGION)).toContainText('Check on pin 2 undone.');
+  await expect(pinRow.locator('.check-state')).toHaveText('Fixed · to check');
+  await expect(pinRow.getByRole('button'), 'the pin waits for its check again').toHaveText(['OK', 'Not fixed']);
+  await expect(pinRow, 'the redirect brings the person back to the pin').toBeFocused();
+
+  await pinRow.getByRole('button', { name: 'Not fixed', exact: true }).click();
+  await expect(page.locator(TOAST_REGION)).toContainText('Pin 2 sent back.');
+  await expect(pinRow.locator('.check-state')).toHaveText('Not fixed');
+  await expect(pinRow.getByRole('button')).toHaveText(['Undo']);
+  await context.close();
 });
 
 test('Omar marks the pin sent back fixed again and is offered nothing on the pin checked OK', async ({ browser }) => {

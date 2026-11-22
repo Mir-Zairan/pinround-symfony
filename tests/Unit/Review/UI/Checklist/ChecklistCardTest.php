@@ -35,12 +35,12 @@ final class ChecklistCardTest extends TestCase
 
         self::assertSame(
             [
-                ['Open', 'check-state--open', true, false],
-                ['Fixed · to check', 'check-state--fixed', false, true],
-                ['Checked OK', 'check-state--ok', false, false],
-                ['Not fixed', 'check-state--not-fixed', true, false],
+                ['Open', 'check-state--open', true, false, false],
+                ['Fixed · to check', 'check-state--fixed', false, true, false],
+                ['Checked OK', 'check-state--ok', false, false, true],
+                ['Not fixed', 'check-state--not-fixed', true, false, true],
             ],
-            array_map(static fn (ChecklistRow $row): array => [$row->stateLabel, $row->stateClass, $row->mayMarkFixed, $row->mayCheck], $card->rows),
+            array_map(static fn (ChecklistRow $row): array => [$row->stateLabel, $row->stateClass, $row->mayMarkFixed, $row->mayCheck, $row->mayUndoCheck], $card->rows),
         );
         self::assertSame('1 of 4 checked OK', $card->status);
         self::assertSame(ChecklistCard::HEADLINE, $card->headline);
@@ -78,6 +78,19 @@ final class ChecklistCardTest extends TestCase
         self::assertSame('1 of 3 checked OK', $card->status);
         self::assertEquals(ChecklistCard::of(new RoundChecklist($checklist->checklist, false, $checklist->picturesByItemId), false, true)->rows, $card->rows);
         self::assertSame([true, false, false], array_map(static fn (ChecklistRow $row): bool => $row->mayCheck, $card->rows));
+    }
+
+    #[Test]
+    public function onlyThePersonWhoChecksMayUndoACheck(): void
+    {
+        $checked = self::checklistOf([1 => ChecklistCommands::STATE_OK, 2 => ChecklistCommands::STATE_NOT_FIXED]);
+
+        $asTester = ChecklistCard::of($checked, false, true);
+        $asAssignee = ChecklistCard::of($checked, true, false);
+
+        self::assertSame([true, true], array_map(static fn (ChecklistRow $row): bool => $row->mayUndoCheck, $asTester->rows));
+        self::assertTrue($asTester->hasControls, 'An Undo needs the form token.');
+        self::assertSame([false, false], array_map(static fn (ChecklistRow $row): bool => $row->mayUndoCheck, $asAssignee->rows));
     }
 
     #[Test]
