@@ -451,7 +451,8 @@ test('the renewal lock is navigator.locks, which pages and the service worker sh
     assert.equal(tokenRefreshLocksOf({ locks: navigatorLocks }), navigatorLocks);
     assert.notEqual(tokenRefreshLocksOf({}), navigatorLocks);
     assert.equal(tokenRefreshLocksOf(null), tokenRefreshLocksOf({}));
-    assert.equal(tokenRefreshLocksOf(), globalThis.navigator.locks);
+    // Node has navigator.locks from 24 on; CI's 22 has none, so the default is then the in-context lock, as in a browser without it.
+    assert.equal(tokenRefreshLocksOf(), globalThis.navigator?.locks ?? tokenRefreshLocksOf({}));
 });
 
 test('a refresh pinround did not answer, or answered 429 or 5xx, keeps the tokens', async () => {
