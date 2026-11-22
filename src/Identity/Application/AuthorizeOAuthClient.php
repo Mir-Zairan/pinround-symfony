@@ -38,6 +38,7 @@ final readonly class AuthorizeOAuthClient
     public const string UNREGISTERED_REDIRECT_URI = 'This app asked to send you to an address it did not register, so pinround stopped here. Start connecting again from the app.';
 
     public const string ACCESS_DENIED = 'access_denied';
+    public const string TICKED_SCOPE_NOT_OFFERED = 'An extra scope must be one the consent page offered.';
 
     // RFC 6749 appendix A.5: state is one or more printable ASCII characters.
     private const string STATE_SHAPE = '/\A[\x20-\x7E]{1,%d}\z/';
@@ -82,12 +83,16 @@ final readonly class AuthorizeOAuthClient
      * then saves a code that lasts OAuthAuthorizationCode::MAX_LIFETIME_SECONDS, in its own transaction. Call it with
      * no transaction open; the entity manager is cleared.
      *
-     * @param array<array-key, mixed> $parameters     the consent form's fields
+     * The scopes the code carries are the ones the app asked for plus any the person ticked on the page from
+     * optionalScopesOf() (ADR-0039: reports:write and notebooks:write only ever by the person's own tick).
+     *
+     * @param array<array-key, mixed> $parameters     the consent form's fields; `extra_scopes` holds the ticked ones
      * @param string                  $organizationId as posted, not yet checked
      *
      * @return string the redirect URI with the plain code and the state; the code is in it only, so send it at once
      *
-     * @throws OAuthAuthorizationRefused        when the request breaks a rule of check(); nothing is saved
+     * @throws OAuthAuthorizationRefused        when the request breaks a rule of check(), or a ticked scope is not one
+     *                                          the page offered; nothing is saved
      * @throws OAuthConsentOrganizationNotFound when the organization id is malformed or not one of the person's
      *                                          organizations now; nothing is saved
      * @throws TenantSwitchRefused              when a transaction is open; nothing is saved
@@ -95,6 +100,8 @@ final readonly class AuthorizeOAuthClient
     public function allow(array $parameters, UserId $userId, string $organizationId, \DateTimeImmutable $issuedAt): string
     {
         [$request, $client] = $this->checked($parameters);
+        $scopes = [...ApiTokenScope::fromValues($request->scopeNames), ...$this->tickedOptionalScopesOf($request, $parameters['extra_scopes'] ?? [])];
+        $scopes = array_values(array_filter(ApiTokenScope::cases(), static fn (ApiTokenScope $scope): bool => \in_array($scope, $scopes, true)));
         $pickedOrganizationId = $this->memberOrganizationOf($userId, $organizationId);
         $issued = OAuthAuthorizationCode::issue(
             $this->codes->nextIdentity(),
@@ -104,13 +111,54 @@ final readonly class AuthorizeOAuthClient
             $request->redirectUri,
             $request->codeChallenge,
             OAuthClient::CODE_CHALLENGE_METHOD,
-            ApiTokenScope::fromValues($request->scopeNames),
+            $scopes,
             $this->hashing,
             $issuedAt,
         );
         $this->codes->add($issued->code());
 
         return self::answerUrl($request->redirectUri, ['code' => $issued->reveal(), 'state' => $request->state]);
+    }
+
+    /**
+     * The scopes the consent page offers as unticked boxes: every scope the app did not ask for. A token page offers the
+     * same ones; the person may tick any of them, and only those (allow() refuses anything else).
+     *
+     * @return list<string> scope names in ApiTokenScope's order
+     */
+    public static function optionalScopesOf(OAuthAuthorizationRequest $request): array
+    {
+        return array_values(array_map(
+            static fn (ApiTokenScope $scope): string => $scope->value,
+            array_filter(ApiTokenScope::cases(), static fn (ApiTokenScope $scope): bool => !\in_array($scope->value, $request->scopeNames, true)),
+        ));
+    }
+
+    /**
+     * @return list<ApiTokenScope>
+     *
+     * @throws OAuthAuthorizationRefused when the field is not a list of offered scope names
+     */
+    private function tickedOptionalScopesOf(OAuthAuthorizationRequest $request, mixed $ticked): array
+    {
+        $offered = self::optionalScopesOf($request);
+        if (!\is_array($ticked) || \count($ticked) > \count($offered)) {
+            throw self::notOffered($request);
+        }
+        $scopes = [];
+        foreach ($ticked as $scopeName) {
+            if (!\is_string($scopeName) || !\in_array($scopeName, $offered, true)) {
+                throw self::notOffered($request);
+            }
+            $scopes[] = ApiTokenScope::from($scopeName);
+        }
+
+        return $scopes;
+    }
+
+    private static function notOffered(OAuthAuthorizationRequest $request): OAuthAuthorizationRefused
+    {
+        return OAuthAuthorizationRefused::toClient(new OAuthRedirectUri($request->redirectUri), OAuthAuthorizationRefused::INVALID_SCOPE, self::TICKED_SCOPE_NOT_OFFERED, $request->state);
     }
 
     /**

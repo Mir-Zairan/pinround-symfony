@@ -41,6 +41,18 @@
                             {% endfor %}
                         </ul>
                     </div>
+                    {% if optionalScopes is not empty %}
+                        {#- Never ticked for the person: report drafts and notebooks need their own tick (ADR-0039). -#}
+                        <fieldset class="profile__themes">
+                            <legend class="profile__legend">You can also let it (optional)</legend>
+                            {% for scopeName, explanation in optionalScopes %}
+                                <label class="profile__theme">
+                                    <input type="checkbox" name="extra_scopes[]" value="{{ scopeName }}">
+                                    {{ explanation }}
+                                </label>
+                            {% endfor %}
+                        </fieldset>
+                    {% endif %}
                     {% if organizations is empty %}
                         <twig:EmptyState message="You are not in any organization yet, so there is nothing to connect."/>
                     {% else %}

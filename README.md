@@ -69,13 +69,13 @@ Report a bug in the bundled shop, fix it with Claude Code and hand it over, as t
    claude mcp add --transport http pinround https://localhost/mcp
    NODE_EXTRA_CA_CERTS=~/.config/pinround/caddy-root.crt claude
    ```
-   In Claude Code, type `/mcp`, pick `pinround` › authenticate, log in as Omar, **Allow**.
+   In Claude Code, type `/mcp`, pick `pinround` › authenticate, log in as Omar. Under **You can also let it**, tick **Let Claude Code prepare report drafts for you** (step 1 uses it), then **Allow**.
 
 All demo people (`@acme-foods.example`): Mia (tester), Omar (developer), Lena (lead), Sara (admin), Raj (manager), one password: `grep DEMO_PASSWORD .env.dev.local`.
 
 **1. Report a problem**, as Mia. On the shop, add the same product twice: the total is wrong.
 - **Extension:** click it › **A new report** › project `SHOP` › **Capture this page** › **Done**. In the draft pinround opens, pin the wrong total and press **Send**.
-- **Claude Code:** run `/mcp__pinround__report_while_investigating` and say "Check the cart total at http://localhost:8090". It keeps the evidence and files a report draft; you press **Send**. This needs a token with `reports:write` ([how](docs/guides/claude-code.md#1-make-a-token)).
+- **Claude Code:** run `/mcp__pinround__report_while_investigating` and say "Check the cart total at http://localhost:8090". It keeps the evidence and files a report draft; you press **Send**. This needs the report drafts tick from **Before you start**, step 3.
 
 **2. Give it to the developer.** As Lena, open the ticket and **Give it to** Omar.
 

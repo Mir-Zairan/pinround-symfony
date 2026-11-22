@@ -14,6 +14,7 @@ use App\Identity\UI\Controller\TokenController;
 use App\SharedKernel\Domain\OrganizationId;
 use App\Tests\Functional\Organization\LogsInAdmins;
 use Doctrine\DBAL\Connection;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -133,6 +134,65 @@ final class OAuthConsentTest extends WebTestCase
         self::assertIsString($stored[0]['row_text']);
         self::assertStringNotContainsString($plainCode, $stored[0]['row_text']);
         self::assertSame([], $this->storedCodesOf($betaBakery));
+    }
+
+    /**
+     * ADR-0039: report drafts and notebooks are only ever the person's own tick. The page offers every scope the app did
+     * not ask for, unticked, and a ticked one joins the code's scopes.
+     */
+    #[Test]
+    public function thePersonMayTickMoreScopesAndOnlyTheTickedOnesJoinTheCode(): void
+    {
+        [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+        $page = $this->client->request('GET', $this->authorizePath(['scope' => 'read tickets:move']));
+        self::assertResponseStatusCodeSame(200);
+        $boxes = $page->filter('input[type=checkbox][name="extra_scopes[]"]');
+        self::assertSame(['rounds:write', 'comments:write', 'reports:write', 'notebooks:write'], $boxes->each(static fn (Crawler $box): string => (string) $box->attr('value')));
+        self::assertSame([null, null, null, null], $boxes->each(static fn (Crawler $box): ?string => $box->attr('checked')), 'Nothing is ticked for the person.');
+        $form = $page->selectButton('Allow')->form();
+        $form->setValues(['organization_id' => $acmeFoods->toString()]);
+        $values = $form->getPhpValues();
+        $values['extra_scopes'] = ['reports:write'];
+
+        $this->client->request('POST', $form->getUri(), $values);
+
+        self::assertResponseStatusCodeSame(302);
+        $stored = $this->storedCodesOf($acmeFoods);
+        self::assertCount(1, $stored);
+        self::assertSame('{read,tickets:move,reports:write}', $stored[0]['scopes']);
+    }
+
+    /**
+     * @return iterable<string, array{mixed}>
+     */
+    public static function extraScopesNotOffered(): iterable
+    {
+        yield 'a scope the app asked for already' => [['read']];
+        yield 'an unknown scope' => [['admin']];
+        yield 'not a list' => ['reports:write'];
+        yield 'a nested list' => [[['reports:write']]];
+    }
+
+    #[Test]
+    #[DataProvider('extraScopesNotOffered')]
+    public function anExtraScopeThePageDidNotOfferGoesBackWithInvalidScopeAndIssuesNoCode(mixed $extraScopes): void
+    {
+        [$omar, $acmeFoods] = $this->omarAndHisOrganizations();
+        $this->logInWithACode($this->client, $this->clock, $omar);
+        $form = $this->consentForm($this->authorizePath(['scope' => 'read']), 'Allow');
+        $form->setValues(['organization_id' => $acmeFoods->toString()]);
+        $values = $form->getPhpValues();
+        $values['extra_scopes'] = $extraScopes;
+
+        $this->client->request('POST', $form->getUri(), $values);
+
+        self::assertResponseStatusCodeSame(302);
+        self::assertSame(
+            ['error' => 'invalid_scope', 'error_description' => AuthorizeOAuthClient::TICKED_SCOPE_NOT_OFFERED, 'state' => self::STATE],
+            self::queryOf((string) $this->client->getResponse()->headers->get('Location')),
+        );
+        self::assertSame(0, $this->storedCodeCount());
     }
 
     #[Test]

@@ -26,7 +26,8 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * The OAuth consent page, /oauth/authorize (ADR-0050): an app that wants to connect sends the person here; they see
- * its name, where it sends them back to and what it may do, pick one of their organizations and allow or deny. Both
+ * its name, where it sends them back to and what it may do, may tick more of what it may do (unticked, ADR-0039), pick
+ * one of their organizations and allow or deny. Both
  * actions need the recent password and two-step proof of making a personal access token (RequiresRecentAuth) and ask
  * OwnAccountVoter for AccountPermission::EDIT_OWN first (ADR-0013). Allow and Deny need the form's CSRF token; without
  * it the page comes back with 422 and no code. A client the server does not know, or a redirect URI it did not
@@ -154,7 +155,8 @@ final class OAuthConsentController extends AbstractController
 
         return self::notStored($this->render('@Identity/oauth_consent.html.twig', [
             'authorization' => $authorization,
-            'scopeExplanations' => self::scopeExplanationsOf($authorization),
+            'scopeExplanations' => self::explanationsOf($authorization->scopeNames),
+            'optionalScopes' => array_combine(AuthorizeOAuthClient::optionalScopesOf($authorization), self::explanationsOf(AuthorizeOAuthClient::optionalScopesOf($authorization))),
             'organizations' => $organizations,
             'preselectedOrganizationId' => $preselectedOrganizationId,
             'formError' => $formError,
@@ -178,15 +180,17 @@ final class OAuthConsentController extends AbstractController
     }
 
     /**
-     * @return list<string> what each asked scope lets the app do, in the words of the tokens page
+     * @param list<string> $scopeNames
      *
-     * @throws \LogicException when a scope has no explanation, so the page never asks for a scope nobody explained
+     * @return list<string> what each scope lets the app do, in the words of the tokens page
+     *
+     * @throws \LogicException when a scope has no explanation, so the page never offers a scope nobody explained
      */
-    private static function scopeExplanationsOf(OAuthAuthorizationRequest $authorization): array
+    private static function explanationsOf(array $scopeNames): array
     {
         return array_map(
             static fn (string $scopeName): string => TokenController::SCOPE_EXPLANATIONS[$scopeName] ?? throw new \LogicException(\sprintf('The token scope "%s" has no explanation.', $scopeName)),
-            $authorization->scopeNames,
+            $scopeNames,
         );
     }
 
