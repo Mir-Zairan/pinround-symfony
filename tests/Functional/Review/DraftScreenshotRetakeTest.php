@@ -42,8 +42,6 @@ final class DraftScreenshotRetakeTest extends WebTestCase
     use SeedsTicketRounds;
 
     private const string NOW = '2026-11-10 09:00:20 UTC';
-    private const string FRAME = '/t/SHOP-1/rounds';
-    private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => 'ticket-rounds'];
     private const string FIRST_TRY_TITLE = 'Cart before the fix';
     private const string FIRST_TRY_NOTE = 'The total is off';
     private const string RETAKE_TITLE = 'Cart after the fix';
@@ -125,7 +123,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         );
 
         $this->logIn($this->client, $this->people['Omar']);
-        $frame = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $frame = $this->client->request('GET', '/t/SHOP-1/rounds/'.$this->draft.'/draft');
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame([$retake, $this->otherShot], $this->sectionIdsOf($frame), 'One section per screenshot: the retake stands in for its chain, before the other screenshot.');
@@ -141,7 +139,7 @@ final class DraftScreenshotRetakeTest extends WebTestCase
         self::assertCount(0, $this->sectionOf($frame, $this->otherShot)->filter('[data-try-label]'), 'The screenshot nobody retook has no tries.');
         self::assertStringNotContainsString(self::MIAS_NOTE, (string) $this->client->getResponse()->getContent());
 
-        $editor = $frame->filter('#round-'.$this->draft.' .draft-round-editor');
+        $editor = $frame->filter('.draft-round-editor');
         self::assertCount(1, $editor);
         $this->postLiveAction($this->client, (string) $editor->attr('data-live-props-value'), 'showTry', ['screenshotId' => $this->firstTry]);
 

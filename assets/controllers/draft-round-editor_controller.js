@@ -28,7 +28,8 @@ export default class extends Controller {
     this.isHoldingShare = false;
     this.isLeavingForShare = false;
     this.liveComponent = null;
-    this.card = this.element.closest('.round-card');
+    // The draft page's header, which holds Share and Delete, is in the live component but outside this element.
+    this.card = this.element.closest('.draft-round-editor');
     this.onSubmit = (event) => this.holdShareUntilSaved(event);
     this.onSubmitStart = (event) => this.holdPinsWhileDeleting(event);
     this.onSubmitEnd = (event) => this.settlePinsAfterDelete(event);

@@ -779,9 +779,183 @@ textarea.screenshot-report__input {
   border-radius: var(--radius-input);
 }
 
-.draft-shot {
-  padding-top: var(--space-12);
-  border-top: 1px solid var(--outline);
+/* The draft page (DraftRoundController::page): the round page's header and tabs over a board of the shown screenshot.
+   The section and the pin placer are display: contents, so the pictures, the pins, the verdict, the texts, Remove and
+   Add screenshot are each a cell of one grid: the pictures on the left, the rest down the side panel. */
+.draft-page .draft-round-editor {
+  gap: var(--space-16);
+}
+
+.draft-page__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-8);
+  margin: var(--space-4) 0 0;
+  color: var(--on-surface-var);
+  font-size: 13px;
+}
+
+.draft-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.draft-page__description {
+  margin: 0;
+  color: var(--on-surface-var);
+}
+
+button.round-tab {
+  border-width: 0 0 2px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.round-tab[aria-pressed="true"] {
+  border-bottom-color: var(--primary);
+  color: var(--on-surface);
+}
+
+.draft-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-areas:
+    "after verdict"
+    "after pins"
+    "after texts"
+    "after remove"
+    "after upload"
+    "after .";
+  grid-template-rows: repeat(5, auto) 1fr;
+  gap: var(--space-16) var(--space-24);
+  align-items: start;
+}
+
+.draft-board--compare[data-compare-mode="both"] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-areas:
+    "before after verdict"
+    "before after pins"
+    "before after texts"
+    "before after remove"
+    "before after upload"
+    "before after .";
+}
+
+.draft-board--compare[data-compare-mode="before"] {
+  grid-template-areas:
+    "before verdict"
+    "before pins"
+    "before texts"
+    "before remove"
+    "before upload"
+    "before .";
+}
+
+.draft-board--compare[data-compare-mode="before"] .draft-board__picture--after,
+.draft-board--compare[data-compare-mode="after"] .draft-board__picture--before {
+  display: none;
+}
+
+.draft-board--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.draft-board .draft-shot,
+.draft-board__placer {
+  display: contents;
+}
+
+.draft-board .draft-shot[hidden] {
+  display: none;
+}
+
+.draft-board__picture {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.draft-board__picture--before {
+  grid-area: before;
+}
+
+.draft-board__picture--after {
+  grid-area: after;
+}
+
+.draft-board__verdict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  grid-area: verdict;
+  padding: 18px;
+  border-radius: var(--radius-card);
+  background: var(--s-c);
+}
+
+.draft-board__verdict .round-panel__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.draft-board__pins {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+  grid-area: pins;
+  min-width: 0;
+}
+
+.draft-board__pins > :not(.pin-placer__add) {
+  align-self: stretch;
+}
+
+.draft-board__texts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  grid-area: texts;
+}
+
+.draft-board__remove {
+  grid-area: remove;
+}
+
+.draft-board__upload {
+  grid-area: upload;
+}
+
+/* Under 1100px the side panel goes under the pictures, as on the round page. */
+@media (max-width: 1100px) {
+  .draft-board,
+  .draft-board--compare[data-compare-mode] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "before" "after" "verdict" "pins" "texts" "remove" "upload";
+    grid-template-rows: none;
+  }
+}
+
+.draft-page__claude-code {
+  max-width: 760px;
+}
+
+.claude-code-box__command {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .draft-shot__verdict,
@@ -840,7 +1014,7 @@ textarea.screenshot-report__input {
 
 .claude-code-box__copy-status,
 .claude-code-box__tools,
-.claude-code-box__tokens {
+.claude-code-box__connect {
   margin: 0;
   color: var(--on-surface-var);
   font-size: 14px;

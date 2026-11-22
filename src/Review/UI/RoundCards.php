@@ -25,14 +25,13 @@ use App\Ticketing\Api\TicketVisibility;
 /**
  * Builds the cards of the Rounds section for one viewer. Besides RoundQueries' own queries it reads the owners'
  * names in one batch and signs the pictures shown in one query per variant and SignedUrls::MAX_MEDIA_IDS pictures,
- * whatever the number of rounds. On the ticket only the report and the viewer's own unshared draft are cards with
- * pictures, the report's at most MAX_PICTURES_PER_CARD and as thumbs. The checklist round is a card of its rows. Every
- * review round and shared draft is a one-line row that opens its own page, loads and signs no picture and says the
- * screenshot count the rounds query counted; a findings round keeps its check items under its row (ChecklistCards,
- * read only when the ticket has a checklist round or a shared draft).
- * The unshared draft's card shows every picture (the domain caps them), so its editor can reach each one, as one
- * screenshot per chain of tries with its earlier tries (ADR-0048). forDraft builds one draft's card alone, shared or
- * not, with its pictures.
+ * whatever the number of rounds. On the ticket only the report is a card with pictures, at most
+ * MAX_PICTURES_PER_CARD and as thumbs. The checklist round is a card of its rows. Every review round and shared draft is
+ * a one-line row that opens its own page, loads and signs no picture and says the screenshot count the rounds query
+ * counted; a findings round keeps its check items under its row (ChecklistCards, read only when the ticket has a
+ * checklist round or a shared draft). The viewer's own unshared draft is a PRIVATE row that opens its draft page.
+ * forDraft builds one draft's card alone, shared or not, for that page's editor: every picture (the domain caps them),
+ * as one screenshot per chain of tries with its earlier tries (ADR-0048).
  */
 final readonly class RoundCards
 {
@@ -48,12 +47,7 @@ final readonly class RoundCards
      */
     public const int THUMBNAIL_MAX_HEIGHT = 200;
 
-    /**
-     * The "For Claude Code" box of the viewer's own unshared draft: the line to give Claude Code, with the ticket's key,
-     * and the tools it uses (AgentApi's MCP server at /mcp); the API tokens line below the note says how to connect.
-     */
-    public const string CLAUDE_CODE_PROMPT = 'Read my pinround notes for %s and fix what is marked “Not right yet”.';
-    public const string CLAUDE_CODE_TOOLS_NOTE = 'Claude Code can read these notes and verdicts and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict.';
+    public const string PRIVATE_DRAFT_HEADLINE = 'Draft round · only you can see this';
 
     /** Asked by the browser before the owner's draft is deleted; the delete form carries it as data-turbo-confirm. */
     public const string DELETE_DRAFT_CONFIRM = 'Delete this draft round? Its screenshots, pins and notes go too.';
@@ -71,6 +65,8 @@ final readonly class RoundCards
 
     private const string PRIVATE_DRAFT_DESCRIPTION = 'Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.';
     private const string EMPTY_DRAFT_NOTE = 'No screenshots yet.';
+    /** The private draft's row: how many of its screenshots look right, and the screenshot count. */
+    private const string PRIVATE_DRAFT_ROW_STATUS = '%d of %d look right · %s';
 
     /** A shared draft of the ticket's assignee, with its number and owner's name. */
     private const string SELF_CHECK_HEADLINE = 'Round %d · self-check by %s';
@@ -107,12 +103,15 @@ final readonly class RoundCards
         }
 
         $ownerNames = $this->memberNameQueries->displayNamesOf($organizationId, self::ownersOf($rounds));
-        $imagesByVariant = $this->imagesOf($organizationId, array_values(array_filter($rounds, static fn (RoundView $round): bool => !self::isRow($round))), $now);
+        $imagesByVariant = $this->imagesOf($organizationId, array_values(array_filter($rounds, static fn (RoundView $round): bool => !self::isRow($round) && !$round->isUnsharedDraft())), $now);
         $checklists = $this->checklistCards->forRounds($organizationId, $ticketId, self::idsOfRoundsWithItems($rounds));
 
         return new RoundsSectionView(
             array_map(function (RoundView $round) use ($ownerNames, $assigneeId, $imagesByVariant, $checklists): RoundCard {
                 $ownerName = $ownerNames[$round->ownerId->toString()] ?? self::UNKNOWN_OWNER;
+                if ($round->isUnsharedDraft()) {
+                    return self::privateDraftRowOf($round);
+                }
 
                 return self::isRow($round)
                     ? self::rowOf($round, $ownerName, $assigneeId, $checklists[$round->id] ?? null)
@@ -198,7 +197,7 @@ final readonly class RoundCards
         $status = [] === $chains ? null : \sprintf('%d of %d look right', $looksRightCount, \count($chains));
         $emptyNote = [] === $round->screenshots ? self::EMPTY_DRAFT_NOTE : null;
         if ($round->isUnsharedDraft()) {
-            return new RoundCard($round->id, $domId, 'Draft round · only you can see this', $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
+            return new RoundCard($round->id, $domId, self::PRIVATE_DRAFT_HEADLINE, $status, true, $screenshots, false, $moreNote, self::PRIVATE_DRAFT_DESCRIPTION, $emptyNote);
         }
 
         // FindingsChecklist's rule, read against today's assignee: a later reassignment changes the label, not the items,
@@ -240,6 +239,21 @@ final readonly class RoundCards
         }
 
         return new RoundCard($round->id, 'round-'.$round->id, $headline, null, false, [], true, number: $round->number, findingsChecklist: $findingsChecklist, isRow: true);
+    }
+
+    /**
+     * The viewer's own unshared draft on the ticket: one line with "Open draft", whose page edits it; no picture is
+     * signed. Counted by chain, the latest try of each, as the draft page's status line counts.
+     */
+    private static function privateDraftRowOf(RoundView $draft): RoundCard
+    {
+        $chains = self::shownChainsOf($draft);
+        $looksRightCount = \count(array_filter($chains, static fn (array $tries): bool => self::LOOKS_RIGHT === $tries[\count($tries) - 1]->verdict));
+        $status = [] === $chains
+            ? self::screenshotCountOf(0)
+            : \sprintf(self::PRIVATE_DRAFT_ROW_STATUS, $looksRightCount, \count($chains), self::screenshotCountOf(\count($chains)));
+
+        return new RoundCard($draft->id, 'round-'.$draft->id, self::PRIVATE_DRAFT_HEADLINE, $status, true, [], false, isRow: true);
     }
 
     private static function screenshotCountOf(int $count): string

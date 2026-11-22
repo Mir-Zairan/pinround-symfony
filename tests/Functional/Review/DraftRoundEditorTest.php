@@ -41,11 +41,10 @@ final class DraftRoundEditorTest extends WebTestCase
     use SeedsTicketRounds;
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
-    private const string FRAME = '/t/SHOP-1/rounds';
-    private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => 'ticket-rounds'];
     private const string OMAR_SHOT_TITLE = 'Omar first shot';
     private const string SHARED_AT = '2026-11-05 09:00:00+00';
-    private const int LIVE_ACTION_QUERIES = 27;
+    /** With the hand-off round before the draft, whose picture of the shown number is its Before. */
+    private const int LIVE_ACTION_QUERIES = 30;
     private const array STRANGERS = ['Lena', 'Mia', 'Sara', 'Raj', 'Ben'];
 
     private KernelBrowser $client;
@@ -371,7 +370,7 @@ final class DraftRoundEditorTest extends WebTestCase
     {
         $this->seedWorld();
         $unshared = $this->cardHeaderAndPicturesShown();
-        self::assertSame('Draft round · only you can see this', $unshared['headline']);
+        self::assertSame('Draft round', $unshared['headline']);
         self::assertTrue($unshared['isPrivate']);
         self::assertSame([$this->firstShot, $this->secondShot], array_keys($unshared['pictures']));
         self::assertNotContains('', $unshared['pictures']);
@@ -461,7 +460,7 @@ final class DraftRoundEditorTest extends WebTestCase
         self::assertGreaterThan(RoundCards::MAX_PICTURES_PER_CARD + 1, \count($shotIds));
         $this->props = $this->propsOf($this->draft);
 
-        $firstRender = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $firstRender = $this->client->request('GET', '/t/SHOP-1/rounds/'.$this->draft.'/draft');
         $this->assertEveryShotHasItsControls($firstRender, $shotIds);
 
         $eleventh = $shotIds[RoundCards::MAX_PICTURES_PER_CARD];
@@ -524,9 +523,9 @@ final class DraftRoundEditorTest extends WebTestCase
 
     private function propsOf(string $roundId): string
     {
-        $frame = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $frame = $this->client->request('GET', '/t/SHOP-1/rounds/'.$roundId.'/draft');
         self::assertResponseStatusCodeSame(200);
-        $editor = $frame->filter('#round-'.$roundId.' .draft-round-editor');
+        $editor = $frame->filter('.draft-round-editor');
         self::assertCount(1, $editor);
         $props = (string) $editor->attr('data-live-props-value');
         self::assertNotSame('', $props);
@@ -560,7 +559,7 @@ final class DraftRoundEditorTest extends WebTestCase
             $ids[] = $id;
             $pressed[$id] = $shot->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed'));
         }
-        $status = $response->filter('.round-card__header [data-draft-status]');
+        $status = $response->filter('.round-page__header [data-draft-status]');
 
         return ['ids' => $ids, 'pressed' => $pressed, 'status' => 0 === \count($status) ? null : $status->text()];
     }
@@ -599,8 +598,8 @@ final class DraftRoundEditorTest extends WebTestCase
         }
 
         return [
-            'headline' => $response->filter('.round-card__header .round-card__headline')->text(),
-            'isPrivate' => 0 !== \count($response->filter('.round-card__header .round-card__private')),
+            'headline' => $response->filter('.round-page__header .round-page__title')->text(),
+            'isPrivate' => 0 !== \count($response->filter('.round-page__header .round-card__private')),
             'pictures' => $pictures,
         ];
     }

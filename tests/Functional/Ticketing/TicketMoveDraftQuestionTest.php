@@ -181,7 +181,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
 
     /**
      * FR-RND-11: the page shows the shared round with no reload. The move's stream replaces the Rounds section, whose
-     * fresh lazy frame loads the rounds again: the draft card with its "Share with the team now" is gone, Round 2 is there.
+     * fresh lazy frame loads the rounds again: the draft's row with its "Open draft" is gone, Round 2 is there.
      */
     #[Test]
     public function aTurboShareReplacesTheRoundsSectionSoItsFrameShowsTheSharedRoundAndNoDraft(): void
@@ -190,7 +190,7 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $this->logIn($this->client, $this->people['Omar']);
         $before = $this->roundsFrame();
         self::assertSame(['Draft round · only you can see this'], $before->filter('article.round-card--private h3')->each(static fn (Crawler $heading): string => $heading->text()));
-        self::assertCount(1, $before->filter('.round-card__share'));
+        self::assertCount(1, $before->filter('article.round-card--private a.round-card__open'), 'The draft opens its page.');
 
         $this->client->request('POST', self::START_WORK, $this->moveFields([TicketMoveController::DRAFT_CHOICE_FIELD => 'share']), [], self::TURBO_FORM_HEADERS);
 
@@ -207,8 +207,8 @@ final class TicketMoveDraftQuestionTest extends WebTestCase
         $headlines = $after->filter('article.round-card h3')->each(static fn (Crawler $heading): string => $heading->text());
         self::assertCount(1, array_filter($headlines, static fn (string $headline): bool => str_starts_with($headline, 'Round 2 · ')), implode(' | ', $headlines));
         self::assertNotContains('Draft round · only you can see this', $headlines);
-        self::assertCount(0, $after->filter('.round-card__share'));
-        self::assertStringNotContainsString('Share with the team now', (string) $this->client->getResponse()->getContent());
+        self::assertCount(0, $after->filter('.round-card--private'));
+        self::assertStringNotContainsString('Open draft', (string) $this->client->getResponse()->getContent());
     }
 
     /**

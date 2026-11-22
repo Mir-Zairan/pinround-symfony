@@ -140,10 +140,15 @@ final class DraftRoundControllerTest extends WebTestCase
 
         $this->client->submit($start->form());
 
-        self::assertSame(DraftRoundController::DRAFT_STARTED, $this->toastAfterTheRedirect());
         $drafts = $this->roundRowsOf($ticketId);
         self::assertCount(1, $drafts);
         self::assertSame(['draft', $this->people['Omar']->id()->toString(), null, null, 'open'], [$drafts[0]['kind'], $drafts[0]['owner_id'], $drafts[0]['number'], $drafts[0]['shared_at'], $drafts[0]['state']]);
+        self::assertIsString($drafts[0]['id']);
+        self::assertSame(DraftRoundController::DRAFT_STARTED, $this->toastOnTheDraftPage($drafts[0]['id']), 'The start opens the new draft\'s page.');
+        $page = $this->client->getCrawler();
+        self::assertSame(DraftRoundEditor::EMPTY_NOTE, $page->filter('.draft-round-editor .round-card__empty')->text());
+        self::assertSame('Add screenshot', $page->filter('.draft-round-editor button.draft-round-editor__add')->text(), 'An empty draft still offers the way to add one.');
+        self::assertCount(0, $page->filter('.draft-round-editor [data-draft-status]'), 'An empty draft has no "0 of 0".');
 
         $this->client->request('POST', self::START, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))], [], self::TURBO_FORM_HEADERS);
         self::assertSame(RoundRefused::DRAFT_EXISTS, $this->toastOfTheRefusal());
@@ -154,13 +159,41 @@ final class DraftRoundControllerTest extends WebTestCase
         $frame = $this->frame();
         self::assertCount(0, $frame->filter(self::ROUNDS.' form.rounds__start'), 'No second start beside the own draft.');
         self::assertSame([self::PRIVATE_HEADLINE], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
-        self::assertCount(0, $frame->filter(self::ROUNDS.' .round-card__status'), 'An empty draft has no "0 of 0".');
-        self::assertSame(DraftRoundEditor::EMPTY_NOTE, $frame->filter(self::ROUNDS.' .round-card__empty')->text());
-        self::assertSame('Add screenshot', $frame->filter(self::ROUNDS.' .draft-round-editor button.draft-round-editor__add')->text(), 'An empty draft still offers the way to add one.');
+        self::assertSame('no screenshots', $frame->filter(self::ROUNDS.' .round-card__status')->text(), 'An empty draft has no "0 of 0".');
     }
 
     #[Test]
-    public function theOwnersDraftCardHoldsTheEditorWithEachScreenshotsTextsVerdictToggleRemoveAndPins(): void
+    public function theOwnersDraftIsARowInTheFrameThatOpensItsPageAndAnEmptyOneSaysSo(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $shared = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $this->addScreenshot($shared, $this->addMedia('ready'), 0, 'Shared shot', null);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null, 'not_right');
+        $this->addScreenshot($draft, $this->addMedia('ready'), 1, null, null, 'looks_right');
+        $this->addScreenshot($draft, $this->addMedia('ready'), 2, null, null, 'looks_right');
+        $this->addScreenshot($draft, $this->addMedia('ready'), 3, null, null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $frame = $this->frame();
+
+        $row = $frame->filter(self::ROUNDS.' article#round-'.$draft.'.round-card--private.round-card--row');
+        self::assertCount(1, $row);
+        self::assertSame(self::PRIVATE_HEADLINE, $row->filter('h3.round-card__headline')->text());
+        self::assertSame('PRIVATE', $row->filter('.round-card__private')->text());
+        self::assertSame('2 of 4 look right · 4 screenshots', $row->filter('.round-card__status')->text());
+        $open = $row->filter('a.round-card__open');
+        self::assertSame(['Open draft', '/t/SHOP-1/rounds/'.$draft.'/draft', '_top'], [trim($open->text()), $open->attr('href'), $open->attr('data-turbo-frame')]);
+        self::assertCount(0, $frame->filter(self::ROUNDS.' .draft-round-editor, '.self::ROUNDS.' img, '.self::ROUNDS.' form, '.self::ROUNDS.' .claude-code-box'), 'The editor, its pictures, its buttons and the Claude Code box are on the draft page only.');
+        self::assertStringNotContainsString(self::OMAR_DRAFT_SHOT, (string) $this->client->getResponse()->getContent());
+        self::assertSame(['Round 1 · self-check by Omar · open · 1 screenshot', self::PRIVATE_HEADLINE], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
+
+        $this->logIn($this->client, $this->people['Lena']);
+        self::assertCount(0, $this->frame()->filter(self::ROUNDS.' .round-card--private'), 'Lena sees no one else\'s private draft.');
+    }
+
+    #[Test]
+    public function theDraftPageShowsTheShownScreenshotsTextsVerdictToggleRemoveAndPinsAndATabPerScreenshot(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $shared = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
@@ -172,20 +205,29 @@ final class DraftRoundControllerTest extends WebTestCase
         $second = $this->addScreenshot($draft, $this->addMedia('ready'), 1, null, null);
         $this->logIn($this->client, $this->people['Omar']);
 
-        $frame = $this->frame();
+        $page = $this->draftPage($draft);
 
-        self::assertCount(1, $frame->filter(self::ROUNDS.' .draft-round-editor'), 'Only the unshared draft has the editor.');
-        self::assertCount(0, $frame->filter('#round-'.$shared.' .draft-round-editor, #round-'.$shared.' button'), 'A shared round is read-only.');
-        $editor = $frame->filter('#round-'.$draft.' .draft-round-editor');
+        self::assertSame('Draft round · SHOP-1 · pinround', $page->filter('title')->text());
+        $editor = $page->filter('.draft-round-editor');
         self::assertCount(1, $editor);
-        self::assertSame('1 of 2 look right', $editor->filter('.round-card__status')->text());
+        self::assertSame('Draft round', $editor->filter('h1')->text());
+        self::assertSame('SHOP-1', $editor->filter('.round-page__key')->text());
+        self::assertSame('/t/SHOP-1', $editor->filter('a.round-page__ticket-link')->attr('href'));
+        self::assertSame('1 of 2 look right', $editor->filter('[data-draft-status]')->text());
+        self::assertSame('PRIVATE', $editor->filter('.round-page__header .round-card__private')->text());
         self::assertCount(0, $editor->filter('.round-card__empty'), 'The empty note is for an empty draft only.');
+        self::assertSame('Before · round 1', $editor->filter('.draft-board__picture--before .round-compare__caption')->text(), 'Round 1 has a screenshot 1.');
         self::assertSame('Add screenshot', $editor->filter('button.draft-round-editor__add')->text());
         $body = $editor->filter('.draft-round-editor__body');
         self::assertSame('round', $body->attr('data-presigned-upload-target-kind-value'));
         self::assertSame($draft, $body->attr('data-presigned-upload-target-id-value'));
+        $tabs = $editor->filter('.round-tabs button.round-tab');
+        self::assertSame([$first, $second], $tabs->each(static fn (Crawler $tab): string => (string) $tab->attr('data-tab-screenshot-id')));
+        self::assertSame(['true', 'false'], $tabs->each(static fn (Crawler $tab): string => (string) $tab->attr('aria-pressed')));
+        self::assertSame(['1', '2'], $tabs->each(static fn (Crawler $tab): string => (string) $tab->attr('data-live-number-param')));
+        self::assertSame(['First <b>shot</b>', 'Screenshot 2'], $tabs->filter('.round-tab__label')->each(static fn (Crawler $label): string => $label->text()));
         $sections = $editor->filter('section[data-screenshot-id]');
-        self::assertSame([$first, $second], $sections->each(static fn (Crawler $section): string => (string) $section->attr('data-screenshot-id')));
+        self::assertSame([[$first, null], [$second, '']], $sections->each(static fn (Crawler $section): array => [(string) $section->attr('data-screenshot-id'), $section->attr('hidden')]), 'One screenshot shown at a time, the first by default.');
 
         $one = $sections->eq(0);
         self::assertSame('First <b>shot</b>', $one->filter('input[data-field=title]')->attr('value'));
@@ -205,12 +247,100 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertCount(1, $one->filter('.pin-placer[data-controller=pin-placer][data-live-ignore] button[data-pin-add]'));
         self::assertSame(DraftRoundEditor::NOTE_PLACEHOLDER, $one->filter('textarea.pin-list__note')->attr('placeholder'));
 
-        $two = $sections->eq(1);
+        self::assertSame(['Share with the team now', 'Make it a new ticket', 'Delete draft'], $editor->filter('.round-page__header form button')->each(static fn (Crawler $button): string => $button->text()));
+
+        $this->postLiveAction($this->client, (string) $editor->attr('data-live-props-value'), 'showScreenshot', ['number' => '2']);
+
+        self::assertResponseStatusCodeSame(200);
+        $answer = new Crawler((string) $this->client->getResponse()->getContent());
+        self::assertSame(['false', 'true'], $answer->filter('.round-tabs button.round-tab')->each(static fn (Crawler $tab): string => (string) $tab->attr('aria-pressed')));
+        $two = $answer->filter('section[data-screenshot-id]:not([hidden])');
+        self::assertSame([$second], $two->each(static fn (Crawler $section): string => (string) $section->attr('data-screenshot-id')));
         self::assertSame(['false', 'false'], $two->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('aria-pressed')));
         self::assertSame(['looks_right', 'not_right'], $two->filter('[role="group"] button[aria-pressed]')->each(static fn (Crawler $chip): string => (string) $chip->attr('data-live-verdict-param')));
         self::assertSame('', $two->filter('input[data-field=title]')->attr('value'));
         self::assertCount(0, $two->filter('textarea.pin-list__note'));
-        self::assertSame(['Share with the team now', 'Make it a new ticket', 'Delete draft'], $frame->filter('#round-'.$draft.' form button')->each(static fn (Crawler $button): string => $button->text()), 'Share, Make it a new ticket and Delete stay.');
+    }
+
+    /**
+     * A draft's screenshot N shows beside the latest try of screenshot N of the hand-off round shared last, which a
+     * later shared round replaces, and a screenshot past that round's last has none.
+     */
+    #[Test]
+    public function theShownScreenshotHasTheSameNumberedPictureOfTheLastHandOffRoundAsItsBefore(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $this->addScreenshot($report, $this->addMedia('ready', 'Mia'), 0, 'Report shot', null);
+        $roundOne = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $roundOneShot = $this->addScreenshot($roundOne, $this->addMedia('ready'), 0, 'Round one shot', null);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 1, null, null);
+        $this->logIn($this->client, $this->people['Omar']);
+
+        $editor = $this->draftPage($draft)->filter('.draft-round-editor');
+
+        self::assertSame('both', $editor->filter('.draft-board')->attr('data-compare-mode'));
+        self::assertSame(['Side by side', 'Before', 'After'], $editor->filter('.round-compare-control button')->each(static fn (Crawler $button): string => $button->text()));
+        self::assertSame(['true', 'false', 'false'], $editor->filter('.round-compare-control button')->each(static fn (Crawler $button): string => (string) $button->attr('aria-pressed')));
+        $before = $editor->filter('.draft-board__picture--before');
+        self::assertSame('Before · round 1', $before->filter('.round-compare__caption')->text(), 'Round 1, not the report: the hand-off round shared last.');
+        self::assertSame('screenshot-'.$roundOneShot, $before->filter('figure.screenshot')->attr('id'));
+        self::assertNotSame('', (string) $before->filter('img.screenshot__image')->attr('src'), 'The Before is signed.');
+        $props = (string) $editor->attr('data-live-props-value');
+
+        $this->postLiveAction($this->client, $props, 'compare', ['mode' => 'after']);
+
+        self::assertResponseStatusCodeSame(200);
+        $answer = new Crawler((string) $this->client->getResponse()->getContent());
+        self::assertSame('after', $answer->filter('.draft-board')->attr('data-compare-mode'));
+        self::assertSame(['false', 'false', 'true'], $answer->filter('.round-compare-control button')->each(static fn (Crawler $button): string => (string) $button->attr('aria-pressed')));
+
+        $this->postLiveAction($this->client, $props, 'showScreenshot', ['number' => '2']);
+
+        self::assertResponseStatusCodeSame(200);
+        $answer = new Crawler((string) $this->client->getResponse()->getContent());
+        self::assertCount(0, $answer->filter('.draft-board__picture--before, .round-compare-control'), 'Round 1 has no screenshot 2.');
+        self::assertCount(1, $answer->filter('section:not([hidden]) .draft-board__picture--after'));
+    }
+
+    #[Test]
+    public function theDraftPageIsNotFoundForEveryoneButItsOwnerAndForAnUnknownSharedOrForeignRound(): void
+    {
+        $ticketId = $this->addTicket('SHOP-1');
+        $otherTicketId = $this->addTicket('SHOP-2', 'all', 2);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null);
+        $shared = $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
+        $report = $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
+        $otherTicketsDraft = $this->addRound($otherTicketId, null, 'draft', 'Omar', null);
+        $ben = $this->otherOrganizationsAdmin();
+        $before = $this->roundRowsOf($ticketId);
+
+        foreach (self::OTHERS as $person) {
+            $this->logIn($this->client, $this->people[$person]);
+            $this->client->request('GET', $this->draftPageUrl($draft));
+
+            self::assertResponseStatusCodeSame(404, $person);
+            self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent(), $person);
+            self::assertStringNotContainsString(self::OMAR_DRAFT_SHOT, (string) $this->client->getResponse()->getContent(), $person);
+        }
+
+        $this->logIn($this->client, $ben);
+        $this->client->request('GET', $this->draftPageUrl($draft));
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringContainsString(RoundsController::NOT_FOUND, (string) $this->client->getResponse()->getContent(), 'Ben may not see SHOP-1 at all.');
+
+        $this->logIn($this->client, $this->people['Omar']);
+        foreach (['not-a-uuid', Uuid::v7()->toRfc4122(), $shared, $report, $otherTicketsDraft] as $roundId) {
+            $this->client->request('GET', $this->draftPageUrl($roundId));
+
+            self::assertResponseStatusCodeSame(404, $roundId);
+            self::assertStringContainsString(RoundRefused::NOT_FOUND, (string) $this->client->getResponse()->getContent(), $roundId);
+        }
+        $this->draftPage($draft);
+        self::assertSame($before, $this->roundRowsOf($ticketId), 'Opening the page changes nothing.');
     }
 
     /**
@@ -235,10 +365,11 @@ final class DraftRoundControllerTest extends WebTestCase
 
         $this->client->submit($start->form());
 
-        self::assertSame(DraftRoundController::DRAFT_STARTED, $this->toastAfterTheRedirect());
         $drafts = $this->roundRowsOf($ticketId);
         self::assertCount(1, $drafts);
         self::assertSame(['draft', $this->people['Mia']->id()->toString(), null, null, 'open'], [$drafts[0]['kind'], $drafts[0]['owner_id'], $drafts[0]['number'], $drafts[0]['shared_at'], $drafts[0]['state']]);
+        self::assertIsString($drafts[0]['id']);
+        self::assertSame(DraftRoundController::DRAFT_STARTED, $this->toastOnTheDraftPage($drafts[0]['id']));
 
         $this->logIn($this->client, $this->people['Omar']);
         $frame = $this->frame();
@@ -393,8 +524,9 @@ final class DraftRoundControllerTest extends WebTestCase
         $picturesToAdd['Ben'] = $picturesToAdd['Omar'];
 
         $this->logIn($this->client, $this->people['Mia']);
-        $miasEditor = $this->frame()->filter('#round-'.$draft.' .draft-round-editor');
-        self::assertCount(1, $miasEditor, 'Mia sees her own draft.');
+        self::assertCount(1, $this->frame()->filter('#round-'.$draft.'.round-card--private'), 'Mia sees her own draft.');
+        $miasEditor = $this->draftPage($draft)->filter('.draft-round-editor');
+        self::assertCount(1, $miasEditor, 'Mia opens her own draft.');
         $miasProps = (string) $miasEditor->attr('data-live-props-value');
         self::assertNotSame('', $miasProps);
         $this->client->request('GET', '/media/'.$draftPicture.'/status');
@@ -422,6 +554,11 @@ final class DraftRoundControllerTest extends WebTestCase
                 $this->assertHoldsNothingOfMiasDraft($person.' '.$roundPage, $draft);
             }
 
+            $this->client->request('GET', $this->draftPageUrl($draft));
+            self::assertResponseStatusCodeSame(404, $person.' opens the draft page.');
+            self::assertStringContainsString($draftRefusal, (string) $this->client->getResponse()->getContent(), $person.' opens the draft page.');
+            $this->assertHoldsNothingOfMiasDraft($person.' on the draft page', null);
+
             foreach ([$this->shareUrl($draft), $this->deleteUrl($draft), $this->newTicketUrl($draft)] as $url) {
                 $this->client->request('POST', $url, [DraftRoundController::CSRF_FIELD => $this->csrfTokenFor($this->client, DraftRoundController::csrfIdOf('SHOP-1'))]);
                 self::assertResponseStatusCodeSame(404, $person.' '.$url);
@@ -434,6 +571,8 @@ final class DraftRoundControllerTest extends WebTestCase
                 'editScreenshotText' => ['screenshotId' => $draftShot, 'title' => 'Hijacked', 'summary' => 'Hijacked'],
                 'setVerdict' => ['screenshotId' => $draftShot, 'verdict' => 'looks_right'],
                 'setPins' => ['screenshotId' => $draftShot, 'pins' => []],
+                'showScreenshot' => ['number' => '1'],
+                'compare' => ['mode' => 'before'],
             ] as $action => $args) {
                 $this->postLiveAction($this->client, $miasProps, $action, $args);
                 self::assertResponseStatusCodeSame(404, $person.' '.$action);
@@ -465,7 +604,7 @@ final class DraftRoundControllerTest extends WebTestCase
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null, 'looks_right');
         $this->logIn($this->client, $this->people['Omar']);
-        $share = $this->frame()->filter('#round-'.$draft.' form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Share with the team now' === $form->filter('button')->text());
+        $share = $this->draftPage($draft)->filter('.draft-round-editor form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Share with the team now' === $form->filter('button')->text());
         self::assertCount(1, $share);
 
         $this->client->submit($share->form());
@@ -498,7 +637,7 @@ final class DraftRoundControllerTest extends WebTestCase
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addScreenshot($draft, $this->addMedia('ready'), 0, self::OMAR_DRAFT_SHOT, null);
         $this->logIn($this->client, $this->people['Omar']);
-        $delete = $this->frame()->filter('#round-'.$draft.' form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Delete draft' === $form->filter('button')->text());
+        $delete = $this->draftPage($draft)->filter('.draft-round-editor form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Delete draft' === $form->filter('button')->text());
         self::assertCount(1, $delete);
         $form = $delete->form();
 
@@ -648,10 +787,9 @@ final class DraftRoundControllerTest extends WebTestCase
         $draftScreenshotsBefore = $this->screenshotRowsOf($draft);
 
         $this->logIn($this->client, $this->people['Mia']);
-        $button = $this->frame()->filter('#round-'.$draft.' form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Make it a new ticket' === $form->filter('button')->text());
+        $button = $this->draftPage($draft)->filter('.draft-round-editor form.round-card__form')->reduce(static fn (Crawler $form): bool => 'Make it a new ticket' === $form->filter('button')->text());
         self::assertCount(1, $button);
         self::assertSame($this->newTicketUrl($draft), $button->attr('action'));
-        self::assertSame('_top', $button->attr('data-turbo-frame'));
         $form = $button->form();
         $outboxBefore = $this->outboxMessages();
         $this->client->submit($form);
@@ -777,75 +915,63 @@ final class DraftRoundControllerTest extends WebTestCase
     }
 
     #[Test]
-    public function theOwnersUnsharedDraftAloneHasItsButtonsAndTheClaudeCodeBoxWithTheTicketsKey(): void
+    public function theDraftPageHasTheClaudeCodeBoxWithTheTicketsKeyAndTheSignInCommand(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $this->addRound($ticketId, 1, 'draft', 'Omar', self::SHARED_AT);
         $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->logIn($this->client, $this->people['Omar']);
 
-        $frame = $this->frame();
+        $page = $this->draftPage($draft);
 
-        self::assertCount(2, $frame->filter(self::ROUNDS.' .round-card'));
-        $boxes = $frame->filter(self::ROUNDS.' .claude-code-box');
+        $boxes = $page->filter('.claude-code-box');
         self::assertCount(1, $boxes);
-        self::assertCount(1, $frame->filter('#round-'.$draft.' .claude-code-box'));
-        self::assertSame('For Claude Code', $boxes->filter('h4')->text());
+        self::assertSame('For Claude Code', $boxes->filter('h2')->text());
         $prompt = $boxes->filter('textarea.claude-code-box__prompt[readonly][data-copy-text-target="source"]');
         self::assertCount(1, $prompt, 'The line is a read-only field, so copy-text can copy its value and select it.');
-        self::assertSame('Read my pinround notes for SHOP-1 and fix what is marked “Not right yet”.', $prompt->text());
+        self::assertSame('Read my pinround notes for SHOP-1 and fix what is marked “Not right yet”.', $prompt->text(), 'Omar is the assignee, so his line fixes.');
         self::assertSame('Line to give Claude Code', $prompt->attr('aria-label'));
-        $copyBlock = $boxes->filter('[data-controller="copy-text"]');
-        self::assertCount(1, $copyBlock);
-        $controls = $copyBlock->filter('[data-copy-text-target="controls"]');
+        $controls = $boxes->filter('[data-controller="copy-text"] [data-copy-text-target="controls"]');
         self::assertNotNull($controls->attr('hidden'), 'The Copy button comes hidden; copy-text shows it only where the browser can copy.');
-        self::assertSame('copy-text#copy', $controls->filter('button')->attr('data-action'));
-        self::assertSame('button', $controls->filter('button')->attr('type'), 'Copy never submits a form.');
-        self::assertCount(1, $controls->filter('[role="status"][data-copy-text-target="status"]'));
-        $tools = $boxes->filter('.claude-code-box__tools')->text();
-        foreach (['get_round_notes', 'add_screenshot', 'set_verdict'] as $tool) {
-            self::assertStringContainsString($tool, $tools);
-        }
-        self::assertSame('To connect Claude Code, make a token on the API tokens page.', $boxes->filter('.claude-code-box__tokens')->text());
-        $tokensLink = $boxes->filter('.claude-code-box__tokens a');
-        self::assertSame(['API tokens', '/me/tokens', '_top'], [$tokensLink->text(), $tokensLink->attr('href'), $tokensLink->attr('data-turbo-frame')], 'The link leaves the rounds frame for the whole page.');
+        self::assertSame(['copy-text#copy', 'button'], [$controls->filter('button')->attr('data-action'), $controls->filter('button')->attr('type')], 'Copy never submits a form.');
+        self::assertSame('Claude Code can read these notes and verdicts and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict.', $boxes->filter('.claude-code-box__tools')->text());
         self::assertSame(
-            ['Add screenshot', 'Share with the team now', 'Make it a new ticket', 'Delete draft', 'Copy line'],
-            $frame->filter(self::ROUNDS.' button')->each(static fn (Crawler $button): string => $button->text()),
-            'Only the private draft has buttons; the start button is gone beside it.',
+            'To connect Claude Code, run claude mcp add --transport http pinround https://localhost/mcp and sign in. To use a token instead, see the API tokens page.',
+            $boxes->filter('.claude-code-box__connect')->text(),
+            'The address the page was opened at, with the MCP path.',
         );
-        self::assertSame('Delete this draft round? Its screenshots, pins and notes go too.', $frame->filter('#round-'.$draft.' form.round-card__form:has(.round-card__delete)')->attr('data-turbo-confirm'), 'Deleting asks first.');
-        self::assertNull($frame->filter('#round-'.$draft.' form:has(.round-card__share)')->attr('data-turbo-confirm'), 'Sharing does not ask.');
-        self::assertSame('Claude Code can read these notes and verdicts and add screenshots. Tools: get_round_notes, add_screenshot, set_verdict.', $tools, 'The tools exist now: no "Planned" or "Not built yet", and no repository path or library name.');
-
-        $this->logIn($this->client, $this->people['Lena']);
-        $frame = $this->frame();
-        self::assertSame(['Round 1 · self-check by Omar · open · no screenshots'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()));
-        self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' form'));
+        self::assertSame('claude mcp add --transport http pinround https://localhost/mcp', $boxes->filter('code.claude-code-box__command')->text());
+        self::assertSame(['API tokens', '/me/tokens'], [$boxes->filter('a.claude-code-box__tokens-link')->text(), $boxes->filter('a.claude-code-box__tokens-link')->attr('href')]);
+        self::assertStringNotContainsString('make a token on the API tokens page', (string) $this->client->getResponse()->getContent());
+        self::assertSame('Delete this draft round? Its screenshots, pins and notes go too.', $page->filter('form.round-card__form:has(.round-card__delete)')->attr('data-turbo-confirm'), 'Deleting asks first.');
+        self::assertNull($page->filter('form.round-card__form:has(.round-card__share)')->attr('data-turbo-confirm'), 'Sharing does not ask.');
     }
 
+    /**
+     * ADR-0044: a draft of anyone but the assignee holds findings, so its line asks Claude Code to check the ticket and
+     * add to the draft, never to fix it.
+     */
     #[Test]
-    public function eachPersonSeesTheClaudeCodeBoxOnlyInTheirOwnUnsharedDraft(): void
+    public function theClaudeCodeLineFitsTheOwnersPartOnTheTicket(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
-        $omarsDraft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
-        $lenasDraft = $this->addRound($ticketId, null, 'draft', 'Lena', null);
-        $this->addRound($ticketId, 1, 'draft', 'Mia', self::SHARED_AT);
+        $this->putInTestingWithMiasTurn($ticketId);
+        $drafts = [
+            'Omar' => $this->addRound($ticketId, null, 'draft', 'Omar', null),
+            'Mia' => $this->addRound($ticketId, null, 'draft', 'Mia', null),
+            'Lena' => $this->addRound($ticketId, null, 'draft', 'Lena', null),
+        ];
+        $expectedLines = [
+            'Omar' => 'Read my pinround notes for SHOP-1 and fix what is marked “Not right yet”.',
+            'Mia' => 'Check SHOP-1 and add what you find to my pinround draft round.',
+            'Lena' => 'Check SHOP-1 and add what you find to my pinround draft round.',
+        ];
 
-        foreach (['Omar' => $omarsDraft, 'Lena' => $lenasDraft] as $owner => $ownDraft) {
+        foreach ($drafts as $owner => $draft) {
             $this->logIn($this->client, $this->people[$owner]);
-            $frame = $this->frame();
-            self::assertSame(['Round 1 · findings by Mia · open · no screenshots', 'Draft round · only you can see this'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $owner.' sees their own draft and the shared round.');
-            self::assertCount(1, $frame->filter(self::ROUNDS.' .claude-code-box'), $owner);
-            self::assertCount(1, $frame->filter('#round-'.$ownDraft.' .claude-code-box'), $owner);
-        }
-
-        foreach (['Mia', 'Raj', 'Sara'] as $person) {
-            $this->logIn($this->client, $this->people[$person]);
-            $frame = $this->frame();
-            self::assertSame(['Round 1 · findings by Mia · open · no screenshots'], $frame->filter(self::ROUNDS.' .round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()), $person.' sees the shared round only.');
-            self::assertCount(0, $frame->filter(self::ROUNDS.' .claude-code-box, '.self::ROUNDS.' [data-controller="copy-text"]'), $person.': a shared round has no box, not even for its owner.');
-            self::assertStringNotContainsString('Read my pinround notes', (string) $this->client->getResponse()->getContent(), $person);
+            self::assertSame($expectedLines[$owner], $this->draftPage($draft)->filter('textarea.claude-code-box__prompt')->text(), $owner);
+            self::assertCount(1, $this->frame()->filter(self::ROUNDS.' .round-card--private'), $owner.' sees their own draft only.');
+            self::assertCount(0, $this->client->getCrawler()->filter(self::ROUNDS.' .claude-code-box'), $owner.': the box is on the draft page only.');
         }
     }
 
@@ -1016,6 +1142,34 @@ final class DraftRoundControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
 
         return $frame;
+    }
+
+    private function draftPage(string $roundId): Crawler
+    {
+        $page = $this->client->request('GET', $this->draftPageUrl($roundId));
+        self::assertResponseStatusCodeSame(200);
+
+        return $page;
+    }
+
+    private function draftPageUrl(string $roundId): string
+    {
+        return '/t/SHOP-1/rounds/'.$roundId.'/draft';
+    }
+
+    /**
+     * The toast of a start, which answers with the new draft's page.
+     */
+    private function toastOnTheDraftPage(string $roundId): string
+    {
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame($this->draftPageUrl($roundId), $this->client->getResponse()->headers->get('Location'));
+        $page = $this->client->followRedirect();
+        self::assertResponseStatusCodeSame(200);
+        $toast = $page->filter('.toast-region [data-toast-message-value]');
+        self::assertCount(1, $toast);
+
+        return (string) $toast->attr('data-toast-message-value');
     }
 
     private function shareUrl(string $roundId): string

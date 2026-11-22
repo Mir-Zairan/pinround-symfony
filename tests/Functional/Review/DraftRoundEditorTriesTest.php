@@ -94,7 +94,7 @@ final class DraftRoundEditorTriesTest extends WebTestCase
     {
         $this->seedWorld();
 
-        $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $this->client->request('GET', '/t/SHOP-1/rounds/'.$this->draft.'/draft');
 
         self::assertResponseStatusCodeSame(200);
         self::assertSame([$this->latestTry, $this->otherShot], $this->sectionIdsShown(), 'One section per screenshot, its latest try first.');
@@ -453,7 +453,7 @@ final class DraftRoundEditorTriesTest extends WebTestCase
         $expectedCard = [[$miasRetake, 'Screenshot 1'], [$miasOtherShot, 'Screenshot 2'], [$miasThirdShot, 'Screenshot 3']];
 
         $this->logIn($this->client, $this->people['Mia']);
-        self::assertSame($expectedCard, $this->screenshotsOnTheCardOf($this->miasDraft), 'Mia\'s draft, before the share.');
+        self::assertSame($expectedCard, $this->screenshotsOnTheDraftPageOf($this->miasDraft), 'Mia\'s draft, before the share.');
 
         $this->client->request(
             'POST',
@@ -510,9 +510,9 @@ final class DraftRoundEditorTriesTest extends WebTestCase
 
     private function propsOf(string $roundId): string
     {
-        $frame = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $frame = $this->client->request('GET', '/t/SHOP-1/rounds/'.$roundId.'/draft');
         self::assertResponseStatusCodeSame(200);
-        $editor = $frame->filter('#round-'.$roundId.' .draft-round-editor');
+        $editor = $frame->filter('.draft-round-editor');
         self::assertCount(1, $editor);
         $props = (string) $editor->attr('data-live-props-value');
         self::assertNotSame('', $props);
@@ -596,7 +596,7 @@ final class DraftRoundEditorTriesTest extends WebTestCase
 
     private function statusShown(): ?string
     {
-        $status = new Crawler((string) $this->client->getResponse()->getContent())->filter('.round-card__header [data-draft-status]');
+        $status = new Crawler((string) $this->client->getResponse()->getContent())->filter('.round-page__header [data-draft-status]');
 
         return 0 === \count($status) ? null : $status->text();
     }
@@ -694,6 +694,20 @@ final class DraftRoundEditorTriesTest extends WebTestCase
         self::assertCount(\count($ids), $labels, 'One label per picture.');
 
         return array_map(static fn (string $id, string $label): array => [$id, $label], $ids, $labels);
+    }
+
+    /**
+     * @return list<array{string, string}> each screenshot on the draft's page, as its owner sees it: the id of the try
+     *                                     shown and its "Screenshot N" label, in order
+     */
+    private function screenshotsOnTheDraftPageOf(string $roundId): array
+    {
+        $page = $this->client->request('GET', '/t/SHOP-1/rounds/'.$roundId.'/draft');
+        self::assertResponseStatusCodeSame(200);
+        $sections = $page->filter('.draft-round-editor section[data-screenshot-id]');
+        self::assertGreaterThan(0, \count($sections), 'The page holds the draft\'s screenshots.');
+
+        return $sections->each(static fn (Crawler $section): array => [(string) $section->attr('data-screenshot-id'), $section->filter('.round-card__screenshot-label > span:first-child')->text()]);
     }
 
     private function draftVersion(): int

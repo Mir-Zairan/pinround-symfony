@@ -169,7 +169,7 @@ final class RoundsFrameTest extends WebTestCase
 
     /**
      * P14.T7: review.css caps Round 0's picture by the thumbnail hook, so five rounds fit one screen; the owner's draft
-     * editor keeps its pictures full width, as pins are placed on them. On a wide screen the hook's grid draws the
+     * is a row whose pictures are on its own page. On a wide screen the hook's grid draws the
      * picture's title and summary, then the pin list, beside the picture: it places the figure's caption and frame and
      * the pin list, the hook's only children.
      */
@@ -196,14 +196,14 @@ final class RoundsFrameTest extends WebTestCase
         self::assertSame(['Report shot'], $thumbnails->filter('figure.screenshot .screenshot__title')->each(static fn (Crawler $title): string => $title->text()));
         self::assertSame(['The total is off'], $thumbnails->filter('.pin-list__note')->each(static fn (Crawler $note): string => $note->text()));
         $draftCard = $page->filter(self::ROUNDS.' article#round-'.$draft);
-        self::assertCount(1, $draftCard->filter('figure.screenshot'), 'The draft shows its picture.');
-        self::assertCount(0, $draftCard->filter('.round-card__screenshot--thumbnail'));
+        self::assertCount(1, $draftCard, 'The draft has its row.');
+        self::assertCount(0, $draftCard->filter('figure.screenshot'), 'The draft\'s pictures are on its page.');
         self::assertCount(1, $page->filter(self::ROUNDS.' .round-card__screenshot--thumbnail'));
     }
 
     /**
      * P14.T7f: Round 0 loads the 480 px thumb (1280 × 800 scaled to 480 × 300), drawn no higher than
-     * RoundCards::THUMBNAIL_MAX_HEIGHT (200 px), while the owner's draft keeps the 1920 px view its pins are placed on.
+     * RoundCards::THUMBNAIL_MAX_HEIGHT (200 px), while the owner's draft page loads the 1920 px view its pins are placed on.
      */
     #[Test]
     public function roundZerosPictureLoadsItsThumbAndTheOwnersDraftItsView(): void
@@ -223,7 +223,10 @@ final class RoundsFrameTest extends WebTestCase
         self::assertCount(1, $reportPicture);
         self::assertSame('/pinround/media/'.$reportMedia.'/thumb.webp', parse_url((string) $reportPicture->attr('src'), \PHP_URL_PATH));
         self::assertSame(['320', '200'], [$reportPicture->attr('width'), $reportPicture->attr('height')], '480 × 300 scaled to 200 high is 320 wide.');
-        $draftPictures = $page->filter(self::ROUNDS.' article#round-'.$draft.' img.screenshot__image')->each(static fn (Crawler $image): string => (string) parse_url((string) $image->attr('src'), \PHP_URL_PATH));
+        self::assertCount(0, $page->filter(self::ROUNDS.' article#round-'.$draft.' img'), 'The draft is a row.');
+        $draftPage = $this->client->request('GET', '/t/SHOP-1/rounds/'.$draft.'/draft');
+        self::assertResponseStatusCodeSame(200);
+        $draftPictures = $draftPage->filter('.draft-round-editor .draft-board__picture--after img.screenshot__image')->each(static fn (Crawler $image): string => (string) parse_url((string) $image->attr('src'), \PHP_URL_PATH));
         self::assertNotEmpty($draftPictures);
         self::assertSame(['/pinround/media/'.$draftMedia.'/view.webp'], array_values(array_unique($draftPictures)));
     }
@@ -489,11 +492,10 @@ final class RoundsFrameTest extends WebTestCase
             ['Round 3 · self-check by Omar · open · 2 screenshots', 'Draft round · only you can see this'],
             $cards->filter('.round-card__headline')->each(static fn (Crawler $headline): string => $headline->text()),
         );
-        self::assertSame(['0 of 1 look right'], $cards->filter('.round-card__status')->each(static fn (Crawler $status): string => $status->text()), 'The shared round is a row with no status line.');
+        self::assertSame(['0 of 1 look right · 1 screenshot'], $cards->filter('.round-card__status')->each(static fn (Crawler $status): string => $status->text()), 'The shared round is a row with no status line.');
         self::assertSame(['PRIVATE'], $cards->filter('.round-card__private')->each(static fn (Crawler $tag): string => $tag->text()));
-        self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private'));
-        self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private .draft-round-editor'), 'The editor is in the private card only.');
-        self::assertCount(1, $page->filter(self::ROUNDS.' .draft-round-editor'));
+        self::assertCount(1, $page->filter(self::ROUNDS.' .round-card--private.round-card--row'));
+        self::assertCount(0, $page->filter(self::ROUNDS.' .draft-round-editor'), 'The editor is on the draft page.');
         self::assertCount(0, $page->filter(self::ROUNDS.' .checklist'), 'A self-check round has no items, so no checklist.');
         self::assertStringNotContainsString(self::LENA_DRAFT_TITLE, (string) $this->client->getResponse()->getContent());
 
@@ -636,7 +638,7 @@ final class RoundsFrameTest extends WebTestCase
     }
 
     #[Test]
-    public function onlyThePrivateDraftHasADescriptionAndRowsAndCardsAreTheSharedCardComponent(): void
+    public function noRowHasADescriptionAndRowsAndCardsAreTheSharedCardComponent(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
         $this->addRound($ticketId, 1, 'draft', 'Lena', self::SHARED_AT);
@@ -647,19 +649,15 @@ final class RoundsFrameTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertSame(
-            ['Check your own work before you pass it on. Screenshots, pins, notes and a verdict per screenshot. Nobody else sees this until you share it.'],
-            $page->filter(self::ROUNDS.' .round-card__description')->each(static fn (Crawler $description): string => $description->text()),
-            'A row is one line, with no description.',
-        );
+        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card__description'), 'A row is one line, with no description; the private draft\'s is on its page.');
         self::assertCount(3, $page->filter(self::ROUNDS.' article.card.round-card'));
     }
 
     #[Test]
-    public function aDraftWithNoScreenshotsShowsNoStatusAndSaysItIsEmpty(): void
+    public function aDraftWithNoScreenshotsSaysSoInItsRowAndOnItsPage(): void
     {
         $ticketId = $this->addTicket('SHOP-1');
-        $this->addRound($ticketId, null, 'draft', 'Omar', null);
+        $draft = $this->addRound($ticketId, null, 'draft', 'Omar', null);
         $this->addRound($ticketId, 0, 'report', 'Mia', self::SHARED_AT);
         $this->logIn($this->client, $this->people['Omar']);
 
@@ -667,9 +665,15 @@ final class RoundsFrameTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(2, $page->filter(self::ROUNDS.' .round-card'));
-        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card__status'));
+        self::assertSame(['no screenshots'], $page->filter(self::ROUNDS.' .round-card__status')->each(static fn (Crawler $status): string => $status->text()));
         self::assertStringNotContainsString('0 of 0', (string) $this->client->getResponse()->getContent());
-        self::assertSame([DraftRoundEditor::EMPTY_NOTE], $page->filter(self::ROUNDS.' .round-card__empty')->each(static fn (Crawler $note): string => $note->text()), 'The report has none.');
+
+        $draftPage = $this->client->request('GET', '/t/SHOP-1/rounds/'.$draft.'/draft');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $draftPage->filter('[data-draft-status]'));
+        self::assertStringNotContainsString('0 of 0', (string) $this->client->getResponse()->getContent());
+        self::assertSame([DraftRoundEditor::EMPTY_NOTE], $draftPage->filter('.draft-round-editor .round-card__empty')->each(static fn (Crawler $note): string => $note->text()));
     }
 
     #[Test]
@@ -687,8 +691,11 @@ final class RoundsFrameTest extends WebTestCase
         $page = $this->client->request('GET', self::ROUNDS_PAGE, [], [], self::TURBO_FRAME_HEADERS);
 
         self::assertResponseStatusCodeSame(200);
-        $labels = $page->filter(self::ROUNDS.' .round-card__screenshot-label');
-        self::assertCount(3, $labels, 'Only the draft numbers its screenshots.');
+        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card__screenshot-label'), 'The report does not number its screenshots.');
+        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card')->eq(0)->filter('.tag'), 'The report card is first.');
+        $labels = $this->client->request('GET', '/t/SHOP-1/rounds/'.$draft.'/draft')->filter('.draft-round-editor .round-card__screenshot-label');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(3, $labels, 'The draft numbers its screenshots.');
         self::assertSame(
             ['Screenshot 1 No verdict yet', 'Screenshot 2 Looks right', 'Screenshot 3 Not right yet'],
             $labels->each(static fn (Crawler $label): string => $label->text()),
@@ -697,7 +704,6 @@ final class RoundsFrameTest extends WebTestCase
             ['verdict-tag--none', 'verdict-tag--looks-right', 'verdict-tag--not-right'],
             $labels->filter('.tag')->each(static fn (Crawler $tag): string => array_values(array_filter(explode(' ', (string) $tag->attr('class')), static fn (string $class): bool => str_starts_with($class, 'verdict-tag--')))[0]),
         );
-        self::assertCount(0, $page->filter(self::ROUNDS.' .round-card')->eq(0)->filter('.tag'), 'The report card is first.');
     }
 
     #[Test]
@@ -744,7 +750,7 @@ final class RoundsFrameTest extends WebTestCase
      * with one item and the viewer's draft, then the same ticket with those and 5 more rounds by different people with
      * 3 pictures each, three of them findings rounds with an item per pin, read the same number of queries. The
      * findings round of the first read is there because a shared draft adds the items query and the ticket's facts,
-     * once; the viewer's draft because its views are signed apart from the report's thumbs, once.
+     * once; the viewer's draft, a row that signs no picture.
      */
     #[Test]
     public function theSectionReadsTheSameNumberOfQueriesWhateverTheNumberOfRounds(): void
@@ -774,8 +780,8 @@ final class RoundsFrameTest extends WebTestCase
         $manyRoundsQueryCount = $this->queryCountOf(self::ROUNDS_PAGE);
 
         self::assertCount(8, $this->client->getCrawler()->filter(self::ROUNDS.' .round-card'));
-        self::assertCount(6, $this->client->getCrawler()->filter(self::ROUNDS.' article.round-card--row'));
-        self::assertCount(2, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'), "The report's and the own draft's: rows show none.");
+        self::assertCount(7, $this->client->getCrawler()->filter(self::ROUNDS.' article.round-card--row'));
+        self::assertCount(1, $this->client->getCrawler()->filter(self::ROUNDS.' figure.screenshot'), "The report's: rows show none.");
         self::assertCount(4, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist'));
         self::assertCount(10, $this->client->getCrawler()->filter(self::ROUNDS.' .checklist__row button'), 'Omar may mark each finding fixed.');
         self::assertSame($threeRoundsQueryCount, $manyRoundsQueryCount);
@@ -944,7 +950,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         $cards = $page->filter(self::ROUNDS.' .round-card');
         self::assertCount(3, $cards);
-        self::assertSame([10, 0, 10], $cards->each(static fn (Crawler $card): int => $card->filter('img.screenshot__image')->count()), 'The shared round is a row.');
+        self::assertSame([10, 0, 0], $cards->each(static fn (Crawler $card): int => $card->filter('img.screenshot__image')->count()), 'The shared round and the own draft are rows.');
         self::assertSame(
             ['2 more screenshots are not shown.'],
             $cards->filter('.round-card__more')->each(static fn (Crawler $note): string => $note->text()),
@@ -956,7 +962,7 @@ final class RoundsFrameTest extends WebTestCase
         self::assertStringNotContainsString('Report shot 10', $content);
         self::assertStringNotContainsString('Report shot 11', $content);
         self::assertStringNotContainsString('Shared shot 0', $content);
-        self::assertStringContainsString('Own shot 9', $content);
+        self::assertStringNotContainsString('Own shot', $content);
         self::assertSame('Round 0 · Report · by Mia · 0 pins', $cards->eq(0)->filter('.round-card__headline')->text());
         self::assertSame('Round 1 · self-check by Omar · open · 11 screenshots', $cards->eq(1)->filter('.round-card__headline')->text(), 'The row counts every screenshot.');
     }

@@ -1,6 +1,6 @@
-{#- RoundsController's answer to RoundsSection's lazy frame: the bare frame with the cards, and no layout. The draft
-    forms leave the frame (_top): DraftRoundController answers with the ticket page. -#}
-{% set draftCsrfToken = canStartDraft or section.hasPrivateDraft ? csrf_token(draftCsrfId) : null %}
+{#- RoundsController's answer to RoundsSection's lazy frame: the bare frame with the cards, and no layout. "Start a draft
+    round" and "Open draft" leave the frame (_top) for the draft's own page. -#}
+{% set draftCsrfToken = canStartDraft ? csrf_token(draftCsrfId) : null %}
 <turbo-frame id="{{ constant('App\\Review\\UI\\Component\\RoundsSection::FRAME_ID') }}">
     {% if section.cards is empty %}
         <twig:EmptyState :message="constant('App\\Review\\UI\\Component\\RoundsSection::EMPTY')" />
@@ -8,8 +8,13 @@
         {% for card in section.cards %}
             <twig:Card tag="article" :class="'round-card' ~ (card.isPrivateDraft ? ' round-card--private' : '') ~ (card.isRow ? ' round-card--row' : '')" id="{{ card.domId }}" aria-labelledby="{{ card.domId }}-heading">
                 {% if card.isPrivateDraft %}
-                    {#- The editor shows the header (with the status line), the description, the screenshots, the empty note and the "more" note itself, so they follow each change. -#}
-                    <twig:DraftRoundEditor :ticketKey="ticketKey" :roundId="card.roundId" :card="card" />
+                    {#- The owner's unshared draft as one line; its own page edits it (DraftRoundController::PAGE_ROUTE). -#}
+                    <header class="round-card__header">
+                        <h3 id="{{ card.domId }}-heading" class="round-card__headline">{{ card.headline }}</h3>
+                        <twig:Tag class="round-card__private">PRIVATE</twig:Tag>
+                        {% if card.status is not null %}<p class="round-card__status">{{ card.status }}</p>{% endif %}
+                        <twig:Button variant="outline" size="sm" href="{{ path(constant('App\\Review\\UI\\DraftRoundController::PAGE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__open" data-turbo-frame="_top">Open draft</twig:Button>
+                    </header>
                 {% elseif card.checklist is not null %}
                     {{ include('@Review/_checklist_card.html.twig', {checklist: card.checklist}) }}
                 {% else %}
@@ -26,7 +31,7 @@
                 </header>
                 {% if card.description is not null %}<p class="round-card__description">{{ card.description }}</p>{% endif %}
                 {% if card.emptyNote is not null %}<p class="round-card__empty">{{ card.emptyNote }}</p>{% endif %}
-                {#- Only the report's pictures reach this loop (a shared draft is a row, the owner's draft has its editor), and the ticket page shows them as thumbnails (P14.T7). -#}
+                {#- Only the report's pictures reach this loop (a shared draft and the owner's draft are rows), and the ticket page shows them as thumbnails (P14.T7). -#}
                 {% for item in card.screenshots %}
                     <div class="round-card__screenshot round-card__screenshot--thumbnail">
                         {% if item.label is not null %}
@@ -45,35 +50,6 @@
                 {% if card.findingsChecklist is not null %}
                     {{ include('@Review/_checklist_card.html.twig', {checklist: card.findingsChecklist}) }}
                 {% endif %}
-                {% endif %}
-                {% if card.isPrivateDraft %}
-                    <div class="round-card__actions">
-                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::SHARE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top">
-                            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
-                            <twig:Button type="submit" size="sm" class="round-card__share">Share with the team now</twig:Button>
-                        </form>
-                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::NEW_TICKET_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top">
-                            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
-                            <twig:Button type="submit" variant="outline" size="sm" class="round-card__new-ticket">Make it a new ticket</twig:Button>
-                        </form>
-                        <form method="post" action="{{ path(constant('App\\Review\\UI\\DraftRoundController::DELETE_ROUTE'), {key: ticketKey, id: card.roundId}) }}" class="round-card__form" data-turbo-frame="_top" data-turbo-confirm="{{ constant('App\\Review\\UI\\RoundCards::DELETE_DRAFT_CONFIRM') }}">
-                            <input type="hidden" name="{{ constant('App\\Review\\UI\\DraftRoundController::CSRF_FIELD') }}" value="{{ draftCsrfToken }}">
-                            <twig:Button type="submit" variant="text" size="sm" class="round-card__delete">Delete draft</twig:Button>
-                        </form>
-                    </div>
-                    <section class="claude-code-box" aria-labelledby="{{ card.domId }}-claude-code">
-                        <h4 id="{{ card.domId }}-claude-code" class="claude-code-box__title">For Claude Code</h4>
-                        {#- A field, not a code line: copy-text copies a field's value, and selects it when the browser refuses. -#}
-                        <div class="claude-code-box__copy" {{ stimulus_controller('copy-text') }}>
-                            <textarea class="claude-code-box__prompt" rows="2" readonly spellcheck="false" aria-label="Line to give Claude Code" {{ stimulus_target('copy-text', 'source') }}>{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_PROMPT')|format(ticketKey) }}</textarea>
-                            <p class="claude-code-box__copy-controls" {{ stimulus_target('copy-text', 'controls') }} hidden>
-                                <twig:Button variant="outline" size="sm" data-action="copy-text#copy">Copy line</twig:Button>
-                                <span class="claude-code-box__copy-status" role="status" aria-live="polite" {{ stimulus_target('copy-text', 'status') }}></span>
-                            </p>
-                        </div>
-                        <p class="claude-code-box__tools">{{ constant('App\\Review\\UI\\RoundCards::CLAUDE_CODE_TOOLS_NOTE') }}</p>
-                        <p class="claude-code-box__tokens">To connect Claude Code, make a token on the <a class="claude-code-box__tokens-link" href="{{ path('identity_tokens') }}" data-turbo-frame="_top">API tokens</a> page.</p>
-                    </section>
                 {% endif %}
             </twig:Card>
         {% endfor %}

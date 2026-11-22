@@ -43,8 +43,6 @@ final class RoundNotesMatchDraftEditorTest extends WebTestCase
     use SeedsTicketRounds;
 
     private const string NOW = '2026-11-06 12:00:00 UTC';
-    private const string FRAME = '/t/SHOP-1/rounds';
-    private const array TURBO_FRAME_HEADERS = ['HTTP_TURBO_FRAME' => 'ticket-rounds'];
 
     private KernelBrowser $client;
 
@@ -180,9 +178,9 @@ final class RoundNotesMatchDraftEditorTest extends WebTestCase
 
     private function removeInTheEditor(string $screenshotId): void
     {
-        $frame = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $frame = $this->client->request('GET', '/t/SHOP-1/rounds/'.$this->draft.'/draft');
         self::assertResponseStatusCodeSame(200);
-        $editor = $frame->filter('#round-'.$this->draft.' .draft-round-editor');
+        $editor = $frame->filter('.draft-round-editor');
         self::assertCount(1, $editor);
 
         $this->postLiveAction($this->client, (string) $editor->attr('data-live-props-value'), 'removeScreenshot', ['screenshotId' => $screenshotId]);
@@ -198,9 +196,9 @@ final class RoundNotesMatchDraftEditorTest extends WebTestCase
      */
     private function shownByTheEditor(): array
     {
-        $frame = $this->client->request('GET', self::FRAME, [], [], self::TURBO_FRAME_HEADERS);
+        $frame = $this->client->request('GET', '/t/SHOP-1/rounds/'.$this->draft.'/draft');
         self::assertResponseStatusCodeSame(200);
-        $editor = $frame->filter('#round-'.$this->draft.' .draft-round-editor');
+        $editor = $frame->filter('.draft-round-editor');
         self::assertCount(1, $editor);
 
         $shown = [];

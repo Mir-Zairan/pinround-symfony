@@ -12,6 +12,7 @@ use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
 use App\Review\UI\Controller\RefusalAnswers;
 use App\Review\UI\Controller\RefusedWithToast;
+use App\Review\UI\DraftPage\ClaudeCodeBox;
 use App\SharedKernel\Application\TenantContext;
 use App\SharedKernel\Application\Transactions;
 use App\SharedKernel\Infrastructure\Http\RequestTransaction;
@@ -24,15 +25,16 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * The buttons of a private draft round in the Rounds section (P05.T8, ADR-0017, ticket-page.md, Draft round): "Start a
- * draft round", "Share with the team now", "Delete draft" and "Make it a new ticket" (ADR-0044). A change made answers
- * with a redirect to the ticket's Rounds section and its toast flashed; "Make it a new ticket" to the new report draft's
+ * A private draft round's own page and its buttons (P05.T8, ADR-0017, ticket-page.md, Draft round): the page that edits
+ * it (DraftRoundEditor), "Start a draft round" in the Rounds section, which answers with the new draft's page, and the
+ * page's "Share with the team now", "Delete draft" and "Make it a new ticket" (ADR-0044). Share and delete answer with
+ * a redirect to the ticket's Rounds section and their toast flashed; "Make it a new ticket" to the new report draft's
  * page instead. A refusal (a start the person may not make, an expired form, or a RoundRefused
  * other than NOT_FOUND) changes nothing and is a 422 toast stream for a Turbo form, and a redirect with the toast
  * flashed for any other form, as the ticket's other actions answer. A share while another shared round of the ticket
  * is open (ADR-0048) is refused with a toast that names who gives the verdict, as the hand-off dialog says it.
  *
- * Without the request transaction, as TicketMoveController: each action runs in a transaction of its own, so a refused
+ * The actions run without the request transaction, as TicketMoveController: each action runs in a transaction of its own, so a refused
  * command leaves nothing and the toast is set only once the change is committed. In that order: a ticket the person may
  * not see is the ticket page's 404; on share, delete and "Make it a new ticket", a round id RoundQueries::accessFactsOf
  * does not know (a malformed one too), a round of another ticket, and a round RoundPermission VIEW, or EDIT (share and
@@ -42,6 +44,7 @@ use Symfony\Component\Routing\Attribute\Route;
  */
 final class DraftRoundController extends AbstractController
 {
+    public const string PAGE_ROUTE = 'review_draft_page';
     public const string START_ROUTE = 'review_draft_start';
     public const string SHARE_ROUTE = 'review_draft_share';
     public const string DELETE_ROUTE = 'review_draft_delete';
@@ -81,21 +84,52 @@ final class DraftRoundController extends AbstractController
         return self::CSRF_ID_PREFIX.$key;
     }
 
+    /**
+     * The owner's unshared draft, laid out as a round page, with its editor and the "For Claude Code" box. Runs in the
+     * request transaction. A ticket the person may not see is the ticket page's 404; an unknown or malformed id, a round
+     * of another ticket, a round that is no unshared draft (shared since, or of another kind) and one RoundPermission
+     * VIEW or EDIT denies are all one 404, so another person's draft cannot be told from a missing one.
+     */
+    #[Route('/t/{key}/rounds/{id}/draft', name: self::PAGE_ROUTE, methods: ['GET'])]
+    public function page(string $key, string $id, Request $request): Response
+    {
+        $visible = $this->visibleTicketLookup->visibleTicketOf($key);
+        $round = $this->roundQueries->accessFactsOf($id);
+        if (null === $round
+            || !$round->isUnsharedDraft
+            || !$round->ticketId->equals($visible->ticket->id)
+            || !$this->isGranted(RoundPermission::VIEW, $round)
+            || !$this->isGranted(RoundPermission::EDIT, $round)) {
+            throw $this->createNotFoundException(RoundRefused::NOT_FOUND);
+        }
+        $assigneeId = $visible->ticket->turnSnapshot->assigneeId;
+
+        return $this->render('@Review/draft.html.twig', [
+            'ticketKey' => $visible->ticket->key,
+            'roundId' => $round->roundId,
+            'claudeCode' => ClaudeCodeBox::forDraftOwner($visible->ticket->key, null !== $assigneeId && $assigneeId->equals($visible->actor->userId()), $request->getSchemeAndHttpHost()),
+        ]);
+    }
+
     #[Route('/t/{key}/rounds/draft', name: self::START_ROUTE, methods: ['POST'], defaults: [RequestTransaction::ROUTE_DEFAULT => false])]
     public function start(string $key, Request $request): Response
     {
         $csrfToken = $request->request->getString(self::CSRF_FIELD);
         $now = $this->clock->now();
 
-        return $this->respondToAction($request, $key, function () use ($key, $csrfToken, $now): string {
-            $visible = $this->visibleTicketLookup->visibleTicketOf($key);
-            if (!$this->isGranted(RoundPermission::DRAFT_CREATE, $visible->ticket->id)) {
-                throw new RefusedWithToast(self::ONLY_THE_ASSIGNEE_OR_TURN_STARTS);
-            }
-            $this->refuseAnExpiredForm($key, $csrfToken);
-            $this->roundCommands->startDraft($visible->ticket->id, $visible->actor->userId(), $now);
+        return $this->answerRefusalsOf($request, $key, function () use ($key, $csrfToken, $now): Response {
+            $draftId = $this->transactions->run(function () use ($key, $csrfToken, $now): string {
+                $visible = $this->visibleTicketLookup->visibleTicketOf($key);
+                if (!$this->isGranted(RoundPermission::DRAFT_CREATE, $visible->ticket->id)) {
+                    throw new RefusedWithToast(self::ONLY_THE_ASSIGNEE_OR_TURN_STARTS);
+                }
+                $this->refuseAnExpiredForm($key, $csrfToken);
 
-            return self::DRAFT_STARTED;
+                return $this->roundCommands->startDraft($visible->ticket->id, $visible->actor->userId(), $now);
+            });
+            $this->addFlash(self::TOAST, self::DRAFT_STARTED);
+
+            return $this->redirectToRoute(self::PAGE_ROUTE, ['key' => $key, 'id' => $draftId], Response::HTTP_SEE_OTHER);
         });
     }
 

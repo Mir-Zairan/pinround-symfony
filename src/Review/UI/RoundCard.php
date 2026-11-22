@@ -7,9 +7,10 @@ namespace App\Review\UI;
 use App\Review\UI\Checklist\ChecklistCard;
 
 /**
- * One round as the ticket page's Rounds section shows it: a heading line, an optional status line, and, for the report
- * and for drafts, its screenshots with their pins. The checklist round shows its rows. A review round and a shared draft
- * are one-line rows that open their own page; a findings round's check items stay under its row.
+ * One round as the ticket page's Rounds section shows it: a heading line, an optional status line, and, for the report,
+ * its screenshots with their pins. The checklist round shows its rows. A review round, a shared draft and the viewer's
+ * own unshared draft are one-line rows that open their own page; a findings round's check items stay under its row. The
+ * draft page's editor takes a draft's card with its screenshots (RoundCards::forDraft).
  */
 final readonly class RoundCard
 {
@@ -30,9 +31,10 @@ final readonly class RoundCard
      *                                                       for every other round
      * @param ChecklistCard|null        $findingsChecklist   a findings round's check items, which show under its row or pictures;
      *                                                       null for every other round
-     * @param bool                      $isRow               a later round shown as one line, for example
-     *                                                       "Round 2 · review by Lena · open · 2 screenshots"; false for the report, the
-     *                                                       checklist and the viewer's own unshared draft
+     * @param bool                      $isRow               a round shown as one line, for example
+     *                                                       "Round 2 · review by Lena · open · 2 screenshots", and the viewer's own
+     *                                                       unshared draft on the ticket page; false for the report, the checklist
+     *                                                       and the draft page's card
      * @param bool                      $hasFullScreen       whether the card carries the "Full screen" link to the
      *                                                       full-screen review: only the report's, when it has a
      *                                                       screenshot

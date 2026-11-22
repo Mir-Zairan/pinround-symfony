@@ -4,17 +4,22 @@ declare(strict_types=1);
 
 namespace App\Review\UI\Component;
 
+use App\Media\Api\SignedUrls;
 use App\Review\Api\PlacedPin;
 use App\Review\Api\RoundCommands;
 use App\Review\Api\RoundPermission;
 use App\Review\Api\RoundQueries;
 use App\Review\Api\RoundRefused;
+use App\Review\Api\RoundView;
+use App\Review\Application\RoundsVisibleTo;
+use App\Review\UI\Controller\RoundController;
 use App\Review\UI\DraftRoundController;
 use App\Review\UI\Media\RoundMediaTarget;
 use App\Review\UI\PinView;
 use App\Review\UI\RoundCard;
 use App\Review\UI\RoundCards;
 use App\Review\UI\RoundCardScreenshot;
+use App\Review\UI\RoundPage\RoundPages;
 use App\Review\UI\ScreenshotView;
 use App\Review\UI\VisibleTicket;
 use App\Review\UI\VisibleTicketLookup;
@@ -31,18 +36,19 @@ use Symfony\UX\LiveComponent\Attribute\PostHydrate;
 use Symfony\UX\LiveComponent\DefaultActionTrait;
 
 /**
- * The owner's unshared draft round on the ticket page (P05.T8 step 2, ADR-0017, ticket-page.md "Draft round"): its
- * card with the screenshots, each with its "Looks right" / "Not right yet" toggle, title, note (the summary), pins and
- * "Remove screenshot", "k of n look right", and "Add screenshot". A retaken screenshot shows its latest try with
- * "Try 2 of 2" and a switch to its earlier tries (ADR-0048); an earlier try is read-only but for marking its pins
- * "Fixed on try N" or "Still wrong" and "Remove this try". Each change is saved at once through RoundCommands'
- * draft commands, in the request transaction: a RoundRefused other than NOT_FOUND is shown in the card and saves
- * nothing; NOT_FOUND is the round's 404.
+ * The owner's unshared draft round on its own page (P05.T8 step 2, ADR-0017, ticket-page.md "Draft round"), laid out as
+ * a round page: the header with "k of n look right", the share, new-ticket and delete buttons and a tab per screenshot,
+ * then one screenshot at a time, beside the picture of the same number in the hand-off round before it when there is
+ * one (Before, After or both), with its "Looks right" / "Not right yet" toggle, pins, title, summary and "Remove
+ * screenshot", and "Add screenshot". A retaken screenshot shows its latest try with "Try 2 of 2" and a switch to its
+ * earlier tries (ADR-0048); an earlier try is read-only but for marking its pins "Fixed on try N" or "Still wrong" and
+ * "Remove this try". Each change is saved at once through RoundCommands' draft commands, in the request transaction: a
+ * RoundRefused other than NOT_FOUND is shown on the page and saves nothing; NOT_FOUND is the round's 404.
  *
  * Every live request, each action included, first finds the ticket for the logged-in person (VisibleTicketLookup's
  * 404 when they may not see it) and asks RoundPermission VIEW and EDIT on the round: an unknown or malformed id, a
  * round of another ticket and a denied round are one 404, never 403, so another person's draft cannot be told from a
- * missing one. The first render, from the Rounds frame, takes the card the frame read and reads nothing itself.
+ * missing one. The first render comes from DraftRoundController's page, which made the same checks.
  */
 #[AsLiveComponent(name: 'DraftRoundEditor', template: '@Review/components/DraftRoundEditor.html.twig', method: 'post')]
 final class DraftRoundEditor
@@ -51,6 +57,18 @@ final class DraftRoundEditor
 
     public const string NOTE_PLACEHOLDER = 'What is right or wrong here?';
     public const string EMPTY_NOTE = 'No screenshots yet. Add one here.';
+    public const string PAGE_TITLE = 'Draft round';
+
+    /** The pictures shown: the Before and the After side by side, or one of them. */
+    public const string COMPARE_BOTH = 'both';
+    public const string COMPARE_BEFORE = 'before';
+    public const string COMPARE_AFTER = 'after';
+
+    /**
+     * Past the highest number a round can get (rvw_round.number is an INT), so the hand-off round before it is the
+     * latest one shared: the round the draft would follow if it were shared now.
+     */
+    private const int NUMBER_AFTER_EVERY_ROUND = 2_147_483_647;
 
     /** The ticket's key, as the page's URL carries it. */
     #[LiveProp]
@@ -67,20 +85,32 @@ final class DraftRoundEditor
     #[LiveProp]
     public array $shownTryIds = [];
 
-    /** The draft's card as the Rounds frame read it; null on a live request, which reads it again after its change. */
-    public ?RoundCard $card = null;
+    /** From 1, the screenshot whose tab is chosen; one past the last shows the last. */
+    #[LiveProp]
+    public int $shownNumber = 1;
+
+    /** One of the COMPARE_ constants; a screenshot with no Before shows its picture alone whatever this is. */
+    #[LiveProp]
+    public string $compareMode = self::COMPARE_BOTH;
+
+    /** The draft's card, read once per render. */
+    private ?RoundCard $card = null;
 
     /** Why the last change was refused; nothing of it was saved. */
     public ?string $refusal = null;
 
     private ?VisibleTicket $visibleTicket = null;
     private bool $isCardRead = false;
+    private ?RoundView $previousHandOffRound = null;
+    private bool $isPreviousHandOffRoundRead = false;
 
     public function __construct(
         private readonly VisibleTicketLookup $visibleTicketLookup,
         private readonly RoundQueries $roundQueries,
         private readonly RoundCommands $roundCommands,
         private readonly RoundCards $roundCards,
+        private readonly RoundsVisibleTo $roundsVisibleTo,
+        private readonly SignedUrls $signedUrls,
         private readonly Security $security,
         private readonly ClockInterface $clock,
     ) {
@@ -112,6 +142,33 @@ final class DraftRoundEditor
     public function addScreenshot(#[LiveArg] string $mediaId): void
     {
         $this->change(fn (UserId $owner, \DateTimeImmutable $now): string => $this->roundCommands->addDraftScreenshot($this->roundId, $owner, $mediaId, $now));
+        if (null === $this->refusal) {
+            $this->shownNumber = \count($this->draftCard()->screenshots ?? []);
+        }
+    }
+
+    /**
+     * Shows the screenshot with that number, from 1; a number past the last shows the last. Changes nothing stored.
+     *
+     * @throws BadRequestHttpException when the number is not a whole number from 1 of at most nine digits
+     */
+    #[LiveAction]
+    public function showScreenshot(#[LiveArg] string $number): void
+    {
+        $position = RoundController::positionOf($number);
+        if (null === $position || 0 === $position) {
+            throw new BadRequestHttpException('A screenshot number is not valid.');
+        }
+        $this->shownNumber = $position;
+    }
+
+    /**
+     * @param string $mode one of the COMPARE_ constants; any other shows both
+     */
+    #[LiveAction]
+    public function compare(#[LiveArg] string $mode): void
+    {
+        $this->compareMode = \in_array($mode, [self::COMPARE_BEFORE, self::COMPARE_AFTER], true) ? $mode : self::COMPARE_BOTH;
     }
 
     /**
@@ -192,13 +249,13 @@ final class DraftRoundEditor
     }
 
     /**
-     * The card read once per render: the one the frame gave, or the draft as stored now. Null when the round is no
+     * The draft as stored now, read once per render; a change reads it after it is saved. Null when the round is no
      * longer among the person's rounds of the ticket.
      */
     public function draftCard(): ?RoundCard
     {
         if (!$this->isCardRead && null === $this->card) {
-            $visibleTicket = $this->visibleTicket ??= $this->visibleTicketLookup->visibleTicketOf($this->ticketKey);
+            $visibleTicket = $this->visibleTicket();
             $draft = $this->roundQueries->draftOf($this->roundId, $visibleTicket->actor->userId());
             if (null !== $draft) {
                 $this->card = $this->roundCards->forDraft($visibleTicket->visibility->organizationId(), $draft, $visibleTicket->ticket->turnSnapshot->assigneeId, $this->clock->now());
@@ -231,6 +288,52 @@ final class DraftRoundEditor
         }
 
         return $screenshot;
+    }
+
+    /**
+     * From 1, the screenshot shown: the chosen one, or the last when the chosen one was removed. 0 for a draft with none.
+     */
+    public function shownPosition(): int
+    {
+        return min($this->shownNumber, \count($this->draftCard()->screenshots ?? []));
+    }
+
+    /** The chain whose tab is chosen, as its latest try; null for a draft with no screenshot. */
+    public function shownScreenshot(): ?RoundCardScreenshot
+    {
+        return ($this->draftCard()->screenshots ?? [])[$this->shownPosition() - 1] ?? null;
+    }
+
+    /**
+     * The shown screenshot's Before: the latest try of the screenshot with its number in the hand-off round shared last,
+     * or the report when none was (RoundPages::beforeScreenshotOf), signed now; null when that round has no screenshot
+     * with its number or the ticket has neither.
+     */
+    public function before(): ?ScreenshotView
+    {
+        $number = $this->shownPosition();
+        $previousRound = $this->previousHandOffRound();
+        $beforeScreenshot = RoundPages::beforeScreenshotOf($previousRound, $number);
+        if (null === $previousRound || null === $beforeScreenshot) {
+            return null;
+        }
+        $visibleTicket = $this->visibleTicket();
+        $images = $this->signedUrls->forVariants($visibleTicket->visibility->organizationId(), [$beforeScreenshot->mediaId], RoundCards::VARIANT, $this->clock->now());
+
+        return RoundCards::screenshotViewOf($previousRound, $beforeScreenshot, $number, $images);
+    }
+
+    /** "Before · round 2"; null when there is no round before the draft. */
+    public function beforeCaption(): ?string
+    {
+        $previousRound = $this->previousHandOffRound();
+
+        return null === $previousRound ? null : \sprintf('Before · round %d', $previousRound->number ?? 0);
+    }
+
+    public function ticketTitle(): string
+    {
+        return $this->visibleTicket()->ticket->title;
     }
 
     public function draftCsrfId(): string
@@ -290,6 +393,23 @@ final class DraftRoundEditor
             }
         }
         $this->shownTryIds = array_values(array_intersect($this->shownTryIds, $earlierTryIds));
+    }
+
+    private function visibleTicket(): VisibleTicket
+    {
+        return $this->visibleTicket ??= $this->visibleTicketLookup->visibleTicketOf($this->ticketKey);
+    }
+
+    /** Read once per render, and only for a draft with a screenshot to pair. */
+    private function previousHandOffRound(): ?RoundView
+    {
+        if (!$this->isPreviousHandOffRoundRead && 0 !== $this->shownPosition()) {
+            $visibleTicket = $this->visibleTicket();
+            $this->previousHandOffRound = $this->roundsVisibleTo->previousHandOffRoundOf($visibleTicket->ticket->id, $visibleTicket->visibility, self::NUMBER_AFTER_EVERY_ROUND);
+            $this->isPreviousHandOffRoundRead = true;
+        }
+
+        return $this->previousHandOffRound;
     }
 
     /**
