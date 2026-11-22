@@ -289,7 +289,7 @@ final class HomeQueriesServiceTest extends TestCase
         $rows = new FixedWhoseTurnRows([self::personGroup(self::LENA, '2027-03-05 07:00:00')]);
 
         try {
-            new HomeQueriesService($rows, new FixedMyReportsRows())->viewersTurns(self::lena(), $limit);
+            new HomeQueriesService($rows, new FixedMyReportsRows())->viewersTurns(self::lena(), $limit, new \DateTimeImmutable('2027-03-05 07:00:00 UTC'));
             self::fail('The limit must be refused.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame('The viewer\'s turns are read 1 to 100 at a time.', $exception->getMessage());
@@ -303,8 +303,8 @@ final class HomeQueriesServiceTest extends TestCase
         $rows = new FixedWhoseTurnRows([]);
         $service = new HomeQueriesService($rows, new FixedMyReportsRows());
 
-        $service->viewersTurns(self::lena(), 1);
-        $service->viewersTurns(self::lena(), 100);
+        $service->viewersTurns(self::lena(), 1, new \DateTimeImmutable('2027-03-05 07:00:00 UTC'));
+        $service->viewersTurns(self::lena(), 100, new \DateTimeImmutable('2027-03-05 07:00:00 UTC'));
 
         self::assertSame([1, 100], $rows->viewersTurnsLimits);
     }

@@ -45,12 +45,13 @@ interface WhoseTurnRows
     /**
      * One query on the viewer's own turn rows only; the count and tickets hold only tickets the viewer may see.
      *
-     * @param int $limit at most this many tickets, checked by the caller
+     * @param int                $limit at most this many tickets, checked by the caller
+     * @param \DateTimeImmutable $now   the time the waits of the score are counted to
      *
-     * @return ViewersTurns the oldest wait first, then the lowest ticket id, as groupedRowsOf() orders a group's tickets
+     * @return ViewersTurns in HomeQueries::viewersTurns' needs-you order
      *
      * @throws \LogicException when no transaction is open, no tenant is set, or the viewer is of another organization
      *                         than the tenant, before any query
      */
-    public function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns;
+    public function viewersTurnsOf(TicketViewer $viewer, int $limit, \DateTimeImmutable $now): ViewersTurns;
 }

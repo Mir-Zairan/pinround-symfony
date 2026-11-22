@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Insight;
 
 use App\Insight\Api\HomeQueries;
+use App\Insight\Api\NeedsYouTicket;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\ViewersTurns;
 use App\Insight\Api\WaitingTicket;
@@ -24,8 +25,10 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
- * The container's HomeQueries::viewersTurns, Home's "Needs you now", as pinround_app under row-level security, against
- * the viewer's own card of HomeQueries::whoseTurn, which it must agree with.
+ * The container's HomeQueries::viewersTurns, Home's "Needs you now", as pinround_app under row-level security: the
+ * tickets of the viewer's own card of HomeQueries::whoseTurn, which it must count alike, in the needs-you order. The
+ * waits are counted to NOW, weeks after the real clock's 2026 and in the middle of a day, so a read of the real clock or
+ * a wait in part-days ranks differently.
  */
 final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
 {
@@ -40,6 +43,9 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
     private const string MIA = '0197a3c0-0000-7000-8000-00000000e953';
     private const string BETA_BAKERY_TICKET = '0197a3c0-0000-7000-8000-00000000e9bb';
     private const int SHOWN = 10;
+    private const string NOW = '2027-03-20 18:00:00 UTC';
+    /** The To do step TicketRows::addOf puts every ticket in. */
+    private const string TICKET_ROWS_STEP = '0197a3c0-0000-7000-8000-00000000f0d0';
 
     protected function setUp(): void
     {
@@ -89,8 +95,11 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         ));
     }
 
+    /**
+     * All twelve have the same base score, so the longer wait scores higher.
+     */
     #[Test]
-    public function twelveTicketsGiveTheOldestTenWaitsThenTheLowestIdAndACountOfTwelve(): void
+    public function twelveTicketsOfOneBaseScoreGiveTheOldestTenWaitsThenTheLowestIdAndACountOfTwelve(): void
     {
         $this->addTheWaits();
 
@@ -102,22 +111,58 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         );
     }
 
+    /**
+     * SHOP-1 has an open question from Omar and Mia as its assignee; SHOP-2 has neither.
+     */
     #[Test]
-    public function eachTicketCarriesItsIdKeyTitleKindAndWait(): void
+    public function eachTicketCarriesItsIdKeyTitleKindWaitStepPriorityAskerAndAssignee(): void
     {
         $this->addTheWaits();
+        $this->transactions()->committedAs(self::ACME_FOODS, function (): void {
+            $this->connection()->executeStatement('UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ? WHERE id = ?', [self::LENA, self::OMAR, self::ticketIdOf(1)]);
+            $this->connection()->executeStatement('UPDATE ins_ticket_turn SET assignee_id = ? WHERE ticket_id = ?', [self::MIA, self::ticketIdOf(1)]);
+        });
 
-        $tickets = $this->viewersTurnsOf(self::lena(), 1)->tickets;
+        $tickets = $this->viewersTurnsOf(self::lena(), 2)->tickets;
 
         self::assertSame(
-            [[self::ticketIdOf(1), 'SHOP-1', 'Checkout button is hidden', 'build', '2027-03-01 06:00:00']],
-            array_map(static fn (WaitingTicket $ticket): array => [
+            [
+                [self::ticketIdOf(1), 'SHOP-1', 'Checkout button is hidden', 'build', '2027-03-01 06:00:00', self::TICKET_ROWS_STEP, 'major', self::OMAR, self::MIA],
+                [self::ticketIdOf(2), 'SHOP-2', 'Checkout button is hidden', 'build', '2027-03-02 06:00:00', self::TICKET_ROWS_STEP, 'major', null, null],
+            ],
+            array_map(static fn (NeedsYouTicket $ticket): array => [
                 $ticket->id->toString(),
                 $ticket->key,
                 $ticket->title,
                 $ticket->kind,
                 $ticket->waitingSince->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+                $ticket->stepId,
+                $ticket->priority,
+                $ticket->askerId?->toString(),
+                $ticket->assigneeId?->toString(),
             ], $tickets),
+        );
+    }
+
+    /**
+     * Each score is base_score + LEAST(whole days waited, 60) × 0.5, counted to NOW: SHOP-33 140 + 0.5 (1 day), SHOP-32
+     * 50 + 0 (6 hours), then four of 40: SHOP-34 10 + 30 (200 days, capped at 60), SHOP-35 39 + 1 (2 days), SHOP-36 40
+     * + 0 (its wait starts 3 days after NOW, which counts no days, not -1.5), then two of 39.5: SHOP-31 10 + 29.5 (59
+     * days) and SHOP-37 38 + 1.5 (3 days and 23 hours, which count 3). Ties go to the oldest wait. Added out of order.
+     */
+    #[Test]
+    public function theHighestScoreComesFirstAndATieGoesToTheOldestWait(): void
+    {
+        $now = self::now();
+        foreach ([[36, 40, '+3 days'], [31, 10, '-59 days'], [37, 38, '-3 days -23 hours'], [33, 140, '-1 day'], [35, 39, '-2 days'], [32, 50, '-6 hours'], [34, 10, '-200 days']] as [$number, $baseScore, $waited]) {
+            $this->addTurn(self::ACME_FOODS, $number, self::LENA, $now->modify($waited)->format('Y-m-d H:i:s'), 'all', $baseScore);
+        }
+
+        $viewersTurns = $this->viewersTurnsOf(self::lena(), self::SHOWN);
+
+        self::assertSame(
+            [['SHOP-33', 'SHOP-32', 'SHOP-34', 'SHOP-35', 'SHOP-36', 'SHOP-31', 'SHOP-37'], 7],
+            [self::keysOf($viewersTurns), $viewersTurns->ticketCount],
         );
     }
 
@@ -135,13 +180,16 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         self::assertSame([['SHOP-20', 'SHOP-1'], 13], [\array_slice(self::keysOf($viewersTurns), 0, 2), $viewersTurns->ticketCount]);
     }
 
+    /**
+     * All of Lena's tickets have one base score, so the score order is the card's order of the oldest wait first.
+     */
     #[Test]
-    public function itAgreesWithTheViewersCardOfWhoseTurn(): void
+    public function itAgreesWithTheViewersCardOfWhoseTurnWhenTheBaseScoresAreEqual(): void
     {
         $this->addTheWaits();
 
         [$viewersTurns, $card] = $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): array => [
-            $this->queries()->viewersTurns(self::lena(), self::SHOWN),
+            $this->queries()->viewersTurns(self::lena(), self::SHOWN, self::now()),
             $this->queries()->whoseTurn(self::lena(), null, self::LENA, null)->groups[0],
         ]);
 
@@ -171,7 +219,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         [$viewersTurns, $queryCount] = $this->transactions()->rolledBackAs(self::ACME_FOODS, function (): array {
             $debugData = $this->debugData();
             $debugData->reset();
-            $viewersTurns = $this->queries()->viewersTurns(self::lena(), self::SHOWN);
+            $viewersTurns = $this->queries()->viewersTurns(self::lena(), self::SHOWN, self::now());
 
             return [$viewersTurns, self::queryCountOf($debugData)];
         });
@@ -195,7 +243,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
             self::assertSame(['pinround_app', 'on'], [$connection->fetchOne('SELECT current_user'), $connection->fetchOne('SHOW row_security')]);
             $debugData = $this->debugData();
             $debugData->reset();
-            $this->queries()->viewersTurns(self::lena(), self::SHOWN);
+            $this->queries()->viewersTurns(self::lena(), self::SHOWN, self::now());
             $queriesOfDefault = $debugData->getData()['default'] ?? null;
             self::assertIsArray($queriesOfDefault);
             $query = $queriesOfDefault[0] ?? null;
@@ -227,7 +275,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
             self::BETA_BAKERY,
             self::ACME_FOODS,
             fn (Connection $connection): ViewersTurns => new DbalWhoseTurnRows($connection, $this->tenantContext(), self::getContainer()->get(StepQueries::class))
-                ->viewersTurnsOf(self::lena(), self::SHOWN),
+                ->viewersTurnsOf(self::lena(), self::SHOWN, self::now()),
         );
 
         self::assertSame([[], 0], [$viewersTurns->tickets, $viewersTurns->ticketCount]);
@@ -239,7 +287,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         $this->tenantContext()->set(new OrganizationId(self::ACME_FOODS));
 
         $this->assertRefusedBeforeAnyQuery(
-            fn (): ViewersTurns => $this->queries()->viewersTurns(self::lena(), self::SHOWN),
+            fn (): ViewersTurns => $this->queries()->viewersTurns(self::lena(), self::SHOWN, self::now()),
             'Whose turn is read in a transaction under the organization as tenant; none is open.',
         );
     }
@@ -250,7 +298,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         $lenaInBetaBakery = new TicketViewer(new OrganizationId(self::BETA_BAKERY), new UserId(self::LENA), [], true, false);
 
         $this->transactions()->rolledBackAs(self::ACME_FOODS, fn () => $this->assertRefusedBeforeAnyQuery(
-            fn (): ViewersTurns => $this->queries()->viewersTurns($lenaInBetaBakery, self::SHOWN),
+            fn (): ViewersTurns => $this->queries()->viewersTurns($lenaInBetaBakery, self::SHOWN, self::now()),
             'Whose turn is read under the viewer\'s own organization as tenant.',
         ));
     }
@@ -273,7 +321,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
 
     private function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns
     {
-        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ViewersTurns => $this->queries()->viewersTurns($viewer, $limit));
+        return $this->transactions()->rolledBackAs(self::ACME_FOODS, fn (): ViewersTurns => $this->queries()->viewersTurns($viewer, $limit, self::now()));
     }
 
     /**
@@ -281,7 +329,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
      */
     private static function keysOf(ViewersTurns $viewersTurns): array
     {
-        return array_map(static fn (WaitingTicket $ticket): string => $ticket->key, $viewersTurns->tickets);
+        return array_map(static fn (NeedsYouTicket $ticket): string => $ticket->key, $viewersTurns->tickets);
     }
 
     /**
@@ -290,11 +338,11 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
      *
      * @param 'all'|'team' $visibility
      */
-    private function addTurn(string $organizationId, int $number, ?string $userId, string $waitingSince, string $visibility): void
+    private function addTurn(string $organizationId, int $number, ?string $userId, string $waitingSince, string $visibility, int $baseScore = 100): void
     {
         $ticketId = self::ticketIdOf($number);
         $this->ticketRows()->addOf($organizationId, $ticketId, self::SHOP_PROJECT, self::MIA, $number);
-        $this->transactions()->committedAs($organizationId, fn (): int|string => $this->insertTurn($this->connection(), $organizationId, $ticketId, $userId, $waitingSince, $visibility));
+        $this->transactions()->committedAs($organizationId, fn (): int|string => $this->insertTurn($this->connection(), $organizationId, $ticketId, $userId, $waitingSince, $visibility, $baseScore));
     }
 
     /**
@@ -330,11 +378,11 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
         $this->migrator()->executeStatement('ANALYZE ins_ticket_turn, tkt_ticket');
     }
 
-    private function insertTurn(Connection $connection, string $organizationId, string $ticketId, ?string $userId, string $waitingSince, string $visibility): int|string
+    private function insertTurn(Connection $connection, string $organizationId, string $ticketId, ?string $userId, string $waitingSince, string $visibility, int $baseScore = 100): int|string
     {
         return $connection->executeStatement(
             "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
-             VALUES (?, ?, ?, ?, 'doing', ?, ?, 'build', 100, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, 'doing', ?, ?, 'build', ?, ?, ?, ?)",
             [
                 $organizationId,
                 $ticketId,
@@ -342,6 +390,7 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
                 self::SHOP_PROJECT,
                 $userId,
                 null === $userId ? 'Customer' : null,
+                $baseScore,
                 $waitingSince.'+00',
                 $visibility,
                 self::MIA,
@@ -352,6 +401,11 @@ final class DbalWhoseTurnRowsViewersTurnsTest extends KernelTestCase
     private static function ticketIdOf(int $number): string
     {
         return \sprintf('0197a3c0-0000-7000-8000-00000000ea%02d', $number);
+    }
+
+    private static function now(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable(self::NOW);
     }
 
     /**

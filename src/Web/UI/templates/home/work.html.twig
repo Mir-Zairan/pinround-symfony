@@ -27,8 +27,11 @@
                 {%- endif -%}
             </h1>
             {% include '@Web/home/_notices.html.twig' %}
-            {% if isLead %}
-                <p class="home__subline">You lead the team, so reviews, decisions and unclear new tickets come to you.</p>
+            {% if notShownCount > 0 or isLead %}
+                <p class="home__subline">
+                    {%- if notShownCount > 0 %}Do the top {{ shownNeedsYouNow }} first. {% endif -%}
+                    {%- if isLead %}You lead the team, so reviews, decisions and unclear new tickets come to you.{% endif -%}
+                </p>
             {% endif %}
         </header>
 
@@ -47,6 +50,11 @@
                     {% block header_extra %}
                         {% if notShownCount > 0 %}
                             <span class="home__section-note">top {{ needsYouNow|length }} of {{ waitingCount|number_format }}</span>
+                        {% endif %}
+                        {% if needsYouNow is not empty %}
+                            <span class="home__order-note"><twig:AiChip>AI ORDER</twig:AiChip> who is blocked, priority, release, how long it waits</span>
+                        {% endif %}
+                        {% if notShownCount > 0 %}
                             <twig:Button variant="text" size="sm" href="{{ seeAllUrl }}" class="home__see-all">See all</twig:Button>
                         {% endif %}
                     {% endblock %}
@@ -54,13 +62,23 @@
                         {% if needsYouNow is empty %}
                             <twig:EmptyState message="Nothing waits on you right now."/>
                         {% else %}
-                            {# No hover prefetch: each link would cost a ticket page's queries. #}
+                            {#- The Why line's wait counts from when the turn came to the person, not from the ticket's last
+                                change, so it says that, dated in the person's time zone. No hover prefetch: each link would
+                                cost a ticket page's queries. -#}
                             <ol class="home__needs" data-turbo-prefetch="false">
-                                {% for ticket in needsYouNow %}
-                                    <li class="home__need">
-                                        <span class="home__rank{{ loop.first ? ' home__rank--first' }}" aria-hidden="true">{{ loop.index }}</span>
-                                        <a class="home__need-link" href="{{ ticket.url }}"><span class="home__need-key">{{ ticket.key }}</span> · <span class="home__need-title">{{ ticket.title }}</span></a>
-                                        <span class="home__need-wait">{{ ticket.wait }}</span>
+                                {% for card in needsYouNow %}
+                                    {%- set waitReason = card.waitDays == 0 ? 'came to you today' : (card.waitDays > 7 ? 'with you for ' ~ card.waitDays ~ ' days' : 'came to you on ' ~ card.waitingSince|date('j M', app.user.timeZone)) -%}
+                                    <li class="home__need{{ loop.first ? ' home__need--first' }}">
+                                        <span class="home__rank" aria-hidden="true">{{ loop.index }}</span>
+                                        <div class="home__need-body">
+                                            <p class="home__need-ticket"><span class="home__need-key">{{ card.key }}</span> · <span class="home__need-title">{{ card.title }}</span></p>
+                                            <h3 class="home__need-task">{{ card.task }}</h3>
+                                            <p class="home__need-why"><span class="home__why-label">Why</span> <span class="home__need-reasons">{{ card.reasons|merge([waitReason])|join(' · ') }}</span></p>
+                                        </div>
+                                        <div class="home__need-side">
+                                            <twig:Button variant="{{ loop.first ? 'filled' : 'tonal' }}" size="sm" href="{{ card.url }}" class="home__need-open">{{ card.openLabel }}<span class="visually-hidden"> {{ card.key }}</span></twig:Button>
+                                            <span class="home__need-wait">{{ card.waitText }}</span>
+                                        </div>
                                     </li>
                                 {% endfor %}
                             </ol>

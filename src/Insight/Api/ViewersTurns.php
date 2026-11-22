@@ -10,9 +10,9 @@ namespace App\Insight\Api;
 final readonly class ViewersTurns
 {
     /**
-     * @param list<WaitingTicket> $tickets     the oldest waits first, then the lowest ticket id
-     * @param int                 $ticketCount every open ticket whose turn is the viewer's and that the viewer may see,
-     *                                         shown or not
+     * @param list<NeedsYouTicket> $tickets     the highest needs-you score first (HomeQueries::viewersTurns)
+     * @param int                  $ticketCount every open ticket whose turn is the viewer's and that the viewer may
+     *                                          see, shown or not
      */
     public function __construct(public array $tickets, public int $ticketCount)
     {

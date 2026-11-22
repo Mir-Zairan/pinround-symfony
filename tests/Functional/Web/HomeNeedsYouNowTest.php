@@ -113,7 +113,7 @@ final class HomeNeedsYouNowTest extends WebTestCase
         $homeKeys = self::textsOf($home, '.home__need-key');
         self::assertSame($keysOf[$person], $homeKeys);
         self::assertSame($waits, self::textsOf($home, '.home__need-wait'));
-        self::assertSame('/t/'.$keysOf[$person][0], $home->filter('.home__need-link')->attr('href'));
+        self::assertSame('/t/'.$keysOf[$person][0], $home->filter('.home__need-open')->attr('href'));
         self::assertCount(0, $home->filter('.home__see-all'));
         self::assertSame('Nothing else waits on you.', $home->filter('section[aria-labelledby="home-also-waiting"] .empty-state')->text());
         $personId = $this->people[$person]->id()->toString();
@@ -146,8 +146,11 @@ final class HomeNeedsYouNowTest extends WebTestCase
         self::assertSame('Nothing else waits on you.', $home->filter('section[aria-labelledby="home-also-waiting"] .empty-state')->text());
     }
 
+    /**
+     * All of Lena's tickets have one base score, so the longest waits score highest.
+     */
     #[Test]
-    public function twelveTicketsShowTheOldestTenAndSeeAllOpensTheViewersCard(): void
+    public function twelveTicketsShowTheTopFiveAndSeeAllOpensTheViewersCard(): void
     {
         foreach ([3, 12, 1, 7, 10, 5, 2, 11, 8, 4, 9, 6] as $waitDays) {
             $this->addWaitingTicket('Lena', $waitDays);
@@ -161,16 +164,20 @@ final class HomeNeedsYouNowTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('12 tickets wait on you, Lena', $home->filter('h1')->text());
         self::assertSame(
-            ['waiting 12 days', 'waiting 11 days', 'waiting 10 days', 'waiting 9 days', 'waiting 8 days', 'waiting 7 days', 'waiting 6 days', 'waiting 5 days', 'waiting 4 days', 'waiting 3 days'],
+            'Do the top 5 first. You lead the team, so reviews, decisions and unclear new tickets come to you.',
+            $home->filter('.home__subline')->text(),
+        );
+        self::assertSame(
+            ['waiting 12 days', 'waiting 11 days', 'waiting 10 days', 'waiting 9 days', 'waiting 8 days'],
             self::textsOf($home, '.home__need-wait'),
         );
-        self::assertSame(['SHOP-2', 'SHOP-8', 'SHOP-5', 'SHOP-11', 'SHOP-9', 'SHOP-4', 'SHOP-12', 'SHOP-6', 'SHOP-10', 'SHOP-1'], self::textsOf($home, '.home__need-key'));
-        self::assertSame('top 10 of 12', $home->filter('.home__section-note')->text());
+        self::assertSame(['SHOP-2', 'SHOP-8', 'SHOP-5', 'SHOP-11', 'SHOP-9'], self::textsOf($home, '.home__need-key'));
+        self::assertSame('top 5 of 12', $home->filter('.home__section-note')->text());
         $seeAll = $home->filter('section[aria-labelledby="home-needs-you-now"] .home__section-header a.home__see-all');
         self::assertSame('See all', $seeAll->text());
         $seeAllUrl = (string) $seeAll->attr('href');
         self::assertSame(self::TURN.'?open='.$lenaId.'#turn-'.$lenaId, $seeAllUrl);
-        self::assertSame('2 more tickets wait on you.', $home->filter('.home__also-waiting')->text());
+        self::assertSame('7 more tickets wait on you.', $home->filter('.home__also-waiting')->text());
 
         $turn = $this->client->request('GET', $seeAllUrl);
 
@@ -181,17 +188,50 @@ final class HomeNeedsYouNowTest extends WebTestCase
     }
 
     /**
+     * Scores (base + half a point a day): Omar's question to Lena 140 (Critical answer) + 0, the check 78 + 1, the review
+     * of Omar's code 50 + 1.5 (Major), and the build 18 + 10 (Normal, 20 days); added lowest first.
+     */
+    #[Test]
+    public function cardsGoByScoreAndSayTheTaskWhyAndWait(): void
+    {
+        $reviewStep = $this->addStep($this->acmeFoods, 'Code review', 'check', 'review');
+        $this->addLenasScoredTicket($this->doingStep, 'build', 18, 'normal', 20);
+        $this->addLenasScoredTicket($reviewStep, 'review', 50, 'major', 3, assignee: 'Omar');
+        $this->addLenasScoredTicket($this->doingStep, 'check', 78, 'normal', 2);
+        $this->addLenasScoredTicket($this->doingStep, 'answer', 140, 'critical', 0, asker: 'Omar');
+        $this->logIn($this->client, $this->people['Lena']);
+
+        $home = $this->client->request('GET', self::HOME);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(['SHOP-4', 'SHOP-3', 'SHOP-2', 'SHOP-1'], self::textsOf($home, '.home__need-key'));
+        self::assertSame(['Answer Omar’s question', 'Check the new ticket', 'Review Omar’s code', 'Build it'], self::textsOf($home, '.home__need-task'));
+        self::assertSame(
+            ['Omar is blocked until you answer · Critical · came to you today', 'came to you on 4 Nov', 'Major · came to you on 3 Nov', 'with you for 20 days'],
+            self::textsOf($home, '.home__need-reasons'),
+        );
+        self::assertSame(['Open ticket SHOP-4', 'Check it SHOP-3', 'Open ticket SHOP-2', 'Open ticket SHOP-1'], self::textsOf($home, '.home__need-open'));
+        self::assertSame(
+            ['btn btn-filled btn-sm home__need-open', 'btn btn-tonal btn-sm home__need-open', 'btn btn-tonal btn-sm home__need-open', 'btn btn-tonal btn-sm home__need-open'],
+            $home->filter('.home__need-open')->each(static fn (Crawler $button): string => (string) $button->attr('class')),
+        );
+        self::assertSame(['today', 'waiting 2 days', 'waiting 3 days', 'waiting 20 days'], self::textsOf($home, '.home__need-wait'));
+        self::assertSame('AI ORDER who is blocked, priority, release, how long it waits', $home->filter('.home__order-note')->text());
+        self::assertCount(0, $home->filter('.home__section-note'));
+    }
+
+    /**
      * @return iterable<string, array{int, int, string}>
      */
-    public static function ticketCountsUpToEleven(): iterable
+    public static function ticketCountsUpToSix(): iterable
     {
-        yield 'exactly 10' => [10, 0, 'Nothing else waits on you.'];
-        yield '11' => [11, 1, '1 more ticket waits on you.'];
+        yield 'exactly 5' => [5, 0, 'Nothing else waits on you.'];
+        yield '6' => [6, 1, '1 more ticket waits on you.'];
     }
 
     #[Test]
-    #[DataProvider('ticketCountsUpToEleven')]
-    public function seeAllShowsOnlyWhenMoreThanTenWait(int $ticketCount, int $seeAllCount, string $alsoWaiting): void
+    #[DataProvider('ticketCountsUpToSix')]
+    public function seeAllShowsOnlyWhenMoreThanFiveWait(int $ticketCount, int $seeAllCount, string $alsoWaiting): void
     {
         for ($waitDays = 1; $waitDays <= $ticketCount; ++$waitDays) {
             $this->addWaitingTicket('Lena', $waitDays);
@@ -201,7 +241,7 @@ final class HomeNeedsYouNowTest extends WebTestCase
         $home = $this->client->request('GET', self::HOME);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(10, $home->filter('.home__need'));
+        self::assertCount(5, $home->filter('.home__need'));
         self::assertCount($seeAllCount, $home->filter('.home__see-all'));
         self::assertCount($seeAllCount, $home->filter('.home__section-note'));
         self::assertSame($alsoWaiting, $home->filter('section[aria-labelledby="home-also-waiting"] .home__section-header ~ *')->text());
@@ -222,23 +262,26 @@ final class HomeNeedsYouNowTest extends WebTestCase
         );
     }
 
+    /**
+     * Every ticket has an assignee, so each card's names are read in both cases.
+     */
     #[Test]
     public function homeRunsTheSameQueriesForTwoTicketsAndForTwelve(): void
     {
-        $this->addWaitingTicket('Lena', 2);
-        $this->addWaitingTicket('Lena', 3);
+        $this->addWaitingTicket('Lena', 2, 'Omar');
+        $this->addWaitingTicket('Lena', 3, 'Omar');
         $this->logIn($this->client, $this->people['Lena']);
         // The first request skips the user refresh every later one pays, and fills the team people's cache.
         $this->queriesOf(self::HOME);
         $twoTicketsQueries = $this->queriesOf(self::HOME);
         self::assertCount(2, $this->client->getCrawler()->filter('.home__need'));
         for ($waitDays = 4; $waitDays <= 13; ++$waitDays) {
-            $this->addWaitingTicket('Lena', $waitDays);
+            $this->addWaitingTicket('Lena', $waitDays, 'Omar');
         }
 
         $twelveTicketsQueries = $this->queriesOf(self::HOME);
 
-        self::assertCount(10, $this->client->getCrawler()->filter('.home__need'));
+        self::assertCount(5, $this->client->getCrawler()->filter('.home__need'));
         self::assertSame('12 tickets wait on you, Lena', $this->client->getCrawler()->filter('h1')->text());
         self::assertNotSame([], $twoTicketsQueries);
         self::assertSame(\count($twoTicketsQueries), \count($twelveTicketsQueries));
@@ -329,16 +372,41 @@ final class HomeNeedsYouNowTest extends WebTestCase
 
     /**
      * A SHOP ticket of Shop's team, reported by Lena, and its turn row: waiting on $turnPerson, or on the label
-     * "Customer" for null, for $waitDays whole days and an hour.
+     * "Customer" for null, for $waitDays whole days and an hour, a build of a Major ticket in progress.
      *
      * @return string the ticket's key
      */
-    private function addWaitingTicket(?string $turnPerson, int $waitDays): string
+    private function addWaitingTicket(?string $turnPerson, int $waitDays, ?string $assignee = null): string
     {
         $key = 'SHOP-'.$this->nextNumber;
-        $ticketId = $this->insertTicket($this->acmeFoods, $this->shopProject, $this->shop->toString(), $key, $this->doingStep, null, null);
+        $assigneeId = null === $assignee ? null : $this->people[$assignee]->id()->toString();
+        $ticketId = $this->insertTicket($this->acmeFoods, $this->shopProject, $this->shop->toString(), $key, $this->doingStep, $assigneeId, null);
         $turnUserId = null === $turnPerson ? null : $this->people[$turnPerson]->id()->toString();
-        $this->insertTurnRow($this->acmeFoods, $ticketId, $this->shop->toString(), $this->shopProject, $turnUserId, $waitDays);
+        $this->insertTurnRow($this->acmeFoods, $ticketId, $this->shop->toString(), $this->shopProject, $turnUserId, $waitDays, assigneeId: $assigneeId);
+
+        return $key;
+    }
+
+    /**
+     * A SHOP ticket of Shop's team in the step, reported by Lena, whose turn row waits on Lena with the kind and base
+     * score; with $asker, it holds an open question from that person to Lena.
+     *
+     * @return string the ticket's key
+     */
+    private function addLenasScoredTicket(string $stepId, string $kind, int $baseScore, string $priority, int $waitDays, ?string $asker = null, ?string $assignee = null): string
+    {
+        $key = 'SHOP-'.$this->nextNumber;
+        $lenaId = $this->people['Lena']->id()->toString();
+        $assigneeId = null === $assignee ? null : $this->people[$assignee]->id()->toString();
+        $ticketId = $this->insertTicket($this->acmeFoods, $this->shopProject, $this->shop->toString(), $key, $stepId, $assigneeId, null, $priority);
+        if (null !== $asker) {
+            $askerId = $this->people[$asker]->id()->toString();
+            $this->committedAs($this->acmeFoods, static fn (Connection $migrator): int|string => $migrator->executeStatement(
+                'UPDATE tkt_ticket SET asked_user_id = ?, asker_id = ? WHERE id = ?',
+                [$lenaId, $askerId, $ticketId],
+            ));
+        }
+        $this->insertTurnRow($this->acmeFoods, $ticketId, $this->shop->toString(), $this->shopProject, $lenaId, $waitDays, $kind, $baseScore, $assigneeId);
 
         return $key;
     }
@@ -364,28 +432,29 @@ final class HomeNeedsYouNowTest extends WebTestCase
     /**
      * @return string the ticket's id
      */
-    private function insertTicket(OrganizationId $organizationId, string $projectId, ?string $teamId, string $key, string $stepId, ?string $assigneeId, ?string $closedAt): string
+    private function insertTicket(OrganizationId $organizationId, string $projectId, ?string $teamId, string $key, string $stepId, ?string $assigneeId, ?string $closedAt, string $priority = 'major'): string
     {
         $number = $this->nextNumber++;
         $ticketId = Uuid::v7()->toRfc4122();
-        $values = [$organizationId->toString(), $ticketId, $projectId, $teamId, $number, $key, 'Ticket '.$key, $stepId, $this->people['Lena']->id()->toString(), $assigneeId, $closedAt];
+        $priorityRank = ['blocker' => 0, 'critical' => 1, 'major' => 2, 'normal' => 3, 'minor' => 4][$priority];
+        $values = [$organizationId->toString(), $ticketId, $projectId, $teamId, $number, $key, 'Ticket '.$key, $priority, $priorityRank, $stepId, $this->people['Lena']->id()->toString(), $assigneeId, $closedAt];
         $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
             "INSERT INTO tkt_ticket (organization_id, id, project_id, team_id, number, key, title, description, type, priority,
                  priority_rank, step_id, reporter_id, visibility, assignee_id, closed_at, components, check_reasons, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, '', 'bug', 'major', 2, ?, ?, 'all', ?, CAST(? AS timestamptz), '{}', '{}', TIMESTAMPTZ '2026-08-01 09:00:00+00', TIMESTAMPTZ '2026-08-01 09:00:00+00')",
+             VALUES (?, ?, ?, ?, ?, ?, ?, '', 'bug', ?, ?, ?, ?, 'all', ?, CAST(? AS timestamptz), '{}', '{}', TIMESTAMPTZ '2026-08-01 09:00:00+00', TIMESTAMPTZ '2026-08-01 09:00:00+00')",
             $values,
         ));
 
         return $ticketId;
     }
 
-    private function insertTurnRow(OrganizationId $organizationId, string $ticketId, ?string $teamId, string $projectId, ?string $turnUserId, int $waitDays): void
+    private function insertTurnRow(OrganizationId $organizationId, string $ticketId, ?string $teamId, string $projectId, ?string $turnUserId, int $waitDays, string $kind = 'build', int $baseScore = 100, ?string $assigneeId = null): void
     {
         $waitingSince = new \DateTimeImmutable(self::NOW)->modify(\sprintf('-%d days -1 hour', $waitDays))->format('Y-m-d H:i:sP');
-        $values = [$organizationId->toString(), $ticketId, $teamId, $projectId, $turnUserId, null === $turnUserId ? 'Customer' : null, $waitingSince, $this->people['Lena']->id()->toString()];
+        $values = [$organizationId->toString(), $ticketId, $teamId, $projectId, $turnUserId, null === $turnUserId ? 'Customer' : null, $kind, $baseScore, $waitingSince, $this->people['Lena']->id()->toString(), $assigneeId];
         $this->committedAs($organizationId, static fn (Connection $migrator): int|string => $migrator->executeStatement(
-            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id)
-             VALUES (?, ?, ?, ?, 'doing', ?, ?, 'build', 100, CAST(? AS timestamptz), 'all', ?)",
+            "INSERT INTO ins_ticket_turn (organization_id, ticket_id, team_id, project_id, grp, turn_user_id, turn_label, kind, base_score, waiting_since, visibility, reporter_id, assignee_id)
+             VALUES (?, ?, ?, ?, 'doing', ?, ?, ?, ?, CAST(? AS timestamptz), 'all', ?, ?)",
             $values,
         ));
     }

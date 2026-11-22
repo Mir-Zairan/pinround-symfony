@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Insight\Infrastructure\Doctrine;
 
 use App\Insight\Api\HomeQueries;
+use App\Insight\Api\NeedsYouTicket;
 use App\Insight\Api\TicketViewer;
 use App\Insight\Api\TurnGroup;
 use App\Insight\Api\TurnGroupCursor;
@@ -159,24 +160,28 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
 
     /**
      * The window count runs before the inner LIMIT, so it counts every visible row of the viewer while only the shown
-     * ones are joined to the view. No row means nothing waits on the viewer.
+     * ones are joined to the view. No row means nothing waits on the viewer. The score is workflow-engine.md's: the
+     * stored base_score plus LEAST(whole days waited, 60) × 0.5, and a wait that starts after $now counts no days.
      */
-    public function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns
+    public function viewersTurnsOf(TicketViewer $viewer, int $limit, \DateTimeImmutable $now): ViewersTurns
     {
         $organizationId = $this->requireViewersTenant($viewer);
         $visibleTurn = $this->visibleTurnOf($viewer);
         $rows = $this->connection->fetchAllAssociative(
-            'SELECT mine.ticket_id, mine.kind, mine.waiting_since, mine.ticket_count, ticket.key, ticket.title'
-            .' FROM (SELECT turn.ticket_id, turn.kind, turn.waiting_since, count(*) OVER () AS ticket_count'
+            'SELECT mine.ticket_id, mine.kind, mine.waiting_since, mine.assignee_id, mine.ticket_count,'
+            .' ticket.key, ticket.title, ticket.step_id, ticket.priority, ticket.asker_id'
+            .' FROM (SELECT turn.ticket_id, turn.kind, turn.waiting_since, turn.assignee_id, count(*) OVER () AS ticket_count,'
+            .' turn.base_score + LEAST(GREATEST(FLOOR(EXTRACT(EPOCH FROM (CAST(:now AS timestamptz) - turn.waiting_since)) / 86400), 0), 60) * 0.5 AS score'
             .' FROM ins_ticket_turn AS turn'
             .' WHERE turn.organization_id = CAST(:organization AS uuid) AND turn.turn_user_id = CAST(:viewer AS uuid)'
             .' AND '.$visibleTurn->sql()
-            .' ORDER BY turn.waiting_since, turn.ticket_id LIMIT CAST(:limit AS integer)) AS mine'
+            .' ORDER BY score DESC, turn.waiting_since, turn.ticket_id LIMIT CAST(:limit AS integer)) AS mine'
             .' JOIN tkt_ticket_list_v AS ticket ON ticket.organization_id = CAST(:organization AS uuid) AND ticket.id = mine.ticket_id'
-            .' ORDER BY mine.waiting_since, mine.ticket_id',
+            .' ORDER BY mine.score DESC, mine.waiting_since, mine.ticket_id',
             [
                 'organization' => $organizationId->toString(),
                 'viewer' => $viewer->viewerId->toString(),
+                'now' => $now->format('Y-m-d H:i:sP'),
                 'limit' => (string) $limit,
                 ...$visibleTurn->parameters(),
             ],
@@ -186,11 +191,24 @@ final readonly class DbalWhoseTurnRows implements WhoseTurnRows
         $tickets = [];
         foreach ($rows as $row) {
             if (!\is_string($row['ticket_id']) || !\is_string($row['kind']) || !\is_string($row['waiting_since'])
-                || !\is_int($row['ticket_count']) || !\is_string($row['key']) || !\is_string($row['title'])) {
+                || !\is_int($row['ticket_count']) || !\is_string($row['key']) || !\is_string($row['title'])
+                || !\is_string($row['step_id']) || !\is_string($row['priority'])
+                || (null !== $row['asker_id'] && !\is_string($row['asker_id']))
+                || (null !== $row['assignee_id'] && !\is_string($row['assignee_id']))) {
                 throw new \LogicException('A row of the viewer\'s turns from the database is not a waiting ticket.');
             }
             $ticketCount = $row['ticket_count'];
-            $tickets[] = new WaitingTicket(new TicketId($row['ticket_id']), $row['key'], $row['title'], $row['kind'], new \DateTimeImmutable($row['waiting_since']));
+            $tickets[] = new NeedsYouTicket(
+                new TicketId($row['ticket_id']),
+                $row['key'],
+                $row['title'],
+                $row['kind'],
+                new \DateTimeImmutable($row['waiting_since']),
+                $row['step_id'],
+                $row['priority'],
+                null === $row['asker_id'] ? null : new UserId($row['asker_id']),
+                null === $row['assignee_id'] ? null : new UserId($row['assignee_id']),
+            );
         }
 
         return new ViewersTurns($tickets, $ticketCount);

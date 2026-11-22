@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Web\UI\Controller;
 
 use App\Insight\Api\HomeQueries;
-use App\Insight\Api\WaitingTicket;
 use App\Organization\Api\ActorContext;
 use App\Organization\Api\AiSettingsQueries;
 use App\Organization\Api\CurrentActor;
@@ -20,6 +19,7 @@ use App\Web\Application\HomeFocusChoices;
 use App\Web\Application\ShowHomeFocus;
 use App\Web\UI\Admin\AdminTabRail;
 use App\Web\UI\Home\HomeLayout;
+use App\Web\UI\Home\NeedsYouNowCards;
 use App\Web\UI\Navigation\MainMenu;
 use App\Web\UI\TicketViewers;
 use Psr\Clock\ClockInterface;
@@ -31,15 +31,16 @@ use Symfony\Component\Routing\Attribute\Route;
  * Home: the work page for anyone who leads or joins a team (and the fallback), "Teams at a glance" for a Manager with
  * no such role, and "Your organization" for an Admin with no team role.
  *
- * Until P07's needs-you score exists, the work page's "Needs you now" lists the open tickets where it is the person's
- * turn with the rules of their card on Whose turn? (HomeQueries::viewersTurns), so both count the same tickets: the
- * oldest wait first, at most SHOWN_NEEDS_YOU_NOW, and "See all" to that card. "Your team" shows a stack per team, at
- * most SHOWN_TEAMS. The work page's queries do not grow with the tickets that wait: the viewer's turn rows come in one
- * query, the team names in one, and the team people from their cache.
+ * The work page's "Needs you now" lists the open tickets where it is the person's turn with the rules of their card on
+ * Whose turn? (HomeQueries::viewersTurns), so both count the same tickets: the top SHOWN_NEEDS_YOU_NOW by the needs-you
+ * score (who is blocked, priority, release, how long it waits) as cards (NeedsYouNowCards), and "See all" to that
+ * card. "Your team" shows a stack per team, at most SHOWN_TEAMS. The work page's queries do not grow with the tickets
+ * that wait: the viewer's turn rows come in one query, the cards' names in one batch, the steps and team people from
+ * their caches, and the team names in one.
  */
 final class HomeController extends AbstractController
 {
-    public const int SHOWN_NEEDS_YOU_NOW = 10;
+    public const int SHOWN_NEEDS_YOU_NOW = 5;
     public const int SHOWN_TEAMS = 3;
     /**
      * Ticketing's WhoseTurnController::ROUTE and OPEN_QUERY, and its card id of a person, which Web_UI may not import;
@@ -62,6 +63,7 @@ final class HomeController extends AbstractController
         private readonly PeopleCountQueries $peopleCountQueries,
         private readonly AiSettingsQueries $aiSettingsQueries,
         private readonly MainMenu $mainMenu,
+        private readonly NeedsYouNowCards $needsYouNowCards,
         private readonly ClockInterface $clock,
     ) {
     }
@@ -83,12 +85,13 @@ final class HomeController extends AbstractController
     {
         $roles = $actor->roles();
         $visibility = $this->ticketVisibilities->of($actor->organizationId(), $actor->userId());
-        $viewersTurns = $this->homeQueries->viewersTurns(TicketViewers::of($visibility), self::SHOWN_NEEDS_YOU_NOW);
+        $now = $this->clock->now();
+        $viewersTurns = $this->homeQueries->viewersTurns(TicketViewers::of($visibility), self::SHOWN_NEEDS_YOU_NOW, $now);
         $waitingCount = $viewersTurns->ticketCount;
         $viewerId = $actor->userId()->toString();
 
         return $this->render('@Web/home/work.html.twig', [
-            'today' => $this->clock->now(),
+            'today' => $now,
             'choices' => HomeFocusChoices::offeredTo($roles),
             'focus' => ($this->showHomeFocus)($actor),
             'isLead' => array_any($roles->teamIds(), $roles->isLeadOf(...)),
@@ -96,7 +99,8 @@ final class HomeController extends AbstractController
             'isAdmin' => $roles->isAdmin(),
             'adminSettingsUrl' => $roles->isAdmin() ? $this->mainMenu->adminHomeUrl() : null,
             'waitingCount' => $waitingCount,
-            'needsYouNow' => array_map($this->needsYouNowRowOf(...), $viewersTurns->tickets),
+            'needsYouNow' => $this->needsYouNowCards->cardsOf($actor->organizationId(), $actor->userId(), $viewersTurns->tickets, $now),
+            'shownNeedsYouNow' => self::SHOWN_NEEDS_YOU_NOW,
             'notShownCount' => $waitingCount - \count($viewersTurns->tickets),
             'seeAllUrl' => $this->generateUrl(self::WHOSE_TURN_ROUTE, [
                 self::WHOSE_TURN_OPEN_QUERY => $viewerId,
@@ -126,25 +130,6 @@ final class HomeController extends AbstractController
             'aiUrl' => $this->generateUrl(AdminTabRail::AI_ROUTE),
             'adminSettingsUrl' => $this->mainMenu->adminHomeUrl(),
         ]);
-    }
-
-    /**
-     * @return array{key: string, title: string, url: string, wait: string}
-     */
-    private function needsYouNowRowOf(WaitingTicket $ticket): array
-    {
-        $waitDays = max(0, intdiv($this->clock->now()->getTimestamp() - $ticket->waitingSince->getTimestamp(), 86400));
-
-        return [
-            'key' => $ticket->key,
-            'title' => $ticket->title,
-            'url' => $this->generateUrl(self::TICKET_ROUTE, ['key' => $ticket->key]),
-            'wait' => match ($waitDays) {
-                0 => 'today',
-                1 => 'waiting 1 day',
-                default => 'waiting '.$waitDays.' days',
-            },
-        ];
     }
 
     /**

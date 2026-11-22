@@ -61,13 +61,13 @@ final readonly class HomeQueriesService implements HomeQueries
         return new WhoseTurnPage([...$viewersGroups, ...$groups], $read['ticketCount'], $nextCursor, $read['isSearchCapped']);
     }
 
-    public function viewersTurns(TicketViewer $viewer, int $limit): ViewersTurns
+    public function viewersTurns(TicketViewer $viewer, int $limit, \DateTimeImmutable $now): ViewersTurns
     {
         if ($limit < 1 || $limit > self::SHOWN_TICKETS_OF_THE_OPENED_GROUP) {
             throw new \InvalidArgumentException(\sprintf('The viewer\'s turns are read 1 to %d at a time.', self::SHOWN_TICKETS_OF_THE_OPENED_GROUP));
         }
 
-        return $this->whoseTurnRows->viewersTurnsOf($viewer, $limit);
+        return $this->whoseTurnRows->viewersTurnsOf($viewer, $limit, $now);
     }
 
     public function myReports(TicketViewer $viewer, ?MyReportsCursor $after): MyReportsPage

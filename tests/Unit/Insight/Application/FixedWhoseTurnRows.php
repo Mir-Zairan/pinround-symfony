@@ -47,15 +47,15 @@ final class FixedWhoseTurnRows implements WhoseTurnRows
     }
 
     /**
-     * The viewer's group's tickets cut to the limit and its count, as the database keeps the oldest waits; none when the
-     * viewer has no group.
+     * The viewer's group's count with no tickets, as a group holds whose-turn rows, not scored ones; a count of 0 when
+     * the viewer has no group.
      */
-    public function viewersTurnsOf(TicketViewer $viewer, int $limit): ViewersTurns
+    public function viewersTurnsOf(TicketViewer $viewer, int $limit, \DateTimeImmutable $now): ViewersTurns
     {
         $this->viewersTurnsLimits[] = $limit;
         foreach ($this->groups as $group) {
             if (null !== $group->turnUserId && $group->turnUserId->equals($viewer->viewerId)) {
-                return new ViewersTurns(\array_slice($group->tickets, 0, $limit), $group->ticketCount);
+                return new ViewersTurns([], $group->ticketCount);
             }
         }
 
